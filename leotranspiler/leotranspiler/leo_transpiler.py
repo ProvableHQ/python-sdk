@@ -1,3 +1,4 @@
+from .zero_knowledge_proof import ZeroKnowledgeProof
 class LeoTranspiler:
     def __init__(self, model, validation_data=None, model_as_input=False, ouput_model_hash=None):
         """
@@ -27,6 +28,7 @@ class LeoTranspiler:
         self.ouput_model_hash = ouput_model_hash
 
         self.transpilation_result = None
+        self.leo_program_stored = False
 
     def _transpile(self):
         """
@@ -52,6 +54,30 @@ class LeoTranspiler:
         None
         """ 
         if self.transpilation_result is None:
+            print("Transpiling model...")
             self._transpile()
         with open(path, "w") as f:
             f.write(self.transpilation_result)
+        self.leo_program_stored = True
+        print("Leo program stored")
+
+    def prove(self, input):
+        """
+        Prove the model output for a given input.
+
+        Parameters
+        ----------
+        input : array_like
+            The input for which to prove the output.
+
+        Returns
+        -------
+        ZeroKnowledgeProof
+            The zero-knowledge proof for the given input.
+        """
+        if not self.leo_program_stored:
+            raise Exception("Leo program not stored")
+        
+        circuit_input = None # TODO: organize circuit input
+        circuit_output, proof_value = None, None # TODO: here we need to do the FFI call or CLI call for leo/snarkVM execute
+        return ZeroKnowledgeProof(circuit_input, circuit_output, proof_value)
