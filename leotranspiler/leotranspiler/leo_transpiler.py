@@ -25,3 +25,33 @@ class LeoTranspiler:
         self.validation_data = validation_data
         self.model_as_input = model_as_input
         self.ouput_model_hash = ouput_model_hash
+
+        self.transpilation_result = None
+
+    def _transpile(self):
+        """
+        Transpile the model to Leo.
+
+        Returns
+        -------
+        None
+        """
+        self.transpilation_result = "TODO"
+
+    def store_leo_program(self, path):
+        """
+        Store the Leo program to a file.
+
+        Parameters
+        ----------
+        path : str
+            The path to the file to store the Leo program in.
+
+        Returns
+        -------
+        None
+        """ 
+        if self.transpilation_result is None:
+            self._transpile()
+        with open(path, "w") as f:
+            f.write(self.transpilation_result)
