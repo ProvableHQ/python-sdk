@@ -1,4 +1,5 @@
 from .zero_knowledge_proof import ZeroKnowledgeProof
+from ._model_transpiler import _transpile_model
 class LeoTranspiler:
     def __init__(self, model, validation_data=None, model_as_input=False, ouput_model_hash=None):
         """
@@ -30,16 +31,6 @@ class LeoTranspiler:
         self.transpilation_result = None
         self.leo_program_stored = False
 
-    def _transpile(self):
-        """
-        Transpile the model to Leo.
-
-        Returns
-        -------
-        None
-        """
-        self.transpilation_result = "TODO"
-
     def store_leo_program(self, path):
         """
         Store the Leo program to a file.
@@ -55,7 +46,7 @@ class LeoTranspiler:
         """ 
         if self.transpilation_result is None:
             print("Transpiling model...")
-            self._transpile()
+            self.transpilation_result = _transpile_model(self.model)
         with open(path, "w") as f:
             f.write(self.transpilation_result)
         self.leo_program_stored = True
@@ -81,25 +72,3 @@ class LeoTranspiler:
         circuit_input = None # TODO: organize circuit input
         circuit_output, proof_value = None, None # TODO: here we need to do the FFI call or CLI call for leo/snarkVM execute
         return ZeroKnowledgeProof(circuit_input, circuit_output, proof_value)
-    
-    def decision_tree_to_pseudocode(self, tree, feature_names, node=0, indentation=""):
-        left_child = tree.children_left[node]
-        right_child = tree.children_right[node]
-
-        # Base case: leaf node
-        if left_child == right_child:  # means it's a leaf
-            return indentation + f"Return {tree.value[node].argmax()}\n"
-
-        # Recursive case: internal node
-        feature = feature_names[tree.feature[node]]
-        threshold = tree.threshold[node]
-
-        if node == 0:
-            pseudocode = f"IF {feature} <= {threshold:.2f} THEN\n"
-        else:
-            pseudocode = indentation + f"IF {feature} <= {threshold:.2f} THEN\n"
-        
-        pseudocode += self.decision_tree_to_pseudocode(tree, feature_names, left_child, indentation + "    ")
-        pseudocode += indentation + "ELSE\n"
-        pseudocode += self.decision_tree_to_pseudocode(tree, feature_names, right_child, indentation + "    ")
-        return pseudocode
