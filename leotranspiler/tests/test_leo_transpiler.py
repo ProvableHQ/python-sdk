@@ -1,5 +1,7 @@
 import unittest
 import sklearn
+import os
+
 from leotranspiler.leotranspiler.leo_transpiler import LeoTranspiler
 
 class TestLeoTranspiler(unittest.TestCase):
@@ -28,7 +30,7 @@ class TestLeoTranspiler(unittest.TestCase):
         y = iris.target
 
         # Split the dataset into a training and a test set
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=0)
 
         # Initialize the decision tree classifier
         clf = DecisionTreeClassifier()
@@ -39,9 +41,10 @@ class TestLeoTranspiler(unittest.TestCase):
         # Make predictions
         y_pred = clf.predict(X_test)
 
-        # Calculate accuracy
-        acc = accuracy_score(y_test, y_pred)
-        print(f"Accuracy: {acc*100:.2f}%")
+        lt = LeoTranspiler(clf)
+        lt.store_leo_program(os.path.join(os.getcwd(), "leo_test_program.leo"))
+
+        a = 0
 
 if __name__ == '__main__':
     unittest.main()

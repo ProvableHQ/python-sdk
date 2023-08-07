@@ -20,9 +20,13 @@ def _transpile_model(model):
         raise ValueError("Model is not supported.")
     
     if(isinstance(model, sklearn.tree._classes.DecisionTreeClassifier)):
-        return _transpile_decision_tree_to_pseudocode(model)
+        tree = model.tree_
+        return _transpile_decision_tree_to_pseudocode(tree)
     
-def _transpile_decision_tree_to_pseudocode(tree, feature_names, node=0, indentation=""):
+def _transpile_decision_tree_to_pseudocode(tree, feature_names=None, node=0, indentation=""):
+    if(feature_names is None):
+        feature_names = [f"x{i}" for i in range(tree.n_features)]
+    
     left_child = tree.children_left[node]
     right_child = tree.children_right[node]
 
