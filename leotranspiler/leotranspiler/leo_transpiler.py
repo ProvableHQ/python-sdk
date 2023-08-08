@@ -1,5 +1,5 @@
 from .zero_knowledge_proof import ZeroKnowledgeProof
-from ._model_transpiler import _transpile_model
+from ._model_transpiler import _get_model_transpiler
 class LeoTranspiler:
     def __init__(self, model, validation_data=None, model_as_input=False, ouput_model_hash=None):
         """
@@ -44,9 +44,18 @@ class LeoTranspiler:
         -------
         None
         """ 
+
+        model_transpiler = _get_model_transpiler(self.model)
+
+        # Todo check numeric stability for model and data and get number range
+        leo_type = model_transpiler().get_leo_type()
+
+        # Todo do fixed point conversion
+
+
         if self.transpilation_result is None:
             print("Transpiling model...")
-            self.transpilation_result = _transpile_model(self.model)
+            self.transpilation_result = model_transpiler.transpile()
         with open(path, "w") as f:
             f.write(self.transpilation_result)
         self.leo_program_stored = True
