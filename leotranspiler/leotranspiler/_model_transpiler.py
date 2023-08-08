@@ -1,3 +1,4 @@
+from ._helper import get_rounding_decimal_places
 import sklearn
 
 def _get_model_transpiler(model, validation_data):
@@ -22,7 +23,10 @@ class _ModelTranspilerBase:
             minimum_data, maximum_data = self._get_numeric_range_data()
             minimum = min(minimum, minimum_data)
             maximum = max(maximum, maximum_data)
-            
+
+        # Todo this result will be needed for automatic fixed point conversion
+        a = self._get_max_decimal_places_data()
+
         # Todo return type based on numeric range
         return "i32"
     
@@ -31,6 +35,9 @@ class _ModelTranspilerBase:
 
     def _get_numeric_range_data(self):
         return self.validation_data.min(), self.validation_data.max()
+    
+    def _get_max_decimal_places_data(self):
+        return max([get_rounding_decimal_places(val) for val in self.validation_data.ravel()])
     
 class _DecisionTreeTranspiler(_ModelTranspilerBase):
     def __init__(self, model, validation_data):
