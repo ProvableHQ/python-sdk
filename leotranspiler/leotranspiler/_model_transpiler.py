@@ -15,7 +15,7 @@ class _ModelTranspilerBase:
         raise NotImplementedError("This method is not implemented.")
     
     def _get_leo_type(self):
-        self._get_numeric_range()
+        minimum, maximum = self._get_numeric_range()
         # Todo return type based on numeric range
         return "i32"
     
@@ -68,3 +68,16 @@ class _DecisionTreeTranspiler(_ModelTranspilerBase):
         pseudocode += indentation + "ELSE\n"
         pseudocode += self._transpile_decision_tree_to_pseudocode(tree, feature_names, right_child, indentation + "    ")
         return pseudocode
+    
+    def _get_numeric_range(self):
+        thresholds = self.model.tree_.threshold
+        minimum = min(thresholds)
+        maximum = max(thresholds)
+
+        classes = self.model.classes_
+        # check if classes are numeric
+        if(isinstance(classes[0], int)):
+            minimum = min(minimum, min(classes))
+            maximum = max(maximum, max(classes))
+        
+        return minimum, maximum

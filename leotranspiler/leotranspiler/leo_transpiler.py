@@ -48,10 +48,9 @@ class LeoTranspiler:
         model_transpiler = _get_model_transpiler(self.model)
 
         # Todo check numeric stability for model and data and get number range
-        leo_type = model_transpiler().get_leo_type()
+        leo_type = model_transpiler._get_leo_type()
 
         # Todo do fixed point conversion
-
 
         if self.transpilation_result is None:
             print("Transpiling model...")
