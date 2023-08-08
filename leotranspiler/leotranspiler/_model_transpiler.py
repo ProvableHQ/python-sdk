@@ -1,13 +1,13 @@
 import sklearn
 
-def _get_model_transpiler(model, validation_data=None):
+def _get_model_transpiler(model, validation_data):
     if(isinstance(model, sklearn.tree._classes.DecisionTreeClassifier)):
         return _DecisionTreeTranspiler(model, validation_data)
     else:
         raise ValueError("Model is not supported.")
 
 class _ModelTranspilerBase:
-    def __init__(self, model, validation_data=None):
+    def __init__(self, model, validation_data):
         self.model = model
         self.validation_data = validation_data
     
@@ -15,15 +15,25 @@ class _ModelTranspilerBase:
         raise NotImplementedError("This method is not implemented.")
     
     def _get_leo_type(self):
-        minimum, maximum = self._get_numeric_range()
+        minimum_model, maximum_model = self._get_numeric_range_model()
+        minimum = minimum_model
+        maximum = maximum_model
+        if(self.validation_data is not None):
+            minimum_data, maximum_data = self._get_numeric_range_data()
+            minimum = min(minimum, minimum_data)
+            maximum = max(maximum, maximum_data)
+            
         # Todo return type based on numeric range
         return "i32"
     
-    def _get_numeric_range(self):
+    def _get_numeric_range_model(self):
         raise NotImplementedError("This method is not implemented.")
+
+    def _get_numeric_range_data(self):
+        return self.validation_data.min(), self.validation_data.max()
     
 class _DecisionTreeTranspiler(_ModelTranspilerBase):
-    def __init__(self, model, validation_data=None):
+    def __init__(self, model, validation_data):
         super().__init__(model, validation_data)
     
     def transpile(self):
@@ -69,7 +79,7 @@ class _DecisionTreeTranspiler(_ModelTranspilerBase):
         pseudocode += self._transpile_decision_tree_to_pseudocode(tree, feature_names, right_child, indentation + "    ")
         return pseudocode
     
-    def _get_numeric_range(self):
+    def _get_numeric_range_model(self):
         thresholds = self.model.tree_.threshold
         minimum = min(thresholds)
         maximum = max(thresholds)

@@ -41,7 +41,7 @@ class TestLeoTranspiler(unittest.TestCase):
         # Make predictions
         y_pred = clf.predict(X_test)
 
-        lt = LeoTranspiler(clf)
+        lt = LeoTranspiler(clf, X_test)
         lt.store_leo_program(os.path.join(os.getcwd(), "leotranspiler", "tests", "leo_test_program.leo"))
 
         a = 0

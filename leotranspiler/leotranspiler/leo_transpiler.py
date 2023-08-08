@@ -45,7 +45,7 @@ class LeoTranspiler:
         None
         """ 
 
-        model_transpiler = _get_model_transpiler(self.model)
+        model_transpiler = _get_model_transpiler(self.model, self.validation_data)
 
         # Todo check numeric stability for model and data and get number range
         leo_type = model_transpiler._get_leo_type()
