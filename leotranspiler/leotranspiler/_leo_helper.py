@@ -1,4 +1,4 @@
-def _get_leo_type(signed, value_bits):
+def _get_leo_integer_type(signed, value_bits):
     if(signed):
         if(value_bits <= 7):
             return "i8"

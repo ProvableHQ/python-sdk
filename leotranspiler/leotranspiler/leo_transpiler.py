@@ -48,7 +48,7 @@ class LeoTranspiler:
         model_transpiler = _get_model_transpiler(self.model, self.validation_data)
 
         # Todo check numeric stability for model and data and get number range
-        leo_type = model_transpiler._get_leo_type()
+        leo_type, fixed_point_scaling_factor = model_transpiler._numbers_get_leo_type_and_fixed_point_scaling_factor()
 
         # Todo do fixed point conversion
 

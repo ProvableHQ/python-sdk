@@ -1,5 +1,5 @@
 from ._helper import _get_rounding_decimal_places
-from ._leo_helper import _get_leo_type
+from ._leo_helper import _get_leo_integer_type
 import sklearn, math
 
 def _get_model_transpiler(model, validation_data):
@@ -16,7 +16,7 @@ class _ModelTranspilerBase:
     def transpile(self):
         raise NotImplementedError("This method is not implemented.")
     
-    def _get_leo_type(self):
+    def _numbers_get_leo_type_and_fixed_point_scaling_factor(self):
         minimum_model, maximum_model = self._get_numeric_range_model()
         minimum = minimum_model
         maximum = maximum_model
@@ -40,10 +40,9 @@ class _ModelTranspilerBase:
         bits_for_fractional_part = math.ceil(fixed_point_min_scaling_exponent)
         fixed_point_scaling_factor = 2**bits_for_fractional_part
 
-        leo_type = _get_leo_type(signed_type_needed, bits_for_integer_part+bits_for_fractional_part)
+        leo_type = _get_leo_integer_type(signed_type_needed, bits_for_integer_part+bits_for_fractional_part)
 
-        # Todo return type based on numeric range
-        return leo_type
+        return leo_type, fixed_point_scaling_factor
     
     def _get_numeric_range_model(self):
         raise NotImplementedError("This method is not implemented.")
