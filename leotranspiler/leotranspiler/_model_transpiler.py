@@ -1,4 +1,5 @@
 from ._helper import _get_rounding_decimal_places
+from ._leo_helper import _get_leo_type
 import sklearn, math
 
 def _get_model_transpiler(model, validation_data):
@@ -24,19 +25,25 @@ class _ModelTranspilerBase:
             minimum = min(minimum, minimum_data)
             maximum = max(maximum, maximum_data)
 
-        # Automatic fixed point conversion
-        max_decimal_places_data = self._get_max_decimal_places_data()
+        bits_for_integer_part = math.ceil(math.log2(max(abs(minimum), abs(maximum))))
+        signed_type_needed = minimum < 0
+
+        # Fixed point parametrization
         max_decimal_places_model = self._get_max_decimal_places_model()
+        max_decimal_places_data = 0
+        if(self.validation_data is not None):
+            max_decimal_places_data = self._get_max_decimal_places_data()
         max_decimal_places = max(max_decimal_places_data, max_decimal_places_model)
 
         min_decimal_value = 10**(-max_decimal_places)
         fixed_point_min_scaling_exponent = math.log2(1 / min_decimal_value)
+        bits_for_fractional_part = math.ceil(fixed_point_min_scaling_exponent)
+        fixed_point_scaling_factor = 2**bits_for_fractional_part
 
-        fixed_point_scaling_exponent = math.ceil(fixed_point_min_scaling_exponent)
-        fixed_point_scaling_factor = 2**fixed_point_scaling_exponent
+        leo_type = _get_leo_type(signed_type_needed, bits_for_integer_part+bits_for_fractional_part)
 
         # Todo return type based on numeric range
-        return "i32"
+        return leo_type
     
     def _get_numeric_range_model(self):
         raise NotImplementedError("This method is not implemented.")
