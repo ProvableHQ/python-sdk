@@ -1,5 +1,5 @@
 from ._helper import _get_rounding_decimal_places
-import sklearn
+import sklearn, math
 
 def _get_model_transpiler(model, validation_data):
     if(isinstance(model, sklearn.tree._classes.DecisionTreeClassifier)):
@@ -24,9 +24,16 @@ class _ModelTranspilerBase:
             minimum = min(minimum, minimum_data)
             maximum = max(maximum, maximum_data)
 
-        # Todo this result will be needed for automatic fixed point conversion
-        a = self._get_max_decimal_places_data()
-        b = self._get_max_decimal_places_model()
+        # Automatic fixed point conversion
+        max_decimal_places_data = self._get_max_decimal_places_data()
+        max_decimal_places_model = self._get_max_decimal_places_model()
+        max_decimal_places = max(max_decimal_places_data, max_decimal_places_model)
+
+        min_decimal_value = 10**(-max_decimal_places)
+        fixed_point_min_scaling_exponent = math.log2(1 / min_decimal_value)
+
+        fixed_point_scaling_exponent = math.ceil(fixed_point_min_scaling_exponent)
+        fixed_point_scaling_factor = 2**fixed_point_scaling_exponent
 
         # Todo return type based on numeric range
         return "i32"
