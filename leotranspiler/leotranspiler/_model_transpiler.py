@@ -93,20 +93,22 @@ class _DecisionTreeTranspiler(_ModelTranspilerBase):
 
         # Base case: leaf node
         if left_child == right_child:  # means it's a leaf
-            return indentation + f"Return {self._convert_to_fixed_point(tree.value[node].argmax())}\n"
+            return indentation + f"return {self._convert_to_fixed_point(tree.value[node].argmax())}{self.leo_type};\n"
 
         # Recursive case: internal node
         feature = feature_names[tree.feature[node]]
         threshold = tree.threshold[node]
 
         if node == 0:
-            pseudocode = f"IF {feature} <= {self._convert_to_fixed_point(threshold)} THEN\n"
+            pseudocode = f"if {feature} <= {self._convert_to_fixed_point(threshold)}{self.leo_type}; {{\n"
         else:
-            pseudocode = indentation + f"IF {feature} <= {self._convert_to_fixed_point(threshold)} THEN\n"
+            pseudocode = indentation + f"if {feature} <= {self._convert_to_fixed_point(threshold)}{self.leo_type}; {{\n"
         
         pseudocode += self._transpile_decision_tree_to_pseudocode(tree, feature_names, left_child, indentation + "    ")
-        pseudocode += indentation + "ELSE\n"
+        pseudocode += indentation + f"}}\n"
+        pseudocode += indentation + "else {\n"
         pseudocode += self._transpile_decision_tree_to_pseudocode(tree, feature_names, right_child, indentation + "    ")
+        pseudocode += indentation + "}\n"
         return pseudocode
     
     def _get_numeric_range_model(self):
