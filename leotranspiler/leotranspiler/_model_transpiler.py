@@ -42,6 +42,9 @@ class _ModelTranspilerBase:
 
         leo_type = _get_leo_integer_type(signed_type_needed, bits_for_integer_part+bits_for_fractional_part)
 
+        self.leo_type = leo_type
+        self.fixed_point_scaling_factor = fixed_point_scaling_factor
+
         return leo_type, fixed_point_scaling_factor
     
     def _get_numeric_range_model(self):
@@ -55,6 +58,9 @@ class _ModelTranspilerBase:
     
     def _get_max_decimal_places_data(self):
         return max([_get_rounding_decimal_places(val) for val in self.validation_data.ravel()])
+    
+    def _convert_to_fixed_point(self, value):
+        return int(round(value * self.fixed_point_scaling_factor))
     
 class _DecisionTreeTranspiler(_ModelTranspilerBase):
     def __init__(self, model, validation_data):
@@ -87,16 +93,16 @@ class _DecisionTreeTranspiler(_ModelTranspilerBase):
 
         # Base case: leaf node
         if left_child == right_child:  # means it's a leaf
-            return indentation + f"Return {tree.value[node].argmax()}\n"
+            return indentation + f"Return {self._convert_to_fixed_point(tree.value[node].argmax())}\n"
 
         # Recursive case: internal node
         feature = feature_names[tree.feature[node]]
         threshold = tree.threshold[node]
 
         if node == 0:
-            pseudocode = f"IF {feature} <= {threshold:.2f} THEN\n"
+            pseudocode = f"IF {feature} <= {self._convert_to_fixed_point(threshold)} THEN\n"
         else:
-            pseudocode = indentation + f"IF {feature} <= {threshold:.2f} THEN\n"
+            pseudocode = indentation + f"IF {feature} <= {self._convert_to_fixed_point(threshold)} THEN\n"
         
         pseudocode += self._transpile_decision_tree_to_pseudocode(tree, feature_names, left_child, indentation + "    ")
         pseudocode += indentation + "ELSE\n"
