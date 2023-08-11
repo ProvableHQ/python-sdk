@@ -85,11 +85,12 @@ class _DecisionTreeTranspiler(_ModelTranspilerBase):
         """
         
         tree = self.model.tree_
-        return self._transpile_decision_tree_to_pseudocode(tree)
+        feature_names = [f"x{i}" for i in range(tree.n_features)]
+        self.feature_usage = {feature_name: False for feature_name in feature_names}
+
+        return self._transpile_decision_tree_to_pseudocode(tree, feature_names)
         
-    def _transpile_decision_tree_to_pseudocode(self, tree, feature_names=None, node=0, indentation=""):
-        if(feature_names is None):
-            feature_names = [f"x{i}" for i in range(tree.n_features)]
+    def _transpile_decision_tree_to_pseudocode(self, tree, feature_names, node=0, indentation=""):
         
         left_child = tree.children_left[node]
         right_child = tree.children_right[node]
@@ -107,6 +108,8 @@ class _DecisionTreeTranspiler(_ModelTranspilerBase):
         else:
             pseudocode = indentation + f"if {feature} <= {self._get_fixed_point_and_leo_type(threshold)}; {{\n"
         
+        self.feature_usage[feature] = True
+
         pseudocode += self._transpile_decision_tree_to_pseudocode(tree, feature_names, left_child, indentation + "    ")
         pseudocode += indentation + f"}}\n"
         pseudocode += indentation + "else {\n"
