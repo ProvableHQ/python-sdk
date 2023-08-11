@@ -65,6 +65,14 @@ class _ModelTranspilerBase:
     def _get_fixed_point_and_leo_type(self, value):
         return str(self._convert_to_fixed_point(value)) + self.leo_type
     
+    def _transpile_circuit_inputs_and_outputs(self):
+        code = "("
+        for feature_name in self.feature_usage:
+            if self.feature_usage[feature_name]:
+                code += f"{feature_name}: {self.leo_type}, "
+        code = code[:-2] + ") -> (" + self.leo_type + ")" # Todo check multi output decision trees
+        return code
+    
 class _DecisionTreeTranspiler(_ModelTranspilerBase):
     def __init__(self, model, validation_data):
         super().__init__(model, validation_data)
@@ -88,9 +96,13 @@ class _DecisionTreeTranspiler(_ModelTranspilerBase):
         feature_names = [f"x{i}" for i in range(tree.n_features)]
         self.feature_usage = {feature_name: False for feature_name in feature_names}
 
-        return self._transpile_decision_tree_to_pseudocode(tree, feature_names)
+        decision_tree_logic = self._transpile_decision_tree_logic_to_pseudocode(tree, feature_names)
+        circuit_inputs_and_outputs = self._transpile_circuit_inputs_and_outputs()
+
+        pseudocode = ""
+        return pseudocode
         
-    def _transpile_decision_tree_to_pseudocode(self, tree, feature_names, node=0, indentation=""):
+    def _transpile_decision_tree_logic_to_pseudocode(self, tree, feature_names, node=0, indentation=""):
         
         left_child = tree.children_left[node]
         right_child = tree.children_right[node]
@@ -110,10 +122,10 @@ class _DecisionTreeTranspiler(_ModelTranspilerBase):
         
         self.feature_usage[feature] = True
 
-        pseudocode += self._transpile_decision_tree_to_pseudocode(tree, feature_names, left_child, indentation + "    ")
+        pseudocode += self._transpile_decision_tree_logic_to_pseudocode(tree, feature_names, left_child, indentation + "    ")
         pseudocode += indentation + f"}}\n"
         pseudocode += indentation + "else {\n"
-        pseudocode += self._transpile_decision_tree_to_pseudocode(tree, feature_names, right_child, indentation + "    ")
+        pseudocode += self._transpile_decision_tree_logic_to_pseudocode(tree, feature_names, right_child, indentation + "    ")
         pseudocode += indentation + "}\n"
         return pseudocode
     
