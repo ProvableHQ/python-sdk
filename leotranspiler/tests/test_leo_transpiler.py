@@ -33,7 +33,7 @@ class TestLeoTranspiler(unittest.TestCase):
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=0)
 
         # Initialize the decision tree classifier
-        clf = DecisionTreeClassifier()
+        clf = DecisionTreeClassifier(random_state=0)
 
         # Train the classifier
         clf.fit(X_train, y_train)
@@ -43,8 +43,6 @@ class TestLeoTranspiler(unittest.TestCase):
 
         lt = LeoTranspiler(clf, X_test)
         lt.store_leo_program(os.path.join(os.getcwd(), "leotranspiler", "tests", "leo_test_program.leo"))
-
-        a = 0
 
 if __name__ == '__main__':
     unittest.main()
