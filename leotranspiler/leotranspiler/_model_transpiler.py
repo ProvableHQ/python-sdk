@@ -62,6 +62,9 @@ class _ModelTranspilerBase:
     def _convert_to_fixed_point(self, value):
         return int(round(value * self.fixed_point_scaling_factor))
     
+    def _get_fixed_point_and_leo_type(self, value):
+        return str(self._convert_to_fixed_point(value)) + self.leo_type
+    
 class _DecisionTreeTranspiler(_ModelTranspilerBase):
     def __init__(self, model, validation_data):
         super().__init__(model, validation_data)
@@ -93,16 +96,16 @@ class _DecisionTreeTranspiler(_ModelTranspilerBase):
 
         # Base case: leaf node
         if left_child == right_child:  # means it's a leaf
-            return indentation + f"return {self._convert_to_fixed_point(tree.value[node].argmax())}{self.leo_type};\n"
+            return indentation + f"return {self._get_fixed_point_and_leo_type(tree.value[node].argmax())};\n"
 
         # Recursive case: internal node
         feature = feature_names[tree.feature[node]]
         threshold = tree.threshold[node]
 
         if node == 0:
-            pseudocode = f"if {feature} <= {self._convert_to_fixed_point(threshold)}{self.leo_type}; {{\n"
+            pseudocode = f"if {feature} <= {self._get_fixed_point_and_leo_type(threshold)}; {{\n"
         else:
-            pseudocode = indentation + f"if {feature} <= {self._convert_to_fixed_point(threshold)}{self.leo_type}; {{\n"
+            pseudocode = indentation + f"if {feature} <= {self._get_fixed_point_and_leo_type(threshold)}; {{\n"
         
         pseudocode += self._transpile_decision_tree_to_pseudocode(tree, feature_names, left_child, indentation + "    ")
         pseudocode += indentation + f"}}\n"
