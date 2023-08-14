@@ -1,5 +1,6 @@
 from ._helper import _get_rounding_decimal_places
 from ._leo_helper import _get_leo_integer_type
+from ._input_generator import _InputGenerator
 import sklearn, math
 
 def _get_model_transpiler(model, validation_data):
@@ -104,7 +105,12 @@ class _DecisionTreeTranspiler(_ModelTranspilerBase):
         
         tree = self.model.tree_
         feature_names = [f"x{i}" for i in range(tree.n_features)]
-        self.feature_usage = {feature_name: False for feature_name in feature_names}
+        self.feature_usage = {feature_name: False for feature_name in feature_names} # todo may no longer be needed
+
+        # Input generation
+        input_generator = _InputGenerator()
+        for feature_name in feature_names:
+            input_generator.add_input(self.leo_type)
 
         decision_tree_logic = self._transpile_decision_tree_logic_to_pseudocode(tree, feature_names, indentation="        ")[:-1]
         circuit_inputs, circuit_outputs = self._transpile_circuit_inputs_and_outputs()

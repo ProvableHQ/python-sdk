@@ -43,6 +43,10 @@ class TestLeoTranspiler(unittest.TestCase):
 
         lt = LeoTranspiler(clf, X_test)
         lt.store_leo_program(os.path.join(os.getcwd(), "leotranspiler", "tests"), "tree1")
+        self.assertEqual(lt.leo_program_stored, True)
+
+        lt.prove(X_test[0])
+
 
 if __name__ == '__main__':
     unittest.main()
