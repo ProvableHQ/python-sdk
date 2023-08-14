@@ -70,6 +70,11 @@ class LeoTranspiler:
         program_json_file_dir = os.path.join(project_dir, "program.json")
         with open(program_json_file_dir, "w") as f:
             f.write(program_json)
+        
+        environment_file = self._get_environment_file() # todo option to pass private key
+        environment_file_dir = os.path.join(project_dir, ".env")
+        with open(environment_file_dir, "w") as f:
+            f.write(environment_file)
 
         self.leo_program_stored = True
         print("Leo program stored")
@@ -115,3 +120,16 @@ class LeoTranspiler:
     "description": "transpiler generated program",
     "license": "MIT"
 }}"""
+
+    def _get_environment_file(self):
+        """
+        Generate the environment file content.
+
+        Returns
+        -------
+        str
+            The environment file.
+        """
+        return f"""NETWORK=testnet3
+PRIVATE_KEY=APrivateKey1zkpHtqVWT6fSHgUMNxsuVf7eaR6id2cj7TieKY1Z8CP5rCD
+"""
