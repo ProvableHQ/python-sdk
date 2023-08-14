@@ -126,9 +126,9 @@ class _DecisionTreeTranspiler(_ModelTranspilerBase):
         threshold = tree.threshold[node]
 
         if node == 0:
-            pseudocode = f"if {feature} <= {self._get_fixed_point_and_leo_type(threshold)}; {{\n"
+            pseudocode = f"if {feature} <= {self._get_fixed_point_and_leo_type(threshold)} {{\n"
         else:
-            pseudocode = indentation + f"if {feature} <= {self._get_fixed_point_and_leo_type(threshold)}; {{\n"
+            pseudocode = indentation + f"if {feature} <= {self._get_fixed_point_and_leo_type(threshold)} {{\n"
         
         self.feature_usage[feature] = True
 
