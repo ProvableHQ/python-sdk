@@ -106,7 +106,7 @@ class _DecisionTreeTranspiler(_ModelTranspilerBase):
         feature_names = [f"x{i}" for i in range(tree.n_features)]
         self.feature_usage = {feature_name: False for feature_name in feature_names}
 
-        decision_tree_logic = self._transpile_decision_tree_logic_to_pseudocode(tree, feature_names)
+        decision_tree_logic = self._transpile_decision_tree_logic_to_pseudocode(tree, feature_names, indentation="        ")[:-1]
         circuit_inputs, circuit_outputs = self._transpile_circuit_inputs_and_outputs()
 
         transpilation_result = self._merge_transpiled_code("decisiontree", circuit_inputs, circuit_outputs, decision_tree_logic)
