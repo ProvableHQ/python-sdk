@@ -42,7 +42,7 @@ class TestLeoTranspiler(unittest.TestCase):
         y_pred = clf.predict(X_test)
 
         lt = LeoTranspiler(clf, X_test)
-        lt.store_leo_program(os.path.join(os.getcwd(), "leotranspiler", "tests", "leo_test_program.leo"))
+        lt.store_leo_program(os.path.join(os.getcwd(), "leotranspiler", "tests"), "tree1")
 
 if __name__ == '__main__':
     unittest.main()

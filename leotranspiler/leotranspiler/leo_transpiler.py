@@ -1,5 +1,7 @@
 from .zero_knowledge_proof import ZeroKnowledgeProof
 from ._model_transpiler import _get_model_transpiler
+import os
+
 class LeoTranspiler:
     def __init__(self, model, validation_data=None, model_as_input=False, ouput_model_hash=None):
         """
@@ -31,7 +33,7 @@ class LeoTranspiler:
         self.transpilation_result = None
         self.leo_program_stored = False
 
-    def store_leo_program(self, path):
+    def store_leo_program(self, path, project_name):
         """
         Store the Leo program to a file.
 
@@ -55,7 +57,15 @@ class LeoTranspiler:
         if self.transpilation_result is None:
             print("Transpiling model...")
             self.transpilation_result = model_transpiler.transpile()
-        with open(path, "w") as f:
+
+        project_dir = os.path.join(path, project_name)
+        src_folder_dir = os.path.join(project_dir, "src")
+        leo_file_dir = os.path.join(src_folder_dir, "main.leo")
+
+        # Make sure path exists
+        os.makedirs(src_folder_dir, exist_ok=True)
+
+        with open(leo_file_dir, "w") as f:
             f.write(self.transpilation_result)
         self.leo_program_stored = True
         print("Leo program stored")
