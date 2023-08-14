@@ -56,7 +56,7 @@ class LeoTranspiler:
 
         if self.transpilation_result is None:
             print("Transpiling model...")
-            self.transpilation_result = model_transpiler.transpile()
+            self.transpilation_result = model_transpiler.transpile(project_name)
 
         project_dir = os.path.join(path, project_name)
         src_folder_dir = os.path.join(project_dir, "src")

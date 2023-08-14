@@ -13,7 +13,7 @@ class _ModelTranspilerBase:
         self.model = model
         self.validation_data = validation_data
     
-    def transpile(self):
+    def transpile(self, project_name):
         raise NotImplementedError("This method is not implemented.")
     
     def _numbers_get_leo_type_and_fixed_point_scaling_factor(self):
@@ -87,14 +87,14 @@ class _DecisionTreeTranspiler(_ModelTranspilerBase):
     def __init__(self, model, validation_data):
         super().__init__(model, validation_data)
     
-    def transpile(self):
+    def transpile(self, project_name):
         """
         Transpile a model to Leo.
 
         Parameters
         ----------
-        model : object
-            The model to transpile.
+        project_name : str
+            The name of the project.
 
         Returns
         -------
@@ -109,7 +109,7 @@ class _DecisionTreeTranspiler(_ModelTranspilerBase):
         decision_tree_logic = self._transpile_decision_tree_logic_to_pseudocode(tree, feature_names, indentation="        ")[:-1]
         circuit_inputs, circuit_outputs = self._transpile_circuit_inputs_and_outputs()
 
-        transpilation_result = self._merge_transpiled_code("decisiontree", circuit_inputs, circuit_outputs, decision_tree_logic)
+        transpilation_result = self._merge_transpiled_code(project_name, circuit_inputs, circuit_outputs, decision_tree_logic)
         return transpilation_result
         
     def _transpile_decision_tree_logic_to_pseudocode(self, tree, feature_names, node=0, indentation=""):
