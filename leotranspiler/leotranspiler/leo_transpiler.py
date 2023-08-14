@@ -49,14 +49,12 @@ class LeoTranspiler:
 
         model_transpiler = _get_model_transpiler(self.model, self.validation_data)
 
-        # Todo check numeric stability for model and data and get number range
+        # Check numeric stability for model and data and get number range
         model_transpiler._numbers_get_leo_type_and_fixed_point_scaling_factor()
-
-        # Todo do fixed point conversion
 
         if self.transpilation_result is None:
             print("Transpiling model...")
-            self.transpilation_result = model_transpiler.transpile(project_name)
+            self.transpilation_result = model_transpiler.transpile(project_name) # todo check case when project name changes
 
         project_dir = os.path.join(path, project_name)
         src_folder_dir = os.path.join(project_dir, "src")
@@ -67,6 +65,12 @@ class LeoTranspiler:
 
         with open(leo_file_dir, "w") as f:
             f.write(self.transpilation_result)
+
+        program_json = self._get_program_json(project_name)
+        program_json_file_dir = os.path.join(project_dir, "program.json")
+        with open(program_json_file_dir, "w") as f:
+            f.write(program_json)
+
         self.leo_program_stored = True
         print("Leo program stored")
 
@@ -90,3 +94,24 @@ class LeoTranspiler:
         circuit_input = None # TODO: organize circuit input
         circuit_output, proof_value = None, None # TODO: here we need to do the FFI call or CLI call for leo/snarkVM execute
         return ZeroKnowledgeProof(circuit_input, circuit_output, proof_value)
+    
+    def _get_program_json(self, project_name):
+        """
+        Generate the program.json file content.
+
+        Parameters
+        ----------
+        project_name : str
+            The name of the project.
+
+        Returns
+        -------
+        str
+            The program.json file.
+        """
+        return f"""{{
+    "program": "{project_name}.aleo",
+    "version": "0.0.0",
+    "description": "transpiler generated program",
+    "license": "MIT"
+}}"""
