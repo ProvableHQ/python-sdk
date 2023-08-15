@@ -66,6 +66,12 @@ class _ModelTranspilerBase:
         else:
             return int(round(value * self.fixed_point_scaling_factor))
     
+    def convert_from_fixed_point(self, value):
+        if(isinstance(value, list)):
+            return [self.convert_from_fixed_point(val) for val in value]
+        else:
+            return value / self.fixed_point_scaling_factor
+    
     def _get_fixed_point_and_leo_type(self, value):
         return str(self._convert_to_fixed_point(value)) + self.leo_type
     

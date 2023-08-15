@@ -79,7 +79,7 @@ class LeoTranspiler:
         self.leo_program_stored = True
         print("Leo program stored")
 
-    def prove(self, input):
+    def prove(self, inputs_decimal):
         """
         Prove the model output for a given input.
 
@@ -96,11 +96,11 @@ class LeoTranspiler:
         if not self.leo_program_stored:
             raise Exception("Leo program not stored")
         
-        circuit_input = self.model_transpiler.generate_input(input)
+        circuit_inputs_fixed_point = self.model_transpiler.generate_input(inputs_decimal)
 
         # TODO: here we need to do the FFI call or CLI call for leo/snarkVM execute
         circuit_output, proof_value = None, None
-        command = ['leo', 'run', 'main'] + circuit_input
+        command = ['leo', 'run', 'main'] + circuit_inputs_fixed_point
         directory = os.path.join(os.getcwd(), "leotranspiler", "tests", "tree1")
 
         # Start Leo program
@@ -120,17 +120,27 @@ class LeoTranspiler:
         result = stdout.decode() + stderr.decode()
         runtime = end - start
 
-        # Check if "Finished" is in the results string
+        outputs_fixed_point = []
+
         success = "Finished" in result
         if success:
-            # Extract the number before the word "constraints" in the results string
-            constraints = result.split("constraints")[0].split()[-1].replace(",", "")
-            constraints = int(constraints)
-            # Todo output processing
+            constraints = int(result.split("constraints")[0].split()[-1].replace(",", ""))
+            # Output processing
+            outputs_str = result.split("Output")[1]
+            outputs_str = outputs_str.split("• ")
+            for element in outputs_str:
+                if element.startswith("\n"):
+                    continue
+                # check if is number
+                if element[0].isdigit():
+                    element = element.split(self.model_transpiler.leo_type)[0]
+                    outputs_fixed_point.append(int(element))
         else:
             print("Error:", result)
 
-        return ZeroKnowledgeProof(circuit_input, circuit_output, proof_value)
+        outputs_decimal = self.model_transpiler.convert_from_fixed_point(outputs_fixed_point)
+
+        return ZeroKnowledgeProof(inputs_decimal, outputs_decimal, None)
     
     def _get_program_json(self, project_name):
         """
