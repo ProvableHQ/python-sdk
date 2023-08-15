@@ -35,3 +35,15 @@ class _InputGenerator:
 
         self.inputl_list.append(self._Input(value, leo_type, active, name))
         self._input_count += 1
+    
+    def use_input(self, index):
+        self.inputl_list[index].active = True
+        return self.inputl_list[index]
+    
+    def get_circuit_input_string(self):
+        circuit_inputs_string = ""
+        for input in self.inputl_list:
+            if(input.active):
+                circuit_inputs_string += f"{input.name}: {input.leo_type}, "
+        circuit_inputs_string = circuit_inputs_string[:-2]
+        return circuit_inputs_string
