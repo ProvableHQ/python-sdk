@@ -17,7 +17,7 @@ class _InputGenerator:
         self.MAX_STRUCT_HIERARCHY = 32
         
         self.MAX_INPUT_VALUES = self.MAX_CIRCUIT_INPUTS * (self.MAX_STRUCT_FIELDS ** self.MAX_STRUCT_HIERARCHY)
-        self.active_inputs_count = 0
+        self.MAX_INPUT_VALUES = 16 # Todo, for now set the value to 16 because hierarchical structs are not implemented yet
 
         self.inputl_list = []
         self._input_count = 0
@@ -42,8 +42,16 @@ class _InputGenerator:
     
     def get_circuit_input_string(self):
         circuit_inputs_string = ""
+        active_input_count = 0
         for input in self.inputl_list:
             if(input.active):
                 circuit_inputs_string += f"{input.name}: {input.leo_type}, "
+                active_input_count += 1
+        
+        if(active_input_count == 0):
+            raise Exception("No active inputs")
+        elif(active_input_count > self.MAX_CIRCUIT_INPUTS):
+            raise Exception(f"Too many active inputs ({active_input_count} > {self.MAX_INPUT_VALUES})")
+        
         circuit_inputs_string = circuit_inputs_string[:-2]
         return circuit_inputs_string
