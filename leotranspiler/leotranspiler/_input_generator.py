@@ -65,10 +65,9 @@ class _InputGenerator:
             self.inputl_list[i].value = fixed_point_features[i]
 
         # construct input string
-        input_string = ""
+        input_list = []
         for input in self.inputl_list:
             if(input.active):
-                input_string += f"{input.value}{input.leo_type} "
-        input_string = input_string[:-1]
+                input_list += [f"{input.value}{input.leo_type}"]
         
-        return input_string
+        return input_list

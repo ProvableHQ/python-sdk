@@ -1,6 +1,6 @@
 from .zero_knowledge_proof import ZeroKnowledgeProof
 from ._model_transpiler import _get_model_transpiler
-import os
+import os, time, subprocess, psutil
 
 class LeoTranspiler:
     def __init__(self, model, validation_data=None, model_as_input=False, ouput_model_hash=None):
@@ -97,7 +97,39 @@ class LeoTranspiler:
             raise Exception("Leo program not stored")
         
         circuit_input = self.model_transpiler.generate_input(input)
-        circuit_output, proof_value = None, None # TODO: here we need to do the FFI call or CLI call for leo/snarkVM execute
+
+        # TODO: here we need to do the FFI call or CLI call for leo/snarkVM execute
+        circuit_output, proof_value = None, None
+        command = ['leo', 'run', 'main'] + circuit_input
+        directory = os.path.join(os.getcwd(), "leotranspiler", "tests", "tree1")
+
+        # Start Leo program
+        start = time.time()
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=directory)
+
+        while process.poll() is None:
+            try:
+                time.sleep(0.1)
+            except psutil.NoSuchProcess:
+                break
+
+        end = time.time()
+
+        # Get the output
+        stdout, stderr = process.communicate()
+        result = stdout.decode() + stderr.decode()
+        runtime = end - start
+
+        # Check if "Finished" is in the results string
+        success = "Finished" in result
+        if success:
+            # Extract the number before the word "constraints" in the results string
+            constraints = result.split("constraints")[0].split()[-1].replace(",", "")
+            constraints = int(constraints)
+            # Todo output processing
+        else:
+            print("Error:", result)
+
         return ZeroKnowledgeProof(circuit_input, circuit_output, proof_value)
     
     def _get_program_json(self, project_name):
