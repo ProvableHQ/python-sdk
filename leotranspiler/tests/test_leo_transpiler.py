@@ -46,6 +46,7 @@ class TestLeoTranspiler(unittest.TestCase):
         self.assertEqual(lt.leo_program_stored, True)
 
         lt.prove(X_test[0])
+        a = 0
 
 
 if __name__ == '__main__':

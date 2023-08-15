@@ -55,3 +55,20 @@ class _InputGenerator:
         
         circuit_inputs_string = circuit_inputs_string[:-2]
         return circuit_inputs_string
+    
+    def generate_input(self, fixed_point_features):
+        if(len(fixed_point_features) != len(self.inputl_list)):
+            raise Exception(f"Number of features ({len(fixed_point_features)}) does not match number of inputs ({len(self.inputl_list)})")
+        
+        # assign values to inputs
+        for i in range(len(fixed_point_features)):
+            self.inputl_list[i].value = fixed_point_features[i]
+
+        # construct input string
+        input_string = ""
+        for input in self.inputl_list:
+            if(input.active):
+                input_string += f"{input.value}{input.leo_type} "
+        input_string = input_string[:-1]
+        
+        return input_string

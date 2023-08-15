@@ -47,14 +47,14 @@ class LeoTranspiler:
         None
         """ 
 
-        model_transpiler = _get_model_transpiler(self.model, self.validation_data)
+        self.model_transpiler = _get_model_transpiler(self.model, self.validation_data)
 
         # Check numeric stability for model and data and get number range
-        model_transpiler._numbers_get_leo_type_and_fixed_point_scaling_factor()
+        self.model_transpiler._numbers_get_leo_type_and_fixed_point_scaling_factor()
 
         if self.transpilation_result is None:
             print("Transpiling model...")
-            self.transpilation_result = model_transpiler.transpile(project_name) # todo check case when project name changes
+            self.transpilation_result = self.model_transpiler.transpile(project_name) # todo check case when project name changes
 
         project_dir = os.path.join(path, project_name)
         src_folder_dir = os.path.join(project_dir, "src")
@@ -96,7 +96,7 @@ class LeoTranspiler:
         if not self.leo_program_stored:
             raise Exception("Leo program not stored")
         
-        circuit_input = None # TODO: organize circuit input
+        circuit_input = self.model_transpiler.generate_input(input)
         circuit_output, proof_value = None, None # TODO: here we need to do the FFI call or CLI call for leo/snarkVM execute
         return ZeroKnowledgeProof(circuit_input, circuit_output, proof_value)
     

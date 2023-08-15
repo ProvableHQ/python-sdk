@@ -61,7 +61,10 @@ class _ModelTranspilerBase:
         return max([_get_rounding_decimal_places(val) for val in self.validation_data.ravel()])
     
     def _convert_to_fixed_point(self, value):
-        return int(round(value * self.fixed_point_scaling_factor))
+        if(hasattr(value, "shape")): # check if value is a numpy array
+            return (value * self.fixed_point_scaling_factor).astype(int)
+        else:
+            return int(round(value * self.fixed_point_scaling_factor))
     
     def _get_fixed_point_and_leo_type(self, value):
         return str(self._convert_to_fixed_point(value)) + self.leo_type
@@ -83,6 +86,10 @@ program {project_name}.aleo {{
         code += f"""    }}
 }}"""
         return code
+    
+    def generate_input(self, features):
+        fixed_point_features = self._convert_to_fixed_point(features)
+        return self.input_generator.generate_input(fixed_point_features)
     
 class _DecisionTreeTranspiler(_ModelTranspilerBase):
     def __init__(self, model, validation_data):
@@ -107,18 +114,18 @@ class _DecisionTreeTranspiler(_ModelTranspilerBase):
         feature_names = [f"x{i}" for i in range(tree.n_features)]
 
         # Input generation
-        input_generator = _InputGenerator()
+        self.input_generator = _InputGenerator()
         for feature_name in feature_names:
-            input_generator.add_input(self.leo_type)
+            self.input_generator.add_input(self.leo_type)
 
-        decision_tree_logic_snippets = self._transpile_decision_tree_logic_to_pseudocode(tree, feature_names, input_generator, indentation="        ")
-        circuit_inputs = "(" + input_generator.get_circuit_input_string() + ")"
+        decision_tree_logic_snippets = self._transpile_decision_tree_logic_to_pseudocode(tree, feature_names, indentation="        ")
+        circuit_inputs = "(" + self.input_generator.get_circuit_input_string() + ")"
         circuit_outputs = "(" + self.leo_type + ")" # Todo check multi output decision trees and models
 
         transpilation_result = self._merge_into_transpiled_code(project_name, circuit_inputs, circuit_outputs, decision_tree_logic_snippets)
         return transpilation_result
         
-    def _transpile_decision_tree_logic_to_pseudocode(self, tree, feature_names, input_generator, node=0, indentation=""):
+    def _transpile_decision_tree_logic_to_pseudocode(self, tree, feature_names, node=0, indentation=""):
         
         left_child = tree.children_left[node]
         right_child = tree.children_right[node]
@@ -128,7 +135,7 @@ class _DecisionTreeTranspiler(_ModelTranspilerBase):
             return [indentation + f"return {self._get_fixed_point_and_leo_type(tree.value[node].argmax())};\n"]
 
         # Recursive case: internal node
-        feature = input_generator.use_input(tree.feature[node])
+        feature = self.input_generator.use_input(tree.feature[node])
         threshold = tree.threshold[node]
 
         pseudocode_snippets = []
@@ -138,10 +145,10 @@ class _DecisionTreeTranspiler(_ModelTranspilerBase):
         else:
             pseudocode_snippets += [indentation + "if ", feature, f" <= {self._get_fixed_point_and_leo_type(threshold)} {{\n"]
 
-        pseudocode_snippets += self._transpile_decision_tree_logic_to_pseudocode(tree, feature_names, input_generator, left_child, indentation + "    ")
+        pseudocode_snippets += self._transpile_decision_tree_logic_to_pseudocode(tree, feature_names, left_child, indentation + "    ")
         pseudocode_snippets += [indentation + f"}}\n" + indentation + "else {\n"]
 
-        pseudocode_snippets += self._transpile_decision_tree_logic_to_pseudocode(tree, feature_names, input_generator, right_child, indentation + "    ")
+        pseudocode_snippets += self._transpile_decision_tree_logic_to_pseudocode(tree, feature_names, right_child, indentation + "    ")
         pseudocode_snippets += [indentation + f"}}\n"]
         return pseudocode_snippets
     
