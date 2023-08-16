@@ -1,2 +1,6 @@
 .vscode/
 sandbox/
+*.egg-info/
+__pycache__/
+*.pyc
+*.pyo
