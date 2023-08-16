@@ -1,6 +1,14 @@
 .vscode/
 sandbox/
+tmp/
+
+# Python artifacts
 *.egg-info/
 __pycache__/
 *.pyc
 *.pyo
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+*.ipynb_checkpoints/
+jupyter_notebook_config.py

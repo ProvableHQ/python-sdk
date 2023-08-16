@@ -56,8 +56,8 @@ class LeoTranspiler:
             print("Transpiling model...")
             self.transpilation_result = self.model_transpiler.transpile(project_name) # todo check case when project name changes
 
-        project_dir = os.path.join(path, project_name)
-        src_folder_dir = os.path.join(project_dir, "src")
+        self.project_dir = os.path.join(path, project_name)
+        src_folder_dir = os.path.join(self.project_dir, "src")
         leo_file_dir = os.path.join(src_folder_dir, "main.leo")
 
         # Make sure path exists
@@ -67,12 +67,12 @@ class LeoTranspiler:
             f.write(self.transpilation_result)
 
         program_json = self._get_program_json(project_name)
-        program_json_file_dir = os.path.join(project_dir, "program.json")
+        program_json_file_dir = os.path.join(self.project_dir, "program.json")
         with open(program_json_file_dir, "w") as f:
             f.write(program_json)
         
         environment_file = self._get_environment_file() # todo option to pass private key
-        environment_file_dir = os.path.join(project_dir, ".env")
+        environment_file_dir = os.path.join(self.project_dir, ".env")
         with open(environment_file_dir, "w") as f:
             f.write(environment_file)
 
@@ -101,7 +101,7 @@ class LeoTranspiler:
         # TODO: here we need to do the FFI call or CLI call for leo/snarkVM execute
         circuit_output, proof_value = None, None
         command = ['leo', 'run', 'main'] + circuit_inputs_fixed_point
-        directory = os.path.join(os.getcwd(), "leotranspiler", "tests", "tree1")
+        directory = self.project_dir
 
         # Start Leo program
         start = time.time()
