@@ -40,8 +40,7 @@ class LeoTranspiler:
         self.leo_program_stored = False
 
     def to_leo(self, path: Path, project_name: str):
-        """
-        Transpile and store the Leo program to a specified directory.
+        """Transpile and store the Leo program to a specified directory.
 
         This method transpiles the model to a Leo program and saves it, along with
         related configuration files, to the specified path under a directory named
@@ -74,39 +73,23 @@ class LeoTranspiler:
 
         self.model_transpiler = _get_model_transpiler(self.model, self.validation_data)
 
-        # Check numeric stability for model and data and get number range
-        self.model_transpiler._numbers_get_leo_type_and_fixed_point_scaling_factor()
-
         if self.transpilation_result is None:
+            # Computing the number ranges and the fixed-point scaling factor
+            print("Computing number ranges and fixed-point scaling factor...")
+            self.model_transpiler._numbers_get_leo_type_and_fixed_point_scaling_factor()
             print("Transpiling model...")
             self.transpilation_result = self.model_transpiler.transpile(project_name) # todo check case when project name changes
 
         self.project_dir = os.path.join(path, project_name)
-        src_folder_dir = os.path.join(self.project_dir, "src")
-        leo_file_dir = os.path.join(src_folder_dir, "main.leo")
-
-        # Make sure path exists
-        os.makedirs(src_folder_dir, exist_ok=True)
-
-        with open(leo_file_dir, "w") as f:
-            f.write(self.transpilation_result)
-
-        program_json = self._get_program_json(project_name)
-        program_json_file_dir = os.path.join(self.project_dir, "program.json")
-        with open(program_json_file_dir, "w") as f:
-            f.write(program_json)
-        
-        environment_file = self._get_environment_file() # todo option to pass private key
-        environment_file_dir = os.path.join(self.project_dir, ".env")
-        with open(environment_file_dir, "w") as f:
-            f.write(environment_file)
+        self._store_leo_program()
+        self._store_program_json(project_name)
+        self._store_environment_file() # todo implement option to pass private key
 
         self.leo_program_stored = True
         print("Leo program stored")
 
-    def prove(self, input_sample: Union[ndarray, List[float]]):
-        """
-        Prove the model output for a given input sample.
+    def prove(self, input_sample: Union[ndarray, List[float]]) -> ZeroKnowledgeProof:
+        """Prove the model output for a given input sample.
 
         Parameters
         ----------
@@ -167,8 +150,8 @@ class LeoTranspiler:
 
         return ZeroKnowledgeProof(input_sample, outputs_decimal, None)
     
-    def _get_program_json(self, project_name: str) -> str:
-        """Generate the content for the program.json file.
+    def _store_leo_program(self):
+        """Store the Leo program.
 
         Parameters
         ----------
@@ -177,27 +160,54 @@ class LeoTranspiler:
 
         Returns
         -------
-        str
-            The content for the program.json file in string format.
+        None
         """
-        return f"""{{
+
+        folder_dir = os.path.join(self.project_dir, "src")
+        # Make sure path exists
+        os.makedirs(folder_dir, exist_ok=True)
+
+        with open(os.path.join(folder_dir, "main.leo"), "w") as f:
+            f.write(self.transpilation_result)
+    
+    def _store_program_json(self, project_name: str):
+        """Store the program.json file.
+
+        Parameters
+        ----------
+        project_name : str
+            The name of the project.
+
+        Returns
+        -------
+        None
+        """
+        content= f"""{{
     "program": "{project_name}.aleo",
     "version": "0.0.0",
     "description": "transpiler generated program",
     "license": "MIT"
 }}"""
+        folder_dir = os.path.join(self.project_dir)
+        # Make sure path exists
+        os.makedirs(folder_dir, exist_ok=True)
 
-    def _get_environment_file(self) -> str:
-        """Generate the content for the environment configuration file.
+        with open(os.path.join(folder_dir, "program.json"), "w") as f:
+            f.write(content)
 
-        This method provides default configurations including the network type and a placeholder for the private key.
-        Note: The returned private key is a placeholder and should be replaced with an actual key for real use-cases.
+    def _store_environment_file(self):
+        """Store the environment configuration file.
 
         Returns
         -------
-        str
-            The content for the environment configuration file in string format.
+        None
         """
-        return f"""NETWORK=testnet3
+        content = f"""NETWORK=testnet3
 PRIVATE_KEY=APrivateKey1zkpHtqVWT6fSHgUMNxsuVf7eaR6id2cj7TieKY1Z8CP5rCD
 """
+        folder_dir = os.path.join(self.project_dir)
+        # Make sure path exists
+        os.makedirs(folder_dir, exist_ok=True)
+
+        with open(os.path.join(folder_dir, ".env"), "w") as f:
+            f.write(content)

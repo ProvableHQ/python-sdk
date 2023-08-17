@@ -44,6 +44,10 @@ class TestLeoTranspiler(unittest.TestCase):
         python_prediction = clf.predict([X_test[0]])
         self.assertEqual(int(zkp.output[0]), python_prediction[0])
 
+        # remove the generated folder
+        import shutil
+        shutil.rmtree(os.path.join(os.getcwd(), "leotranspiler", "tests", "tree1"))
+
 
 if __name__ == '__main__':
     unittest.main()
