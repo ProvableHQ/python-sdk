@@ -148,7 +148,7 @@ class LeoTranspiler:
 
         outputs_decimal = self.model_transpiler.convert_from_fixed_point(outputs_fixed_point)
 
-        return ZeroKnowledgeProof(input_sample, outputs_decimal, None)
+        return ZeroKnowledgeProof(input_sample, outputs_decimal, None, constraints)
     
     def _store_leo_program(self):
         """Store the Leo program.

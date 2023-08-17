@@ -46,6 +46,8 @@ class _ModelTranspilerBase:
         self.leo_type = leo_type
         self.fixed_point_scaling_factor = fixed_point_scaling_factor
 
+        print(f"Minimum number: {minimum}, maximum number: {maximum}. Recommended fixed-point scaling factor: {fixed_point_scaling_factor}, required Leo type: {leo_type}")
+
         return leo_type, fixed_point_scaling_factor
     
     def _get_numeric_range_model(self):
