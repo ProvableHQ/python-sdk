@@ -1,28 +1,29 @@
 from .zero_knowledge_proof import ZeroKnowledgeProof
 from ._model_transpiler import _get_model_transpiler
 import os, time, subprocess, psutil
+from sklearn.base import BaseEstimator
+from typing import Optional
+from numpy.typing import ArrayLike
 
 class LeoTranspiler:
-    def __init__(self, model, validation_data=None, model_as_input=False, ouput_model_hash=None):
-        """
-        Create a new transpiler instance.
+
+    def __init__(self, 
+             model: BaseEstimator, 
+             validation_data: Optional[ArrayLike] = None, 
+             model_as_input: bool = False, 
+             ouput_model_hash: Optional[str] = None):
+        """Initializes the LeoTranspiler with the given parameters.
 
         Parameters
         ----------
-        model : Model
-            The model to transpile.
+        model : BaseEstimator
+            The ML model to transpile.
         validation_data : tuple of array_like, optional
-            Data on which to evaluate the numerical stability of the circuit. The model will not be trained on
-            this data.
+            Data to evaluate the numerical stability of the circuit. The model will not be trained on this data.
         model_as_input : bool, optional
-            If True, the model weights and biases are treated as circuit input instead of being hardcoded.
-        ouput_model_hash : str, optional
-            If set, the circuit will return the hash of the model weights and biases. Possible values are ... (todo)
-
-        Returns
-        -------
-        LeoTranspiler
-            The transpiler instance.
+            If True, the model's weights and biases are treated as circuit input rather than being hardcoded.
+        output_model_hash : str, optional
+            If provided, the circuit returns the hash of the model's weights and biases. Possible values are ... (todo)
         """
 
         self.model = model

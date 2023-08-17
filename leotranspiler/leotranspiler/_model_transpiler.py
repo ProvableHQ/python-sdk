@@ -124,14 +124,14 @@ class _DecisionTreeTranspiler(_ModelTranspilerBase):
         for feature_name in feature_names:
             self.input_generator.add_input(self.leo_type)
 
-        decision_tree_logic_snippets = self._transpile_decision_tree_logic_to_pseudocode(tree, feature_names, indentation="        ")
+        decision_tree_logic_snippets = self._transpile_decision_tree_logic_to_leo_code(tree, feature_names, indentation="        ")
         circuit_inputs = "(" + self.input_generator.get_circuit_input_string() + ")"
         circuit_outputs = "(" + self.leo_type + ")" # Todo check multi output decision trees and models
 
         transpilation_result = self._merge_into_transpiled_code(project_name, circuit_inputs, circuit_outputs, decision_tree_logic_snippets)
         return transpilation_result
         
-    def _transpile_decision_tree_logic_to_pseudocode(self, tree, feature_names, node=0, indentation=""):
+    def _transpile_decision_tree_logic_to_leo_code(self, tree, feature_names, node=0, indentation=""):
         
         left_child = tree.children_left[node]
         right_child = tree.children_right[node]
@@ -144,19 +144,19 @@ class _DecisionTreeTranspiler(_ModelTranspilerBase):
         feature = self.input_generator.use_input(tree.feature[node])
         threshold = tree.threshold[node]
 
-        pseudocode_snippets = []
+        leo_code_snippets = []
 
         if node == 0:
-            pseudocode_snippets += [indentation + "if ", feature, f" <= {self._get_fixed_point_and_leo_type(threshold)} {{\n"]
+            leo_code_snippets += [indentation + "if ", feature, f" <= {self._get_fixed_point_and_leo_type(threshold)} {{\n"]
         else:
-            pseudocode_snippets += [indentation + "if ", feature, f" <= {self._get_fixed_point_and_leo_type(threshold)} {{\n"]
+            leo_code_snippets += [indentation + "if ", feature, f" <= {self._get_fixed_point_and_leo_type(threshold)} {{\n"]
 
-        pseudocode_snippets += self._transpile_decision_tree_logic_to_pseudocode(tree, feature_names, left_child, indentation + "    ")
-        pseudocode_snippets += [indentation + f"}}\n" + indentation + "else {\n"]
+        leo_code_snippets += self._transpile_decision_tree_logic_to_leo_code(tree, feature_names, left_child, indentation + "    ")
+        leo_code_snippets += [indentation + f"}}\n" + indentation + "else {\n"]
 
-        pseudocode_snippets += self._transpile_decision_tree_logic_to_pseudocode(tree, feature_names, right_child, indentation + "    ")
-        pseudocode_snippets += [indentation + f"}}\n"]
-        return pseudocode_snippets
+        leo_code_snippets += self._transpile_decision_tree_logic_to_leo_code(tree, feature_names, right_child, indentation + "    ")
+        leo_code_snippets += [indentation + f"}}\n"]
+        return leo_code_snippets
     
     def _get_numeric_range_model(self):
         thresholds = self.model.tree_.threshold

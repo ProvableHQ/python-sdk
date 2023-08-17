@@ -1,6 +1,6 @@
 import unittest
-import sklearn
 import os
+from sklearn.tree import DecisionTreeClassifier
 
 from leotranspiler.leotranspiler.leo_transpiler import LeoTranspiler
 
@@ -19,10 +19,6 @@ class TestLeoTranspiler(unittest.TestCase):
         # Import necessary libraries
         from sklearn.datasets import load_iris
         from sklearn.model_selection import train_test_split
-        from sklearn.tree import DecisionTreeClassifier
-        from sklearn.metrics import accuracy_score
-        import matplotlib.pyplot as plt
-        from sklearn.tree import plot_tree
 
         # Load the iris dataset
         iris = load_iris()
@@ -30,7 +26,7 @@ class TestLeoTranspiler(unittest.TestCase):
         y = iris.target
 
         # Split the dataset into a training and a test set
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=0)
+        X_train, X_test, y_train, _ = train_test_split(X, y, test_size=0.2, random_state=0)
 
         # Initialize the decision tree classifier
         clf = DecisionTreeClassifier(random_state=0)
