@@ -2,8 +2,10 @@ from .zero_knowledge_proof import ZeroKnowledgeProof
 from ._model_transpiler import _get_model_transpiler
 import os, time, subprocess, psutil
 from sklearn.base import BaseEstimator
-from typing import Optional
+from typing import Optional, Union, List
+from numpy import ndarray
 from numpy.typing import ArrayLike
+from pathlib import Path
 
 class LeoTranspiler:
 
@@ -19,11 +21,14 @@ class LeoTranspiler:
         model : BaseEstimator
             The ML model to transpile.
         validation_data : tuple of array_like, optional
-            Data to evaluate the numerical stability of the circuit. The model will not be trained on this data.
+            Data to evaluate the numerical stability of the circuit. The model will
+            not be trained on this data.
         model_as_input : bool, optional
-            If True, the model's weights and biases are treated as circuit input rather than being hardcoded.
+            If True, the model's weights and biases are treated as circuit input
+            rather than being hardcoded.
         output_model_hash : str, optional
-            If provided, the circuit returns the hash of the model's weights and biases. Possible values are ... (todo)
+            If provided, the circuit returns the hash of the model's weights and
+            biases. Possible values are ... (todo)
         """
 
         self.model = model
@@ -34,19 +39,38 @@ class LeoTranspiler:
         self.transpilation_result = None
         self.leo_program_stored = False
 
-    def store_leo_program(self, path, project_name):
+    def to_leo(self, path: Path, project_name: str):
         """
-        Store the Leo program to a file.
+        Transpile and store the Leo program to a specified directory.
+
+        This method transpiles the model to a Leo program and saves it, along with
+        related configuration files, to the specified path under a directory named
+        after the project name.
 
         Parameters
         ----------
-        path : str
-            The path to the file to store the Leo program in.
+        path : Path
+            The directory where the Leo program and related files will be stored.
+        project_name : str
+            The name of the project, which determines the directory name under
+            the specified path and is used during transpilation.
 
         Returns
         -------
         None
-        """ 
+
+        Notes
+        -----
+        The method saves three main files:
+        - `main.leo`: The transpiled Leo program.
+        - `program.json`: Configuration for the Leo program.
+        - `.env`: Environment-specific settings.
+
+        If the Leo program is already transpiled, this method will not re-transpile
+        but will directly store the program.
+
+        Directories are created as needed to ensure the specified path exists.
+        """
 
         self.model_transpiler = _get_model_transpiler(self.model, self.validation_data)
 
@@ -80,24 +104,24 @@ class LeoTranspiler:
         self.leo_program_stored = True
         print("Leo program stored")
 
-    def prove(self, inputs_decimal):
+    def prove(self, input_sample: Union[ndarray, List[float]]):
         """
-        Prove the model output for a given input.
+        Prove the model output for a given input sample.
 
         Parameters
         ----------
-        input : array_like
-            The input for which to prove the output.
+        input_sample : Union[ndarray, List[float]]
+            The input sample for which to prove the output. Can be a numpy array or a list of floats.
 
         Returns
         -------
         ZeroKnowledgeProof
-            The zero-knowledge proof for the given input.
+            The zero-knowledge proof for the given input sample.
         """
         if not self.leo_program_stored:
             raise Exception("Leo program not stored")
         
-        circuit_inputs_fixed_point = self.model_transpiler.generate_input(inputs_decimal)
+        circuit_inputs_fixed_point = self.model_transpiler.generate_input(input_sample)
 
         # TODO: here we need to do the FFI call or CLI call for leo/snarkVM execute
         circuit_output, proof_value = None, None
@@ -141,11 +165,10 @@ class LeoTranspiler:
 
         outputs_decimal = self.model_transpiler.convert_from_fixed_point(outputs_fixed_point)
 
-        return ZeroKnowledgeProof(inputs_decimal, outputs_decimal, None)
+        return ZeroKnowledgeProof(input_sample, outputs_decimal, None)
     
-    def _get_program_json(self, project_name):
-        """
-        Generate the program.json file content.
+    def _get_program_json(self, project_name: str) -> str:
+        """Generate the content for the program.json file.
 
         Parameters
         ----------
@@ -155,7 +178,7 @@ class LeoTranspiler:
         Returns
         -------
         str
-            The program.json file.
+            The content for the program.json file in string format.
         """
         return f"""{{
     "program": "{project_name}.aleo",
@@ -164,14 +187,16 @@ class LeoTranspiler:
     "license": "MIT"
 }}"""
 
-    def _get_environment_file(self):
-        """
-        Generate the environment file content.
+    def _get_environment_file(self) -> str:
+        """Generate the content for the environment configuration file.
+
+        This method provides default configurations including the network type and a placeholder for the private key.
+        Note: The returned private key is a placeholder and should be replaced with an actual key for real use-cases.
 
         Returns
         -------
         str
-            The environment file.
+            The content for the environment configuration file in string format.
         """
         return f"""NETWORK=testnet3
 PRIVATE_KEY=APrivateKey1zkpHtqVWT6fSHgUMNxsuVf7eaR6id2cj7TieKY1Z8CP5rCD

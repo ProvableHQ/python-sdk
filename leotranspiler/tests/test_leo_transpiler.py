@@ -36,7 +36,7 @@ class TestLeoTranspiler(unittest.TestCase):
 
         # Transpile
         lt = LeoTranspiler(clf, X_test)
-        lt.store_leo_program(os.path.join(os.getcwd(), "leotranspiler", "tests"), "tree1")
+        lt.to_leo(os.path.join(os.getcwd(), "leotranspiler", "tests"), "tree1")
         self.assertEqual(lt.leo_program_stored, True)
 
         # Prove and compare the Python prediction with the Leo prediction
