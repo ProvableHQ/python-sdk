@@ -71,6 +71,7 @@ class LeoTranspiler:
         Directories are created as needed to ensure the specified path exists.
         """
 
+        self._check_installed_leo_version()
         self.model_transpiler = _get_model_transpiler(self.model, self.validation_data)
 
         if self.transpilation_result is None:
@@ -211,3 +212,27 @@ PRIVATE_KEY=APrivateKey1zkpHtqVWT6fSHgUMNxsuVf7eaR6id2cj7TieKY1Z8CP5rCD
 
         with open(os.path.join(folder_dir, ".env"), "w") as f:
             f.write(content)
+
+    def _check_installed_leo_version(self):
+        """Check if Leo is installed and the version is up to date.
+
+        Returns
+        -------
+        None
+
+        Raises
+        ------
+        Exception
+            If Leo is not installed or the version is not correct.
+        """
+        MIN_LEO_VERSION = "1.9.4"
+        
+        def parse_version(version):
+            return tuple(map(int, version.split(".")))
+
+        try:
+            version = subprocess.check_output(["leo", "--version"]).decode().strip().split(" ")[1]
+            if parse_version(version) < parse_version(MIN_LEO_VERSION):
+                raise Exception(f"Leo version must be at least {MIN_LEO_VERSION}")
+        except FileNotFoundError:
+            raise Exception("Leo not installed")
