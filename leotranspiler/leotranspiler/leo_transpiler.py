@@ -225,7 +225,7 @@ PRIVATE_KEY=APrivateKey1zkpHtqVWT6fSHgUMNxsuVf7eaR6id2cj7TieKY1Z8CP5rCD
         Exception
             If Leo is not installed or the version is not correct.
         """
-        MIN_LEO_VERSION = "1.9.4"
+        MIN_LEO_VERSION = "1.9.3"
         
         def parse_version(version):
             return tuple(map(int, version.split(".")))
