@@ -233,6 +233,6 @@ PRIVATE_KEY=APrivateKey1zkpHtqVWT6fSHgUMNxsuVf7eaR6id2cj7TieKY1Z8CP5rCD
         try:
             version = subprocess.check_output(["leo", "--version"]).decode().strip().split(" ")[1]
             if parse_version(version) < parse_version(MIN_LEO_VERSION):
-                raise Exception(f"Leo version must be at least {MIN_LEO_VERSION}")
+                raise Exception(f"Leo version must be at least {MIN_LEO_VERSION}. Please update Leo using `leo update`.")
         except FileNotFoundError:
-            raise Exception("Leo not installed")
+            raise Exception("Leo not installed. Please visit https://developer.aleo.org/leo/installation/ to install Leo.")
