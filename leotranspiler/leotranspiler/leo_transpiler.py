@@ -103,7 +103,7 @@ class LeoTranspiler:
             The zero-knowledge proof for the given input sample.
         """
         if not self.leo_program_stored:
-            raise Exception("Leo program not stored")
+            raise FileNotFoundError("Leo program not stored")
         
         circuit_inputs_fixed_point = self.model_transpiler.generate_input(input_sample)
 
@@ -222,8 +222,10 @@ PRIVATE_KEY=APrivateKey1zkpHtqVWT6fSHgUMNxsuVf7eaR6id2cj7TieKY1Z8CP5rCD
 
         Raises
         ------
-        Exception
-            If Leo is not installed or the version is not correct.
+        ValueError
+            If the Leo version is not correct.
+        FileNotFoundError
+            If Leo is not installed.
         """
         MIN_LEO_VERSION = "1.9.3"
         
@@ -233,6 +235,6 @@ PRIVATE_KEY=APrivateKey1zkpHtqVWT6fSHgUMNxsuVf7eaR6id2cj7TieKY1Z8CP5rCD
         try:
             version = subprocess.check_output(["leo", "--version"]).decode().strip().split(" ")[1]
             if parse_version(version) < parse_version(MIN_LEO_VERSION):
-                raise Exception(f"Leo version must be at least {MIN_LEO_VERSION}. Please update Leo using `leo update`.")
+                raise ValueError(f"Leo version must be at least {MIN_LEO_VERSION}. Please update Leo using `leo update`.")
         except FileNotFoundError:
-            raise Exception("Leo not installed. Please visit https://developer.aleo.org/leo/installation/ to install Leo.")
+            raise FileNotFoundError("Leo not installed. Please visit https://developer.aleo.org/leo/installation/ to install Leo.")
