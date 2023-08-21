@@ -109,26 +109,9 @@ class LeoTranspiler:
         circuit_inputs_fixed_point = self.model_transpiler.generate_input(input_sample)
 
         result, runtime = self._execute_leo_cli("run", circuit_inputs_fixed_point)
-
-        outputs_fixed_point = []
-
-        success = "Finished" in result
-        if success:
-            constraints = int(result.split("constraints")[0].split()[-1].replace(",", ""))
-            # Output processing
-            outputs_str = result.split("Output")[1]
-            outputs_str = outputs_str.split("• ")
-            for element in outputs_str:
-                if element.startswith("\n"):
-                    continue
-                # check if is number
-                if element[0].isdigit():
-                    element = element.split(self.model_transpiler.leo_type)[0]
-                    outputs_fixed_point.append(int(element))
-        else:
-            print("Error:", result)
-
+        outputs_fixed_point, constraints = self._parse_leo_output(result)
         outputs_decimal = self.model_transpiler.convert_from_fixed_point(outputs_fixed_point)
+
 
         return ZeroKnowledgeProof(input_sample, outputs_decimal, constraints, None)
     
@@ -167,6 +150,40 @@ class LeoTranspiler:
         runtime = end - start
 
         return result, runtime
+    
+    def _parse_leo_output(self, result: str) -> Tuple[List[int], int]:
+        """Parse the Leo output.
+
+        Parameters
+        ----------
+        result : str
+            The Leo output.
+
+        Returns
+        -------
+        Tuple[List[int], int]
+            The outputs (in fixed-point format) and the number of constraints.
+        """
+        outputs_fixed_point = []
+
+        success = "Finished" in result
+        if success:
+            constraints = int(result.split("constraints")[0].split()[-1].replace(",", ""))
+            # Output processing
+            outputs_str = result.split("Output")[1]
+            outputs_str = outputs_str.split("• ")
+            for element in outputs_str:
+                if element.startswith("\n"):
+                    continue
+                # check if is number
+                if element[0].isdigit():
+                    element = element.split(self.model_transpiler.leo_type)[0]
+                    outputs_fixed_point.append(int(element))
+        else:
+            print("Error while parsing leo outputs:", result)
+            raise ValueError("Error while parsing leo outputs")
+
+        return outputs_fixed_point, constraints
     
     def _store_leo_program(self):
         """Store the Leo program.
