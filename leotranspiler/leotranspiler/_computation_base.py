@@ -1,14 +1,16 @@
 class _ComputationBase:
-    def __init__(self, input, output, circuit_constraints):
+    def __init__(self, input, outputs_original, circuit_constraints, outputs_decimal, fixed_point_scaling_factor=1):
         self.input = input
-        self.output = output
+        self.outputs_original = outputs_original
         self.circuit_constraints = circuit_constraints
+        self.outputs_decimal = outputs_decimal
+        self.fixed_point_scaling_factor = fixed_point_scaling_factor
 
 class ZeroKnowledgeProof(_ComputationBase):
-    def __init__(self, input, output, circuit_constraints, proof):
-        super().__init__(input, output, circuit_constraints)
+    def __init__(self, input, outputs_original, circuit_constraints, proof, outputs_decimal=None):
+        super().__init__(input, outputs_original, circuit_constraints, outputs_decimal)
         self.proof = proof
 
 class LeoComputation(_ComputationBase):
-    def __init__(self, input, output, circuit_constraints):
-        super().__init__(input, output, circuit_constraints)
+    def __init__(self, input, outputs_original, circuit_constraints, outputs_decimal=None):
+        super().__init__(input, outputs_original, circuit_constraints, outputs_decimal)

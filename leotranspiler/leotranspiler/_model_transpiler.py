@@ -68,9 +68,13 @@ class _ModelTranspilerBase:
         else:
             return int(round(value * self.fixed_point_scaling_factor))
     
-    def convert_from_fixed_point(self, value):
+    def convert_computation_base_outputs_to_decimal(self, computation_base):
+        computation_base.fixed_point_scaling_factor = self.fixed_point_scaling_factor
+        computation_base.outputs_decimal = self._convert_from_fixed_point(computation_base.outputs_original)
+
+    def _convert_from_fixed_point(self, value):
         if(isinstance(value, list)):
-            return [self.convert_from_fixed_point(val) for val in value]
+            return [self._convert_from_fixed_point(val) for val in value]
         else:
             return value / self.fixed_point_scaling_factor
     

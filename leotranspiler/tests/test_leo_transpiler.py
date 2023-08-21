@@ -39,10 +39,10 @@ class TestLeoTranspiler(unittest.TestCase):
         lt.to_leo(os.path.join(os.getcwd(), "leotranspiler", "tests"), "tree1")
         self.assertEqual(lt.leo_program_stored, True)
 
-        # Prove and compare the Python prediction with the Leo prediction
-        zkp = lt.prove(X_test[0])
+        # Run and compare the Python prediction with the Leo prediction
+        lc = lt.run(X_test[0])
         python_prediction = clf.predict([X_test[0]])
-        self.assertEqual(int(zkp.output[0]), python_prediction[0])
+        self.assertEqual(int(lc.outputs_decimal[0]), python_prediction[0])
 
         # remove the generated folder
         import shutil

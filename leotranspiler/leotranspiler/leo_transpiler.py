@@ -1,4 +1,4 @@
-from ._computation_base import ZeroKnowledgeProof
+from ._computation_base import ZeroKnowledgeProof, LeoComputation
 from ._model_transpiler import _get_model_transpiler
 import os, time, subprocess, psutil
 from sklearn.base import BaseEstimator
@@ -90,8 +90,8 @@ class LeoTranspiler:
         self.leo_program_stored = True
         print("Leo program stored")
 
-    def prove(self, input_sample: Union[ndarray, List[float]]) -> ZeroKnowledgeProof:
-        """Prove the model output for a given input sample.
+    def run(self, input_sample: Union[ndarray, List[float]]) -> LeoComputation:
+        """Run the model in Leo output for a given input sample.
 
         Parameters
         ----------
@@ -100,8 +100,8 @@ class LeoTranspiler:
 
         Returns
         -------
-        ZeroKnowledgeProof
-            The zero-knowledge proof for the given input sample.
+        LeoComputation
+            The Leo computation for the given input sample.
         """
         if not self.leo_program_stored:
             raise FileNotFoundError("Leo program not stored")
@@ -109,11 +109,10 @@ class LeoTranspiler:
         circuit_inputs_fixed_point = self.model_transpiler.generate_input(input_sample)
 
         result, runtime = self._execute_leo_cli("run", circuit_inputs_fixed_point)
-        outputs_fixed_point, constraints = self._parse_leo_output(result)
-        outputs_decimal = self.model_transpiler.convert_from_fixed_point(outputs_fixed_point)
+        leo_computation = self._parse_leo_output("run", result, input_sample)
+        self.model_transpiler.convert_computation_base_outputs_to_decimal(leo_computation)
 
-
-        return ZeroKnowledgeProof(input_sample, outputs_decimal, constraints, None)
+        return leo_computation
     
     def _execute_leo_cli(self, command: str, inputs: List[str]) -> Tuple[str, float]:
         """Execute a Leo CLI command.
@@ -151,13 +150,17 @@ class LeoTranspiler:
 
         return result, runtime
     
-    def _parse_leo_output(self, result: str) -> Tuple[List[int], int]:
+    def _parse_leo_output(self, command: str, result: str, input: Optional[Union[ndarray, List[float]]] = None) -> Tuple[List[int], int]:
         """Parse the Leo output.
 
         Parameters
         ----------
+        command : str
+            The command that was executed.
         result : str
             The Leo output.
+        input : Union[ndarray, List[float]], optional
+            The input sample for which the output was computed, by default None
 
         Returns
         -------
@@ -183,7 +186,8 @@ class LeoTranspiler:
             print("Error while parsing leo outputs:", result)
             raise ValueError("Error while parsing leo outputs")
 
-        return outputs_fixed_point, constraints
+        if(command == "run"):
+            return LeoComputation(input, outputs_fixed_point, constraints, input)
     
     def _store_leo_program(self):
         """Store the Leo program.
