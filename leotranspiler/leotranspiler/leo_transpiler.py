@@ -6,6 +6,7 @@ from typing import Optional, Union, List, Tuple
 from numpy import ndarray
 from numpy.typing import ArrayLike
 from pathlib import Path
+import json
 
 
 class LeoTranspiler:
@@ -107,12 +108,34 @@ class LeoTranspiler:
             raise FileNotFoundError("Leo program not stored")
         
         circuit_inputs_fixed_point = self.model_transpiler.generate_input(input_sample)
-
         result, runtime = self._execute_leo_cli("run", circuit_inputs_fixed_point)
         leo_computation = self._parse_leo_output("run", result, input_sample)
         self.model_transpiler.convert_computation_base_outputs_to_decimal(leo_computation)
 
         return leo_computation
+
+    def execute(self, input_sample: Union[ndarray, List[float]]) -> ZeroKnowledgeProof:
+        """Run the model in Leo output for a given input sample.
+
+        Parameters
+        ----------
+        input_sample : Union[ndarray, List[float]]
+            The input sample for which to prove the output. Can be a numpy array or a list of floats.
+
+        Returns
+        -------
+        LeoComputation
+            The Leo computation for the given input sample.
+        """
+        if not self.leo_program_stored:
+            raise FileNotFoundError("Leo program not stored")
+        
+        circuit_inputs_fixed_point = self.model_transpiler.generate_input(input_sample)
+        result, runtime = self._execute_leo_cli("execute", circuit_inputs_fixed_point)
+        zkp = self._parse_leo_output("execute", result, input_sample)
+        self.model_transpiler.convert_computation_base_outputs_to_decimal(zkp)
+
+        return zkp
     
     def _execute_leo_cli(self, command: str, inputs: List[str]) -> Tuple[str, float]:
         """Execute a Leo CLI command.
@@ -169,8 +192,9 @@ class LeoTranspiler:
         """
         outputs_fixed_point = []
 
-        success = "Finished" in result
-        if success:
+        success_run = "Finished" in result and command == "run"
+        success_execute = "Executed" in result and command == "execute"
+        if success_run or success_execute:
             constraints = int(result.split("constraints")[0].split()[-1].replace(",", ""))
             # Output processing
             outputs_str = result.split("Output")[1]
@@ -185,9 +209,22 @@ class LeoTranspiler:
         else:
             print("Error while parsing leo outputs:", result)
             raise ValueError("Error while parsing leo outputs")
+        
+        if(success_execute):
+            # get index of last \n\n in result
+            index = result.rfind("\n\n")
+            result_content = result[:index]
+            index = result_content.rfind("\n\n")
+            result_content = result_content[index+2:]
+            # parse json
+            execution_data = json.loads(result_content)
 
         if(command == "run"):
             return LeoComputation(input, outputs_fixed_point, constraints, input)
+        elif(command == "execute"):
+            return ZeroKnowledgeProof(input, outputs_fixed_point, constraints, execution_data["execution"]["proof"], execution_data["execution"], input)
+        else:
+            raise ValueError("Unknown command")
     
     def _store_leo_program(self):
         """Store the Leo program.

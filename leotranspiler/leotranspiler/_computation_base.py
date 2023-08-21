@@ -7,9 +7,10 @@ class _ComputationBase:
         self.fixed_point_scaling_factor = fixed_point_scaling_factor
 
 class ZeroKnowledgeProof(_ComputationBase):
-    def __init__(self, input, outputs_original, circuit_constraints, proof, outputs_decimal=None):
+    def __init__(self, input, outputs_original, circuit_constraints, proof, execution=None, outputs_decimal=None):
         super().__init__(input, outputs_original, circuit_constraints, outputs_decimal)
         self.proof = proof
+        self.execution = execution
 
 class LeoComputation(_ComputationBase):
     def __init__(self, input, outputs_original, circuit_constraints, outputs_decimal=None):
