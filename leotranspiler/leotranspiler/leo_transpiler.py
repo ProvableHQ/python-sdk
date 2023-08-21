@@ -2,10 +2,11 @@ from ._computation_base import ZeroKnowledgeProof
 from ._model_transpiler import _get_model_transpiler
 import os, time, subprocess, psutil
 from sklearn.base import BaseEstimator
-from typing import Optional, Union, List
+from typing import Optional, Union, List, Tuple
 from numpy import ndarray
 from numpy.typing import ArrayLike
 from pathlib import Path
+
 
 class LeoTranspiler:
 
@@ -107,27 +108,7 @@ class LeoTranspiler:
         
         circuit_inputs_fixed_point = self.model_transpiler.generate_input(input_sample)
 
-        # TODO: here we need to do the FFI call or CLI call for leo/snarkVM execute
-        circuit_output, proof_value = None, None
-        command = ['leo', 'run', 'main'] + circuit_inputs_fixed_point
-        directory = self.project_dir
-
-        # Start Leo program
-        start = time.time()
-        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=directory)
-
-        while process.poll() is None:
-            try:
-                time.sleep(0.1)
-            except psutil.NoSuchProcess:
-                break
-
-        end = time.time()
-
-        # Get the output
-        stdout, stderr = process.communicate()
-        result = stdout.decode() + stderr.decode()
-        runtime = end - start
+        result, runtime = self._execute_leo_cli("run", circuit_inputs_fixed_point)
 
         outputs_fixed_point = []
 
@@ -149,7 +130,43 @@ class LeoTranspiler:
 
         outputs_decimal = self.model_transpiler.convert_from_fixed_point(outputs_fixed_point)
 
-        return ZeroKnowledgeProof(input_sample, outputs_decimal, None, constraints)
+        return ZeroKnowledgeProof(input_sample, outputs_decimal, constraints, None)
+    
+    def _execute_leo_cli(self, command: str, inputs: List[str]) -> Tuple[str, float]:
+        """Execute a Leo CLI command.
+
+        Parameters
+        ----------
+        command : str
+            The command to execute.
+        inputs : List[str]
+            The inputs to the command.
+
+        Returns
+        -------
+        Tuple[str, float]
+            The command output and the runtime in seconds.
+        """
+        directory = self.project_dir
+
+        # Start Leo program
+        start = time.time()
+        process = subprocess.Popen(['leo', command, 'main']+inputs, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=directory)
+
+        while process.poll() is None:
+            try:
+                time.sleep(0.1)
+            except psutil.NoSuchProcess:
+                break
+
+        end = time.time()
+
+        # Get the output
+        stdout, stderr = process.communicate()
+        result = stdout.decode() + stderr.decode()
+        runtime = end - start
+
+        return result, runtime
     
     def _store_leo_program(self):
         """Store the Leo program.
