@@ -1,4 +1,4 @@
-from .zero_knowledge_proof import ZeroKnowledgeProof
+from ._computation_base import ZeroKnowledgeProof
 from ._model_transpiler import _get_model_transpiler
 import os, time, subprocess, psutil
 from sklearn.base import BaseEstimator
