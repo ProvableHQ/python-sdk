@@ -42,7 +42,7 @@ class TestLeoTranspiler(unittest.TestCase):
         # Run and compare the Python prediction with the Leo prediction
         lc = lt.run(X_test[0])
         python_prediction = clf.predict([X_test[0]])
-        self.assertEqual(int(lc.outputs_decimal[0]), python_prediction[0])
+        self.assertEqual(int(lc.output_decimal[0]), python_prediction[0])
 
         # remove the generated folder
         import shutil
@@ -75,7 +75,7 @@ class TestLeoTranspiler(unittest.TestCase):
         # Execute and compare the Python prediction with the Leo prediction
         zkp = lt.execute(X_test[0])
         python_prediction = clf.predict([X_test[0]])
-        self.assertEqual(int(zkp.outputs_decimal[0]), python_prediction[0])
+        self.assertEqual(int(zkp.output_decimal[0]), python_prediction[0])
 
         # remove the generated folder
         import shutil

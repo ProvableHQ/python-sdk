@@ -109,7 +109,7 @@ class LeoTranspiler:
         
         circuit_inputs_fixed_point = self.model_transpiler.generate_input(input_sample)
         result, runtime = self._execute_leo_cli("run", circuit_inputs_fixed_point)
-        leo_computation = self._parse_leo_output("run", result, input_sample)
+        leo_computation = self._parse_leo_output("run", result, circuit_inputs_fixed_point)
         self.model_transpiler.convert_computation_base_outputs_to_decimal(leo_computation)
 
         return leo_computation
@@ -132,7 +132,7 @@ class LeoTranspiler:
         
         circuit_inputs_fixed_point = self.model_transpiler.generate_input(input_sample)
         result, runtime = self._execute_leo_cli("execute", circuit_inputs_fixed_point)
-        zkp = self._parse_leo_output("execute", result, input_sample)
+        zkp = self._parse_leo_output("execute", result, circuit_inputs_fixed_point)
         self.model_transpiler.convert_computation_base_outputs_to_decimal(zkp)
 
         return zkp
