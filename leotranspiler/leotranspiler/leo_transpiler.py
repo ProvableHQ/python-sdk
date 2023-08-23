@@ -1,21 +1,28 @@
-from ._computation_base import ZeroKnowledgeProof, LeoComputation
-from ._model_transpiler import _get_model_transpiler
-import os, time, subprocess, psutil
-from sklearn.base import BaseEstimator
-from typing import Optional, Union, List, Tuple
+# -*- coding: utf-8 -*-
+import json
+import os
+import subprocess
+import time
+from pathlib import Path
+from typing import List, Optional, Tuple, Union
+
+import psutil
 from numpy import ndarray
 from numpy.typing import ArrayLike
-from pathlib import Path
-import json
+from sklearn.base import BaseEstimator
+
+from ._computation_base import LeoComputation, ZeroKnowledgeProof
+from ._model_transpiler import _get_model_transpiler
 
 
 class LeoTranspiler:
-
-    def __init__(self, 
-             model: BaseEstimator, 
-             validation_data: Optional[ArrayLike] = None, 
-             model_as_input: bool = False, 
-             ouput_model_hash: Optional[str] = None):
+    def __init__(
+        self,
+        model: BaseEstimator,
+        validation_data: Optional[ArrayLike] = None,
+        model_as_input: bool = False,
+        ouput_model_hash: Optional[str] = None,
+    ):
         """Initializes the LeoTranspiler with the given parameters.
 
         Parameters
@@ -81,12 +88,14 @@ class LeoTranspiler:
             print("Computing number ranges and fixed-point scaling factor...")
             self.model_transpiler._numbers_get_leo_type_and_fixed_point_scaling_factor()
             print("Transpiling model...")
-            self.transpilation_result = self.model_transpiler.transpile(project_name) # todo check case when project name changes
+            self.transpilation_result = self.model_transpiler.transpile(
+                project_name
+            )  # todo check case when project name changes
 
         self.project_dir = os.path.join(path, project_name)
         self._store_leo_program()
         self._store_program_json(project_name)
-        self._store_environment_file() # todo implement option to pass private key
+        self._store_environment_file()  # todo implement option to pass private key
 
         self.leo_program_stored = True
         print("Leo program stored")
@@ -106,11 +115,15 @@ class LeoTranspiler:
         """
         if not self.leo_program_stored:
             raise FileNotFoundError("Leo program not stored")
-        
+
         circuit_inputs_fixed_point = self.model_transpiler.generate_input(input_sample)
         result, runtime = self._execute_leo_cli("run", circuit_inputs_fixed_point)
-        leo_computation = self._parse_leo_output("run", result, circuit_inputs_fixed_point)
-        self.model_transpiler.convert_computation_base_outputs_to_decimal(leo_computation)
+        leo_computation = self._parse_leo_output(
+            "run", result, circuit_inputs_fixed_point
+        )
+        self.model_transpiler.convert_computation_base_outputs_to_decimal(
+            leo_computation
+        )
 
         return leo_computation
 
@@ -129,14 +142,14 @@ class LeoTranspiler:
         """
         if not self.leo_program_stored:
             raise FileNotFoundError("Leo program not stored")
-        
+
         circuit_inputs_fixed_point = self.model_transpiler.generate_input(input_sample)
         result, runtime = self._execute_leo_cli("execute", circuit_inputs_fixed_point)
         zkp = self._parse_leo_output("execute", result, circuit_inputs_fixed_point)
         self.model_transpiler.convert_computation_base_outputs_to_decimal(zkp)
 
         return zkp
-    
+
     def _execute_leo_cli(self, command: str, inputs: List[str]) -> Tuple[str, float]:
         """Execute a Leo CLI command.
 
@@ -156,7 +169,12 @@ class LeoTranspiler:
 
         # Start Leo program
         start = time.time()
-        process = subprocess.Popen(['leo', command, 'main']+inputs, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=directory)
+        process = subprocess.Popen(
+            ["leo", command, "main"] + inputs,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=directory,
+        )
 
         while process.poll() is None:
             try:
@@ -172,8 +190,13 @@ class LeoTranspiler:
         runtime = end - start
 
         return result, runtime
-    
-    def _parse_leo_output(self, command: str, result: str, input: Optional[Union[ndarray, List[float]]] = None) -> Tuple[List[int], int]:
+
+    def _parse_leo_output(
+        self,
+        command: str,
+        result: str,
+        input: Optional[Union[ndarray, List[float]]] = None,
+    ) -> Tuple[List[int], int]:
         """Parse the Leo output.
 
         Parameters
@@ -195,7 +218,9 @@ class LeoTranspiler:
         success_run = "Finished" in result and command == "run"
         success_execute = "Executed" in result and command == "execute"
         if success_run or success_execute:
-            constraints = int(result.split("constraints")[0].split()[-1].replace(",", ""))
+            constraints = int(
+                result.split("constraints")[0].split()[-1].replace(",", "")
+            )
             # Output processing
             outputs_str = result.split("Output")[1]
             outputs_str = outputs_str.split("• ")
@@ -209,23 +234,30 @@ class LeoTranspiler:
         else:
             print("Error while parsing leo outputs:", result)
             raise ValueError("Error while parsing leo outputs")
-        
-        if(success_execute):
+
+        if success_execute:
             # get index of last \n\n in result
             index = result.rfind("\n\n")
             result_content = result[:index]
             index = result_content.rfind("\n\n")
-            result_content = result_content[index+2:]
+            result_content = result_content[index + 2 :]
             # parse json
             execution_data = json.loads(result_content)
 
-        if(command == "run"):
+        if command == "run":
             return LeoComputation(input, outputs_fixed_point, constraints, input)
-        elif(command == "execute"):
-            return ZeroKnowledgeProof(input, outputs_fixed_point, constraints, execution_data["execution"]["proof"], execution_data["execution"], input)
+        elif command == "execute":
+            return ZeroKnowledgeProof(
+                input,
+                outputs_fixed_point,
+                constraints,
+                execution_data["execution"]["proof"],
+                execution_data["execution"],
+                input,
+            )
         else:
             raise ValueError("Unknown command")
-    
+
     def _store_leo_program(self):
         """Store the Leo program.
 
@@ -245,7 +277,7 @@ class LeoTranspiler:
 
         with open(os.path.join(folder_dir, "main.leo"), "w") as f:
             f.write(self.transpilation_result)
-    
+
     def _store_program_json(self, project_name: str):
         """Store the program.json file.
 
@@ -258,7 +290,7 @@ class LeoTranspiler:
         -------
         None
         """
-        content= f"""{{
+        content = f"""{{
     "program": "{project_name}.aleo",
     "version": "0.0.0",
     "description": "transpiler generated program",
@@ -303,13 +335,22 @@ PRIVATE_KEY=APrivateKey1zkpHtqVWT6fSHgUMNxsuVf7eaR6id2cj7TieKY1Z8CP5rCD
             If Leo is not installed.
         """
         MIN_LEO_VERSION = "1.9.3"
-        
+
         def parse_version(version):
             return tuple(map(int, version.split(".")))
 
         try:
-            version = subprocess.check_output(["leo", "--version"]).decode().strip().split(" ")[1]
+            version = (
+                subprocess.check_output(["leo", "--version"])
+                .decode()
+                .strip()
+                .split(" ")[1]
+            )
             if parse_version(version) < parse_version(MIN_LEO_VERSION):
-                raise ValueError(f"Leo version must be at least {MIN_LEO_VERSION}. Please update Leo using `leo update`.")
+                raise ValueError(
+                    f"Leo version must be at least {MIN_LEO_VERSION}. Please update Leo using `leo update`."
+                )
         except FileNotFoundError:
-            raise FileNotFoundError("Leo not installed. Please visit https://developer.aleo.org/leo/installation/ to install Leo.")
+            raise FileNotFoundError(
+                "Leo not installed. Please visit https://developer.aleo.org/leo/installation/ to install Leo."
+            )
