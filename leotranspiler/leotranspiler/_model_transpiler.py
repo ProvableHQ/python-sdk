@@ -55,7 +55,9 @@ class _ModelTranspilerBase:
         self.fixed_point_scaling_factor = fixed_point_scaling_factor
 
         print(
-            f"Minimum number: {minimum}, maximum number: {maximum}. Recommended fixed-point scaling factor: {fixed_point_scaling_factor}, required Leo type: {leo_type}"
+            f"Minimum number: {minimum}, maximum number: {maximum}. Recommended "
+            f"fixed-point scaling factor: {fixed_point_scaling_factor}, required Leo "
+            f"type: {leo_type}"
         )
 
         return leo_type, fixed_point_scaling_factor
@@ -111,7 +113,7 @@ program {project_name}.aleo {{
             else:
                 raise ValueError("Unknown element type in model logic snippets.")
 
-        code += f"""    }}
+        code += """    }}
 }}"""
         return code
 
@@ -144,7 +146,7 @@ class _DecisionTreeTranspiler(_ModelTranspilerBase):
 
         # Input generation
         self.input_generator = _InputGenerator()
-        for feature_name in feature_names:
+        for _ in feature_names:
             self.input_generator.add_input(self.leo_type)
 
         decision_tree_logic_snippets = self._transpile_decision_tree_logic_to_leo_code(
@@ -169,8 +171,8 @@ class _DecisionTreeTranspiler(_ModelTranspilerBase):
         # Base case: leaf node
         if left_child == right_child:  # means it's a leaf
             return [
-                indentation
-                + f"return {self._get_fixed_point_and_leo_type(tree.value[node].argmax())};\n"
+                indentation + f"return "
+                f"{self._get_fixed_point_and_leo_type(tree.value[node].argmax())};\n"
             ]
 
         # Recursive case: internal node
@@ -195,12 +197,12 @@ class _DecisionTreeTranspiler(_ModelTranspilerBase):
         leo_code_snippets += self._transpile_decision_tree_logic_to_leo_code(
             tree, feature_names, left_child, indentation + "    "
         )
-        leo_code_snippets += [indentation + f"}}\n" + indentation + "else {\n"]
+        leo_code_snippets += [indentation + "}}\n" + indentation + "else {\n"]
 
         leo_code_snippets += self._transpile_decision_tree_logic_to_leo_code(
             tree, feature_names, right_child, indentation + "    "
         )
-        leo_code_snippets += [indentation + f"}}\n"]
+        leo_code_snippets += [indentation + "}}\n"]
         return leo_code_snippets
 
     def _get_numeric_range_model(self):

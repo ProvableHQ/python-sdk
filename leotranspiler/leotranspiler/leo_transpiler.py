@@ -106,7 +106,8 @@ class LeoTranspiler:
         Parameters
         ----------
         input_sample : Union[ndarray, List[float]]
-            The input sample for which to prove the output. Can be a numpy array or a list of floats.
+            The input sample for which to prove the output. Can be a numpy array or a
+            list of floats.
 
         Returns
         -------
@@ -133,7 +134,8 @@ class LeoTranspiler:
         Parameters
         ----------
         input_sample : Union[ndarray, List[float]]
-            The input sample for which to prove the output. Can be a numpy array or a list of floats.
+            The input sample for which to prove the output. Can be a numpy array or a
+            list of floats.
 
         Returns
         -------
@@ -310,7 +312,7 @@ class LeoTranspiler:
         -------
         None
         """
-        content = f"""NETWORK=testnet3
+        content = """NETWORK=testnet3
 PRIVATE_KEY=APrivateKey1zkpHtqVWT6fSHgUMNxsuVf7eaR6id2cj7TieKY1Z8CP5rCD
 """
         folder_dir = os.path.join(self.project_dir)
@@ -348,9 +350,11 @@ PRIVATE_KEY=APrivateKey1zkpHtqVWT6fSHgUMNxsuVf7eaR6id2cj7TieKY1Z8CP5rCD
             )
             if parse_version(version) < parse_version(MIN_LEO_VERSION):
                 raise ValueError(
-                    f"Leo version must be at least {MIN_LEO_VERSION}. Please update Leo using `leo update`."
+                    f"Leo version must be at least {MIN_LEO_VERSION}. Please update "
+                    f"Leo using `leo update`."
                 )
         except FileNotFoundError:
             raise FileNotFoundError(
-                "Leo not installed. Please visit https://developer.aleo.org/leo/installation/ to install Leo."
+                "Leo not installed. Please visit "
+                "https://developer.aleo.org/leo/installation/ to install Leo."
             )

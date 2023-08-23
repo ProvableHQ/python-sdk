@@ -10,7 +10,8 @@ def _get_leo_integer_type(signed, value_bits):
             return f"{'i' if signed else 'u'}{bits.bit_length()}"
 
     raise ValueError(
-        f"No leo type for {'signed' if signed else 'unsigned'} value with more than {_leo_type_bits[-1]} bits. Try quantizing the model and/or the data."
+        f"No leo type for {'signed' if signed else 'unsigned'} value with more than "
+        f"{_leo_type_bits[-1]} bits. Try quantizing the model and/or the data."
     )
 
 

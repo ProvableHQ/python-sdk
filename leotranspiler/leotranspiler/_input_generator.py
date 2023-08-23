@@ -20,8 +20,9 @@ class _InputGenerator:
         self.MAX_INPUT_VALUES = self.MAX_CIRCUIT_INPUTS * (
             self.MAX_STRUCT_FIELDS**self.MAX_STRUCT_HIERARCHY
         )
-        self.MAX_INPUT_VALUES = 16  # Todo, for now set the value to 16 because hierarchical structs are not implemented yet
-
+        self.MAX_INPUT_VALUES = 16
+        """Todo, for now set the value to 16 because
+        hierarchical structs are not implemented yet"""
         self.inputl_list = []
         self._input_count = 0
         self.naming_strategy = naming_strategy
@@ -35,7 +36,7 @@ class _InputGenerator:
         if self.naming_strategy == "xi":
             name = f"x{self._input_count}"
         elif self.naming_strategy == "custom":
-            if name == None:
+            if name is None:
                 raise Exception("Custom naming strategy requires a name")
 
         self.inputl_list.append(self._Input(value, leo_type, active, name))
@@ -57,7 +58,8 @@ class _InputGenerator:
             raise Exception("No active inputs")
         elif active_input_count > self.MAX_CIRCUIT_INPUTS:
             raise Exception(
-                f"Too many active inputs ({active_input_count} > {self.MAX_INPUT_VALUES})"
+                f"Too many active inputs "
+                f"({active_input_count} > {self.MAX_INPUT_VALUES})"
             )
 
         circuit_inputs_string = circuit_inputs_string[:-2]
@@ -66,7 +68,8 @@ class _InputGenerator:
     def generate_input(self, fixed_point_features):
         if len(fixed_point_features) != len(self.inputl_list):
             raise Exception(
-                f"Number of features ({len(fixed_point_features)}) does not match number of inputs ({len(self.inputl_list)})"
+                f"Number of features ({len(fixed_point_features)}) "
+                f"does not match number of inputs ({len(self.inputl_list)})"
             )
 
         # assign values to inputs
