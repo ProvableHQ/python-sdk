@@ -7,7 +7,7 @@ def _get_leo_integer_type(signed, value_bits):
         # Subtract 1 bit for signed integers
         max_bits = bits - 1 if signed else bits
         if value_bits <= max_bits:
-            return f"{'i' if signed else 'u'}{bits.bit_length()}"
+            return f"{'i' if signed else 'u'}{bits}"
 
     raise ValueError(
         f"No leo type for {'signed' if signed else 'unsigned'} value with more than "

@@ -114,8 +114,8 @@ program {project_name}.aleo {{
             else:
                 raise ValueError("Unknown element type in model logic snippets.")
 
-        code += """    }}
-}}"""
+        code += """    }
+}"""
         return code
 
     def generate_input(self, features):
@@ -197,12 +197,12 @@ class _DecisionTreeTranspiler(_ModelTranspilerBase):
         leo_code_snippets += self._transpile_decision_tree_logic_to_leo_code(
             tree, feature_names, left_child, indentation + "    "
         )
-        leo_code_snippets += [indentation + "}}\n" + indentation + "else {\n"]
+        leo_code_snippets += [indentation + "}\n" + indentation + "else {\n"]
 
         leo_code_snippets += self._transpile_decision_tree_logic_to_leo_code(
             tree, feature_names, right_child, indentation + "    "
         )
-        leo_code_snippets += [indentation + "}}\n"]
+        leo_code_snippets += [indentation + "}\n"]
         return leo_code_snippets
 
     def _get_numeric_range_model(self):
