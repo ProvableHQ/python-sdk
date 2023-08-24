@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import logging
 import math
 
 import sklearn
@@ -54,7 +55,7 @@ class _ModelTranspilerBase:
         self.leo_type = leo_type
         self.fixed_point_scaling_factor = fixed_point_scaling_factor
 
-        print(
+        logging.info(
             f"Minimum number: {minimum}, maximum number: {maximum}. Recommended "
             f"fixed-point scaling factor: {fixed_point_scaling_factor}, required Leo "
             f"type: {leo_type}"
@@ -140,7 +141,6 @@ class _DecisionTreeTranspiler(_ModelTranspilerBase):
         transpilation_result : str
             The transpiled model.
         """
-
         tree = self.model.tree_
         feature_names = [f"x{i}" for i in range(tree.n_features)]
 

@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+"""Setup script for the LeoTranspiler package."""
 from setuptools import find_packages, setup
 
 with open("README.md") as f:

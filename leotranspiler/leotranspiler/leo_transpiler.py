@@ -1,5 +1,11 @@
 # -*- coding: utf-8 -*-
+"""Provides the LeoTranspiler class for transpiling ML models.
+
+This module enables transpilation of machine learning models into the Leo
+programming language, suitable for creating zero-knowledge proofs.
+"""
 import json
+import logging
 import os
 import subprocess
 import time
@@ -16,6 +22,13 @@ from ._model_transpiler import _get_model_transpiler
 
 
 class LeoTranspiler:
+    """Main class for transpiling machine learning models into the Leo language.
+
+    LeoTranspiler takes a machine learning model, and potentially some validation data,
+    and provides methods to transpile this model into a Leo program. This transpiled
+    program can be run to generate zero-knowledge proofs for given input samples.
+    """
+
     def __init__(
         self,
         model: BaseEstimator,
@@ -23,7 +36,7 @@ class LeoTranspiler:
         model_as_input: bool = False,
         ouput_model_hash: Optional[str] = None,
     ):
-        """Initializes the LeoTranspiler with the given parameters.
+        """Initialize the LeoTranspiler with the given parameters.
 
         Parameters
         ----------
@@ -39,7 +52,6 @@ class LeoTranspiler:
             If provided, the circuit returns the hash of the model's weights and
             biases. Possible values are ... (todo)
         """
-
         self.model = model
         self.validation_data = validation_data
         self.model_as_input = model_as_input
@@ -79,15 +91,14 @@ class LeoTranspiler:
 
         Directories are created as needed to ensure the specified path exists.
         """
-
         self._check_installed_leo_version()
         self.model_transpiler = _get_model_transpiler(self.model, self.validation_data)
 
         if self.transpilation_result is None:
             # Computing the number ranges and the fixed-point scaling factor
-            print("Computing number ranges and fixed-point scaling factor...")
+            logging.info("Computing number ranges and fixed-point scaling factor...")
             self.model_transpiler._numbers_get_leo_type_and_fixed_point_scaling_factor()
-            print("Transpiling model...")
+            logging.info("Transpiling model...")
             self.transpilation_result = self.model_transpiler.transpile(
                 project_name
             )  # todo check case when project name changes
@@ -98,7 +109,7 @@ class LeoTranspiler:
         self._store_environment_file()  # todo implement option to pass private key
 
         self.leo_program_stored = True
-        print("Leo program stored")
+        logging.info("Leo program stored")
 
     def run(self, input_sample: Union[ndarray, List[float]]) -> LeoComputation:
         """Run the model in Leo output for a given input sample.
@@ -234,7 +245,7 @@ class LeoTranspiler:
                     element = element.split(self.model_transpiler.leo_type)[0]
                     outputs_fixed_point.append(int(element))
         else:
-            print("Error while parsing leo outputs:", result)
+            logging.info(f"Error while parsing leo outputs: {result}")
             raise ValueError("Error while parsing leo outputs")
 
         if success_execute:
@@ -272,7 +283,6 @@ class LeoTranspiler:
         -------
         None
         """
-
         folder_dir = os.path.join(self.project_dir, "src")
         # Make sure path exists
         os.makedirs(folder_dir, exist_ok=True)

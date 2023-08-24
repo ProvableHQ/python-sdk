@@ -1,5 +1,17 @@
 # -*- coding: utf-8 -*-
 class _ComputationBase:
+    """
+    A base class for computational structures.
+
+    Attributes
+    ----------
+    - input: The input for the computation.
+    - output: The expected output after computation.
+    - circuit_constraints: Constraints for the computation.
+    - output_decimal: Decimal representation of the output.
+    - fixed_point_scaling_factor: A scaling factor (defaults to 1).
+    """
+
     def __init__(
         self,
         input,
@@ -16,6 +28,17 @@ class _ComputationBase:
 
 
 class ZeroKnowledgeProof(_ComputationBase):
+    """
+    Represents a Zero Knowledge Proof based on the ComputationBase structure.
+
+    Attributes
+    ----------
+    - proof: The zero-knowledge proof.
+    - execution: (Optional) Details of the execution of the proof.
+
+    Inherits other attributes from _ComputationBase.
+    """
+
     def __init__(
         self,
         input,
@@ -31,5 +54,11 @@ class ZeroKnowledgeProof(_ComputationBase):
 
 
 class LeoComputation(_ComputationBase):
+    """
+    Represents a Leo Computation structure based on the ComputationBase.
+
+    Inherits attributes from _ComputationBase.
+    """
+
     def __init__(self, input, output, circuit_constraints, output_decimal=None):
         super().__init__(input, output, circuit_constraints, output_decimal)

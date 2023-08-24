@@ -16,6 +16,22 @@ def _get_leo_integer_type(signed, value_bits):
 
 
 class LeoType:
+    """Leo type."""
+
     def __init__(self, value, type):
+        """Leo type.
+
+        Parameters
+        ----------
+        value : int
+            The value of the Leo type.
+        type : str
+            The Leo type.
+
+        Returns
+        -------
+        LeoType
+            The Leo type.
+        """
         self.value = value
         self.type = type
