@@ -4,7 +4,7 @@ import unittest
 
 from sklearn.tree import DecisionTreeClassifier
 
-from leotranspiler.leotranspiler.leo_transpiler import LeoTranspiler
+from leotranspiler import LeoTranspiler
 
 
 class TestLeoTranspiler(unittest.TestCase):
