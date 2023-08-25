@@ -29,9 +29,9 @@ This Python library offers the ability to transpile Python machine learning mode
 ### Installation:
 
 1. Clone the repository, or download the `.whl` or `.tar.gz` file from the `dist` folder.
-2. Navigate to the directory containing the `.whl/.tar.gz` file:
+2. Navigate to the directory containing the `.whl` or `.tar.gz` file:
    ```bash
-   cd PATH_TO_DIRECTORY
+   cd dist
    ```
 3. Install using pip:
    ```bash
