@@ -245,7 +245,7 @@ class LeoTranspiler:
                     element = element.split(self.model_transpiler.leo_type)[0]
                     outputs_fixed_point.append(int(element))
         else:
-            logging.info(f"Error while parsing leo outputs: {result}")
+            logging.error(f"Error while parsing leo outputs: {result}")
             raise ValueError("Error while parsing leo outputs")
 
         if success_execute:
