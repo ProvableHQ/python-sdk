@@ -1,30 +1,94 @@
-# Python to Leo - machine learning model transpiler
+# Python to Leo: Machine Learning Model Transpiler
 
-This Python library provides tools to transpile Python machine learning models into Leo code. It also provides tools to run the transpiled code from python and to create zk proofs.
+This Python library offers the ability to transpile Python machine learning models into Leo code. Additionally, it provides tools to execute the transpiled code from Python and to generate zk proofs.
 
-## Guide for users (i.e., Python ML developers)
+## 🚀 Getting Started for Users (Python ML Developers)
 
-1. Ensure you have the Python 3 of version 3.9.6 or newer installed: You can check it by running "python3 --version" Here is the instructions to install Python ...
-2. Ensure you have Leo version 1.9.3 or newer installed.  https://developer.aleo.org/leo/installation/ You can check it by running "leo --version"
-1. Ensure you are on the master branch of GitHub (by default you should be)
-3. Clone the repository, or download a .whl or .tar.gz from the dist folder
-4. cd to the folder containing the .whl/.tar.gz file
-5. Install it via either "pip3 install leotranspiler-0.1.0-py3-none-any.whl" or "pip3 install leotranspiler-0.1.0.tar.gz"
-6. Use it. In the examples folder, you can find example usage
+### Prerequisites:
 
-Notes:
-- On some machines, you may need to run "python" and "pip" instead of "python3" and "pip3"
+1. **Python**: Ensure Python 3.9.6 or newer is installed.
+   - Check by running:
+   ```bash
+   python3 --version
+   ```
+   - If not installed, follow the instructions [here](https://wiki.python.org/moin/BeginnersGuide/Download).
 
-## Guide for library developers
+2. **Leo**: Ensure Leo version 1.9.3 or newer is installed.
+   - Check by running:
+   ```bash
+   leo --version
+   ```
+   - If necessary, update:
+   ```bash
+   leo update
+   ```
+   - Installation guide: [Leo Installation](https://developer.aleo.org/leo/installation/)
 
-1. Clone the repository
-2. Make sure you have not already installed a version of leotranspiler, e.g. by running pip3 uninstall leotranspiler
-3. cd into the src directory leotranspiler and run pip3 install -e .
-4. Code, and advance the library
-5. Run the tests
-6. If you wish to create executables, make sure you have poetry installed. Then, run "poetry build"
-7. If you with to commit, please ensure you are working on your own branch, and ensure the pre-commit tests pass. You can check this by running pre-commit run --all-files. For this, you need to have pre-comimt installed: ...
+3. Confirm you're on the master branch of GitHub (you should be by default).
 
-Notes:
-- When coding, please follow the PEP 8 style guide: https://peps.python.org/pep-0008/, and make sure you write docstrings for public-facing functions and classes
-- More detailed contributing instructions will follow. In the meantime, if you wish to contribute, please reach out to us
+### Installation:
+
+1. Clone the repository, or download the `.whl` or `.tar.gz` file from the `dist` folder.
+2. Navigate to the directory containing the `.whl/.tar.gz` file:
+   ```bash
+   cd PATH_TO_DIRECTORY
+   ```
+3. Install using pip:
+   ```bash
+   pip3 install leotranspiler-0.1.0-py3-none-any.whl
+   ```
+   OR
+   ```bash
+   pip3 install leotranspiler-0.1.0.tar.gz
+   ```
+
+### Usage:
+
+- Explore the `examples` folder for example usages.
+
+**Notes**:
+- On some systems, "python" and "pip" might be used instead of "python3" and "pip3".
+
+## 🛠 Guide for Library Developers
+
+### Setup:
+
+1. Clone the repository.
+2. Ensure no previous version of `leotranspiler` is installed:
+   ```bash
+   pip3 uninstall leotranspiler
+   ```
+3. Navigate to the `leotranspiler` source code directory:
+   ```bash
+   cd leotranspiler
+   ```
+4. Install in editable mode:
+   ```bash
+   pip3 install -e .
+   ```
+
+### Development:
+
+1. Code and enhance the library.
+2. Ensure you run the tests.
+3. If you want to generate executables, ensure `poetry` is installed and then run:
+   ```bash
+   poetry build
+   ```
+
+### Committing:
+
+1. Ensure you're working on your own branch.
+2. Make sure the pre-commit tests pass. Check by running:
+   ```bash
+   pre-commit run --all-files
+   ```
+   - Install `pre-commit` if not present [installation link here].
+
+**Notes**:
+- Adhere to the [PEP 8 style guide](https://peps.python.org/pep-0008/) and ensure you provide docstrings for all public-facing functions and classes.
+- More detailed contribution guidelines will be provided soon. If you'd like to contribute in the meantime, please contact us.
+
+---
+
+Thank you for your interest in Python to Leo transpiler. Let's push the boundaries of zk and Python together!
