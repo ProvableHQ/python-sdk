@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "leotranspiler"
+version = "0.1.0"
+description = "A transpiler for Python machine learning models to Leo for zero-knowledge inference"
+authors = [
+    "Konstantin Pandl <konstantin@aleo.org>",
+    "Michael Turner <mturner@aleo.org>"
+]
+readme = "README.md"
+license = "Apache-2.0"
+include = ["LICENSE.md"]
+repository = "https://github.com/AleoHQ/python-sdk/tree/master/leotranspiler"
+
+[tool.poetry.dependencies]
+python = "^3.9"
+psutil = "^5.8.0"
+
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
