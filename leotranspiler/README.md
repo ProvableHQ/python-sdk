@@ -83,7 +83,7 @@ This Python library offers the ability to transpile Python machine learning mode
    ```bash
    pre-commit run --all-files
    ```
-   - Install `pre-commit` if not present [installation link here].
+   - Install `pre-commit` if not present [installation link here](https://pre-commit.com/).
 
 **Notes**:
 - Adhere to the [PEP 8 style guide](https://peps.python.org/pep-0008/) and ensure you provide docstrings for all public-facing functions and classes.
