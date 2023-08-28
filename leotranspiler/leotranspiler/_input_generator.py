@@ -11,8 +11,15 @@ class _InputGenerator:
             self.leo_type = leo_type
             self.active = active
             self.name = name
+            self.tmp_data_value = None
 
-    def __init__(self, naming_strategy="xi"):
+        def get_set_value(self):
+            if self.value is None:
+                return self.tmp_data_value
+            else:
+                return self.value
+
+    def __init__(self):
         self.MAX_CIRCUIT_INPUTS = 16
         self.MAX_STRUCT_FIELDS = 32
         self.MAX_STRUCT_HIERARCHY = 32
@@ -24,23 +31,30 @@ class _InputGenerator:
         """Todo, for now set the value to 16 because
         hierarchical structs are not implemented yet"""
         self.inputl_list = []
-        self._input_count = 0
-        self.naming_strategy = naming_strategy
+        self._input_counts = {}
 
-        if self.naming_strategy not in ["xi", "custom"]:
-            raise Exception(
-                "Naming strategy must be one of the following: 'xi', 'custom'"
-            )
-
-    def add_input(self, leo_type, active=False, value=None, name=None):
-        if self.naming_strategy == "xi":
-            name = f"x{self._input_count}"
-        elif self.naming_strategy == "custom":
+    def add_input(
+        self, leo_type, naming_strategy="xi", active=False, value=None, name=None
+    ):  # Todo implement custom naming strategy for different names
+        input_count = self._input_counts.get(naming_strategy, 0)
+        if naming_strategy == "xi":
+            name = f"x{input_count}"
+        elif naming_strategy == "custom":
             if name is None:
                 raise Exception("Custom naming strategy requires a name")
+        elif naming_strategy == "customi":
+            if name is None:
+                raise Exception("Custom naming strategy requires a name")
+            name = f"{name}{input_count}"
+        else:
+            raise Exception("Invalid naming strategy")
 
-        self.inputl_list.append(self._Input(value, leo_type, active, name))
-        self._input_count += 1
+        self._input_counts[naming_strategy] = input_count + 1
+
+        new_input = self._Input(value, leo_type, active, name)
+        self.inputl_list.append(new_input)
+
+        return new_input
 
     def use_input(self, index):
         self.inputl_list[index].active = True
@@ -66,20 +80,27 @@ class _InputGenerator:
         return circuit_inputs_string
 
     def generate_input(self, fixed_point_features):
-        if len(fixed_point_features) != len(self.inputl_list):
+        inputs_without_value = len(
+            [input for input in self.inputl_list if input.value is None]
+        )
+        if len(fixed_point_features) != inputs_without_value:
             raise Exception(
                 f"Number of features ({len(fixed_point_features)}) "
-                f"does not match number of inputs ({len(self.inputl_list)})"
+                "does not match number of inputs without a specified value "
+                f"({inputs_without_value})"
             )
 
-        # assign values to inputs
-        for i in range(len(fixed_point_features)):
-            self.inputl_list[i].value = fixed_point_features[i]
+        # assign values to inputs without a specified value
+        index = 0
+        for input in self.inputl_list:
+            if input.value is None:
+                input.tmp_data_value = fixed_point_features[index]
+                index += 1
 
         # construct input string
         input_list = []
         for input in self.inputl_list:
             if input.active:
-                input_list += [f"{input.value}{input.leo_type}"]
+                input_list += [f"{input.get_set_value()}{input.leo_type}"]
 
         return input_list

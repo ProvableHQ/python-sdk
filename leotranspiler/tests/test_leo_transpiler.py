@@ -12,7 +12,6 @@ class TestLeoTranspiler(unittest.TestCase):
         leo_transpiler = LeoTranspiler(None)
         self.assertEqual(leo_transpiler.model, None)
         self.assertEqual(leo_transpiler.validation_data, None)
-        self.assertEqual(leo_transpiler.model_as_input, False)
         self.assertEqual(leo_transpiler.ouput_model_hash, None)
         self.assertEqual(leo_transpiler.transpilation_result, None)
         self.assertEqual(leo_transpiler.leo_program_stored, False)
@@ -76,13 +75,15 @@ class TestLeoTranspiler(unittest.TestCase):
 
         # Transpile
         lt = LeoTranspiler(clf, X_test)
-        lt.to_leo(os.path.join(os.getcwd(), "leotranspiler", "tests"), "tree1")
+        lt.to_leo(os.path.join(os.getcwd(), "leotranspiler", "tests"), "tree1", True)
         self.assertEqual(lt.leo_program_stored, True)
 
         # Run and compare the Python prediction with the Leo prediction
         lc = lt.run(X_test[0])
         python_prediction = clf.predict([X_test[0]])
         self.assertEqual(int(lc.output_decimal[0]), python_prediction[0])
+
+        lc = lt.run(X_test[1])
 
         # remove the generated folder
         import shutil
