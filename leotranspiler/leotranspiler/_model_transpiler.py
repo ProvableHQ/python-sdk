@@ -144,15 +144,14 @@ class _DecisionTreeTranspiler(_ModelTranspilerBase):
             The transpiled model.
         """
         tree = self.model.tree_
-        feature_names = [f"x{i}" for i in range(tree.n_features)]
 
         # Input generation
         self.input_generator = _InputGenerator()
-        for _ in feature_names:
-            self.input_generator.add_input(self.leo_type)
+        for _ in range(tree.n_features):
+            self.input_generator.add_input(self.leo_type, "xi")
 
         decision_tree_logic_snippets = self._transpile_decision_tree_logic_to_leo_code(
-            tree, feature_names, model_as_input, indentation="        "
+            tree, model_as_input, indentation="        "
         )
         circuit_inputs = "(" + self.input_generator.get_circuit_input_string() + ")"
         circuit_outputs = (
@@ -165,7 +164,7 @@ class _DecisionTreeTranspiler(_ModelTranspilerBase):
         return transpilation_result
 
     def _transpile_decision_tree_logic_to_leo_code(
-        self, tree, feature_names, model_as_input, node=0, indentation=""
+        self, tree, model_as_input, node=0, indentation=""
     ):
         left_child = tree.children_left[node]
         right_child = tree.children_right[node]
@@ -179,40 +178,44 @@ class _DecisionTreeTranspiler(_ModelTranspilerBase):
 
         # Recursive case: internal node
         feature = self.input_generator.use_input(tree.feature[node])
-        threshold = tree.threshold[node]
+        threshold = self._convert_to_fixed_point(tree.threshold[node])
 
         leo_code_snippets = []
 
         if node == 0:
             leo_code_snippets += [indentation + "if ", feature, " <= "]
             if model_as_input:
-                leo_code_snippets += ["todo"]
-            else:
                 leo_code_snippets += [
-                    f"{self._get_fixed_point_and_leo_type(threshold)}"
+                    self.input_generator.add_input(
+                        self.leo_type, "customi", True, threshold, "threshold"
+                    )
                 ]
+            else:
+                leo_code_snippets += [f"{threshold}{self.leo_type}"]
             leo_code_snippets += [
                 " {\n",
             ]
         else:
             leo_code_snippets += [indentation + "if ", feature, " <= "]
             if model_as_input:
-                leo_code_snippets += ["todo"]
-            else:
                 leo_code_snippets += [
-                    f"{self._get_fixed_point_and_leo_type(threshold)}"
+                    self.input_generator.add_input(
+                        self.leo_type, "customi", True, threshold, "threshold"
+                    )
                 ]
+            else:
+                leo_code_snippets += [f"{threshold}{self.leo_type}"]
             leo_code_snippets += [
                 " {\n",
             ]
 
         leo_code_snippets += self._transpile_decision_tree_logic_to_leo_code(
-            tree, feature_names, model_as_input, left_child, indentation + "    "
+            tree, model_as_input, left_child, indentation + "    "
         )
         leo_code_snippets += [indentation + "}\n" + indentation + "else {\n"]
 
         leo_code_snippets += self._transpile_decision_tree_logic_to_leo_code(
-            tree, feature_names, model_as_input, right_child, indentation + "    "
+            tree, model_as_input, right_child, indentation + "    "
         )
         leo_code_snippets += [indentation + "}\n"]
         return leo_code_snippets
