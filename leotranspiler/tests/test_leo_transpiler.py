@@ -84,6 +84,8 @@ class TestLeoTranspiler(unittest.TestCase):
         python_prediction = clf.predict([X_test[0]])
         self.assertEqual(int(lc.output_decimal[0]), python_prediction[0])
 
+        lc = lt.run(X_test[1])
+
         # remove the generated folder
         import shutil
 

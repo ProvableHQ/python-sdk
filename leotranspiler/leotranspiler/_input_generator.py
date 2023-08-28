@@ -11,6 +11,13 @@ class _InputGenerator:
             self.leo_type = leo_type
             self.active = active
             self.name = name
+            self.tmp_data_value = None
+
+        def get_set_value(self):
+            if self.value is None:
+                return self.tmp_data_value
+            else:
+                return self.value
 
     def __init__(self):
         self.MAX_CIRCUIT_INPUTS = 16
@@ -87,13 +94,13 @@ class _InputGenerator:
         index = 0
         for input in self.inputl_list:
             if input.value is None:
-                input.value = fixed_point_features[index]
+                input.tmp_data_value = fixed_point_features[index]
                 index += 1
 
         # construct input string
         input_list = []
         for input in self.inputl_list:
             if input.active:
-                input_list += [f"{input.value}{input.leo_type}"]
+                input_list += [f"{input.get_set_value()}{input.leo_type}"]
 
         return input_list
