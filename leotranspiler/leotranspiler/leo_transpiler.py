@@ -33,7 +33,6 @@ class LeoTranspiler:
         self,
         model: BaseEstimator,
         validation_data: Optional[ArrayLike] = None,
-        model_as_input: bool = False,
         ouput_model_hash: Optional[str] = None,
     ):
         """Initialize the LeoTranspiler with the given parameters.
@@ -45,18 +44,15 @@ class LeoTranspiler:
         validation_data : tuple of array_like, optional
             Data to evaluate the numerical stability of the circuit. The model will
             not be trained on this data.
-        model_as_input : bool, optional
-            If True, the model's weights and biases are treated as circuit input
-            rather than being hardcoded.
         output_model_hash : str, optional
             If provided, the circuit returns the hash of the model's weights and
             biases. Possible values are ... (todo)
         """
         self.model = model
         self.validation_data = validation_data
-        self.model_as_input = model_as_input
         self.ouput_model_hash = ouput_model_hash
 
+        self.model_as_input = None
         self.transpilation_result = None
         self.leo_program_stored = False
 
@@ -97,7 +93,7 @@ class LeoTranspiler:
         self._check_installed_leo_version()
         self.model_transpiler = _get_model_transpiler(self.model, self.validation_data)
 
-        if self.transpilation_result is None:
+        if self.transpilation_result is None or self.model_as_input != model_as_input:
             # Computing the number ranges and the fixed-point scaling factor
             logging.info("Computing number ranges and fixed-point scaling factor...")
             self.model_transpiler._numbers_get_leo_type_and_fixed_point_scaling_factor()
@@ -106,6 +102,7 @@ class LeoTranspiler:
                 project_name,
                 model_as_input=model_as_input,
             )  # todo check case when project name changes
+            self.model_as_input = model_as_input
 
         self.project_dir = os.path.join(path, project_name)
         self._store_leo_program()
