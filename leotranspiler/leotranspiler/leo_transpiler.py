@@ -60,7 +60,7 @@ class LeoTranspiler:
         self.transpilation_result = None
         self.leo_program_stored = False
 
-    def to_leo(self, path: Path, project_name: str):
+    def to_leo(self, path: Path, project_name: str, model_as_input: bool = False):
         """Transpile and store the Leo program to a specified directory.
 
         This method transpiles the model to a Leo program and saves it, along with
@@ -74,6 +74,9 @@ class LeoTranspiler:
         project_name : str
             The name of the project, which determines the directory name under
             the specified path and is used during transpilation.
+        model_as_input : bool, optional
+            If True, the model's weights and biases are treated as circuit input
+            rather than being hardcoded.
 
         Returns
         -------
@@ -100,7 +103,8 @@ class LeoTranspiler:
             self.model_transpiler._numbers_get_leo_type_and_fixed_point_scaling_factor()
             logging.info("Transpiling model...")
             self.transpilation_result = self.model_transpiler.transpile(
-                project_name
+                project_name,
+                model_as_input=model_as_input,
             )  # todo check case when project name changes
 
         self.project_dir = os.path.join(path, project_name)
