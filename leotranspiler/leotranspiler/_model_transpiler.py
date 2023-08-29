@@ -80,9 +80,22 @@ class _ModelTranspilerBase:
         raise NotImplementedError("This method is not implemented.")
 
     def _get_max_decimal_places_data(self):
-        return max(
-            [_get_rounding_decimal_places(val) for val in self.validation_data.ravel()]
-        )
+        if isinstance(self.validation_data, np.ndarray):
+            return max(
+                [
+                    _get_rounding_decimal_places(val)
+                    for val in self.validation_data.ravel()
+                ]
+            )
+        elif isinstance(self.validation_data, pd.DataFrame):
+            return max(
+                [
+                    _get_rounding_decimal_places(val)
+                    for val in self.validation_data.to_numpy().ravel()
+                ]
+            )
+        else:
+            raise TypeError("Unsupported data type for validation_data")
 
     def _convert_to_fixed_point(self, value):
         if hasattr(value, "shape"):  # check if value is a numpy array
