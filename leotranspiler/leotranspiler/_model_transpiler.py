@@ -130,7 +130,7 @@ program {project_name}.aleo {{
             if isinstance(element, str):
                 code += f"""{element}"""
             elif isinstance(element, _InputGenerator._Input):
-                code += f"""{element.name}"""
+                code += f"""{element.reference_name}"""
             else:
                 raise ValueError("Unknown element type in model logic snippets.")
 

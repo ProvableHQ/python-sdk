@@ -221,9 +221,7 @@ class TestLeoTranspiler(unittest.TestCase):
 
         # Transpile the deceision tree into Leo code
         lt = LeoTranspiler(model=clf, validation_data=X_train)
-        leo_project_path = os.path.join(os.getcwd(), "tmp")
-        leo_project_name = "tree_credit"
-        lt.to_leo(path=leo_project_path, project_name=leo_project_name)
+        lt.to_leo(os.path.join(os.getcwd(), "leotranspiler", "tests"), "tree_credit")
 
 
 if __name__ == "__main__":
