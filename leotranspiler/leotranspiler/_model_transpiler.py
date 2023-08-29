@@ -2,6 +2,8 @@
 import logging
 import math
 
+import numpy as np
+import pandas as pd
 import sklearn
 
 from ._helper import _get_rounding_decimal_places
@@ -67,7 +69,12 @@ class _ModelTranspilerBase:
         raise NotImplementedError("This method is not implemented.")
 
     def _get_numeric_range_data(self):
-        return self.validation_data.min(), self.validation_data.max()
+        if isinstance(self.validation_data, np.ndarray):
+            return self.validation_data.min(), self.validation_data.max()
+        elif isinstance(self.validation_data, pd.DataFrame):
+            return self.validation_data.min().min(), self.validation_data.max().max()
+        else:
+            raise TypeError("Unsupported data type for validation_data")
 
     def _get_max_decimal_places_model(self):
         raise NotImplementedError("This method is not implemented.")
