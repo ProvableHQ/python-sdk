@@ -179,10 +179,11 @@ class _DecisionTreeTranspiler(_ModelTranspilerBase):
         decision_tree_logic_snippets = self._transpile_decision_tree_logic_to_leo_code(
             tree, model_as_input, indentation="        "
         )
+
         (
             input_string,
             struct_definitions,
-        ) = self.input_generator.get_circuit_input_string()
+        ) = self.input_generator.get_struct_definitions_and_circuit_input_string()
         circuit_inputs = "(" + input_string + ")"
         circuit_outputs = (
             "(" + self.leo_type + ")"
