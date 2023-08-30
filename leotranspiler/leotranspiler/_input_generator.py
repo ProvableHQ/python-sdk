@@ -120,8 +120,8 @@ class _InputGenerator:
 
     def get_struct_definitions_and_circuit_input_string(self):
         self._assign_inputs_to_structs()
-        self.generate_struct_definitions()
-        pass
+        struct_definitions = self.generate_struct_definitions()
+        return struct_definitions, ""
 
     def _assign_inputs_to_structs(self):
         active_inputs = [input for input in self.input_list if input.active]
@@ -170,31 +170,26 @@ class _InputGenerator:
         if(isinstance(self.structured_inputs[0], self._Input)):
             return ""
         
-        # dive deep leftmost in self.structured_inputs until hitting an input
-        item = self.structured_inputs[0]
-        while(isinstance(item, self._Struct)):
-            item = item.fields[0]
-        item = item.parent_struct.parent_struct
-
-        horizonal_position = 0
-
-        while True:
-
-            for field in item.fields:
-                field.add_struct_definition_to_directory(self.unique_struct_directory)
-            if(item.parent_struct is None):
-                item.add_struct_definition_to_directory(self.unique_struct_directory)
-            item = item.parent_struct
-            if(item is None):
-                horizonal_position += 1
-                if(horizonal_position >= len(self.structured_inputs)):
+        for structured_input in self.structured_inputs:
+            item = structured_input
+            while True:
+                if(isinstance(item, self._Struct)):
+                    # dive deep leftmost in self.structured_inputs until hitting an input
+                    while(isinstance(item, self._Struct)):
+                        item = item.fields[0]
+                    item = item.parent_struct.parent_struct
+                
+                if(item is not None):
+                    for field in item.fields:
+                        field.add_struct_definition_to_directory(self.unique_struct_directory)
+                
+                if(item is None or item.parent_struct is None):
+                    structured_input.add_struct_definition_to_directory(self.unique_struct_directory)
                     break
-                item = self.structured_inputs[horizonal_position]
-                while(isinstance(item, self._Struct)):
-                    item = item.fields[0]
-                item = item.parent_struct.parent_struct
-
-        pass
+                else:
+                    item = item.parent_struct
+        
+        return "\n".join([struct_definition for _, struct_definition in self.unique_struct_directory.values()])
 
     def generate_input(self, fixed_point_features):
         inputs_without_value = len(
