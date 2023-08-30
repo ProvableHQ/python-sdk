@@ -147,15 +147,36 @@ class _InputGenerator:
     def generate_struct_definitions(self):
         unique_structs = {}
 
-        # check if self.struct_definitions consists of structs instead of inputs - otherwise return
+        # check if self.structured_inputs consists of structs instead of inputs - otherwise return
+        if(isinstance(self.structured_inputs[0], self._Input)):
+            return ""
+        
         # dive deep leftmost in self.structured_inputs until hitting an input
+        item = self.structured_inputs[0]
+        while(isinstance(item, self._Struct)):
+            item = item.fields[0]
+        item = item.parent_struct
+
         # define an identifier for the struct based on the number of fields and the types of the fields (field.leo_type) - can be a string
+        identifier = ""
+        for field in item.fields:
+            identifier += field.leo_type
+
         # if this identifier is not in unique_structs, add it, and add the leo representation which looks like this:
         # struct Name {
         #   field1: type1,
         #   field2: type2,
         #   ...
         # }
+
+        if(identifier in unique_structs):
+            pass
+        else:
+            num_structs = len(unique_structs)
+            leo_struct_name = f"Struct{num_structs}"
+            leo_struct_definition = f"struct {leo_struct_name}" + " {\n" + "  " + ",\n  ".join([f"{field.name}: {field.leo_type}" for field in item.fields]) + "\n}"
+            unique_structs[identifier] = (leo_struct_name, leo_struct_definition)
+
         # now repeat this for the right struct, and then for the parent struct, until the parent struct is None
         # then repeat this for the next struct in self.structured_inputs
 
