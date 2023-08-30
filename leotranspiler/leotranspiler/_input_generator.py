@@ -4,8 +4,10 @@ class _InputGenerator:
         MAX_STRUCT_FIELDS = 32
         MAX_STRUCT_HIERARCHY = 32
 
-        def __init__(self, inputs, hierarchy=0):
+        def __init__(self, inputs, horizontal_position, hierarchy):
+            self.horizontal_position = horizontal_position
             self.hierarchy = hierarchy
+
             num_inputs = len(inputs)
             if (
                 num_inputs > self.MAX_STRUCT_FIELDS
@@ -27,14 +29,16 @@ class _InputGenerator:
 
                 # Create a _Struct for each chunk, with incremented hierarchy level
                 self.fields = [
-                    self.__class__(chunk, hierarchy=self.hierarchy + 1)
-                    for chunk in input_chunks
+                    self.__class__(chunk, i, hierarchy=self.hierarchy + 1)
+                    for i, chunk in enumerate(input_chunks)
                 ]
             elif (
                 num_inputs <= self.MAX_STRUCT_FIELDS
                 and hierarchy < self.MAX_STRUCT_HIERARCHY
             ):
                 self.fields = inputs
+                for i, field in enumerate(self.fields):
+                    field.horizontal_position = i
             else:
                 raise ValueError("Invalid number of inputs")
 
@@ -46,6 +50,7 @@ class _InputGenerator:
             self.name = name
             self.reference_name = None
             self.tmp_data_value = None
+            self.horizontal_position = None
 
         def get_set_value(self):
             if self.value is None:
@@ -105,6 +110,8 @@ class _InputGenerator:
         self.structured_inputs = []
         if active_input_count <= self.MAX_CIRCUIT_INPUTS:
             self.structured_inputs = active_inputs
+            for i, input in enumerate(self.structured_inputs):
+                input.horizontal_position = i
         else:
             # split active_inputs into MAX_CIRCUIT_INPUTS sized chunks
             # Calculate the number of elements in each chunk
@@ -121,8 +128,10 @@ class _InputGenerator:
                 start_index = end_index
 
             # Create a struct for each chunk
-            for chunk in input_chunks:
-                self.structured_inputs.append(self._Struct(chunk, hierarchy=0))
+            for i, chunk in enumerate(input_chunks):
+                self.structured_inputs.append(
+                    self._Struct(chunk, horizontal_position=i, hierarchy=0)
+                )
 
         a = 0  # Noqa F841
 
