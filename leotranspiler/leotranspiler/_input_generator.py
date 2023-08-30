@@ -4,9 +4,10 @@ class _InputGenerator:
         MAX_STRUCT_FIELDS = 32
         MAX_STRUCT_HIERARCHY = 32
 
-        def __init__(self, inputs, horizontal_position, hierarchy):
+        def __init__(self, inputs, horizontal_position, hierarchy, parent_struct=None):
             self.horizontal_position = horizontal_position
             self.hierarchy = hierarchy
+            self.parent_struct = parent_struct
 
             num_inputs = len(inputs)
             if (
@@ -29,7 +30,9 @@ class _InputGenerator:
 
                 # Create a _Struct for each chunk, with incremented hierarchy level
                 self.fields = [
-                    self.__class__(chunk, i, hierarchy=self.hierarchy + 1)
+                    self.__class__(
+                        chunk, i, hierarchy=self.hierarchy + 1, parent_struct=self
+                    )
                     for i, chunk in enumerate(input_chunks)
                 ]
             elif (
@@ -39,6 +42,7 @@ class _InputGenerator:
                 self.fields = inputs
                 for i, field in enumerate(self.fields):
                     field.horizontal_position = i
+                    field.parent_struct = self
             else:
                 raise ValueError("Invalid number of inputs")
 
@@ -51,6 +55,7 @@ class _InputGenerator:
             self.reference_name = None
             self.tmp_data_value = None
             self.horizontal_position = None
+            self.parent_struct = None
 
         def get_set_value(self):
             if self.value is None:
@@ -96,6 +101,7 @@ class _InputGenerator:
 
     def get_struct_definitions_and_circuit_input_string(self):
         self._assign_inputs_to_structs()
+        self.generate_struct_definitions()
         pass
 
     def _assign_inputs_to_structs(self):
@@ -112,6 +118,7 @@ class _InputGenerator:
             self.structured_inputs = active_inputs
             for i, input in enumerate(self.structured_inputs):
                 input.horizontal_position = i
+                input.parent_struct = None
         else:
             # split active_inputs into MAX_CIRCUIT_INPUTS sized chunks
             # Calculate the number of elements in each chunk
@@ -130,10 +137,29 @@ class _InputGenerator:
             # Create a struct for each chunk
             for i, chunk in enumerate(input_chunks):
                 self.structured_inputs.append(
-                    self._Struct(chunk, horizontal_position=i, hierarchy=0)
+                    self._Struct(
+                        chunk, horizontal_position=i, hierarchy=0, parent_struct=None
+                    )
                 )
 
         a = 0  # Noqa F841
+
+    def generate_struct_definitions(self):
+        unique_structs = {}
+
+        # check if self.struct_definitions consists of structs instead of inputs - otherwise return
+        # dive deep leftmost in self.structured_inputs until hitting an input
+        # define an identifier for the struct based on the number of fields and the types of the fields (field.leo_type) - can be a string
+        # if this identifier is not in unique_structs, add it, and add the leo representation which looks like this:
+        # struct Name {
+        #   field1: type1,
+        #   field2: type2,
+        #   ...
+        # }
+        # now repeat this for the right struct, and then for the parent struct, until the parent struct is None
+        # then repeat this for the next struct in self.structured_inputs
+
+        pass
 
     def generate_input(self, fixed_point_features):
         inputs_without_value = len(
