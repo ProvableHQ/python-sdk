@@ -5,6 +5,7 @@ class _InputGenerator:
         MAX_STRUCT_HIERARCHY = 32
 
         def __init__(self, inputs, hierarchy=0):
+            self.hierarchy = hierarchy
             num_inputs = len(inputs)
             if (
                 num_inputs > self.MAX_STRUCT_FIELDS
@@ -36,8 +37,6 @@ class _InputGenerator:
                 self.fields = inputs
             else:
                 raise ValueError("Invalid number of inputs")
-
-            self.hierarchy = hierarchy
 
     class _Input:
         def __init__(self, value, leo_type, active, name):
