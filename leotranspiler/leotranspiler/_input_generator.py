@@ -8,6 +8,8 @@ class _InputGenerator:
             self.horizontal_position = horizontal_position
             self.hierarchy = hierarchy
             self.parent_struct = parent_struct
+            self.leo_reference_name = None
+            self.internal_reference_name = None
 
             num_inputs = len(inputs)
             if (
@@ -170,12 +172,15 @@ class _InputGenerator:
         # }
 
         if(identifier in unique_structs):
-            pass
+            leo_struct_name, _ = unique_structs[identifier]
         else:
             num_structs = len(unique_structs)
             leo_struct_name = f"Struct{num_structs}"
             leo_struct_definition = f"struct {leo_struct_name}" + " {\n" + "  " + ",\n  ".join([f"{field.name}: {field.leo_type}" for field in item.fields]) + "\n}"
             unique_structs[identifier] = (leo_struct_name, leo_struct_definition)
+        
+        item.leo_reference_name = leo_struct_name
+        item.internal_reference_name = identifier
 
         # now repeat this for the right struct, and then for the parent struct, until the parent struct is None
         # then repeat this for the next struct in self.structured_inputs
