@@ -181,8 +181,8 @@ class _DecisionTreeTranspiler(_ModelTranspilerBase):
         )
 
         (
-            input_string,
             struct_definitions,
+            input_string,
         ) = self.input_generator.get_struct_definitions_and_circuit_input_string()
         circuit_inputs = "(" + input_string + ")"
         circuit_outputs = (

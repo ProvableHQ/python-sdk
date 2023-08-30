@@ -121,7 +121,8 @@ class _InputGenerator:
     def get_struct_definitions_and_circuit_input_string(self):
         self._assign_inputs_to_structs()
         struct_definitions = self.generate_struct_definitions()
-        return struct_definitions, ""
+        circuit_input_string = self.generate_circuit_input_string()
+        return struct_definitions, circuit_input_string
 
     def _assign_inputs_to_structs(self):
         active_inputs = [input for input in self.input_list if input.active]
@@ -190,6 +191,12 @@ class _InputGenerator:
                     item = item.parent_struct
         
         return "\n".join([struct_definition for _, struct_definition in self.unique_struct_directory.values()])
+    
+    def generate_circuit_input_string(self):
+        input_string = ""
+        for structured_input in self.structured_inputs:
+            input_string += f"{structured_input.name}: {structured_input.leo_type}, "
+        return input_string[:-2]
 
     def generate_input(self, fixed_point_features):
         inputs_without_value = len(
