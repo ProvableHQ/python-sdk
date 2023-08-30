@@ -223,6 +223,13 @@ class TestLeoTranspiler(unittest.TestCase):
         lt = LeoTranspiler(model=clf, validation_data=X_train)
         lt.to_leo(os.path.join(os.getcwd(), "leotranspiler", "tests"), "tree_credit")
 
+        # Run and compare the Python prediction with the Leo prediction
+        lc = lt.run(X_test.iloc[0])
+        python_prediction = clf.predict([X_test[0]])
+        self.assertEqual(int(lc.output_decimal[0]), python_prediction[0])
+
+        lc = lt.run(X_test[1])
+
 
 if __name__ == "__main__":
     unittest.main()
