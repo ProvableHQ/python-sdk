@@ -8,7 +8,7 @@ class _InputGenerator:
             self.horizontal_position = horizontal_position
             self.hierarchy = hierarchy
             self.parent_struct = parent_struct
-            self.leo_reference_name = None
+            self.leo_type = None
             self.internal_reference_name = None
 
             num_inputs = len(inputs)
@@ -47,6 +47,23 @@ class _InputGenerator:
                     field.parent_struct = self
             else:
                 raise ValueError("Invalid number of inputs")
+            
+            self.name = f"struct{self.hierarchy}_{self.horizontal_position}"
+            
+        def add_struct_definition_to_directory(self, unique_struct_directory):
+            self.type_identifier = f"{self.hierarchy}"
+            for field in self.fields:
+                self.type_identifier += field.leo_type
+
+            if(self.type_identifier in unique_struct_directory):
+                self.leo_type, _ = unique_struct_directory[self.type_identifier]
+            else:
+                num_structs = len(unique_struct_directory.keys())
+                self.leo_type = f"Struct{num_structs}"
+                leo_struct_definition = f"struct {self.leo_type}" + " {\n" + "  " + ",\n  ".join([f"{field.name}: {field.leo_type}" for field in self.fields]) + "\n}"
+                unique_struct_directory[self.type_identifier] = (self.leo_type, leo_struct_definition)
+
+
 
     class _Input:
         def __init__(self, value, leo_type, active, name):
@@ -147,7 +164,7 @@ class _InputGenerator:
         a = 0  # Noqa F841
 
     def generate_struct_definitions(self):
-        unique_structs = {}
+        self.unique_struct_directory = {}
 
         # check if self.structured_inputs consists of structs instead of inputs - otherwise return
         if(isinstance(self.structured_inputs[0], self._Input)):
@@ -157,33 +174,25 @@ class _InputGenerator:
         item = self.structured_inputs[0]
         while(isinstance(item, self._Struct)):
             item = item.fields[0]
-        item = item.parent_struct
+        item = item.parent_struct.parent_struct
 
-        # define an identifier for the struct based on the number of fields and the types of the fields (field.leo_type) - can be a string
-        identifier = ""
-        for field in item.fields:
-            identifier += field.leo_type
+        horizonal_position = 0
 
-        # if this identifier is not in unique_structs, add it, and add the leo representation which looks like this:
-        # struct Name {
-        #   field1: type1,
-        #   field2: type2,
-        #   ...
-        # }
+        while True:
 
-        if(identifier in unique_structs):
-            leo_struct_name, _ = unique_structs[identifier]
-        else:
-            num_structs = len(unique_structs)
-            leo_struct_name = f"Struct{num_structs}"
-            leo_struct_definition = f"struct {leo_struct_name}" + " {\n" + "  " + ",\n  ".join([f"{field.name}: {field.leo_type}" for field in item.fields]) + "\n}"
-            unique_structs[identifier] = (leo_struct_name, leo_struct_definition)
-        
-        item.leo_reference_name = leo_struct_name
-        item.internal_reference_name = identifier
-
-        # now repeat this for the right struct, and then for the parent struct, until the parent struct is None
-        # then repeat this for the next struct in self.structured_inputs
+            for field in item.fields:
+                field.add_struct_definition_to_directory(self.unique_struct_directory)
+            if(item.parent_struct is None):
+                item.add_struct_definition_to_directory(self.unique_struct_directory)
+            item = item.parent_struct
+            if(item is None):
+                horizonal_position += 1
+                if(horizonal_position >= len(self.structured_inputs)):
+                    break
+                item = self.structured_inputs[horizonal_position]
+                while(isinstance(item, self._Struct)):
+                    item = item.fields[0]
+                item = item.parent_struct.parent_struct
 
         pass
 
