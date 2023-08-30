@@ -49,6 +49,14 @@ class _InputGenerator:
                 raise ValueError("Invalid number of inputs")
             
             self.name = f"struct{self.hierarchy}_{self.horizontal_position}"
+            if(parent_struct is not None):
+                self.reference_name = f"{parent_struct.reference_name}.{self.name}"
+            else:
+                self.reference_name = self.name
+            
+            if(isinstance(self.fields[0], _InputGenerator._Input)):
+                for i, field in enumerate(self.fields):
+                    field.reference_name = f"{self.reference_name}.x{i}"
             
         def add_struct_definition_to_directory(self, unique_struct_directory):
             self.type_identifier = f"{self.hierarchy}"
@@ -60,7 +68,10 @@ class _InputGenerator:
             else:
                 num_structs = len(unique_struct_directory.keys())
                 self.leo_type = f"Struct{num_structs}"
-                leo_struct_definition = f"struct {self.leo_type}" + " {\n" + "  " + ",\n  ".join([f"{field.name}: {field.leo_type}" for field in self.fields]) + "\n}"
+                if(isinstance(self.fields[0], _InputGenerator._Struct)):
+                    leo_struct_definition = f"struct {self.leo_type}" + " {\n" + "  " + ",\n  ".join([f"{field.name}: {field.leo_type}" for field in self.fields]) + "\n}"
+                if(isinstance(self.fields[0], _InputGenerator._Input)):
+                    leo_struct_definition = f"struct {self.leo_type}" + " {\n" + "  " + ",\n  ".join([f"x{i}: {field.leo_type}" for i, field in enumerate(self.fields)]) + "\n}"
                 unique_struct_directory[self.type_identifier] = (self.leo_type, leo_struct_definition)
 
 
