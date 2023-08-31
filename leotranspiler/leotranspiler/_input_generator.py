@@ -82,7 +82,7 @@ class _InputGenerator:
             self.leo_type = leo_type
             self.active = active
             self.name = name
-            self.reference_name = None
+            self.reference_name = name
             self.tmp_data_value = None
             self.horizontal_position = None
             self.parent_struct = None
@@ -92,6 +92,9 @@ class _InputGenerator:
                 return self.tmp_data_value
             else:
                 return self.value
+        
+        def get_input_value_string(self):
+            return f"{self.reference_name}: {self.get_set_value()}{self.leo_type}"
 
     def __init__(self):
         self.MAX_CIRCUIT_INPUTS = 16
@@ -208,7 +211,7 @@ class _InputGenerator:
         for structured_input in self.structured_inputs:
             input_string += f"{structured_input.name}: {structured_input.leo_type}, "
         return input_string[:-2]
-
+    
     def generate_input(self, fixed_point_features):
         inputs_without_value = len(
             [input for input in self.input_list if input.value is None]
@@ -219,4 +222,12 @@ class _InputGenerator:
                 "number of inputs without a specified value ({inputs_without_value})"
             )
 
-        pass
+        # Assign values to inputs without a specified value
+        index = 0
+        for input in self.input_list:
+            if input.value is None:
+                input.tmp_data_value = fixed_point_features[index]
+                index += 1
+
+        formatted_input_list = [el.get_input_value_string() for el in self.structured_inputs]
+        return formatted_input_list
