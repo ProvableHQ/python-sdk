@@ -47,34 +47,61 @@ class _InputGenerator:
                     field.parent_struct = self
             else:
                 raise ValueError("Invalid number of inputs")
-            
+
             self.name = f"struct{self.hierarchy}_{self.horizontal_position}"
-            if(parent_struct is not None):
+            if parent_struct is not None:
                 self.reference_name = f"{parent_struct.reference_name}.{self.name}"
             else:
                 self.reference_name = self.name
-            
-            if(isinstance(self.fields[0], _InputGenerator._Input)):
+
+            if isinstance(self.fields[0], _InputGenerator._Input):
                 for i, field in enumerate(self.fields):
-                    field.reference_name = f"{self.reference_name}.x{i}"
-            
+                    field.name = f"x{i}"
+                    field.reference_name = f"{self.reference_name}.{field.name}"
+
         def add_struct_definition_to_directory(self, unique_struct_directory):
             self.type_identifier = f"{self.hierarchy}"
             for field in self.fields:
                 self.type_identifier += field.leo_type
 
-            if(self.type_identifier in unique_struct_directory):
+            if self.type_identifier in unique_struct_directory:
                 self.leo_type, _ = unique_struct_directory[self.type_identifier]
             else:
                 num_structs = len(unique_struct_directory.keys())
                 self.leo_type = f"Struct{num_structs}"
-                if(isinstance(self.fields[0], _InputGenerator._Struct)):
-                    leo_struct_definition = f"struct {self.leo_type}" + " {\n" + "  " + ",\n  ".join([f"{field.name}: {field.leo_type}" for field in self.fields]) + "\n}"
-                if(isinstance(self.fields[0], _InputGenerator._Input)):
-                    leo_struct_definition = f"struct {self.leo_type}" + " {\n" + "  " + ",\n  ".join([f"x{i}: {field.leo_type}" for i, field in enumerate(self.fields)]) + "\n}"
-                unique_struct_directory[self.type_identifier] = (self.leo_type, leo_struct_definition)
+                if isinstance(self.fields[0], _InputGenerator._Struct):
+                    leo_struct_definition = (
+                        f"struct {self.leo_type}"
+                        + " {\n"
+                        + "  "
+                        + ",\n  ".join(
+                            [f"{field.name}: {field.leo_type}" for field in self.fields]
+                        )
+                        + "\n}"
+                    )
+                if isinstance(self.fields[0], _InputGenerator._Input):
+                    leo_struct_definition = (
+                        f"struct {self.leo_type}"
+                        + " {\n"
+                        + "  "
+                        + ",\n  ".join(
+                            [
+                                f"x{i}: {field.leo_type}"
+                                for i, field in enumerate(self.fields)
+                            ]
+                        )
+                        + "\n}"
+                    )
+                unique_struct_directory[self.type_identifier] = (
+                    self.leo_type,
+                    leo_struct_definition,
+                )
 
-
+        def get_input_value_string(self):
+            str = "{ "
+            for field in self.fields:
+                str += f"{field.name}: {field.get_input_value_string()}, "
+            return str[:-2] + " }"
 
     class _Input:
         def __init__(self, value, leo_type, active, name):
@@ -92,7 +119,7 @@ class _InputGenerator:
                 return self.tmp_data_value
             else:
                 return self.value
-        
+
         def get_input_value_string(self):
             return f"{self.get_set_value()}{self.leo_type}"
 
@@ -182,36 +209,45 @@ class _InputGenerator:
         self.unique_struct_directory = {}
 
         # check if self.structured_inputs consists of structs instead of inputs - otherwise return
-        if(isinstance(self.structured_inputs[0], self._Input)):
+        if isinstance(self.structured_inputs[0], self._Input):
             return ""
-        
+
         for structured_input in self.structured_inputs:
             item = structured_input
             while True:
-                if(isinstance(item, self._Struct)):
+                if isinstance(item, self._Struct):
                     # dive deep leftmost in self.structured_inputs until hitting an input
-                    while(isinstance(item, self._Struct)):
+                    while isinstance(item, self._Struct):
                         item = item.fields[0]
                     item = item.parent_struct.parent_struct
-                
-                if(item is not None):
+
+                if item is not None:
                     for field in item.fields:
-                        field.add_struct_definition_to_directory(self.unique_struct_directory)
-                
-                if(item is None or item.parent_struct is None):
-                    structured_input.add_struct_definition_to_directory(self.unique_struct_directory)
+                        field.add_struct_definition_to_directory(
+                            self.unique_struct_directory
+                        )
+
+                if item is None or item.parent_struct is None:
+                    structured_input.add_struct_definition_to_directory(
+                        self.unique_struct_directory
+                    )
                     break
                 else:
                     item = item.parent_struct
-        
-        return "\n".join([struct_definition for _, struct_definition in self.unique_struct_directory.values()])
-    
+
+        return "\n".join(
+            [
+                struct_definition
+                for _, struct_definition in self.unique_struct_directory.values()
+            ]
+        )
+
     def generate_circuit_input_string(self):
         input_string = ""
         for structured_input in self.structured_inputs:
             input_string += f"{structured_input.name}: {structured_input.leo_type}, "
         return input_string[:-2]
-    
+
     def generate_input(self, fixed_point_features):
         inputs_without_value = len(
             [input for input in self.input_list if input.value is None]
@@ -229,5 +265,7 @@ class _InputGenerator:
                 input.tmp_data_value = fixed_point_features[index]
                 index += 1
 
-        formatted_input_list = [el.get_input_value_string() for el in self.structured_inputs]
+        formatted_input_list = [
+            el.get_input_value_string() for el in self.structured_inputs
+        ]
         return formatted_input_list

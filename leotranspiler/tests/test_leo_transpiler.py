@@ -225,10 +225,18 @@ class TestLeoTranspiler(unittest.TestCase):
 
         # Run and compare the Python prediction with the Leo prediction
         lc = lt.run(X_test.iloc[0])
-        python_prediction = clf.predict([X_test[0]])
+        python_prediction = clf.predict([X_test.iloc[0]])
         self.assertEqual(int(lc.output_decimal[0]), python_prediction[0])
 
-        lc = lt.run(X_test[1])
+        # test another input
+        lc = lt.run(X_test.iloc[1])
+
+        # remove the generated folder
+        import shutil
+
+        shutil.rmtree(
+            os.path.join(os.getcwd(), "leotranspiler", "tests", "tree_credit")
+        )
 
 
 if __name__ == "__main__":
