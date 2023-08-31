@@ -94,7 +94,7 @@ class _InputGenerator:
                 return self.value
         
         def get_input_value_string(self):
-            return f"{self.reference_name}: {self.get_set_value()}{self.leo_type}"
+            return f"{self.get_set_value()}{self.leo_type}"
 
     def __init__(self):
         self.MAX_CIRCUIT_INPUTS = 16
