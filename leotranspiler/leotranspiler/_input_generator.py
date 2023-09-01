@@ -208,7 +208,6 @@ class _InputGenerator:
     def generate_struct_definitions(self):
         self.unique_struct_directory = {}
 
-        # check if self.structured_inputs consists of structs instead of inputs - otherwise return
         if isinstance(self.structured_inputs[0], self._Input):
             return ""
 
@@ -216,7 +215,7 @@ class _InputGenerator:
             item = structured_input
             while True:
                 if isinstance(item, self._Struct):
-                    # dive deep leftmost in self.structured_inputs until hitting an input
+                    # dive deep leftmost in self.structured_inputs until hitting input
                     while isinstance(item, self._Struct):
                         item = item.fields[0]
                     item = item.parent_struct.parent_struct
