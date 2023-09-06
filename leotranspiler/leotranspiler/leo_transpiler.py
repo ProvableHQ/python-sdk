@@ -259,12 +259,19 @@ class LeoTranspiler:
             execution_data = json.loads(result_content)
 
         if command == "run":
-            return LeoComputation(input, outputs_fixed_point, constraints, input)
+            return LeoComputation(
+                input,
+                outputs_fixed_point,
+                constraints,
+                self.model_transpiler.active_input_count,
+                input,
+            )
         elif command == "execute":
             return ZeroKnowledgeProof(
                 input,
                 outputs_fixed_point,
                 constraints,
+                self.model_transpiler.active_input_count,
                 execution_data["execution"]["proof"],
                 execution_data["execution"],
                 input,

@@ -1,15 +1,24 @@
 # -*- coding: utf-8 -*-
+
+
 class _InputGenerator:
     class _Struct:
         MAX_STRUCT_FIELDS = 32
         MAX_STRUCT_HIERARCHY = 32
 
         def __init__(self, inputs, horizontal_position, hierarchy, parent_struct=None):
+
             self.horizontal_position = horizontal_position
             self.hierarchy = hierarchy
             self.parent_struct = parent_struct
             self.leo_type = None
             self.internal_reference_name = None
+
+            self.name = f"struct{self.hierarchy}_{self.horizontal_position}"
+            if parent_struct is not None:
+                self.reference_name = f"{parent_struct.reference_name}.{self.name}"
+            else:
+                self.reference_name = self.name
 
             num_inputs = len(inputs)
             if (
@@ -47,12 +56,6 @@ class _InputGenerator:
                     field.parent_struct = self
             else:
                 raise ValueError("Invalid number of inputs")
-
-            self.name = f"struct{self.hierarchy}_{self.horizontal_position}"
-            if parent_struct is not None:
-                self.reference_name = f"{parent_struct.reference_name}.{self.name}"
-            else:
-                self.reference_name = self.name
 
             if isinstance(self.fields[0], _InputGenerator._Input):
                 for i, field in enumerate(self.fields):
@@ -160,10 +163,10 @@ class _InputGenerator:
         return self.input_list[index]
 
     def get_struct_definitions_and_circuit_input_string(self):
-        self._assign_inputs_to_structs()
+        active_input_count = self._assign_inputs_to_structs()
         struct_definitions = self.generate_struct_definitions()
         circuit_input_string = self.generate_circuit_input_string()
-        return struct_definitions, circuit_input_string
+        return struct_definitions, circuit_input_string, active_input_count
 
     def _assign_inputs_to_structs(self):
         active_inputs = [input for input in self.input_list if input.active]
@@ -203,7 +206,7 @@ class _InputGenerator:
                     )
                 )
 
-        a = 0  # Noqa F841
+            return active_input_count
 
     def generate_struct_definitions(self):
         self.unique_struct_directory = {}

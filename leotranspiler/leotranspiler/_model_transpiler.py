@@ -183,6 +183,7 @@ class _DecisionTreeTranspiler(_ModelTranspilerBase):
         (
             struct_definitions,
             input_string,
+            active_input_count,
         ) = self.input_generator.get_struct_definitions_and_circuit_input_string()
         circuit_inputs = "(" + input_string + ")"
         circuit_outputs = (
@@ -196,6 +197,7 @@ class _DecisionTreeTranspiler(_ModelTranspilerBase):
             circuit_outputs,
             decision_tree_logic_snippets,
         )
+        self.active_input_count = active_input_count
         return transpilation_result
 
     def _transpile_decision_tree_logic_to_leo_code(

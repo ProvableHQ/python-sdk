@@ -6,8 +6,9 @@ class _ComputationBase:
     Attributes
     ----------
     - input: The input for the computation.
-    - output: The expected output after computation.
+    - output: The output after computation.
     - circuit_constraints: Constraints for the computation.
+    - active_input_count: The number of active inputs.
     - output_decimal: Decimal representation of the output.
     - fixed_point_scaling_factor: A scaling factor (defaults to 1).
     """
@@ -17,12 +18,14 @@ class _ComputationBase:
         input,
         output,
         circuit_constraints,
+        active_input_count,
         output_decimal,
         fixed_point_scaling_factor=1,
     ):
         self.input = input
         self.output = output
         self.circuit_constraints = circuit_constraints
+        self.active_input_count = active_input_count
         self.output_decimal = output_decimal
         self.fixed_point_scaling_factor = fixed_point_scaling_factor
 
@@ -33,8 +36,13 @@ class ZeroKnowledgeProof(_ComputationBase):
 
     Attributes
     ----------
+    - input: The input for the computation.
+    - output: The output after computation.
+    - circuit_constraints: Constraints for the computation.
+    - active_input_count: The number of active inputs.
     - proof: The zero-knowledge proof.
     - execution: (Optional) Details of the execution of the proof.
+    - output_decimal: Decimal representation of the output.
 
     Inherits other attributes from _ComputationBase.
     """
@@ -44,11 +52,14 @@ class ZeroKnowledgeProof(_ComputationBase):
         input,
         output,
         circuit_constraints,
+        active_input_count,
         proof,
         execution=None,
         output_decimal=None,
     ):
-        super().__init__(input, output, circuit_constraints, output_decimal)
+        super().__init__(
+            input, output, circuit_constraints, active_input_count, output_decimal
+        )
         self.proof = proof
         self.execution = execution
 
@@ -60,5 +71,14 @@ class LeoComputation(_ComputationBase):
     Inherits attributes from _ComputationBase.
     """
 
-    def __init__(self, input, output, circuit_constraints, output_decimal=None):
-        super().__init__(input, output, circuit_constraints, output_decimal)
+    def __init__(
+        self,
+        input,
+        output,
+        circuit_constraints,
+        active_input_count,
+        output_decimal=None,
+    ):
+        super().__init__(
+            input, output, circuit_constraints, active_input_count, output_decimal
+        )
