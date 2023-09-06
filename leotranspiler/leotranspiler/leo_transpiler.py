@@ -132,7 +132,7 @@ class LeoTranspiler:
         circuit_inputs_fixed_point = self.model_transpiler.generate_input(input_sample)
         result, runtime = self._execute_leo_cli("run", circuit_inputs_fixed_point)
         leo_computation = self._parse_leo_output(
-            "run", result, circuit_inputs_fixed_point
+            "run", result, circuit_inputs_fixed_point, runtime
         )
         self.model_transpiler.convert_computation_base_outputs_to_decimal(
             leo_computation
@@ -159,7 +159,9 @@ class LeoTranspiler:
 
         circuit_inputs_fixed_point = self.model_transpiler.generate_input(input_sample)
         result, runtime = self._execute_leo_cli("execute", circuit_inputs_fixed_point)
-        zkp = self._parse_leo_output("execute", result, circuit_inputs_fixed_point)
+        zkp = self._parse_leo_output(
+            "execute", result, circuit_inputs_fixed_point, runtime
+        )
         self.model_transpiler.convert_computation_base_outputs_to_decimal(zkp)
 
         return zkp
@@ -210,6 +212,7 @@ class LeoTranspiler:
         command: str,
         result: str,
         input: Optional[Union[ndarray, List[float]]] = None,
+        runtime: Optional[float] = None,
     ) -> Tuple[List[int], int]:
         """Parse the Leo output.
 
@@ -221,6 +224,8 @@ class LeoTranspiler:
             The Leo output.
         input : Union[ndarray, List[float]], optional
             The input sample for which the output was computed, by default None
+        runtime : float, optional
+            The runtime of the Leo computation in seconds, by default None
 
         Returns
         -------
@@ -264,7 +269,7 @@ class LeoTranspiler:
                 outputs_fixed_point,
                 constraints,
                 self.model_transpiler.active_input_count,
-                input,
+                runtime,
             )
         elif command == "execute":
             return ZeroKnowledgeProof(
@@ -272,9 +277,9 @@ class LeoTranspiler:
                 outputs_fixed_point,
                 constraints,
                 self.model_transpiler.active_input_count,
+                runtime,
                 execution_data["execution"]["proof"],
                 execution_data["execution"],
-                input,
             )
         else:
             raise ValueError("Unknown command")
