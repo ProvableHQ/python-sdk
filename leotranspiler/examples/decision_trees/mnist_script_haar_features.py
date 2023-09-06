@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 
 import gzip
 import os
@@ -24,6 +25,7 @@ def download_and_extract_dataset(url, save_path, folder_path):
         print(f"{decompressed_file_name} downloaded and extracted.")
     else:
         print(f"{os.path.basename(save_path)} already exists.")
+
 
 file_info = [
     (
@@ -135,23 +137,23 @@ train_images_2d = train_images.reshape(
 )  # -1 infers the size from the remaining dimensions
 test_images_2d = test_images.reshape(test_images.shape[0], -1)
 
-# Create the classifier and fit it to the reshaped training data
-from sklearn.tree import DecisionTreeClassifier
+import cv2
+import numpy as np
 
 # %%
 from scipy.ndimage import label
 
-import cv2
-import numpy as np
+# Create the classifier and fit it to the reshaped training data
+from sklearn.tree import DecisionTreeClassifier
 
 
-def extract_haar_features(image, step_size=8, feature_type='both'):
+def extract_haar_features(image, step_size=8, feature_type="both"):
     # Compute the integral image
     int_img = cv2.integral(image)
-    
+
     # Define a small set of Haar-like features
     features = []
-    
+
     def horizontal_features(y, x, w, h):
         A = int_img[y, x]
         B = int_img[y, x + w // 2]
@@ -160,7 +162,7 @@ def extract_haar_features(image, step_size=8, feature_type='both'):
         E = int_img[y, x + w]
         F = int_img[y + h, x + w]
         return (D - B + A) - (F - D + E - B)
-    
+
     def vertical_features(y, x, w, h):
         A = int_img[y, x]
         B = int_img[y, x + w]
@@ -169,24 +171,25 @@ def extract_haar_features(image, step_size=8, feature_type='both'):
         E = int_img[y + h, x]
         F = int_img[y + h, x + w]
         return (D - B + A) - (F - D + E - C)
-    
+
     for y in range(0, 28, step_size):
         for x in range(0, 28, step_size):
             for w in range(step_size, 28 - x, step_size):
                 for h in range(step_size, 28 - y, step_size):
-                    if feature_type in ['horizontal', 'both']:
+                    if feature_type in ["horizontal", "both"]:
                         features.append(horizontal_features(y, x, w, h))
-                    if feature_type in ['vertical', 'both']:
+                    if feature_type in ["vertical", "both"]:
                         features.append(vertical_features(y, x, w, h))
-                        
+
     return np.array(features)
+
 
 # Test the function on a single 28x28 image
 single_image = train_images[0]
-haar_features = extract_haar_features(single_image, step_size=8, feature_type='both')
-print("Reduced Haar Features Length for Both Horizontal and Vertical:", len(haar_features))
-
-
+haar_features = extract_haar_features(single_image, step_size=8, feature_type="both")
+print(
+    "Reduced Haar Features Length for Both Horizontal and Vertical:", len(haar_features)
+)
 
 
 # Compute HoG features for the training set
@@ -194,7 +197,6 @@ hog_features_train = np.array([extract_haar_features(img) for img in train_image
 
 # Compute HoG features for the test set
 hog_features_test = np.array([extract_haar_features(img) for img in test_images])
-
 
 
 X_new_train = np.c_[hog_features_train]
@@ -210,6 +212,7 @@ print("Train score:", tree_clf.score(X_new_train, train_labels))
 print("Test score:", tree_clf.score(X_new_test, test_labels))
 
 from leotranspiler import LeoTranspiler
+
 # %%
 lt = LeoTranspiler(model=tree_clf, validation_data=train_images_2d[0:50])
 leo_project_path = os.path.join(os.getcwd(), "tmp/mnist")

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 
 import gzip
 import os
@@ -24,6 +25,7 @@ def download_and_extract_dataset(url, save_path, folder_path):
         print(f"{decompressed_file_name} downloaded and extracted.")
     else:
         print(f"{os.path.basename(save_path)} already exists.")
+
 
 file_info = [
     (
@@ -135,14 +137,16 @@ train_images_2d = train_images.reshape(
 )  # -1 infers the size from the remaining dimensions
 test_images_2d = test_images.reshape(test_images.shape[0], -1)
 
-# Create the classifier and fit it to the reshaped training data
-from sklearn.tree import DecisionTreeClassifier
-
 # %%
 from scipy.ndimage import label
 
+# Create the classifier and fit it to the reshaped training data
+from sklearn.tree import DecisionTreeClassifier
+
+
 def average_intensity(image):
     return np.mean(image)
+
 
 def num_white_regions(image, threshold=128):
     # Threshold the image to convert it to binary
@@ -151,47 +155,55 @@ def num_white_regions(image, threshold=128):
     labeled_array, num_features = label(bin_image)
     return num_features
 
-from scipy.stats import skew, kurtosis
+
+from scipy.stats import kurtosis, skew
+
 
 def standard_deviation(image):
     return np.std(image)
 
+
 def skewness(image):
     return skew(image)
+
 
 def kurtosis_value(image):
     return kurtosis(image)
 
+
 def aspect_ratio(image, threshold=128):
     # Threshold the image to create a binary representation
-    bin_image = (image > threshold)
+    bin_image = image > threshold
     # Find the bounding box
     row_indices, col_indices = np.nonzero(bin_image)
     max_row, min_row = np.max(row_indices), np.min(row_indices)
     max_col, min_col = np.max(col_indices), np.min(col_indices)
-    
+
     # Calculate the aspect ratio of the bounding box
     width = max_col - min_col + 1
     height = max_row - min_row + 1
-    
+
     if height == 0:  # To avoid division by zero
         return 1.0
-    
+
     return width / height
+
 
 from scipy.ndimage import label
 from scipy.optimize import curve_fit
 
+
 def linear_func(x, a, b):
     return a * x + b
+
 
 def avg_dist_to_fitted_line(image, threshold=128):
     # Threshold the image
     bin_image = (image > threshold).astype(int)
-    
+
     # Identify connected components
     labeled_array, num_features = label(bin_image)
-    
+
     # Find the largest connected component
     largest_component = None
     max_count = 0
@@ -201,24 +213,26 @@ def avg_dist_to_fitted_line(image, threshold=128):
         if count > max_count:
             max_count = count
             largest_component = component
-            
+
     if largest_component is None:
         return 0.0
-    
+
     x, y = largest_component
     if len(x) <= 1:  # Can't fit a line to a single point or empty set
         return 0.0
-    
+
     # Fit a line to the largest component
     popt, _ = curve_fit(linear_func, x, y)
-    
+
     # Calculate the average distance from each point to the line
     distances = np.abs(y - linear_func(x, *popt))
     avg_distance = np.mean(distances)
-    
+
     return avg_distance
 
+
 from skimage.feature import hog
+
 
 def compute_hog_features(image):
     # The image shape is 28x28
@@ -226,13 +240,13 @@ def compute_hog_features(image):
     pixels_per_cell = (8, 8)
     cells_per_block = (2, 2)
     nbins = 6  # Number of orientation bins
-    
+
     features, hog_image = hog(
-        image, 
-        orientations=nbins, 
-        pixels_per_cell=pixels_per_cell, 
-        cells_per_block=cells_per_block, 
-        visualize=True
+        image,
+        orientations=nbins,
+        pixels_per_cell=pixels_per_cell,
+        cells_per_block=cells_per_block,
+        visualize=True,
     )
     return features
 
@@ -242,7 +256,6 @@ hog_features_train = np.array([compute_hog_features(img) for img in train_images
 
 # Compute HoG features for the test set
 hog_features_test = np.array([compute_hog_features(img) for img in test_images])
-
 
 
 # Calculate new features for training set
@@ -276,13 +289,11 @@ avg_dist_train = np.array([avg_dist_to_fitted_line(img) for img in train_images]
 avg_dist_test = np.array([avg_dist_to_fitted_line(img) for img in test_images])
 
 
-
-
 # Combine old and new features for training set
-#X_new_train = np.c_[avg_intensity_train, white_regions_train, aspect_ratio_train, hog_features_train]
+# X_new_train = np.c_[avg_intensity_train, white_regions_train, aspect_ratio_train, hog_features_train]
 
 # Combine old and new features for test set
-#X_new_test = np.c_[avg_intensity_test, white_regions_test, aspect_ratio_test, hog_features_test]
+# X_new_test = np.c_[avg_intensity_test, white_regions_test, aspect_ratio_test, hog_features_test]
 
 X_new_train = np.c_[hog_features_train]
 X_new_test = np.c_[hog_features_test]
@@ -297,6 +308,7 @@ print("Train score:", tree_clf.score(X_new_train, train_labels))
 print("Test score:", tree_clf.score(X_new_test, test_labels))
 
 from leotranspiler import LeoTranspiler
+
 # %%
 lt = LeoTranspiler(model=tree_clf, validation_data=train_images_2d[0:50])
 leo_project_path = os.path.join(os.getcwd(), "tmp/mnist")
