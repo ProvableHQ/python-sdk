@@ -7,7 +7,6 @@ class _InputGenerator:
         MAX_STRUCT_HIERARCHY = 32
 
         def __init__(self, inputs, horizontal_position, hierarchy, parent_struct=None):
-
             self.horizontal_position = horizontal_position
             self.hierarchy = hierarchy
             self.parent_struct = parent_struct
@@ -206,7 +205,7 @@ class _InputGenerator:
                     )
                 )
 
-            return active_input_count
+        return active_input_count
 
     def generate_struct_definitions(self):
         self.unique_struct_directory = {}
