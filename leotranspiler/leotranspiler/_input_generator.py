@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import pandas as pd
 
 
 class _InputGenerator:
@@ -263,7 +264,10 @@ class _InputGenerator:
         index = 0
         for input in self.input_list:
             if input.value is None:
-                input.tmp_data_value = fixed_point_features[index]
+                if isinstance(fixed_point_features, pd.Series):
+                    input.tmp_data_value = fixed_point_features.iloc[index]
+                else:
+                    input.tmp_data_value = fixed_point_features[index]
                 index += 1
 
         formatted_input_list = [
