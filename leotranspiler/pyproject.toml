@@ -14,7 +14,9 @@ repository = "https://github.com/AleoHQ/python-sdk/tree/master/leotranspiler"
 [tool.poetry.dependencies]
 python = "^3.9"
 psutil = "^5.8.0"
-
+numpy = "^1.24.3"
+pandas = "^2.1.0"
+scikit-learn = "^1.3.0"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]

@@ -41,6 +41,10 @@ This Python library offers the ability to transpile Python machine learning mode
    ```bash
    pip3 install leotranspiler-0.1.0.tar.gz
    ```
+4. You may to run the examples, so it is a good idea to run the following command to install packages used by the example code:
+   ```bash
+   pip3 install -r examples/requirements.txt
+   ```
 
 ### Usage:
 

@@ -1,0 +1,2 @@
+matplotlib>=3.7.3
+requests>=2.31.0
