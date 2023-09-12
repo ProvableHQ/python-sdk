@@ -41,14 +41,13 @@ This Python library offers the ability to transpile Python machine learning mode
    ```bash
    pip3 install leotranspiler-0.1.0.tar.gz
    ```
-4. You may to run the examples, so it is a good idea to run the following command to install packages used by the example code:
-   ```bash
-   pip3 install -r examples/requirements.txt
-   ```
 
 ### Usage:
 
-- Explore the `examples` folder for example usages.
+- Explore the `examples` folder for example usages. To run the examples, you need further Python packages. You can install these from the `examples` folder by running:
+   ```bash
+   pip3 install -r requirements.txt
+   ```
 
 The `examples` folder contains Jupyter Notebooks that demonstrate how to work with the Python to Leo transpiler. There are two main ways to run these notebooks:
 
@@ -63,7 +62,6 @@ The `examples` folder contains Jupyter Notebooks that demonstrate how to work wi
    - Once Jupyter Notebook launches in your browser, open the notebook files (`.ipynb`) to view and run the Python code cells interactively.
 
 For a more detailed tutorial on using Jupyter Notebooks, refer to this [Jupyter Notebook beginner guide](https://realpython.com/jupyter-notebook-introduction/).
-
 
 **Notes**:
 - On some systems, "python" and "pip" might be used instead of "python3" and "pip3".
