@@ -29,7 +29,7 @@ This Python library offers the ability to transpile Python machine learning mode
 ### Installation:
 
 1. Clone the repository, or download the `.whl` or `.tar.gz` file from the `dist` folder.
-2. Navigate to the directory containing the `.whl` or `.tar.gz` file:
+2. Navigate to the `dist` directory containing the `.whl` or `.tar.gz` file:
    ```bash
    cd dist
    ```
@@ -44,12 +44,12 @@ This Python library offers the ability to transpile Python machine learning mode
 
 ### Usage:
 
-- Explore the `examples` folder for example usages. To run the examples, you need further Python packages. You can install these from the `examples` folder by running:
+- Explore the `examples` folder for example usages. To run the examples, additional Python packages are required. You can install these from the `examples` folder by running:
    ```bash
    pip3 install -r requirements.txt
    ```
 
-The `examples` folder contains Jupyter Notebooks that demonstrate how to work with the Python to Leo transpiler. There are two main ways to run these notebooks:
+The `examples` folder contains Jupyter Notebooks that demonstrate how to work with the Python to Leo transpiler. Currently, the transpiler supports sklearn decision tree models, and the examples cover the Iris dataset, the German credit dataset, and the MNIST dataset. There are two main ways to run these notebooks:
 
 1. **Visual Studio Code (VS Code)**
    - Ensure you have [VS Code installed](https://code.visualstudio.com/).
