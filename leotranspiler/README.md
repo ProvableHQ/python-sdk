@@ -29,7 +29,7 @@ This Python library offers the ability to transpile Python machine learning mode
 ### Installation:
 
 1. Clone the repository, or download the `.whl` or `.tar.gz` file from the `dist` folder.
-2. Navigate to the directory containing the `.whl` or `.tar.gz` file:
+2. Navigate to the `dist` directory containing the `.whl` or `.tar.gz` file:
    ```bash
    cd dist
    ```
@@ -44,7 +44,24 @@ This Python library offers the ability to transpile Python machine learning mode
 
 ### Usage:
 
-- Explore the `examples` folder for example usages.
+- Explore the `examples` folder for example usages. To run the examples, additional Python packages are required. You can install these from the `examples` folder by running:
+   ```bash
+   pip3 install -r requirements.txt
+   ```
+
+The `examples` folder contains Jupyter Notebooks that demonstrate how to work with the Python to Leo transpiler. Currently, the transpiler supports sklearn decision tree models, and the examples cover the Iris dataset, the German credit dataset, and the MNIST dataset. There are two main ways to run these notebooks:
+
+1. **Visual Studio Code (VS Code)**
+   - Ensure you have [VS Code installed](https://code.visualstudio.com/).
+   - [Install the Jupyter extension](https://marketplace.visualstudio.com/items?itemName=ms-toolsai.jupyter) in VS Code.
+   - Open the notebook file (`.ipynb`) in VS Code to view, edit, and run the Python code cells interactively.
+
+2. **Jupyter Notebook**
+   - Ensure you have [Jupyter Notebook installed](https://jupyter.org/install.html).
+   - Navigate to the `examples` folder in a terminal and launch Jupyter Notebook using the command `jupyter notebook`.
+   - Once Jupyter Notebook launches in your browser, open the notebook files (`.ipynb`) to view and run the Python code cells interactively.
+
+For a more detailed tutorial on using Jupyter Notebooks, refer to this [Jupyter Notebook beginner guide](https://realpython.com/jupyter-notebook-introduction/).
 
 **Notes**:
 - On some systems, "python" and "pip" might be used instead of "python3" and "pip3".
