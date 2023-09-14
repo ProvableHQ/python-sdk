@@ -239,6 +239,180 @@ class TestLeoTranspiler(unittest.TestCase):
             os.path.join(os.getcwd(), "leotranspiler", "tests", "tree_credit")
         )
 
+    def test_run_mnist(self):  # noqa: D103
+        import gzip
+        import os
+        import shutil
+
+        import requests
+
+        def download_and_extract_dataset(url, save_path, folder_path):
+            """Download and extract dataset if it doesn't exist."""
+            if not os.path.exists(save_path):
+                print(f"Downloading {os.path.basename(save_path)}...")  # noqa: T201
+                response = requests.get(url)
+                with open(save_path, "wb") as file:
+                    file.write(response.content)
+
+                decompressed_file_name = os.path.splitext(os.path.basename(save_path))[
+                    0
+                ]
+                decompressed_file_path = os.path.join(
+                    folder_path, decompressed_file_name
+                )
+
+                with gzip.open(save_path, "rb") as f_in:
+                    with open(decompressed_file_path, "wb") as f_out:
+                        shutil.copyfileobj(f_in, f_out)
+
+                print(  # noqa: T201
+                    f"{decompressed_file_name} downloaded and extracted."
+                )  # noqa: T201
+            else:
+                print(f"{os.path.basename(save_path)} already exists.")  # noqa: T201
+
+        # URLs and filenames
+        file_info = [
+            (
+                "http://yann.lecun.com/exdb/mnist/train-images-idx3-ubyte.gz",
+                "train-images-idx3-ubyte.gz",
+            ),
+            (
+                "http://yann.lecun.com/exdb/mnist/train-labels-idx1-ubyte.gz",
+                "train-labels-idx1-ubyte.gz",
+            ),
+            (
+                "http://yann.lecun.com/exdb/mnist/t10k-images-idx3-ubyte.gz",
+                "t10k-images-idx3-ubyte.gz",
+            ),
+            (
+                "http://yann.lecun.com/exdb/mnist/t10k-labels-idx1-ubyte.gz",
+                "t10k-labels-idx1-ubyte.gz",
+            ),
+        ]
+
+        folder_name = "leotranspiler/tests/tmp/mnist"
+        folder_path = os.path.join(os.getcwd(), folder_name)
+
+        os.makedirs(folder_path, exist_ok=True)  # Create folder if it doesn't exist
+
+        # Download and extract each file
+        for url, file_name in file_info:
+            path_to_save = os.path.join(folder_path, file_name)
+            download_and_extract_dataset(url, path_to_save, folder_path)
+
+        import numpy as np
+
+        def read_idx3_ubyte_image_file(filename):
+            """Read IDX3-ubyte formatted image data."""
+            with open(filename, "rb") as f:
+                magic_num = int.from_bytes(f.read(4), byteorder="big")
+                num_images = int.from_bytes(f.read(4), byteorder="big")
+                num_rows = int.from_bytes(f.read(4), byteorder="big")
+                num_cols = int.from_bytes(f.read(4), byteorder="big")
+
+                if magic_num != 2051:
+                    raise ValueError(f"Invalid magic number: {magic_num}")
+
+                images = np.zeros((num_images, num_rows, num_cols), dtype=np.uint8)
+
+                for i in range(num_images):
+                    for r in range(num_rows):
+                        for c in range(num_cols):
+                            pixel = int.from_bytes(f.read(1), byteorder="big")
+                            images[i, r, c] = pixel
+
+            return images
+
+        def read_idx1_ubyte_label_file(filename):
+            """Read IDX1-ubyte formatted label data."""
+            with open(filename, "rb") as f:
+                magic_num = int.from_bytes(f.read(4), byteorder="big")
+                num_labels = int.from_bytes(f.read(4), byteorder="big")
+
+                if magic_num != 2049:
+                    raise ValueError(f"Invalid magic number: {magic_num}")
+
+                labels = np.zeros(num_labels, dtype=np.uint8)
+
+                for i in range(num_labels):
+                    labels[i] = int.from_bytes(f.read(1), byteorder="big")
+
+            return labels
+
+        folder_path = os.path.join(
+            os.getcwd(), folder_name
+        )  # Adjust this path to where you stored the files
+
+        train_images = read_idx3_ubyte_image_file(
+            os.path.join(folder_path, "train-images-idx3-ubyte")
+        )
+        train_labels = read_idx1_ubyte_label_file(
+            os.path.join(folder_path, "train-labels-idx1-ubyte")
+        )
+        test_images = read_idx3_ubyte_image_file(
+            os.path.join(folder_path, "t10k-images-idx3-ubyte")
+        )
+        test_labels = read_idx1_ubyte_label_file(
+            os.path.join(folder_path, "t10k-labels-idx1-ubyte")
+        )
+
+        print(  # noqa: T201
+            f"Shape of train_images: {train_images.shape}"
+        )  # Should output "Shape of train_images: (60000, 28, 28)"
+        print(  # noqa: T201
+            f"Shape of train_labels: {train_labels.shape}"
+        )  # Should output "Shape of train_labels: (60000,)"
+        print(  # noqa: T201
+            f"Shape of test_images: {test_images.shape}"
+        )  # Should output "Shape of test_images: (10000, 28, 28)"
+        print(  # noqa: T201
+            f"Shape of test_labels: {test_labels.shape}"
+        )  # Should output "Shape of test_labels: (10000,)"
+
+        # Reshape the datasets from 3D to 2D
+        train_images_2d = train_images.reshape(
+            train_images.shape[0], -1
+        )  # -1 infers the size from the remaining dimensions
+        test_images_2d = test_images.reshape(test_images.shape[0], -1)
+
+        # Create the classifier and fit it to the reshaped training data
+        from sklearn.tree import DecisionTreeClassifier
+
+        clf = DecisionTreeClassifier(max_depth=10, random_state=0)
+        clf.fit(train_images_2d, train_labels)
+
+        import logging
+        import os
+
+        from leotranspiler import LeoTranspiler
+
+        # Set the logger
+        logger = logging.getLogger()
+        logger.setLevel(logging.INFO)
+
+        # Transpile the deceision tree into Leo code
+        lt = LeoTranspiler(model=clf, validation_data=train_images_2d[0:200])
+        leo_project_path = os.path.join(os.getcwd(), "leotranspiler/tests/tmp/mnist")
+        leo_project_name = "tree_mnist_1"
+        lt.to_leo(path=leo_project_path, project_name=leo_project_name)
+
+        # Compute the accuracy of the Leo program and the Python program on the test set
+        num_test_samples = len(test_images_2d)
+
+        # let's limit the number of test stamples to 50 to make the computation faster
+        num_test_samples = min(num_test_samples, 50)
+
+        python_predictions = clf.predict(test_images_2d)
+
+        leo_predictions = np.zeros(num_test_samples)
+        for i in range(num_test_samples):
+            leo_predictions[i] = lt.run(input_sample=test_images_2d[i]).output_decimal[
+                0
+            ]
+
+            self.assertEqual(int(leo_predictions[i]), python_predictions[i])
+
 
 if __name__ == "__main__":
     unittest.main()
