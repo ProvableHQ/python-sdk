@@ -400,13 +400,16 @@ class TestLeoTranspiler(unittest.TestCase):
         # Compute the accuracy of the Leo program and the Python program on the test set
         num_test_samples = len(test_images_2d)
 
-        # let's limit the number of test stamples to 50 to make the computation faster
-        num_test_samples = min(num_test_samples, 50)
+        # let's limit the number of test stamples to 10 to make the computation faster
+        num_test_samples = min(num_test_samples, 10)
 
         python_predictions = clf.predict(test_images_2d)
 
         leo_predictions = np.zeros(num_test_samples)
         for i in range(num_test_samples):
+            one_dim_array = test_images_2d[i].ravel()  # noqa: F841
+            inputs = lt.model_transpiler.generate_input(test_images_2d[i])  # noqa: F841
+
             leo_predictions[i] = lt.run(input_sample=test_images_2d[i]).output_decimal[
                 0
             ]

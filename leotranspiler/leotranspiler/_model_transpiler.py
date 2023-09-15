@@ -99,7 +99,10 @@ class _ModelTranspilerBase:
 
     def _convert_to_fixed_point(self, value):
         if hasattr(value, "shape"):  # check if value is a numpy array
-            return (value * self.fixed_point_scaling_factor).astype(int)
+            vectorized_int = np.vectorize(int)
+            return vectorized_int(
+                value.astype(object) * self.fixed_point_scaling_factor
+            )
         else:
             return int(round(value * self.fixed_point_scaling_factor))
 
