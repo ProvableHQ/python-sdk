@@ -5,10 +5,13 @@ from zipfile import ZipFile
 
 import pandas as pd
 import requests
-from leotranspiler import LeoTranspiler
 from sklearn.metrics import accuracy_score, roc_auc_score
 from sklearn.model_selection import train_test_split
 from sklearn.tree import DecisionTreeClassifier
+
+from zkml import LeoTranspiler
+
+library_name = "zkml"
 
 
 class TestLeoTranspiler(unittest.TestCase):
@@ -43,7 +46,7 @@ class TestLeoTranspiler(unittest.TestCase):
 
         # Transpile
         lt = LeoTranspiler(clf, X_test)
-        lt.to_leo(os.path.join(os.getcwd(), "leotranspiler", "tests"), "tree1")
+        lt.to_leo(os.path.join(os.getcwd(), library_name, "tests"), "tree1")
         self.assertEqual(lt.leo_program_stored, True)
 
         # Run and compare the Python prediction with the Leo prediction
@@ -55,7 +58,7 @@ class TestLeoTranspiler(unittest.TestCase):
         # remove the generated folder
         import shutil
 
-        shutil.rmtree(os.path.join(os.getcwd(), "leotranspiler", "tests", "tree1"))
+        shutil.rmtree(os.path.join(os.getcwd(), library_name, "tests", "tree1"))
 
     def test_init_tree_run_model_parameters_as_inputs(self):
         # Import necessary libraries
@@ -80,7 +83,7 @@ class TestLeoTranspiler(unittest.TestCase):
 
         # Transpile
         lt = LeoTranspiler(clf, X_test)
-        lt.to_leo(os.path.join(os.getcwd(), "leotranspiler", "tests"), "tree1", True)
+        lt.to_leo(os.path.join(os.getcwd(), library_name, "tests"), "tree1", True)
         self.assertEqual(lt.leo_program_stored, True)
 
         # Run and compare the Python prediction with the Leo prediction
@@ -93,7 +96,7 @@ class TestLeoTranspiler(unittest.TestCase):
         # remove the generated folder
         import shutil
 
-        shutil.rmtree(os.path.join(os.getcwd(), "leotranspiler", "tests", "tree1"))
+        shutil.rmtree(os.path.join(os.getcwd(), library_name, "tests", "tree1"))
 
     def test_init_tree_execute(self):
         # Import necessary libraries
@@ -118,7 +121,7 @@ class TestLeoTranspiler(unittest.TestCase):
 
         # Transpile
         lt = LeoTranspiler(clf, X_test)
-        lt.to_leo(os.path.join(os.getcwd(), "leotranspiler", "tests"), "tree1")
+        lt.to_leo(os.path.join(os.getcwd(), library_name, "tests"), "tree1")
         self.assertEqual(lt.leo_program_stored, True)
 
         # Execute and compare the Python prediction with the Leo prediction
@@ -129,7 +132,7 @@ class TestLeoTranspiler(unittest.TestCase):
         # remove the generated folder
         import shutil
 
-        shutil.rmtree(os.path.join(os.getcwd(), "leotranspiler", "tests", "tree1"))
+        shutil.rmtree(os.path.join(os.getcwd(), library_name, "tests", "tree1"))
 
     def download_and_extract_dataset(self, url, save_path, folder_path):
         """Download and extract dataset if it doesn't exist."""
@@ -147,10 +150,10 @@ class TestLeoTranspiler(unittest.TestCase):
     def test_run_credit(self):  # noqa: D103
         # File and folder specifications
         url = "https://archive.ics.uci.edu/static/public/144/"
-        "statlog+german+credit+data.zip"
+        url += "statlog+german+credit+data.zip"
         folder_name = "tmp"
         zip_file_name = "statlog+german+credit+data.zip"
-        folder_path = os.path.join(os.getcwd(), "leotranspiler", "tests", folder_name)
+        folder_path = os.path.join(os.getcwd(), library_name, "tests", folder_name)
         path_to_save = os.path.join(folder_path, zip_file_name)
 
         os.makedirs(folder_path, exist_ok=True)  # Create folder if it doesn't exist
@@ -221,7 +224,7 @@ class TestLeoTranspiler(unittest.TestCase):
 
         # Transpile the deceision tree into Leo code
         lt = LeoTranspiler(model=clf, validation_data=X_train)
-        lt.to_leo(os.path.join(os.getcwd(), "leotranspiler", "tests"), "tree_credit")
+        lt.to_leo(os.path.join(os.getcwd(), library_name, "tests"), "tree_credit")
 
         # Run and compare the Python prediction with the Leo prediction
         lc = lt.run(X_test.iloc[0])
@@ -234,9 +237,7 @@ class TestLeoTranspiler(unittest.TestCase):
         # remove the generated folder
         import shutil
 
-        shutil.rmtree(
-            os.path.join(os.getcwd(), "leotranspiler", "tests", "tree_credit")
-        )
+        shutil.rmtree(os.path.join(os.getcwd(), library_name, "tests", "tree_credit"))
 
     def test_run_mnist(self):  # noqa: D103
         import gzip
@@ -290,7 +291,7 @@ class TestLeoTranspiler(unittest.TestCase):
             ),
         ]
 
-        folder_name = "leotranspiler/tests/tmp/mnist"
+        folder_name = library_name + "/tests/tmp/mnist"
         folder_path = os.path.join(os.getcwd(), folder_name)
 
         os.makedirs(folder_path, exist_ok=True)  # Create folder if it doesn't exist
@@ -384,7 +385,7 @@ class TestLeoTranspiler(unittest.TestCase):
         import logging
         import os
 
-        from leotranspiler import LeoTranspiler
+        from zkml import LeoTranspiler
 
         # Set the logger
         logger = logging.getLogger()
@@ -392,7 +393,7 @@ class TestLeoTranspiler(unittest.TestCase):
 
         # Transpile the deceision tree into Leo code
         lt = LeoTranspiler(model=clf, validation_data=train_images_2d[0:200])
-        leo_project_path = os.path.join(os.getcwd(), "leotranspiler/tests/tmp/mnist")
+        leo_project_path = os.path.join(os.getcwd(), library_name + "/tests/tmp/mnist")
         leo_project_name = "tree_mnist_1"
         lt.to_leo(path=leo_project_path, project_name=leo_project_name)
 

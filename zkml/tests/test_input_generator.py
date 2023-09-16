@@ -3,7 +3,7 @@ import logging
 import sys
 import unittest
 
-from leotranspiler._input_generator import _InputGenerator
+from zkml._input_generator import _InputGenerator
 
 
 class TestInputGenerator(unittest.TestCase):

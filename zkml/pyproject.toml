@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "leotranspiler"
+name = "zkml"
 version = "0.1.0"
 description = "A transpiler for Python machine learning models to Leo for zero-knowledge inference"
 authors = [
