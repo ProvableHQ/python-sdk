@@ -4,6 +4,6 @@ Welcome to the Aleo Python SDK! This SDK provides a set of libraries aimed at em
 
 ## Libraries Included
 
-- [**leotranspiler**](./leotranspiler/): A transpiler that converts Python machine learning models into Leo code.
+- [**zkml**](./zkml/): A transpiler that converts Python machine learning models into Leo code.
 
 For detailed information on each library, please navigate to their respective folders.
