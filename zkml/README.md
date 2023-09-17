@@ -28,6 +28,15 @@ This Python library offers the ability to transpile Python machine learning mode
 
 ### Installation:
 
+**Through PyPI**:
+
+- Install using the following command:
+   ```bash
+   pip3 install zkml
+   ```
+
+**Through the GitHub repository**:
+
 1. Clone the repository, or download the `.whl` or `.tar.gz` file from the `dist` folder.
 2. Navigate to the `dist` directory containing the `.whl` or `.tar.gz` file:
    ```bash
@@ -35,16 +44,16 @@ This Python library offers the ability to transpile Python machine learning mode
    ```
 3. Install using pip:
    ```bash
-   pip3 install leotranspiler-0.1.0-py3-none-any.whl
+   pip3 install zkml-0.0.1b1-py3-none-any.whl
    ```
    OR
    ```bash
-   pip3 install leotranspiler-0.1.0.tar.gz
+   pip3 install zkml-0.0.1b1.tar.gz
    ```
 
 ### Usage:
 
-- Explore the `examples` folder for example usages. To run the examples, additional Python packages are required. You can install these from the `examples` folder by running:
+- Explore the `examples` folder from GitHub for example usages. To run the examples, additional Python packages are required. You can install these from the `examples` folder by running:
    ```bash
    pip3 install -r requirements.txt
    ```
@@ -72,13 +81,13 @@ This Python library offers the ability to transpile Python machine learning mode
 ### Setup:
 
 1. Clone the repository.
-2. Ensure no previous version of `leotranspiler` is installed:
+2. Ensure no previous version of `zkml` is installed:
    ```bash
-   pip3 uninstall leotranspiler
+   pip3 uninstall zkml
    ```
-3. Navigate to the `leotranspiler` source code directory:
+3. Navigate to the `zkml` source code directory:
    ```bash
-   cd leotranspiler
+   cd zkml
    ```
 4. Install in editable mode:
    ```bash
@@ -105,8 +114,8 @@ This Python library offers the ability to transpile Python machine learning mode
 
 **Notes**:
 - Adhere to the [PEP 8 style guide](https://peps.python.org/pep-0008/) and ensure you provide docstrings for all public-facing functions and classes.
-- More detailed contribution guidelines will be provided soon. If you'd like to contribute in the meantime, please contact us.
+- More detailed contribution guidelines will be provided soon. If you'd like to contribute in the meantime, please contact us via email.
 
 ---
 
-Thank you for your interest in Python to Leo transpiler. Let's push the boundaries of zk and Python together!
+Thank you for your interest in the zkml Python to Leo transpiler. Let's push the boundaries of zk and Python together!

@@ -9,7 +9,7 @@ authors = [
 readme = "README.md"
 license = "Apache-2.0"
 include = ["LICENSE.md"]
-repository = "https://github.com/AleoHQ/python-sdk/tree/master/leotranspiler"
+repository = "https://github.com/AleoHQ/python-sdk/tree/master/zkml"
 
 [tool.poetry.dependencies]
 python = "^3.9"
