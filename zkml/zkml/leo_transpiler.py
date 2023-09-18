@@ -156,17 +156,30 @@ class LeoTranspiler:
         computation_base_result = []
 
         if isinstance(input_sample, pd.DataFrame):  # an entire dataset
-            # Handle a pandas DataFrame (assumed to be a collection of data points)
             for _, row in input_sample.iterrows():
                 computation_base_result.append(self._handle_run_execute(row, command))
         elif isinstance(input_sample, list):  # a list of data points
-            # Handle a list of data points
             for data_point in input_sample:
                 computation_base_result.append(
                     self._handle_run_execute(data_point, command)
                 )
+        elif (
+            isinstance(input_sample, ndarray)
+            and self.validation_data is not None
+            and input_sample.ndim == self.validation_data.ndim
+        ):
+            for data_point in input_sample:
+                computation_base_result.append(
+                    self._handle_run_execute(data_point, command)
+                )
+        elif isinstance(input_sample, ndarray) and self.validation_data is None:
+            logging.warning(
+                "No validation_data passed to the transpiler, thus, no information "
+                "available of dataset shape. "
+                f"Passed input sample for {command} is treated as a single data point"
+            )
+            computation_base_result = self._handle_run_execute(input_sample, command)
         else:  # a single data point
-            # Handle a single data point
             computation_base_result = self._handle_run_execute(input_sample, command)
 
         return computation_base_result
