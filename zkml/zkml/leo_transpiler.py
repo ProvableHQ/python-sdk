@@ -126,17 +126,7 @@ class LeoTranspiler:
         LeoComputation
             The Leo computation for the given input sample.
         """
-        if not self.leo_program_stored:
-            raise FileNotFoundError("Leo program not stored")
-
-        circuit_inputs_fixed_point = self.model_transpiler.generate_input(input_sample)
-        result, runtime = self._execute_leo_cli("run", circuit_inputs_fixed_point)
-        leo_computation = self._parse_leo_output(
-            "run", result, circuit_inputs_fixed_point, runtime
-        )
-        self.model_transpiler.convert_computation_base_outputs_to_decimal(
-            leo_computation
-        )
+        leo_computation = self._handle_run_execute(input_sample, "run")
 
         return leo_computation
 
@@ -154,17 +144,24 @@ class LeoTranspiler:
         ZeroKnowledgeProof
             The zero knowledge proof for the given input sample.
         """
+        zkp = self._handle_run_execute(input_sample, "execute")
+
+        return zkp
+
+    def _handle_run_execute(self, input_sample, command):
         if not self.leo_program_stored:
             raise FileNotFoundError("Leo program not stored")
 
         circuit_inputs_fixed_point = self.model_transpiler.generate_input(input_sample)
-        result, runtime = self._execute_leo_cli("execute", circuit_inputs_fixed_point)
-        zkp = self._parse_leo_output(
-            "execute", result, circuit_inputs_fixed_point, runtime
+        result, runtime = self._execute_leo_cli(command, circuit_inputs_fixed_point)
+        computation_base_result = self._parse_leo_output(
+            command, result, circuit_inputs_fixed_point, runtime
         )
-        self.model_transpiler.convert_computation_base_outputs_to_decimal(zkp)
+        self.model_transpiler.convert_computation_base_outputs_to_decimal(
+            computation_base_result
+        )
 
-        return zkp
+        return computation_base_result
 
     def _execute_leo_cli(self, command: str, inputs: List[str]) -> Tuple[str, float]:
         """Execute a Leo CLI command.
