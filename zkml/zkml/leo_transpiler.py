@@ -33,7 +33,7 @@ class LeoTranspiler:
         self,
         model: BaseEstimator,
         validation_data: Optional[ArrayLike] = None,
-        ouput_model_hash: Optional[str] = None,
+        output_model_hash: Optional[str] = None,
     ):
         """Initialize the LeoTranspiler with the given parameters.
 
@@ -46,11 +46,11 @@ class LeoTranspiler:
             not be trained on this data.
         output_model_hash : str, optional
             If provided, the circuit returns the hash of the model's weights and
-            biases. Possible values are ... (todo)
+            biases. This functionality is not yet implemented.
         """
         self.model = model
         self.validation_data = validation_data
-        self.ouput_model_hash = ouput_model_hash
+        self.output_model_hash = output_model_hash
 
         self.model_as_input = None
         self.transpilation_result = None
@@ -151,8 +151,8 @@ class LeoTranspiler:
 
         Returns
         -------
-        LeoComputation
-            The Leo computation for the given input sample.
+        ZeroKnowledgeProof
+            The zero knowledge proof for the given input sample.
         """
         if not self.leo_program_stored:
             raise FileNotFoundError("Leo program not stored")
@@ -213,7 +213,7 @@ class LeoTranspiler:
         result: str,
         input: Optional[Union[ndarray, List[float]]] = None,
         runtime: Optional[float] = None,
-    ) -> Tuple[List[int], int]:
+    ) -> Union[LeoComputation, ZeroKnowledgeProof]:
         """Parse the Leo output.
 
         Parameters
@@ -229,8 +229,15 @@ class LeoTranspiler:
 
         Returns
         -------
-        Tuple[List[int], int]
-            The outputs (in fixed-point format) and the number of constraints.
+        Union[LeoComputation, ZeroKnowledgeProof]
+            - If the command was "run", a `LeoComputation` object.
+            - If the command was "execute", a `ZeroKnowledgeProof` object.
+
+        Raises
+        ------
+        ValueError
+            If the command is not recognized or if there was an error parsing the
+            output.
         """
         outputs_fixed_point = []
 
