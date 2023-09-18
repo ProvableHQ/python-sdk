@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
 
+import pandas as pd
 import psutil
 from numpy import ndarray
 from numpy.typing import ArrayLike
@@ -126,7 +127,7 @@ class LeoTranspiler:
         LeoComputation
             The Leo computation for the given input sample.
         """
-        leo_computation = self._handle_run_execute(input_sample, "run")
+        leo_computation = self._handle_input_sample(input_sample, "run")
 
         return leo_computation
 
@@ -144,14 +145,33 @@ class LeoTranspiler:
         ZeroKnowledgeProof
             The zero knowledge proof for the given input sample.
         """
-        zkp = self._handle_run_execute(input_sample, "execute")
+        zkp = self._handle_input_sample(input_sample, "execute")
 
         return zkp
 
-    def _handle_run_execute(self, input_sample, command):
+    def _handle_input_sample(self, input_sample, command):
         if not self.leo_program_stored:
             raise FileNotFoundError("Leo program not stored")
 
+        computation_base_result = []
+
+        if isinstance(input_sample, pd.DataFrame):  # an entire dataset
+            # Handle a pandas DataFrame (assumed to be a collection of data points)
+            for _, row in input_sample.iterrows():
+                computation_base_result.append(self._handle_run_execute(row, command))
+        elif isinstance(input_sample, list):  # a list of data points
+            # Handle a list of data points
+            for data_point in input_sample:
+                computation_base_result.append(
+                    self._handle_run_execute(data_point, command)
+                )
+        else:  # a single data point
+            # Handle a single data point
+            computation_base_result = self._handle_run_execute(input_sample, command)
+
+        return computation_base_result
+
+    def _handle_run_execute(self, input_sample, command):
         circuit_inputs_fixed_point = self.model_transpiler.generate_input(input_sample)
         result, runtime = self._execute_leo_cli(command, circuit_inputs_fixed_point)
         computation_base_result = self._parse_leo_output(
