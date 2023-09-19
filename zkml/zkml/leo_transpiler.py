@@ -113,74 +113,81 @@ class LeoTranspiler:
         self.leo_program_stored = True
         logging.info("Leo program stored")
 
-    def run(self, input_sample: Union[ndarray, List[float]]) -> LeoComputation:
-        """Run the model in Leo output for a given input sample.
+    def run(
+        self, input: Union[ndarray, List[float], pd.DataFrame, pd.Series]
+    ) -> LeoComputation:
+        """Run the model to get a Leo computation for a given input sample.
 
         Parameters
         ----------
-        input_sample : Union[ndarray, List[float]]
-            The input sample for which to prove the output. Can be a numpy array or a
-            list of floats.
+        input : Union[ndarray, List[float], DataFrame, Series]
+            The input sample or dataset for which to generate the
+            Leo computation output. Can be a numpy ndarray, a
+            list of floats, a pandas DataFrame, or a pandas
+            Series.
 
         Returns
         -------
         LeoComputation
             The Leo computation for the given input sample.
         """
-        leo_computation = self._handle_input_sample(input_sample, "run")
+        leo_computation = self._handle_input(input, "run")
 
         return leo_computation
 
-    def execute(self, input_sample: Union[ndarray, List[float]]) -> ZeroKnowledgeProof:
-        """Run the model in Leo output for a given input sample.
+    def execute(
+        self, input: Union[ndarray, List[float], pd.DataFrame, pd.Series]
+    ) -> ZeroKnowledgeProof:
+        """Run the model to get a zero-knowledge proof for a given input sample.
 
         Parameters
         ----------
-        input_sample : Union[ndarray, List[float]]
-            The input sample for which to prove the output. Can be a numpy array or a
-            list of floats.
+        input : Union[ndarray, List[float], DataFrame, Series]
+            The input sample or dataset for which to generate the zero-knowledge proof.
+            Can be a numpy ndarray, a list of floats, a pandas DataFrame, or a pandas
+            Series.
 
         Returns
         -------
         ZeroKnowledgeProof
-            The zero knowledge proof for the given input sample.
+            The zero-knowledge proof for the given input sample.
         """
-        zkp = self._handle_input_sample(input_sample, "execute")
+        zkp = self._handle_input(input, "execute")
 
         return zkp
 
-    def _handle_input_sample(self, input_sample, command):
+    def _handle_input(self, input, command):
         if not self.leo_program_stored:
             raise FileNotFoundError("Leo program not stored")
 
         computation_base_result = []
 
-        if isinstance(input_sample, pd.DataFrame):  # an entire dataset
-            for _, row in input_sample.iterrows():
+        if isinstance(input, pd.DataFrame):  # an entire dataset
+            for _, row in input.iterrows():
                 computation_base_result.append(self._handle_run_execute(row, command))
-        elif isinstance(input_sample, list):  # a list of data points
-            for data_point in input_sample:
+        elif isinstance(input, list):  # a list of data points
+            for data_point in input:
                 computation_base_result.append(
                     self._handle_run_execute(data_point, command)
                 )
         elif (
-            isinstance(input_sample, ndarray)
+            isinstance(input, ndarray)
             and self.validation_data is not None
-            and input_sample.ndim == self.validation_data.ndim
+            and input.ndim == self.validation_data.ndim
         ):
-            for data_point in input_sample:
+            for data_point in input:
                 computation_base_result.append(
                     self._handle_run_execute(data_point, command)
                 )
-        elif isinstance(input_sample, ndarray) and self.validation_data is None:
+        elif isinstance(input, ndarray) and self.validation_data is None:
             logging.warning(
                 "No validation_data passed to the transpiler, thus, no information "
                 "available of dataset shape. "
                 f"Passed input sample for {command} is treated as a single data point"
             )
-            computation_base_result = self._handle_run_execute(input_sample, command)
+            computation_base_result = self._handle_run_execute(input, command)
         else:  # a single data point
-            computation_base_result = self._handle_run_execute(input_sample, command)
+            computation_base_result = self._handle_run_execute(input, command)
 
         return computation_base_result
 
