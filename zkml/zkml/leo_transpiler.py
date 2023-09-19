@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
 
+import pandas as pd
 import psutil
 from numpy import ndarray
 from numpy.typing import ArrayLike
@@ -33,7 +34,7 @@ class LeoTranspiler:
         self,
         model: BaseEstimator,
         validation_data: Optional[ArrayLike] = None,
-        ouput_model_hash: Optional[str] = None,
+        output_model_hash: Optional[str] = None,
     ):
         """Initialize the LeoTranspiler with the given parameters.
 
@@ -46,11 +47,11 @@ class LeoTranspiler:
             not be trained on this data.
         output_model_hash : str, optional
             If provided, the circuit returns the hash of the model's weights and
-            biases. Possible values are ... (todo)
+            biases. This functionality is not yet implemented.
         """
         self.model = model
         self.validation_data = validation_data
-        self.ouput_model_hash = ouput_model_hash
+        self.output_model_hash = output_model_hash
 
         self.model_as_input = None
         self.transpilation_result = None
@@ -112,59 +113,95 @@ class LeoTranspiler:
         self.leo_program_stored = True
         logging.info("Leo program stored")
 
-    def run(self, input_sample: Union[ndarray, List[float]]) -> LeoComputation:
-        """Run the model in Leo output for a given input sample.
+    def run(
+        self, input: Union[ndarray, List[float], pd.DataFrame, pd.Series]
+    ) -> LeoComputation:
+        """Run the model to get a Leo computation for a given input sample.
 
         Parameters
         ----------
-        input_sample : Union[ndarray, List[float]]
-            The input sample for which to prove the output. Can be a numpy array or a
-            list of floats.
+        input : Union[ndarray, List[float], DataFrame, Series]
+            The input sample or dataset for which to generate the
+            Leo computation output. Can be a numpy ndarray, a
+            list of floats, a pandas DataFrame, or a pandas
+            Series.
 
         Returns
         -------
         LeoComputation
             The Leo computation for the given input sample.
         """
-        if not self.leo_program_stored:
-            raise FileNotFoundError("Leo program not stored")
-
-        circuit_inputs_fixed_point = self.model_transpiler.generate_input(input_sample)
-        result, runtime = self._execute_leo_cli("run", circuit_inputs_fixed_point)
-        leo_computation = self._parse_leo_output(
-            "run", result, circuit_inputs_fixed_point, runtime
-        )
-        self.model_transpiler.convert_computation_base_outputs_to_decimal(
-            leo_computation
-        )
+        leo_computation = self._handle_input(input, "run")
 
         return leo_computation
 
-    def execute(self, input_sample: Union[ndarray, List[float]]) -> ZeroKnowledgeProof:
-        """Run the model in Leo output for a given input sample.
+    def execute(
+        self, input: Union[ndarray, List[float], pd.DataFrame, pd.Series]
+    ) -> ZeroKnowledgeProof:
+        """Run the model to get a zero-knowledge proof for a given input sample.
 
         Parameters
         ----------
-        input_sample : Union[ndarray, List[float]]
-            The input sample for which to prove the output. Can be a numpy array or a
-            list of floats.
+        input : Union[ndarray, List[float], DataFrame, Series]
+            The input sample or dataset for which to generate the zero-knowledge proof.
+            Can be a numpy ndarray, a list of floats, a pandas DataFrame, or a pandas
+            Series.
 
         Returns
         -------
-        LeoComputation
-            The Leo computation for the given input sample.
+        ZeroKnowledgeProof
+            The zero-knowledge proof for the given input sample.
         """
+        zkp = self._handle_input(input, "execute")
+
+        return zkp
+
+    def _handle_input(self, input, command):
         if not self.leo_program_stored:
             raise FileNotFoundError("Leo program not stored")
 
-        circuit_inputs_fixed_point = self.model_transpiler.generate_input(input_sample)
-        result, runtime = self._execute_leo_cli("execute", circuit_inputs_fixed_point)
-        zkp = self._parse_leo_output(
-            "execute", result, circuit_inputs_fixed_point, runtime
-        )
-        self.model_transpiler.convert_computation_base_outputs_to_decimal(zkp)
+        computation_base_result = []
 
-        return zkp
+        if isinstance(input, pd.DataFrame):  # an entire dataset
+            for _, row in input.iterrows():
+                computation_base_result.append(self._handle_run_execute(row, command))
+        elif isinstance(input, list):  # a list of data points
+            for data_point in input:
+                computation_base_result.append(
+                    self._handle_run_execute(data_point, command)
+                )
+        elif (
+            isinstance(input, ndarray)
+            and self.validation_data is not None
+            and input.ndim == self.validation_data.ndim
+        ):
+            for data_point in input:
+                computation_base_result.append(
+                    self._handle_run_execute(data_point, command)
+                )
+        elif isinstance(input, ndarray) and self.validation_data is None:
+            logging.warning(
+                "No validation_data passed to the transpiler, thus, no information "
+                "available of dataset shape. "
+                f"Passed input sample for {command} is treated as a single data point"
+            )
+            computation_base_result = self._handle_run_execute(input, command)
+        else:  # a single data point
+            computation_base_result = self._handle_run_execute(input, command)
+
+        return computation_base_result
+
+    def _handle_run_execute(self, input, command):
+        circuit_inputs_fixed_point = self.model_transpiler.generate_input(input)
+        result, runtime = self._execute_leo_cli(command, circuit_inputs_fixed_point)
+        computation_base_result = self._parse_leo_output(
+            command, result, circuit_inputs_fixed_point, runtime
+        )
+        self.model_transpiler.convert_computation_base_outputs_to_decimal(
+            computation_base_result
+        )
+
+        return computation_base_result
 
     def _execute_leo_cli(self, command: str, inputs: List[str]) -> Tuple[str, float]:
         """Execute a Leo CLI command.
@@ -213,7 +250,7 @@ class LeoTranspiler:
         result: str,
         input: Optional[Union[ndarray, List[float]]] = None,
         runtime: Optional[float] = None,
-    ) -> Tuple[List[int], int]:
+    ) -> Union[LeoComputation, ZeroKnowledgeProof]:
         """Parse the Leo output.
 
         Parameters
@@ -229,8 +266,15 @@ class LeoTranspiler:
 
         Returns
         -------
-        Tuple[List[int], int]
-            The outputs (in fixed-point format) and the number of constraints.
+        Union[LeoComputation, ZeroKnowledgeProof]
+            - If the command was "run", a `LeoComputation` object.
+            - If the command was "execute", a `ZeroKnowledgeProof` object.
+
+        Raises
+        ------
+        ValueError
+            If the command is not recognized or if there was an error parsing the
+            output.
         """
         outputs_fixed_point = []
 
