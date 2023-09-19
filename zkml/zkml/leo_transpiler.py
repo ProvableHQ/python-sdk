@@ -191,8 +191,8 @@ class LeoTranspiler:
 
         return computation_base_result
 
-    def _handle_run_execute(self, input_sample, command):
-        circuit_inputs_fixed_point = self.model_transpiler.generate_input(input_sample)
+    def _handle_run_execute(self, input, command):
+        circuit_inputs_fixed_point = self.model_transpiler.generate_input(input)
         result, runtime = self._execute_leo_cli(command, circuit_inputs_fixed_point)
         computation_base_result = self._parse_leo_output(
             command, result, circuit_inputs_fixed_point, runtime

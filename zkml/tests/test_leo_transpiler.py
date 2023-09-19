@@ -578,9 +578,7 @@ class TestLeoTranspiler(unittest.TestCase):
             one_dim_array = test_images_2d[i].ravel()  # noqa: F841
             inputs = lt.model_transpiler.generate_input(test_images_2d[i])  # noqa: F841
 
-            leo_predictions[i] = lt.run(input_sample=test_images_2d[i]).output_decimal[
-                0
-            ]
+            leo_predictions[i] = lt.run(input=test_images_2d[i]).output_decimal[0]
 
             self.assertEqual(int(leo_predictions[i]), python_predictions[i])
 
@@ -750,7 +748,7 @@ class TestLeoTranspiler(unittest.TestCase):
 
         python_predictions = clf.predict(test_images_2d)
 
-        leo_computations = lt.run(input_sample=test_images_2d[0:num_test_samples])
+        leo_computations = lt.run(input=test_images_2d[0:num_test_samples])
 
         leo_predictions = np.zeros(num_test_samples)
         for i in range(num_test_samples):
