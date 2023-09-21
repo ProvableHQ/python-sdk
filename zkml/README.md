@@ -94,27 +94,9 @@ This Python library offers the ability to transpile Python machine learning mode
    pip3 install -e .
    ```
 
-### Development:
+### Contribution guidelines:
 
-1. Code and enhance the library.
-2. Ensure you run the tests.
-3. If you want to generate executables, ensure `poetry` is installed and then run:
-   ```bash
-   poetry build
-   ```
-
-### Committing:
-
-1. Ensure you're working on your own branch.
-2. Make sure the pre-commit tests pass. Check by running:
-   ```bash
-   pre-commit run --all-files
-   ```
-   - Install `pre-commit` if not present ([installation link here](https://pre-commit.com/)).
-
-**Notes**:
-- Adhere to the [PEP 8 style guide](https://peps.python.org/pep-0008/) and ensure you provide docstrings for all public-facing functions and classes.
-- More detailed contribution guidelines will be provided soon. If you'd like to contribute in the meantime, please contact us via email.
+Please follow the contribution guidelines outlined [here](CONTRIBUTING.md). For efficient workflows, we also encourage you to get in touch with the developers prior to contributing.
 
 ---
 
