@@ -17,5 +17,5 @@ Thank you for your interest in contributing to the zkml Leo transpiler! Below yo
 Please follow the instructions below when filing pull requests:
 
 - Ensure that your branch is forked from the current [master](https://github.com/AleoHQ/python-sdk/zkml/tree/master) branch.
-- Fill out the provided markdown template for the feature or proposal. Be sure to link the pull request to any issues by using keywords. Example: "closes #130".
+- Provide descriptive text for the feature or proposal. Be sure to link the pull request to any issues by using keywords. Example: "closes #130".
 - Run `pre-commit run --all-files` before you commit. You can find the installation details for pre-commit [here](https://pre-commit.com/). The pre-commit checks include the [PEP 8 style guide](https://peps.python.org/pep-0008/) and enforcing docstrings for all public-facing functions and classes
