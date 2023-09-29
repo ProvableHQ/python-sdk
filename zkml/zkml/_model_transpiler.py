@@ -15,6 +15,12 @@ def _get_model_transpiler(model, validation_data):
     if isinstance(model, sklearn.tree._classes.DecisionTreeClassifier):
         return _DecisionTreeTranspiler(model, validation_data)
     elif isinstance(model, sklearn.neural_network._multilayer_perceptron.MLPClassifier):
+        # ensure that the model uses the ReLU activation function
+        if model.activation != "relu":
+            raise ValueError(
+                "The model uses the activation function "
+                f"{model.activation}, but only ReLU is supported."
+            )
         return _MLPTranspiler(model, validation_data)
     else:
         raise ValueError("Model is not supported.")
@@ -289,3 +295,51 @@ class _DecisionTreeTranspiler(_ModelTranspilerBase):
 class _MLPTranspiler(_ModelTranspilerBase):
     def __init__(self, model, validation_data):
         super().__init__(model, validation_data)
+
+    def _get_numeric_range_model(self):
+        minimum = None
+        maximum = None
+
+        for layer in self.model.coefs_:
+            layer_minimum = layer.min()
+            layer_maximum = layer.max()
+            if minimum is None:
+                minimum = layer_minimum
+                maximum = layer_maximum
+            else:
+                minimum = min(minimum, layer_minimum)
+                maximum = max(maximum, layer_maximum)
+
+        for layer in self.model.intercepts_:
+            layer_minimum = layer.min()
+            layer_maximum = layer.max()
+            minimum = min(minimum, layer_minimum)
+            maximum = max(maximum, layer_maximum)
+
+        classes = self.model.classes_
+        # check if classes are numeric
+        # Todo generalize this code with others like the decision trees
+        # Todo one could quantize here and make the range smaller
+        if isinstance(classes[0], int) or isinstance(classes[0], np.int64):
+            minimum = min(minimum, min(classes))
+            maximum = max(maximum, max(classes))
+
+        return minimum, maximum
+
+    def _get_max_decimal_places_model(self):
+        max_decimal_places = None
+        for layer in self.model.coefs_:
+            layer_max_decimal_places = max(
+                [_get_rounding_decimal_places(val) for val in layer.ravel()]
+            )
+            if max_decimal_places is None:
+                max_decimal_places = layer_max_decimal_places
+            else:
+                max_decimal_places = max(max_decimal_places, layer_max_decimal_places)
+
+        for layer in self.model.intercepts_:
+            layer_max_decimal_places = max(
+                [_get_rounding_decimal_places(val) for val in layer.ravel()]
+            )
+            max_decimal_places = max(max_decimal_places, layer_max_decimal_places)
+        return max_decimal_places
