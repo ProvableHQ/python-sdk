@@ -1,0 +1,4 @@
+// The program input for mlp1/src/main.leo
+[main]
+public a: i32 = 0i32;
+b: i32 = 0i32;
