@@ -771,9 +771,9 @@ class TestLeoTranspiler(unittest.TestCase):
             random_state=0,
         )
 
-        sklearn_mlp.fit(
-            np.zeros((output_neurons, input_neurons)), list(range(output_neurons))
-        )
+        training_data = np.zeros((output_neurons, input_neurons))
+
+        sklearn_mlp.fit(training_data, list(range(output_neurons)))
 
         # make some parts of the model sparse
         sklearn_mlp.coefs_[0][0][0] = 0
@@ -782,6 +782,20 @@ class TestLeoTranspiler(unittest.TestCase):
         sklearn_mlp.intercepts_[0][1] = 0
 
         sklearn_mlp.coefs_[1][0] = 0
+
+        import logging
+
+        from zkml import LeoTranspiler
+
+        # Set the logger
+        logger = logging.getLogger()
+        logger.setLevel(logging.INFO)
+
+        # Transpile the deceision tree into Leo code
+        lt = LeoTranspiler(model=sklearn_mlp, validation_data=training_data)
+        leo_project_path = os.path.join(os.getcwd(), library_name + "/tests/tmp/mnist")
+        leo_project_name = "sklearn_mlp_mnist_1"
+        lt.to_leo(path=leo_project_path, project_name=leo_project_name)
 
         a = 0  # noqa: F841
 

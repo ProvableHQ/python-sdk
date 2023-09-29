@@ -14,6 +14,8 @@ from ._leo_helper import _get_leo_integer_type
 def _get_model_transpiler(model, validation_data):
     if isinstance(model, sklearn.tree._classes.DecisionTreeClassifier):
         return _DecisionTreeTranspiler(model, validation_data)
+    elif isinstance(model, sklearn.neural_network._multilayer_perceptron.MLPClassifier):
+        return _MLPTranspiler(model, validation_data)
     else:
         raise ValueError("Model is not supported.")
 
@@ -282,3 +284,8 @@ class _DecisionTreeTranspiler(_ModelTranspilerBase):
             ]
         )
         return max_decimal_places
+
+
+class _MLPTranspiler(_ModelTranspilerBase):
+    def __init__(self, model, validation_data):
+        super().__init__(model, validation_data)
