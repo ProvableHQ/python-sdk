@@ -5,6 +5,7 @@ import math
 import numpy as np
 import pandas as pd
 import sklearn
+from sklearn.neural_network import MLPClassifier, MLPRegressor
 
 from ._helper import _get_rounding_decimal_places
 from ._input_generator import _InputGenerator
@@ -343,3 +344,93 @@ class _MLPTranspiler(_ModelTranspilerBase):
             )
             max_decimal_places = max(max_decimal_places, layer_max_decimal_places)
         return max_decimal_places
+
+    def transpile(self, project_name: str, model_as_input: bool):
+        """
+        Transpile a model to Leo.
+
+        Parameters
+        ----------
+        project_name : str
+            The name of the project.
+        model_as_input : bool
+            Whether the model parameters should be an input to the circuit.
+
+        Returns
+        -------
+        transpilation_result : str
+            The transpiled model.
+        """
+        # Input generation
+        number_of_model_inputs = self.model.coefs_[0].shape[0]
+        self.input_generator = _InputGenerator()
+        for _ in range(number_of_model_inputs):
+            self.input_generator.add_input(self.leo_type, "xi")
+
+        pseudocode = self.mlp_to_pseudocode(self.model)
+
+        # store the pseudocode in a file
+        with open("pseudocode.txt", "w") as f:
+            f.write(pseudocode)
+
+    def mlp_to_pseudocode(self, mlp):
+        if not isinstance(mlp, (MLPClassifier, MLPRegressor)):
+            raise ValueError(
+                "Input must be an instance of MLPClassifier or MLPRegressor."
+            )
+
+        pseudocode = []
+
+        def generate_layer_code(weights, biases, is_output=False):
+            code = []
+            for i, (w_row, b) in enumerate(zip(weights, biases)):
+                operation_str = ""
+                if not is_output:
+                    operation_str = f"    neuron_{i} = max(0, "
+                else:
+                    operation_str = f"    output_{i} = "
+
+                for j, w in enumerate(w_row):
+                    if j != 0:
+                        operation_str += " + "
+                    operation_str += f"{w:.5f} * input_{j}"
+                operation_str += f" + {b:.5f})"
+                code.append(operation_str)
+            return code
+
+        # Input layer
+        pseudocode.append(
+            "function neural_network("
+            + ", ".join([f"input_{i}" for i in range(mlp.coefs_[0].shape[0])])
+            + "):"
+        )
+
+        # Hidden layers
+        for layer, (weights, biases) in enumerate(zip(mlp.coefs_, mlp.intercepts_)):
+            pseudocode.extend(
+                generate_layer_code(
+                    weights, biases, is_output=layer == len(mlp.coefs_) - 1
+                )
+            )
+
+            # Update input names for next layer
+            if layer != len(mlp.coefs_) - 1:
+                pseudocode.append("")
+                pseudocode.append(f"    # Update input names for layer {layer+2}")
+                for i in range(weights.shape[1]):
+                    pseudocode.append(f"    input_{i} = neuron_{i}")
+
+        # Return statement
+        if isinstance(mlp, MLPClassifier):
+            pseudocode.append(
+                "\n    return softmax(["
+                + ", ".join([f"output_{i}" for i in range(mlp.coefs_[-1].shape[1])])
+                + "])"
+            )
+        else:
+            pseudocode.append(
+                "\n    return "
+                + ", ".join([f"output_{i}" for i in range(mlp.coefs_[-1].shape[1])])
+            )
+
+        return "\n".join(pseudocode)
