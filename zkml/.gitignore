@@ -1,4 +1,5 @@
 .vscode/
+.idea/
 sandbox/
 tmp/
 
@@ -7,6 +8,7 @@ tmp/
 __pycache__/
 *.pyc
 *.pyo
+.env
 
 # Jupyter Notebook
 .ipynb_checkpoints/
@@ -14,3 +16,6 @@ __pycache__/
 jupyter_notebook_config.py
 
 .DS_Store
+
+# Rust artifacts
+target/
