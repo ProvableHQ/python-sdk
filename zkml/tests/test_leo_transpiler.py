@@ -758,13 +758,13 @@ class TestLeoTranspiler(unittest.TestCase):
 
     def test_sklearn_mlp_dummy(self):  # noqa: D103
         import numpy as np
-        from sklearn.neural_network import MLPClassifier
+        from sklearn.neural_network import MLPRegressor
 
-        input_neurons = 4
-        hidden_neurons = 3
-        output_neurons = 2
+        input_neurons = 5
+        hidden_neurons = 4
+        output_neurons = 3
 
-        sklearn_mlp = MLPClassifier(
+        sklearn_mlp = MLPRegressor(
             hidden_layer_sizes=(hidden_neurons,),
             activation="relu",
             max_iter=1,
@@ -772,16 +772,32 @@ class TestLeoTranspiler(unittest.TestCase):
         )
 
         training_data = np.zeros((output_neurons, input_neurons))
+        target_data = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
 
-        sklearn_mlp.fit(training_data, list(range(output_neurons)))
+        sklearn_mlp.fit(training_data, target_data)
 
-        # make some parts of the model sparse
-        sklearn_mlp.coefs_[0][0][0] = 0
-        sklearn_mlp.coefs_[0][1][1] = 0
+        # make sklearn_mlp.coefs_[0] zeros
+        sklearn_mlp.coefs_[0] = np.zeros((input_neurons, hidden_neurons))
+        sklearn_mlp.coefs_[0][0][0] = 1
 
+        sklearn_mlp.intercepts_[0][0] = 0
         sklearn_mlp.intercepts_[0][1] = 0
+        sklearn_mlp.intercepts_[0][2] = 0
+        sklearn_mlp.intercepts_[0][3] = 0
 
-        sklearn_mlp.coefs_[1][0] = 0
+        # make sklearn_mlp.coefs_[1] zeros
+        sklearn_mlp.coefs_[1] = np.zeros((hidden_neurons, output_neurons))
+        sklearn_mlp.coefs_[1][0][0] = 1
+
+        sklearn_mlp.intercepts_[1][1] = 0
+        sklearn_mlp.intercepts_[1][2] = 0
+
+        # predict the output of 1, 0, 0, 0 from the sklearn model
+
+        input_data = np.zeros((1, input_neurons))
+        input_data[0][0] = 1
+
+        # input input_data into the sklearn model
 
         import logging
 

@@ -5,7 +5,7 @@ import math
 import numpy as np
 import pandas as pd
 import sklearn
-from sklearn.neural_network import MLPClassifier, MLPRegressor
+from sklearn.neural_network import MLPClassifier
 
 from ._helper import _get_rounding_decimal_places
 from ._input_generator import _InputGenerator
@@ -15,7 +15,9 @@ from ._leo_helper import _get_leo_integer_type
 def _get_model_transpiler(model, validation_data):
     if isinstance(model, sklearn.tree._classes.DecisionTreeClassifier):
         return _DecisionTreeTranspiler(model, validation_data)
-    elif isinstance(model, sklearn.neural_network._multilayer_perceptron.MLPClassifier):
+    elif isinstance(
+        model, sklearn.neural_network._multilayer_perceptron.MLPClassifier
+    ) or isinstance(model, sklearn.neural_network._multilayer_perceptron.MLPRegressor):
         # ensure that the model uses the ReLU activation function
         if model.activation != "relu":
             raise ValueError(
@@ -317,13 +319,15 @@ class _MLPTranspiler(_ModelTranspilerBase):
             minimum = min(minimum, layer_minimum)
             maximum = max(maximum, layer_maximum)
 
-        classes = self.model.classes_
-        # check if classes are numeric
-        # Todo generalize this code with others like the decision trees
-        # Todo one could quantize here and make the range smaller
-        if isinstance(classes[0], int) or isinstance(classes[0], np.int64):
-            minimum = min(minimum, min(classes))
-            maximum = max(maximum, max(classes))
+        # check if model is a classifier
+        if isinstance(self.model, MLPClassifier):
+            classes = self.model.classes_
+            # check if classes are numeric
+            # Todo generalize this code with others like the decision trees
+            # Todo one could quantize here and make the range smaller
+            if isinstance(classes[0], int) or isinstance(classes[0], np.int64):
+                minimum = min(minimum, min(classes))
+                maximum = max(maximum, max(classes))
 
         return minimum, maximum
 
@@ -373,64 +377,45 @@ class _MLPTranspiler(_ModelTranspilerBase):
         with open("pseudocode.txt", "w") as f:
             f.write(pseudocode)
 
+        a = 0  # noqa: F841
+
     def mlp_to_pseudocode(self, mlp):
-        if not isinstance(mlp, (MLPClassifier, MLPRegressor)):
-            raise ValueError(
-                "Input must be an instance of MLPClassifier or MLPRegressor."
-            )
+        coefs = mlp.coefs_
+        intercepts = mlp.intercepts_
 
-        pseudocode = []
-
-        def generate_layer_code(weights, biases, is_output=False):
-            code = []
-            for i, (w_row, b) in enumerate(zip(weights, biases)):
-                operation_str = ""
-                if not is_output:
-                    operation_str = f"    neuron_{i} = max(0, "
-                else:
-                    operation_str = f"    output_{i} = "
-
-                for j, w in enumerate(w_row):
-                    if j != 0:
-                        operation_str += " + "
-                    operation_str += f"{w:.5f} * input_{j}"
-                operation_str += f" + {b:.5f})"
-                code.append(operation_str)
-            return code
-
-        # Input layer
-        pseudocode.append(
+        code = []
+        code.append(
             "function neural_network("
-            + ", ".join([f"input_{i}" for i in range(mlp.coefs_[0].shape[0])])
+            + ", ".join([f"input_{i}" for i in range(coefs[0].shape[0])])
             + "):"
         )
 
-        # Hidden layers
-        for layer, (weights, biases) in enumerate(zip(mlp.coefs_, mlp.intercepts_)):
-            pseudocode.extend(
-                generate_layer_code(
-                    weights, biases, is_output=layer == len(mlp.coefs_) - 1
-                )
-            )
+        # for each layer
+        prev_neurons = [f"input_{i}" for i in range(coefs[0].shape[0])]
+        for layer in range(len(coefs)):
+            layer_code = []
+            for n in range(coefs[layer].shape[1]):
+                terms = [
+                    f"{coefs[layer][i][n]:.5f}*{prev_neurons[i]}"
+                    for i in range(coefs[layer].shape[0])
+                ]
+                if layer != len(coefs) - 1:  # if not the last layer
+                    neuron_name = f"neuron_{layer+1}_{n}"
+                    layer_code.append(
+                        f"    {neuron_name} = max(0, {' + '.join(terms)}"
+                        f" + {intercepts[layer][n]:.5f})"
+                    )
+                else:  # if the last layer
+                    neuron_name = f"output_{n}"
+                    layer_code.append(
+                        f"    {neuron_name} = {' + '.join(terms)} + "
+                        f"{intercepts[layer][n]:.5f}"
+                    )
+            code.extend(layer_code)
+            prev_neurons = [
+                f"neuron_{layer+1}_{n}" for n in range(coefs[layer].shape[1])
+            ]
 
-            # Update input names for next layer
-            if layer != len(mlp.coefs_) - 1:
-                pseudocode.append("")
-                pseudocode.append(f"    # Update input names for layer {layer+2}")
-                for i in range(weights.shape[1]):
-                    pseudocode.append(f"    input_{i} = neuron_{i}")
-
-        # Return statement
-        if isinstance(mlp, MLPClassifier):
-            pseudocode.append(
-                "\n    return softmax(["
-                + ", ".join([f"output_{i}" for i in range(mlp.coefs_[-1].shape[1])])
-                + "])"
-            )
-        else:
-            pseudocode.append(
-                "\n    return "
-                + ", ".join([f"output_{i}" for i in range(mlp.coefs_[-1].shape[1])])
-            )
-
-        return "\n".join(pseudocode)
+        outputs = [f"output_{i}" for i in range(coefs[-1].shape[1])]
+        code.append(f"    return softmax([{', '.join(outputs)}])")
+        return "\n".join(code)
