@@ -756,6 +756,35 @@ class TestLeoTranspiler(unittest.TestCase):
 
             self.assertEqual(int(leo_predictions[i]), python_predictions[i])
 
+    def test_sklearn_mlp_dummy(self):  # noqa: D103
+        import numpy as np
+        from sklearn.neural_network import MLPClassifier
+
+        input_neurons = 4
+        hidden_neurons = 3
+        output_neurons = 2
+
+        sklearn_mlp = MLPClassifier(
+            hidden_layer_sizes=(hidden_neurons,),
+            activation="relu",
+            max_iter=1,
+            random_state=0,
+        )
+
+        sklearn_mlp.fit(
+            np.zeros((output_neurons, input_neurons)), list(range(output_neurons))
+        )
+
+        # make some parts of the model sparse
+        sklearn_mlp.coefs_[0][0][0] = 0
+        sklearn_mlp.coefs_[0][1][1] = 0
+
+        sklearn_mlp.intercepts_[0][1] = 0
+
+        sklearn_mlp.coefs_[1][0] = 0
+
+        a = 0  # noqa: F841
+
 
 if __name__ == "__main__":
     unittest.main()
