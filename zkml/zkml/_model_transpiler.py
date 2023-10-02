@@ -383,7 +383,14 @@ class _MLPTranspiler(_ModelTranspilerBase):
 
         a = 0  # noqa: F841
 
-    def _transpile_mlp_logic_to_leo_code(self, mlp, model_as_input, indentation=""):
+    def _transpile_mlp_logic_to_leo_code(
+        self,
+        mlp,
+        model_as_input,
+        indentation="",
+        prune_threshold_weights=0,
+        prune_threshold_bias=0,
+    ):
         leo_code_snippets = []
 
         coefs = mlp.coefs_
@@ -403,21 +410,49 @@ class _MLPTranspiler(_ModelTranspilerBase):
 
         # for each layer
         prev_neurons = [f"input_{i}" for i in range(coefs[0].shape[0])]
-        for layer in range(len(coefs)):
+        for layer in range(len(coefs)):  # for each layer
             layer_code = []
-            for n in range(coefs[layer].shape[1]):
-                terms = [
-                    f"{coefs[layer][i][n]:.5f}*{prev_neurons[i]}"
-                    for i in range(coefs[layer].shape[0])
-                ]
+            for n in range(coefs[layer].shape[1]):  # for each neuron in the layer
+                terms = []
+                for i in range(coefs[layer].shape[0]):  # for each input to the neuron
+                    weight_input = self.input_generator.add_input(
+                        self.leo_type,
+                        "customi",
+                        model_as_input,
+                        coefs[layer][i][n],
+                        f"w_{layer}_{n}_",
+                    )
+                    # todo adapt for case where model weights are actual inputs
+                    if coefs[layer][i][n] > prune_threshold_weights:
+                        terms.append(
+                            f"({self._convert_to_fixed_point(weight_input.value.item())}{self.leo_type} as field)*{self.input_generator.use_input(i).field_name}"
+                        )
+                        # todo adjust for multiple hidden layers
+
                 if layer != len(coefs) - 1:  # if not the last layer
-                    leo_code_snippets.append(
-                        f"let neuron_{layer+1}_{n}: {self.leo_type} = relu("
+                    neuron_code = indentation + f"let neuron_{layer+1}_{n}: field = "
+                    weights_or_bias_above_prune_thresholds = (
+                        terms != [] or intercepts[layer][n] > prune_threshold_bias
                     )
-                    layer_code.append(
-                        f"    {neuron_name} = max(0, {' + '.join(terms)}"
-                        f" + {intercepts[layer][n]:.5f})"
-                    )
+
+                    if weights_or_bias_above_prune_thresholds:
+                        neuron_code += "relu(" + " + ".join(terms)
+
+                        bias_input = self.input_generator.add_input(
+                            self.leo_type,
+                            "customi",
+                            model_as_input,
+                            intercepts[layer][n],
+                            f"b_{layer}_{n}_",
+                        )
+                        if intercepts[layer][n] > prune_threshold_bias:
+                            neuron_code += f" + ({self._convert_to_fixed_point(bias_input.value.item())}{self.leo_type} as field)"
+
+                        neuron_code += ");\n"
+                    else:
+                        neuron_code += "0field;\n"
+                    leo_code_snippets.append(neuron_code)
+
                 else:  # if the last layer
                     neuron_name = f"output_{n}"
                     layer_code.append(
