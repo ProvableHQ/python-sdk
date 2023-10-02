@@ -371,15 +371,13 @@ class _MLPTranspiler(_ModelTranspilerBase):
         for _ in range(number_of_model_inputs):
             self.input_generator.add_input(self.leo_type, "xi")
 
-        decision_tree_logic_snippets = self._transpile_mlp_logic_to_leo_code(
+        mlp_logic_snippets = self._transpile_mlp_logic_to_leo_code(
             self.model, model_as_input, indentation="        "
         )
 
-        pseudocode = self.mlp_to_pseudocode(self.model)
-
-        # store the pseudocode in a file
-        with open("pseudocode.txt", "w") as f:
-            f.write(pseudocode)
+        # pseudocode = self.mlp_to_pseudocode(self.model)
+        # with open("pseudocode.txt", "w") as f:
+        #    f.write(pseudocode)
 
         a = 0  # noqa: F841
 
@@ -487,9 +485,17 @@ class _MLPTranspiler(_ModelTranspilerBase):
                 f"neuron_{layer+1}_{n}" for n in range(coefs[layer].shape[1])
             ]
 
-        outputs = [f"output_{i}" for i in range(coefs[-1].shape[1])]
-        code.append(f"    return softmax([{', '.join(outputs)}])")
-        return "\n".join(code)
+        num_outputs = coefs[-1].shape[1]
+        return_line = (
+            indentation
+            + "return ("
+            + ", ".join(
+                [f"output_{i}_field as {self.leo_type}" for i in range(num_outputs)]
+            )
+            + ");\n"
+        )
+        leo_code_snippets.append(return_line)
+        return leo_code_snippets
 
     def mlp_to_pseudocode(self, mlp):
         coefs = mlp.coefs_

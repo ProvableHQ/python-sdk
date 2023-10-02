@@ -1,6 +1,6 @@
 // The 'mlp1' program.
 program mlp1.aleo {
-    transition main(public a: i32, b: i32) -> i32 {
+    transition main(public a: i32, b: i32) -> (i32, i32) {
         let c: i32 = a;
         let c_field: field = c as field;
 
@@ -17,7 +17,7 @@ program mlp1.aleo {
         let d_field_relu: field = relu(d_field);
 
         let c_output: i32 = c_field_relu as i32;
-        return c_output;
+        return (c_output, d_field_relu as i32);
     }
 
     function relu(x: field) -> field {
