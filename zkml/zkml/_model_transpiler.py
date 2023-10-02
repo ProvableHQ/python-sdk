@@ -371,6 +371,10 @@ class _MLPTranspiler(_ModelTranspilerBase):
         for _ in range(number_of_model_inputs):
             self.input_generator.add_input(self.leo_type, "xi")
 
+        decision_tree_logic_snippets = self._transpile_mlp_logic_to_leo_code(
+            self.model, model_as_input, indentation="        "
+        )
+
         pseudocode = self.mlp_to_pseudocode(self.model)
 
         # store the pseudocode in a file
@@ -378,6 +382,56 @@ class _MLPTranspiler(_ModelTranspilerBase):
             f.write(pseudocode)
 
         a = 0  # noqa: F841
+
+    def _transpile_mlp_logic_to_leo_code(self, mlp, model_as_input, indentation=""):
+        leo_code_snippets = []
+
+        coefs = mlp.coefs_
+        intercepts = mlp.intercepts_
+
+        # specify and convert inputs to fields
+        for i in range(coefs[0].shape[0]):
+            used_input = self.input_generator.use_input(i)
+
+            leo_code_snippets.append(
+                indentation
+                + f"let {used_input.reference_name}_field: field = {used_input.reference_name} as field;"
+                + "\n"
+            )
+
+            used_input.field_name = f"{used_input.reference_name}_field"
+
+        # for each layer
+        prev_neurons = [f"input_{i}" for i in range(coefs[0].shape[0])]
+        for layer in range(len(coefs)):
+            layer_code = []
+            for n in range(coefs[layer].shape[1]):
+                terms = [
+                    f"{coefs[layer][i][n]:.5f}*{prev_neurons[i]}"
+                    for i in range(coefs[layer].shape[0])
+                ]
+                if layer != len(coefs) - 1:  # if not the last layer
+                    leo_code_snippets.append(
+                        f"let neuron_{layer+1}_{n}: {self.leo_type} = relu("
+                    )
+                    layer_code.append(
+                        f"    {neuron_name} = max(0, {' + '.join(terms)}"
+                        f" + {intercepts[layer][n]:.5f})"
+                    )
+                else:  # if the last layer
+                    neuron_name = f"output_{n}"
+                    layer_code.append(
+                        f"    {neuron_name} = {' + '.join(terms)} + "
+                        f"{intercepts[layer][n]:.5f}"
+                    )
+            code.extend(layer_code)
+            prev_neurons = [
+                f"neuron_{layer+1}_{n}" for n in range(coefs[layer].shape[1])
+            ]
+
+        outputs = [f"output_{i}" for i in range(coefs[-1].shape[1])]
+        code.append(f"    return softmax([{', '.join(outputs)}])")
+        return "\n".join(code)
 
     def mlp_to_pseudocode(self, mlp):
         coefs = mlp.coefs_
