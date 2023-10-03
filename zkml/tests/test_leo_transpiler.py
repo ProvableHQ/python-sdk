@@ -813,7 +813,13 @@ class TestLeoTranspiler(unittest.TestCase):
         leo_project_name = "sklearn_mlp_mnist_1"
         lt.to_leo(path=leo_project_path, project_name=leo_project_name)
 
-        a = 0  # noqa: F841
+        python_prediction = sklearn_mlp.predict([training_data[0]])
+        lc = lt.run(training_data[0])
+
+        python_predicted_class = np.argmax(python_prediction)
+        lc_predicted_class = np.argmax(lc.output_decimal)
+
+        self.assertEqual(python_predicted_class, lc_predicted_class)
 
 
 if __name__ == "__main__":
