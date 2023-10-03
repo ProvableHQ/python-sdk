@@ -47,10 +47,20 @@ class _ModelTranspilerBase:
             minimum = min(minimum, minimum_data)
             maximum = max(maximum, maximum_data)
 
+            minimum_model_inference, maximum_model_inference = (
+                self._get_numeric_range_model_inference()
+            )
+
+            if minimum_model_inference is not None:
+                minimum = min(minimum, minimum_model_inference)
+            if maximum_model_inference is not None:
+                maximum = max(maximum, maximum_model_inference)
+
         bits_for_integer_part = math.ceil(math.log2(max(abs(minimum), abs(maximum))))
         signed_type_needed = minimum < 0
 
         # Fixed point parametrization
+        # todo implement this for model inference
         max_decimal_places_model = self._get_max_decimal_places_model()
         max_decimal_places_data = 0
         if self.validation_data is not None:
@@ -87,6 +97,10 @@ class _ModelTranspilerBase:
             return self.validation_data.min().min(), self.validation_data.max().max()
         else:
             raise TypeError("Unsupported data type for validation_data")
+
+    def _get_numeric_range_model_inference(self):
+        # has to be implemented by the subclass if the model requires it
+        return None, None
 
     def _get_max_decimal_places_model(self):
         raise NotImplementedError("This method is not implemented.")
@@ -162,7 +176,7 @@ program {project_name}.aleo {{
         if add_relu_function:
             code += """
                 function relu(x: field) -> field {
-        let x_integer: i32 = x as i32; // around 33 constraints
+        let x_integer: i32 = x as i32;
         if x_integer < 0i32 {
             return 0field;
         } else {
@@ -344,6 +358,42 @@ class _MLPTranspiler(_ModelTranspilerBase):
                 maximum = max(maximum, max(classes))
 
         return minimum, maximum
+    
+    def _get_numeric_range_model_inference(self):
+        minimum = None
+        maximum = None
+
+        for data_point in self.validation_data:
+            min_inference, max_inference = self._get_min_max_pre_activation_values(
+                self.model, data_point
+            )
+            if minimum is None:
+                minimum = min_inference
+                maximum = max_inference
+            else:
+                minimum = min(minimum, min_inference)
+                maximum = max(maximum, max_inference)
+
+        return minimum, maximum
+
+    def _get_min_max_pre_activation_values(self, model, X):
+        layer_input = X
+        global_min = float('inf')
+        global_max = float('-inf')
+        
+        # Iterate through layers and compute weighted sum
+        for i, (weights, biases) in enumerate(zip(model.coefs_, model.intercepts_)):
+            pre_activation = np.dot(layer_input, weights) + biases
+            
+            # Update global min and max pre-activation values
+            global_min = min(global_min, np.min(pre_activation))
+            global_max = max(global_max, np.max(pre_activation))
+            
+            # Apply ReLU activation function except for the output layer
+            if i < len(model.coefs_) - 1:
+                layer_input = np.maximum(0, pre_activation)
+        
+        return global_min, global_max
 
     def _get_max_decimal_places_model(self):
         max_decimal_places = None
