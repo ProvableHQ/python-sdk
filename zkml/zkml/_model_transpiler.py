@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import logging
 import math
+import os
 
 import numpy as np
 import pandas as pd
@@ -409,11 +410,23 @@ class _MLPTranspiler(_ModelTranspilerBase):
             add_relu_function=True,
         )
         self.active_input_count = active_input_count
-        return transpilation_result
 
-        # pseudocode = self.mlp_to_pseudocode(self.model)
-        # with open("pseudocode.txt", "w") as f:
-        #    f.write(pseudocode)
+        pseudocode = self.mlp_to_pseudocode(self.model)
+        with open(
+            os.path.join(
+                os.getcwd(),
+                "zkml",
+                "tests",
+                "tmp",
+                "mnist",
+                project_name,
+                "pseudocode.txt",
+            ),
+            "w",
+        ) as f:
+            f.write(pseudocode)
+
+        return transpilation_result
 
     def _transpile_mlp_logic_to_leo_code(
         self,
@@ -511,6 +524,8 @@ class _MLPTranspiler(_ModelTranspilerBase):
                             f"b_{layer}_{n}_",
                         )
                         neuron_code += f"({self._convert_to_fixed_point(bias_input.value.item())}{self.leo_type} as field);\n"
+                    elif terms != [] and intercepts[layer][n] <= prune_threshold_bias:
+                        neuron_code += f"{' + '.join(terms)};\n"
                     else:
                         neuron_code += "0field;\n"
 

@@ -821,6 +821,72 @@ class TestLeoTranspiler(unittest.TestCase):
 
         self.assertEqual(python_predicted_class, lc_predicted_class)
 
+    def test_sklearn_mlp_dummy_dataset(self):  # noqa: D103
+        import numpy as np
+        from sklearn.neural_network import MLPRegressor
+
+        input_neurons = 5
+        hidden_neurons = 4
+        output_neurons = 3
+
+        sklearn_mlp = MLPRegressor(
+            hidden_layer_sizes=(hidden_neurons,),
+            activation="relu",
+            max_iter=1,
+            random_state=0,
+        )
+
+        training_data = np.zeros((output_neurons, input_neurons))
+        target_data = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+
+        sklearn_mlp.fit(training_data, target_data)
+
+        # make sklearn_mlp.coefs_[0] zeros
+        sklearn_mlp.coefs_[0] = np.zeros((input_neurons, hidden_neurons))
+        sklearn_mlp.coefs_[0][0][0] = 1
+        sklearn_mlp.coefs_[0][0][1] = 0.25
+
+        sklearn_mlp.intercepts_[0][1] = 0
+        sklearn_mlp.intercepts_[0][2] = 0
+        sklearn_mlp.intercepts_[0][3] = 0
+
+        # make sklearn_mlp.coefs_[1] zeros
+        sklearn_mlp.coefs_[1] = np.zeros((hidden_neurons, output_neurons))
+        sklearn_mlp.coefs_[1][0][0] = 1
+        sklearn_mlp.coefs_[1][0][1] = 0.5
+
+        sklearn_mlp.intercepts_[1][1] = 0
+        sklearn_mlp.intercepts_[1][2] = 0
+
+        # predict the output of 1, 0, 0, 0 from the sklearn model
+
+        input_data = np.zeros((1, input_neurons))
+        input_data[0][0] = 1
+
+        # input input_data into the sklearn model
+
+        import logging
+
+        from zkml import LeoTranspiler
+
+        # Set the logger
+        logger = logging.getLogger()
+        logger.setLevel(logging.INFO)
+
+        # Transpile the deceision tree into Leo code
+        lt = LeoTranspiler(model=sklearn_mlp, validation_data=training_data)
+        leo_project_path = os.path.join(os.getcwd(), library_name + "/tests/tmp/mnist")
+        leo_project_name = "sklearn_mlp_mnist_1"
+        lt.to_leo(path=leo_project_path, project_name=leo_project_name)
+
+        python_prediction = sklearn_mlp.predict([training_data[0]])
+        lc = lt.run(training_data[0])
+
+        python_predicted_class = np.argmax(python_prediction)
+        lc_predicted_class = np.argmax(lc.output_decimal)
+
+        self.assertEqual(python_predicted_class, lc_predicted_class)
+
 
 if __name__ == "__main__":
     unittest.main()
