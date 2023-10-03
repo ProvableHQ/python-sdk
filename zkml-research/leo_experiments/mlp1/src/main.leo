@@ -13,7 +13,7 @@ program mlp1.aleo {
 
 
         let d_field: field = b as field;
-        d_field = d_field * c_field * c_field;
+        d_field = d_field / c_field;
         let d_field_relu: field = relu(d_field);
 
         let c_output: i32 = c_field_relu as i32;

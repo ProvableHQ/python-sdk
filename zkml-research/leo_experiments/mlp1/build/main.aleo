@@ -19,10 +19,9 @@ function main:
     cast -50i32 into r4 as field;
     add r3 r4 into r5;
     cast r1 into r6 as field;
-    mul r6 r2 into r7;
-    mul r7 r2 into r8;
-    call relu r8 into r9;
-    cast r5 into r10 as i32;
-    cast r9 into r11 as i32;
+    div r6 r2 into r7;
+    call relu r7 into r8;
+    cast r5 into r9 as i32;
+    cast r8 into r10 as i32;
+    output r9 as i32.private;
     output r10 as i32.private;
-    output r11 as i32.private;

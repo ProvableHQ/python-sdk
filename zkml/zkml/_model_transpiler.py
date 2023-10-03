@@ -47,9 +47,10 @@ class _ModelTranspilerBase:
             minimum = min(minimum, minimum_data)
             maximum = max(maximum, maximum_data)
 
-            minimum_model_inference, maximum_model_inference = (
-                self._get_numeric_range_model_inference()
-            )
+            (
+                minimum_model_inference,
+                maximum_model_inference,
+            ) = self._get_numeric_range_model_inference()
 
             if minimum_model_inference is not None:
                 minimum = min(minimum, minimum_model_inference)
@@ -71,6 +72,28 @@ class _ModelTranspilerBase:
         fixed_point_min_scaling_exponent = math.log2(1 / min_decimal_value)
         bits_for_fractional_part = math.ceil(fixed_point_min_scaling_exponent)
         fixed_point_scaling_factor = 2**bits_for_fractional_part
+
+        if self.validation_data is not None:
+            (
+                minimum_model_inference_fixed_point,
+                maximum_model_inference_fixed_point,
+            ) = self._get_numeric_range_model_inference(
+                scaling_factor=fixed_point_scaling_factor
+            )
+
+            if minimum_model_inference is not None:
+                bits_for_integer_part_after_fixed_point_inference = math.ceil(
+                    math.log2(
+                        max(
+                            abs(minimum_model_inference_fixed_point),
+                            abs(maximum_model_inference_fixed_point),
+                        )
+                    )
+                )
+                bits_for_integer_part = max(
+                    bits_for_integer_part,
+                    bits_for_integer_part_after_fixed_point_inference,
+                )
 
         leo_type = _get_leo_integer_type(
             signed_type_needed, bits_for_integer_part + bits_for_fractional_part
@@ -98,7 +121,7 @@ class _ModelTranspilerBase:
         else:
             raise TypeError("Unsupported data type for validation_data")
 
-    def _get_numeric_range_model_inference(self):
+    def _get_numeric_range_model_inference(self, scaling_factor=1):
         # has to be implemented by the subclass if the model requires it
         return None, None
 
@@ -358,14 +381,14 @@ class _MLPTranspiler(_ModelTranspilerBase):
                 maximum = max(maximum, max(classes))
 
         return minimum, maximum
-    
-    def _get_numeric_range_model_inference(self):
+
+    def _get_numeric_range_model_inference(self, scaling_factor=1):
         minimum = None
         maximum = None
 
         for data_point in self.validation_data:
             min_inference, max_inference = self._get_min_max_pre_activation_values(
-                self.model, data_point
+                self.model, data_point, scaling_factor
             )
             if minimum is None:
                 minimum = min_inference
@@ -376,23 +399,28 @@ class _MLPTranspiler(_ModelTranspilerBase):
 
         return minimum, maximum
 
-    def _get_min_max_pre_activation_values(self, model, X):
+    def _get_min_max_pre_activation_values(self, model, X, scaling_factor=1):
+        # todo implement rounding in fixed point number conversion
         layer_input = X
-        global_min = float('inf')
-        global_max = float('-inf')
-        
+        global_min = float("inf")
+        global_max = float("-inf")
+
         # Iterate through layers and compute weighted sum
         for i, (weights, biases) in enumerate(zip(model.coefs_, model.intercepts_)):
-            pre_activation = np.dot(layer_input, weights) + biases
-            
+            pre_activation = (
+                np.dot(layer_input * scaling_factor, weights * scaling_factor)
+                / scaling_factor
+                + biases * scaling_factor
+            )
+
             # Update global min and max pre-activation values
             global_min = min(global_min, np.min(pre_activation))
             global_max = max(global_max, np.max(pre_activation))
-            
+
             # Apply ReLU activation function except for the output layer
             if i < len(model.coefs_) - 1:
                 layer_input = np.maximum(0, pre_activation)
-        
+
         return global_min, global_max
 
     def _get_max_decimal_places_model(self):
@@ -523,7 +551,7 @@ class _MLPTranspiler(_ModelTranspilerBase):
                     # todo adapt for case where model weights are actual inputs
                     if coefs[layer][i][n] > prune_threshold_weights:
                         terms.append(
-                            f"({self._convert_to_fixed_point(weight_input.value.item())}{self.leo_type} as field)*{prev_neurons[i]}"
+                            f"({self._convert_to_fixed_point(weight_input.value.item())}{self.leo_type} as field)*{prev_neurons[i]}/({self.fixed_point_scaling_factor}{self.leo_type} as field)"
                         )
 
                 if layer != len(coefs) - 1:  # if not the last layer
