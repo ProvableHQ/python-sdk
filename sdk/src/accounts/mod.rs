@@ -14,22 +14,19 @@
 // You should have received a copy of the GNU General Public License
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
-use snarkvm::console::account::{
-    Address as AleoAddress,
-    compute_key::ComputeKey as AleoComputeKey,
-    private_key::PrivateKey as AleoPrivateKey,
-    view_key::ViewKey as AleoViewKey,
-};
-use snarkvm::console::network::Testnet3 as CurrentNetwork;
-use pyo3::prelude::*;
-use std::str::FromStr;
+use super::*;
 
-mod accounts;
-use accounts::*;
+pub(crate) mod address;
+pub (crate) use address::*;
 
-#[pymodule]
-#[pyo3(name = "aleo_python_sdk")]
-fn account(_py: Python, m: &PyModule) -> PyResult<()> {
-    m.add_class::<PrivateKey>()?;
-    Ok(())
-}
+pub(crate) mod compute_key;
+pub (crate) use compute_key::*;
+
+pub(crate) mod private_key;
+pub (crate) use private_key::*;
+
+pub(crate) mod signature;
+pub(crate) use signature::*;
+
+pub(crate) mod view_key;
+pub(crate) use view_key::*;
