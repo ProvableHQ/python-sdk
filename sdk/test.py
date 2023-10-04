@@ -1,4 +1,5 @@
-import aleo_python_sdk as aleo
+# -*- coding: utf-8 -*-
+import aleo
 
 if __name__ == "__main__":
     private_key = aleo.PrivateKey()
