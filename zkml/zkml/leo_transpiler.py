@@ -291,7 +291,7 @@ class LeoTranspiler:
                 if element.startswith("\n"):
                     continue
                 # check if is number
-                if element[0].isdigit():
+                if element[0].isdigit() or element[0] == "-":
                     element = element.split(self.model_transpiler.leo_type)[0]
                     outputs_fixed_point.append(int(element))
         else:

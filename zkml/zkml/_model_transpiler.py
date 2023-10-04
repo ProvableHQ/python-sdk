@@ -100,7 +100,7 @@ class _ModelTranspilerBase:
         )
 
         self.leo_type = leo_type
-        self.fixed_point_scaling_factor = fixed_point_scaling_factor
+        self.fixed_point_scaling_factor = 128#fixed_point_scaling_factor
 
         logging.info(
             f"Minimum number: {minimum}, maximum number: {maximum}. Recommended "
@@ -549,7 +549,7 @@ class _MLPTranspiler(_ModelTranspilerBase):
                         f"w_{layer}_{n}_",
                     )
                     # todo adapt for case where model weights are actual inputs
-                    if coefs[layer][i][n] > prune_threshold_weights:
+                    if abs(coefs[layer][i][n]) > prune_threshold_weights:
                         terms.append(
                             f"({self._convert_to_fixed_point(weight_input.value.item())}{self.leo_type} as field)*{prev_neurons[i]}/({self.fixed_point_scaling_factor}{self.leo_type} as field)"
                         )
@@ -557,7 +557,7 @@ class _MLPTranspiler(_ModelTranspilerBase):
                 if layer != len(coefs) - 1:  # if not the last layer
                     neuron_code = indentation + f"let neuron_{layer+1}_{n}: field = "
                     weights_or_bias_above_prune_thresholds = (
-                        terms != [] or intercepts[layer][n] > prune_threshold_bias
+                        terms != [] or abs(intercepts[layer][n]) > prune_threshold_bias
                     )
 
                     if weights_or_bias_above_prune_thresholds:
@@ -570,7 +570,7 @@ class _MLPTranspiler(_ModelTranspilerBase):
                             intercepts[layer][n],
                             f"b_{layer}_{n}_",
                         )
-                        if intercepts[layer][n] > prune_threshold_bias:
+                        if abs(intercepts[layer][n]) > prune_threshold_bias:
                             neuron_code += f" + ({self._convert_to_fixed_point(bias_input.value.item())}{self.leo_type} as field)"
 
                         neuron_code += ");\n"
@@ -581,9 +581,9 @@ class _MLPTranspiler(_ModelTranspilerBase):
                 else:  # if the last layer
                     neuron_code = indentation + f"let output_{n}_field" + f" : field = "
 
-                    if terms != [] and intercepts[layer][n] > prune_threshold_bias:
+                    if terms != [] and abs(intercepts[layer][n]) > prune_threshold_bias:
                         neuron_code += f"{' + '.join(terms)}"
-                        if intercepts[layer][n] > prune_threshold_bias:
+                        if abs(intercepts[layer][n]) > prune_threshold_bias:
                             bias_input = self.input_generator.add_input(
                                 self.leo_type,
                                 "customi",
@@ -593,7 +593,7 @@ class _MLPTranspiler(_ModelTranspilerBase):
                             )
                             neuron_code += f" + ({self._convert_to_fixed_point(bias_input.value.item())}{self.leo_type} as field)"
                         neuron_code += ";\n"
-                    elif terms == [] and intercepts[layer][n] > prune_threshold_bias:
+                    elif terms == [] and abs(intercepts[layer][n]) > prune_threshold_bias:
                         bias_input = self.input_generator.add_input(
                             self.leo_type,
                             "customi",
@@ -602,7 +602,7 @@ class _MLPTranspiler(_ModelTranspilerBase):
                             f"b_{layer}_{n}_",
                         )
                         neuron_code += f"({self._convert_to_fixed_point(bias_input.value.item())}{self.leo_type} as field);\n"
-                    elif terms != [] and intercepts[layer][n] <= prune_threshold_bias:
+                    elif terms != [] and abs(intercepts[layer][n]) <= prune_threshold_bias:
                         neuron_code += f"{' + '.join(terms)};\n"
                     else:
                         neuron_code += "0field;\n"

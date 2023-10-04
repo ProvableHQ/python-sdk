@@ -879,13 +879,46 @@ class TestLeoTranspiler(unittest.TestCase):
         leo_project_name = "sklearn_mlp_mnist_1"
         lt.to_leo(path=leo_project_path, project_name=leo_project_name)
 
-        python_prediction = sklearn_mlp.predict([training_data[0]])
-        lc = lt.run(training_data[0])
+        python_prediction = sklearn_mlp.predict(training_data)
+        lc = lt.run(training_data)
 
-        python_predicted_class = np.argmax(python_prediction)
-        lc_predicted_class = np.argmax(lc.output_decimal)
+        for i in range(len(python_prediction)):
+            python_predicted_class = np.argmax(python_prediction[i])
+            lc_predicted_class = np.argmax(lc[i].output_decimal)
 
-        self.assertEqual(python_predicted_class, lc_predicted_class)
+            self.assertEqual(python_predicted_class, lc_predicted_class)
+
+        sklearn_mlp.fit(training_data, target_data)
+
+        lt = LeoTranspiler(model=sklearn_mlp, validation_data=training_data)
+        leo_project_path = os.path.join(os.getcwd(), library_name + "/tests/tmp/mnist")
+        leo_project_name = "sklearn_mlp_mnist_1"
+        lt.to_leo(path=leo_project_path, project_name=leo_project_name)
+
+        # generate 5 random test samples
+        np.random.seed(0)
+        test_data = np.random.rand(5, input_neurons)
+
+        python_prediction = sklearn_mlp.predict(test_data)
+        lc = lt.run(test_data)
+
+        equal_count = 0
+        different_count = 0
+
+        for i in range(len(python_prediction)):
+            python_predicted_class = np.argmax(python_prediction[i])
+            lc_predicted_class = np.argmax(lc[i].output_decimal)
+            print(lc_predicted_class)
+
+            if(python_predicted_class == lc_predicted_class):
+                equal_count += 1
+            else:
+                different_count += 1
+
+            a = 0
+
+
+        a = 0
 
 
 if __name__ == "__main__":
