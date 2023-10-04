@@ -1,10 +1,18 @@
 [package]
 name = "aleo"
 authors = ["Konstantin Pandl", "Mike Turner"]
-version = "0.0.1"
+version = "0.0.2"
+description = "A Python sdk for zero-knowledge cryptography based on Aleo"
 edition = "2021"
+license = "Apache-2.0"
 
 [dependencies]
 rand = { version = "^0.8" }
 pyo3 = { version = "0.18.2", features = ["extension-module"] }
 snarkvm = { version = "0.12.6", features = ["console"] }
+
+[package.metadata.maturin]
+name = "aleo"
+description = "A Python sdk for zero-knowledge cryptography based on Aleo"
+repository = "https://github.com/AleoHQ/python-sdk/tree/master/sdk"
+license = "Apache-2.0"
