@@ -77,8 +77,4 @@ repos:
       - id: pydocstyle
         args: ["--config=setup.cfg"]
         exclude: "tests/__init__.py"
-<<<<<<< HEAD
         files: ^zkml/
-=======
-        files: ^zkml/
->>>>>>> master
