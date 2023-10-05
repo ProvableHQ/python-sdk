@@ -100,7 +100,7 @@ class _ModelTranspilerBase:
         )
 
         self.leo_type = leo_type
-        self.fixed_point_scaling_factor = 128#fixed_point_scaling_factor
+        self.fixed_point_scaling_factor = 128  # fixed_point_scaling_factor
 
         logging.info(
             f"Minimum number: {minimum}, maximum number: {maximum}. Recommended "
@@ -196,7 +196,7 @@ program {project_name}.aleo {{
 
         code += """    }"""
 
-        if add_relu_function: # todo adjust to data type
+        if add_relu_function:  # todo adjust to data type
             code += """
                 function relu(x: field) -> field {
         let x_integer: i128 = x as i128;
@@ -593,7 +593,9 @@ class _MLPTranspiler(_ModelTranspilerBase):
                             )
                             neuron_code += f" + ({self._convert_to_fixed_point(bias_input.value.item(), layer+2)}{self.leo_type} as field)"
                         neuron_code += ";\n"
-                    elif terms == [] and abs(intercepts[layer][n]) > prune_threshold_bias:
+                    elif (
+                        terms == [] and abs(intercepts[layer][n]) > prune_threshold_bias
+                    ):
                         bias_input = self.input_generator.add_input(
                             self.leo_type,
                             "customi",
@@ -602,7 +604,10 @@ class _MLPTranspiler(_ModelTranspilerBase):
                             f"b_{layer}_{n}_",
                         )
                         neuron_code += f"({self._convert_to_fixed_point(bias_input.value.item(), layer+2)}{self.leo_type} as field);\n"
-                    elif terms != [] and abs(intercepts[layer][n]) <= prune_threshold_bias:
+                    elif (
+                        terms != []
+                        and abs(intercepts[layer][n]) <= prune_threshold_bias
+                    ):
                         neuron_code += f"{' + '.join(terms)};\n"
                     else:
                         neuron_code += "0field;\n"
