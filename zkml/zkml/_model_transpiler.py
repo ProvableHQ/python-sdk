@@ -146,14 +146,14 @@ class _ModelTranspilerBase:
         else:
             raise TypeError("Unsupported data type for validation_data")
 
-    def _convert_to_fixed_point(self, value):
+    def _convert_to_fixed_point(self, value, power=1):
         if hasattr(value, "shape"):  # check if value is a numpy array
             vectorized_int = np.vectorize(int)
             return vectorized_int(
-                value.astype(object) * self.fixed_point_scaling_factor
+                value.astype(object) * (self.fixed_point_scaling_factor**power)
             )
         else:
-            return int(round(value * self.fixed_point_scaling_factor))
+            return int(round(value * (self.fixed_point_scaling_factor**power)))
 
     def convert_computation_base_outputs_to_decimal(self, computation_base):
         computation_base.fixed_point_scaling_factor = self.fixed_point_scaling_factor
@@ -196,11 +196,11 @@ program {project_name}.aleo {{
 
         code += """    }"""
 
-        if add_relu_function:
+        if add_relu_function: # todo adjust to data type
             code += """
                 function relu(x: field) -> field {
-        let x_integer: i32 = x as i32;
-        if x_integer < 0i32 {
+        let x_integer: i128 = x as i128;
+        if x_integer < 0i128 {
             return 0field;
         } else {
             return x_integer as field;
@@ -551,7 +551,7 @@ class _MLPTranspiler(_ModelTranspilerBase):
                     # todo adapt for case where model weights are actual inputs
                     if abs(coefs[layer][i][n]) > prune_threshold_weights:
                         terms.append(
-                            f"({self._convert_to_fixed_point(weight_input.value.item())}{self.leo_type} as field)*{prev_neurons[i]}/({self.fixed_point_scaling_factor}{self.leo_type} as field)"
+                            f"({self._convert_to_fixed_point(weight_input.value.item())}{self.leo_type} as field)*{prev_neurons[i]}"
                         )
 
                 if layer != len(coefs) - 1:  # if not the last layer
@@ -571,7 +571,7 @@ class _MLPTranspiler(_ModelTranspilerBase):
                             f"b_{layer}_{n}_",
                         )
                         if abs(intercepts[layer][n]) > prune_threshold_bias:
-                            neuron_code += f" + ({self._convert_to_fixed_point(bias_input.value.item())}{self.leo_type} as field)"
+                            neuron_code += f" + ({self._convert_to_fixed_point(bias_input.value.item(), layer+2)}{self.leo_type} as field)"
 
                         neuron_code += ");\n"
                     else:
@@ -591,7 +591,7 @@ class _MLPTranspiler(_ModelTranspilerBase):
                                 intercepts[layer][n],
                                 f"b_{layer}_{n}_",
                             )
-                            neuron_code += f" + ({self._convert_to_fixed_point(bias_input.value.item())}{self.leo_type} as field)"
+                            neuron_code += f" + ({self._convert_to_fixed_point(bias_input.value.item(), layer+2)}{self.leo_type} as field)"
                         neuron_code += ";\n"
                     elif terms == [] and abs(intercepts[layer][n]) > prune_threshold_bias:
                         bias_input = self.input_generator.add_input(
@@ -601,7 +601,7 @@ class _MLPTranspiler(_ModelTranspilerBase):
                             intercepts[layer][n],
                             f"b_{layer}_{n}_",
                         )
-                        neuron_code += f"({self._convert_to_fixed_point(bias_input.value.item())}{self.leo_type} as field);\n"
+                        neuron_code += f"({self._convert_to_fixed_point(bias_input.value.item(), layer+2)}{self.leo_type} as field);\n"
                     elif terms != [] and abs(intercepts[layer][n]) <= prune_threshold_bias:
                         neuron_code += f"{' + '.join(terms)};\n"
                     else:

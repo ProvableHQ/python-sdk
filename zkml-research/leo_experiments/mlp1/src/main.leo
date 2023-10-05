@@ -12,9 +12,9 @@ program mlp1.aleo {
         let c_field_relu: field = relu(c_field) + bias as field;
 
 
-        let d_field: field = b as field;
-        d_field = d_field / c_field;
-        let d_field_relu: field = relu(d_field);
+        //let d_field: field = b as field;
+        //d_field = d_field / c_field;
+        //let d_field_relu: field = relu(d_field);
 
         let c_output: i32 = c_field_relu as i32;
         let output_1_field : field = (-90i128 as field);
@@ -29,7 +29,7 @@ program mlp1.aleo {
 
         // this works, but fails if we divide by more than 90
         let output_0_field : field = (118i128 as field)*(90i128 as field);
-        output_0_field = output_0_field / (90i128 as field);
+        //output_0_field = output_0_field / (90i128 as field);
 
         return (output_0_field as i128, output_1_field as i128);
     }
