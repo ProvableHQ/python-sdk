@@ -101,6 +101,7 @@ class _ModelTranspilerBase:
 
         self.leo_type = leo_type
         self.fixed_point_scaling_factor = 128  # fixed_point_scaling_factor
+        self.output_fixed_point_scaling_factor_power = 1
 
         logging.info(
             f"Minimum number: {minimum}, maximum number: {maximum}. Recommended "
@@ -156,7 +157,10 @@ class _ModelTranspilerBase:
             return int(round(value * (self.fixed_point_scaling_factor**power)))
 
     def convert_computation_base_outputs_to_decimal(self, computation_base):
-        computation_base.fixed_point_scaling_factor = self.fixed_point_scaling_factor
+        computation_base.fixed_point_scaling_factor = (
+            self.fixed_point_scaling_factor
+            ** self.output_fixed_point_scaling_factor_power
+        )
         computation_base.output_decimal = self._convert_from_fixed_point(
             computation_base.output
         )
@@ -165,7 +169,10 @@ class _ModelTranspilerBase:
         if isinstance(value, list):
             return [self._convert_from_fixed_point(val) for val in value]
         else:
-            return value / self.fixed_point_scaling_factor
+            return value / (
+                self.fixed_point_scaling_factor
+                ** self.output_fixed_point_scaling_factor_power
+            )
 
     def _get_fixed_point_and_leo_type(self, value):
         return str(self._convert_to_fixed_point(value)) + self.leo_type
@@ -580,6 +587,7 @@ class _MLPTranspiler(_ModelTranspilerBase):
 
                 else:  # if the last layer
                     neuron_code = indentation + f"let output_{n}_field" + f" : field = "
+                    self.output_fixed_point_scaling_factor_power = layer + 2
 
                     if terms != [] and abs(intercepts[layer][n]) > prune_threshold_bias:
                         neuron_code += f"{' + '.join(terms)}"
