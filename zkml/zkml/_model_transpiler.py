@@ -540,7 +540,12 @@ class _MLPTranspiler(_ModelTranspilerBase):
 
             leo_code_snippets.append(
                 indentation
-                + f"let {used_input.reference_name}_field: field = {used_input.reference_name} as field;"
+                + f"let {used_input.reference_name}_field: field = ")
+            
+            leo_code_snippets.append(used_input)
+
+            leo_code_snippets.append(
+                 " as field;"
                 + "\n"
             )
 
