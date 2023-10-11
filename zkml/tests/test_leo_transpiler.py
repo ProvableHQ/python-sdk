@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import copy
 import os
 import unittest
 from zipfile import ZipFile
@@ -9,11 +10,9 @@ from sklearn.metrics import accuracy_score, roc_auc_score
 from sklearn.model_selection import train_test_split
 from sklearn.tree import DecisionTreeClassifier
 
-import copy
-import os
-from .helper import prepare_MNIST_haar_MLP
-
 from zkml import LeoTranspiler
+
+from .helper import prepare_MNIST_haar_MLP
 
 library_name = "zkml"
 
@@ -922,15 +921,11 @@ class TestLeoTranspiler(unittest.TestCase):
 
         self.assertEqual(equal_count, num_test_samples)
 
-
     def test_mlp_mnist_run(self):  # noqa: D103
-        
-
-
         # store all three objects in one pickle file
 
-        import pickle
         import os
+        import pickle
 
         # check if the pickle file exists
 
@@ -949,6 +944,7 @@ class TestLeoTranspiler(unittest.TestCase):
 
         import logging
         import os
+
         import numpy as np
 
         from zkml import LeoTranspiler
@@ -979,7 +975,6 @@ class TestLeoTranspiler(unittest.TestCase):
             lc = lt.run(input=test_images_2d[i])
 
             self.assertEqual(int(leo_predictions[i]), python_predictions[i])
-
 
 
 if __name__ == "__main__":
