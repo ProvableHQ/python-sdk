@@ -578,19 +578,18 @@ class _MLPTranspiler(_ModelTranspilerBase):
                     )
 
                     if weights_or_bias_above_prune_thresholds:
-                        neuron_code += "relu("# + " + ".join(terms)
+                        neuron_code += "relu("  # + " + ".join(terms)
                         for i, term in enumerate(terms):
-                            if(i == 0):
-                                if(term[1] == "-"):
+                            if i == 0:
+                                if term[1] == "-":
                                     neuron_code += f" ({term[2:]}"
                                 else:
                                     neuron_code += f"{term}"
                             else:
-                                if(term[1] == "-"):
+                                if term[1] == "-":
                                     neuron_code += f" - ({term[2:]}"
                                 else:
                                     neuron_code += f" + {term}"
-                        
 
                         bias_input = self.input_generator.add_input(
                             self.leo_type,
@@ -600,7 +599,7 @@ class _MLPTranspiler(_ModelTranspilerBase):
                             f"b_{layer}_{n}_",
                         )
                         if abs(intercepts[layer][n]) > prune_threshold_bias:
-                            neuron_code += f" + ({self._convert_to_fixed_point(bias_input.value.item(), layer+2)}{self.leo_type} as field)" # todo handle negative bias separately
+                            neuron_code += f" + ({self._convert_to_fixed_point(bias_input.value.item(), layer+2)}{self.leo_type} as field)"  # todo handle negative bias separately
 
                         neuron_code += ");\n"
                     else:
@@ -612,16 +611,15 @@ class _MLPTranspiler(_ModelTranspilerBase):
                     self.output_fixed_point_scaling_factor_power = layer + 2
 
                     if terms != [] and abs(intercepts[layer][n]) > prune_threshold_bias:
-                        
-                        #neuron_code += f"{' + '.join(terms)}"
+                        # neuron_code += f"{' + '.join(terms)}"
                         for i, term in enumerate(terms):
-                            if(i == 0):
-                                if(term[1] == "-"):
+                            if i == 0:
+                                if term[1] == "-":
                                     neuron_code += f" ({term[2:]}"
                                 else:
                                     neuron_code += f"{term}"
                             else:
-                                if(term[1] == "-"):
+                                if term[1] == "-":
                                     neuron_code += f" - ({term[2:]}"
                                 else:
                                     neuron_code += f" + {term}"
@@ -651,15 +649,15 @@ class _MLPTranspiler(_ModelTranspilerBase):
                         terms != []
                         and abs(intercepts[layer][n]) <= prune_threshold_bias
                     ):
-                        #neuron_code += f"{' + '.join(terms)};\n"
+                        # neuron_code += f"{' + '.join(terms)};\n"
                         for i, term in enumerate(terms):
-                            if(i == 0):
-                                if(term[1] == "-"):
+                            if i == 0:
+                                if term[1] == "-":
                                     neuron_code += f" ({term[2:]}"
                                 else:
                                     neuron_code += f"{term}"
                             else:
-                                if(term[1] == "-"):
+                                if term[1] == "-":
                                     neuron_code += f" - ({term[2:]}"
                                 else:
                                     neuron_code += f" + {term}"
