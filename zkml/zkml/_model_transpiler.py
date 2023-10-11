@@ -73,7 +73,7 @@ class _ModelTranspilerBase:
         bits_for_fractional_part = math.ceil(fixed_point_min_scaling_exponent)
         fixed_point_scaling_factor = 2**bits_for_fractional_part
 
-        fixed_point_scaling_factor = 128 # todo change
+        fixed_point_scaling_factor = 128  # todo change
 
         if self.validation_data is not None:
             (
@@ -416,14 +416,21 @@ class _MLPTranspiler(_ModelTranspilerBase):
 
         # Iterate through layers and compute weighted sum
         for i, (weights, biases) in enumerate(zip(model.coefs_, model.intercepts_)):
-            pre_activation = (
-                np.dot(layer_input * scaling_factor, weights * scaling_factor)
-                + biases * (scaling_factor**(i+2))
-            )
+            pre_activation = np.dot(
+                layer_input * scaling_factor, weights * scaling_factor
+            ) + biases * (scaling_factor ** (i + 2))
 
             # Update global min and max pre-activation values and layer-specific fixed point scaled bias
-            global_min = min(global_min, np.min(pre_activation), np.min(biases * (scaling_factor**(i+2))))
-            global_max = max(global_max, np.max(pre_activation), np.max(biases * (scaling_factor**(i+2))))
+            global_min = min(
+                global_min,
+                np.min(pre_activation),
+                np.min(biases * (scaling_factor ** (i + 2))),
+            )
+            global_max = max(
+                global_max,
+                np.max(pre_activation),
+                np.max(biases * (scaling_factor ** (i + 2))),
+            )
 
             # Apply ReLU activation function except for the output layer
             if i < len(model.coefs_) - 1:

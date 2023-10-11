@@ -9,6 +9,10 @@ from sklearn.metrics import accuracy_score, roc_auc_score
 from sklearn.model_selection import train_test_split
 from sklearn.tree import DecisionTreeClassifier
 
+import copy
+import os
+from .helper import prepare_MNIST_haar_MLP
+
 from zkml import LeoTranspiler
 
 library_name = "zkml"
@@ -917,6 +921,65 @@ class TestLeoTranspiler(unittest.TestCase):
                 different_count += 1
 
         self.assertEqual(equal_count, num_test_samples)
+
+
+    def test_mlp_mnist_run(self):  # noqa: D103
+        
+
+
+        # store all three objects in one pickle file
+
+        import pickle
+        import os
+
+        # check if the pickle file exists
+
+        if os.path.exists("mnist_haar_mlp.pkl"):
+            # load the pickle file
+            with open("mnist_haar_mlp.pkl", "rb") as f:
+                clf, train_images_2d, test_images_2d = pickle.load(f)
+        else:
+            # Convert the example PyTorch MLP to sklearn MLP
+            clf, train_images_2d, test_images_2d = prepare_MNIST_haar_MLP()
+            with open("mnist_haar_mlp.pkl", "wb") as f:
+                pickle.dump([clf, train_images_2d, test_images_2d], f)
+
+        train_images_2d = train_images_2d.numpy()
+        test_images_2d = test_images_2d.numpy()
+
+        import logging
+        import os
+        import numpy as np
+
+        from zkml import LeoTranspiler
+
+        # Set the logger
+        logger = logging.getLogger()
+        logger.setLevel(logging.INFO)
+
+        # Transpile the deceision tree into Leo code
+        lt = LeoTranspiler(model=clf, validation_data=train_images_2d[0:200])
+        leo_project_path = os.path.join(os.getcwd(), library_name + "/tests/tmp/mnist")
+        leo_project_name = "sklearn_mlp_mnist_1"
+        lt.to_leo(path=leo_project_path, project_name=leo_project_name)
+
+        # Compute the accuracy of the Leo program and the Python program on the test set
+        num_test_samples = len(test_images_2d)
+
+        # let's limit the number of test stamples to 10 to make the computation faster
+        num_test_samples = min(num_test_samples, 10)
+
+        python_predictions = clf.predict(test_images_2d)
+
+        leo_predictions = np.zeros(num_test_samples)
+        for i in range(num_test_samples):
+            one_dim_array = test_images_2d[i].ravel()  # noqa: F841
+            inputs = lt.model_transpiler.generate_input(test_images_2d[i])  # noqa: F841
+
+            leo_predictions[i] = lt.run(input=test_images_2d[i]).output_decimal[0]
+
+            self.assertEqual(int(leo_predictions[i]), python_predictions[i])
+
 
 
 if __name__ == "__main__":
