@@ -4,6 +4,25 @@
 import copy
 library_name = "zkml"
 
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from sklearn.metrics import accuracy_score
+import numpy as np
+
+# Define the PyTorch neural network
+class SimpleNN(nn.Module):
+    def __init__(self, input_dim, hidden_dim, output_dim):
+        super(SimpleNN, self).__init__()
+        self.fc1 = nn.Linear(input_dim, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, output_dim)
+
+    def forward(self, x):
+        x = torch.relu(self.fc1(x))
+        x = self.fc2(x)
+        return x
+
 def prune_neural_network(
     network_to_prune, weight_threshold=1e-1, bias_threshold=1e-1
 ):  # noqa: D103
@@ -114,7 +133,7 @@ def prune_pytorch_network(
 
     return model
 
-def prepare_MNIST_haar_MLP():
+def prepare_MNIST_haar():
     import gzip
     import os
     import shutil
@@ -176,7 +195,6 @@ def prepare_MNIST_haar_MLP():
         path_to_save = os.path.join(folder_path, file_name)
         download_and_extract_dataset(url, path_to_save, folder_path)
 
-    import numpy as np
 
     def read_idx3_ubyte_image_file(filename):
         """Read IDX3-ubyte formatted image data."""
@@ -275,8 +293,6 @@ def prepare_MNIST_haar_MLP():
     validation_labels_tensor = train_labels_tensor_shuffled[:validation_size]
     train_images_tensor = train_images_tensor_shuffled[validation_size:]
     train_labels_tensor = train_labels_tensor_shuffled[validation_size:]
-
-    import numpy as np
 
     def get_bounding_box(img):
         """
@@ -379,38 +395,6 @@ def prepare_MNIST_haar_MLP():
 
 
 
-    import torch
-    import torch.nn as nn
-    import torch.optim as optim
-    from sklearn.metrics import accuracy_score
-
-
-    def evaluate_model(model, resized=False):
-        model.eval()  # Set the model to evaluation mode
-        with torch.no_grad():
-            if not resized:
-                test_outputs = model(test_features_normalized)
-            else:
-                test_outputs = model(test_features_resized_normalized)
-            _, predicted = torch.max(test_outputs.data, 1)
-            accuracy = accuracy_score(test_labels, predicted.numpy())
-            print("Accuracy:", accuracy)
-            return accuracy
-
-
-
-
-    # Define the PyTorch neural network
-    class SimpleNN(nn.Module):
-        def __init__(self, input_dim, hidden_dim, output_dim):
-            super(SimpleNN, self).__init__()
-            self.fc1 = nn.Linear(input_dim, hidden_dim)
-            self.fc2 = nn.Linear(hidden_dim, output_dim)
-
-        def forward(self, x):
-            x = torch.relu(self.fc1(x))
-            x = self.fc2(x)
-            return x
 
     def compute_haar_features(image):
         if image.shape != (20, 20) and image.shape != (28, 28):
@@ -581,12 +565,27 @@ def prepare_MNIST_haar_MLP():
     val_features_resized_normalized = val_features_resized_normalized.float()
     test_features_resized_normalized = test_features_resized_normalized.float()
 
+    return train_features_resized_normalized, val_features_resized_normalized, test_features_resized_normalized, train_labels_tensor, validation_labels_tensor, test_labels
 
+
+
+def prepare_MNIST_MLP(train_features_resized_normalized, val_features_resized_normalized, test_features_resized_normalized, train_labels_tensor, validation_labels_tensor, test_labels):
+
+
+    def evaluate_model(model):
+        model.eval()  # Set the model to evaluation mode
+        with torch.no_grad():
+            
+            test_outputs = model(test_features_resized_normalized)
+            _, predicted = torch.max(test_outputs.data, 1)
+            accuracy = accuracy_score(test_labels, predicted.numpy())
+            print("Accuracy:", accuracy)
+            return accuracy
 
 
     # Hyperparameters
     input_dim = train_features_resized_normalized.shape[1]
-    output_dim = len(set(train_labels))  # Assuming train_labels are class indices
+    output_dim = len(set(train_labels_tensor.numpy()))  # Assuming train_labels are class indices
     hidden_dim = int((input_dim + output_dim) / 2)
 
     # Instantiate the model
@@ -644,14 +643,14 @@ def prepare_MNIST_haar_MLP():
     best_model_state = model_states[np.argmin(validation_losses)]
     model_medium2_resized.load_state_dict(best_model_state)
 
-    evaluate_model(model_medium2_resized, resized=True)
+    evaluate_model(model_medium2_resized)
 
     model_medium2_resized_pruned = copy.deepcopy(model_medium2_resized)
     model_medium2_resized_pruned = prune_pytorch_network(
         model_medium2_resized_pruned, 1e-1, 1e-1
     )
 
-    evaluate_model(model_medium2_resized_pruned, resized=True)
+    evaluate_model(model_medium2_resized_pruned)
 
 
     from sklearn.neural_network import MLPClassifier
@@ -690,4 +689,4 @@ def prepare_MNIST_haar_MLP():
         return sklearn_mlp
 
     clf = pytorch_to_sklearn(model_medium2_resized_pruned)
-    return clf, train_features_resized_normalized, test_features_resized_normalized
+    return clf#, train_features_resized_normalized, test_features_resized_normalized
