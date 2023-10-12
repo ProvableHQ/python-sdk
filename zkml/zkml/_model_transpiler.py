@@ -73,7 +73,7 @@ class _ModelTranspilerBase:
         bits_for_fractional_part = math.ceil(fixed_point_min_scaling_exponent)
         fixed_point_scaling_factor = 2**bits_for_fractional_part
 
-        fixed_point_scaling_factor = 128  # todo change
+        fixed_point_scaling_factor = 16  # todo change
 
         if self.validation_data is not None:
             (
