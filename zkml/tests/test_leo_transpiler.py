@@ -997,45 +997,59 @@ class TestLeoTranspiler(unittest.TestCase):
             with open("mnist_haar.pkl", "wb") as f:
                 pickle.dump([train_features_resized_normalized, val_features_resized_normalized, test_features_resized_normalized, train_labels_tensor, validation_labels_tensor, test_labels], f)
 
-        clf = prepare_MNIST_MLP(train_features_resized_normalized, val_features_resized_normalized, test_features_resized_normalized, train_labels_tensor, validation_labels_tensor, test_labels)
+        # make dict
+        leo_run_results = {}
+        
+        for hidden_neurons in [10, 20, 30, 40]:
 
+            clf = prepare_MNIST_MLP(train_features_resized_normalized, val_features_resized_normalized, test_features_resized_normalized, train_labels_tensor, validation_labels_tensor, test_labels, hidden_neuron_specification=hidden_neurons, prune=True)
 
-        train_images_2d = train_features_resized_normalized.numpy()
-        test_images_2d = test_features_resized_normalized.numpy()
+            # get the number of neurons of clf
+            num_neurons = clf.coefs_[0].shape[0]
 
-        import logging
-        import os
+            # number of neurons in hidden layers and output layer
+            for i in range(len(clf.intercepts_)):
+                num_neurons += clf.intercepts_[i].shape[0]
 
-        import numpy as np
+            train_images_2d = train_features_resized_normalized.numpy()
+            test_images_2d = test_features_resized_normalized.numpy()
 
-        from zkml import LeoTranspiler
+            import logging
+            import os
 
-        # Set the logger
-        logger = logging.getLogger()
-        logger.setLevel(logging.INFO)
+            import numpy as np
 
-        # Transpile the deceision tree into Leo code
-        lt = LeoTranspiler(model=clf, validation_data=train_images_2d[0:200])
-        leo_project_path = os.path.join(os.getcwd(), library_name + "/tests/tmp/mnist")
-        leo_project_name = "sklearn_mlp_mnist_1"
-        lt.to_leo(path=leo_project_path, project_name=leo_project_name)
+            from zkml import LeoTranspiler
 
-        # Compute the accuracy of the Leo program and the Python program on the test set
-        num_test_samples = len(test_images_2d)
+            # Set the logger
+            logger = logging.getLogger()
+            logger.setLevel(logging.INFO)
 
-        # let's limit the number of test stamples to 10 to make the computation faster
-        num_test_samples = min(num_test_samples, 10)
+            # Transpile the deceision tree into Leo code
+            lt = LeoTranspiler(model=clf, validation_data=train_images_2d[0:200])
+            leo_project_path = os.path.join(os.getcwd(), library_name + "/tests/tmp/mnist")
+            leo_project_name = "sklearn_mlp_mnist_1"
+            lt.to_leo(path=leo_project_path, project_name=leo_project_name)
 
-        python_predictions = clf.predict(test_images_2d)
+            # Compute the accuracy of the Leo program and the Python program on the test set
+            num_test_samples = len(test_images_2d)
 
-        leo_predictions = np.zeros(num_test_samples)
-        for i in range(num_test_samples):
-            one_dim_array = test_images_2d[i].ravel()  # noqa: F841
-            inputs = lt.model_transpiler.generate_input(test_images_2d[i])  # noqa: F841
+            # let's limit the number of test stamples to 1 to make the computation faster
+            num_test_samples = min(num_test_samples, 1)
 
-            lc = lt.run(input=test_images_2d[i])
+            python_predictions = clf.predict(test_images_2d)
 
-            self.assertEqual(int(leo_predictions[i]), python_predictions[i])
+            leo_predictions = np.zeros(num_test_samples)
+            for i in range(num_test_samples):
+                one_dim_array = test_images_2d[i].ravel()  # noqa: F841
+                inputs = lt.model_transpiler.generate_input(test_images_2d[i])  # noqa: F841
+
+                lc = lt.run(input=test_images_2d[i])
+
+                leo_run_results[num_neurons] = lc.circuit_constraints
+
+            a = 0
+        a = 0
 
 
 

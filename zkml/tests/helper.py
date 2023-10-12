@@ -569,7 +569,7 @@ def prepare_MNIST_haar():
 
 
 
-def prepare_MNIST_MLP(train_features_resized_normalized, val_features_resized_normalized, test_features_resized_normalized, train_labels_tensor, validation_labels_tensor, test_labels):
+def prepare_MNIST_MLP(train_features_resized_normalized, val_features_resized_normalized, test_features_resized_normalized, train_labels_tensor, validation_labels_tensor, test_labels, hidden_neuron_specification=None, prune=True):
 
 
     def evaluate_model(model):
@@ -586,7 +586,10 @@ def prepare_MNIST_MLP(train_features_resized_normalized, val_features_resized_no
     # Hyperparameters
     input_dim = train_features_resized_normalized.shape[1]
     output_dim = len(set(train_labels_tensor.numpy()))  # Assuming train_labels are class indices
-    hidden_dim = int((input_dim + output_dim) / 2)
+    if(hidden_neuron_specification is None):
+        hidden_dim = int((input_dim + output_dim) / 2)
+    else:
+        hidden_dim = hidden_neuron_specification
 
     # Instantiate the model
     model_medium2_resized = SimpleNN(
@@ -646,9 +649,10 @@ def prepare_MNIST_MLP(train_features_resized_normalized, val_features_resized_no
     evaluate_model(model_medium2_resized)
 
     model_medium2_resized_pruned = copy.deepcopy(model_medium2_resized)
-    model_medium2_resized_pruned = prune_pytorch_network(
-        model_medium2_resized_pruned, 1e-1, 1e-1
-    )
+    if(prune):
+        model_medium2_resized_pruned = prune_pytorch_network(
+            model_medium2_resized_pruned, 1e-1, 1e-1
+        )
 
     evaluate_model(model_medium2_resized_pruned)
 

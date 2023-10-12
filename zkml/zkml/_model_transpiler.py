@@ -205,7 +205,7 @@ program {project_name}.aleo {{
 
         code += """    }"""
 
-        if add_relu_function and False:  # todo adjust to data type
+        if add_relu_function and True:  # todo adjust to data type
             code += """
                 function relu(x: field) -> field {
         let x_integer: i128 = x as i128;
@@ -216,7 +216,7 @@ program {project_name}.aleo {{
         }
     }"""
 
-        if add_relu_function and True:  # todo adjust to data type
+        if add_relu_function and False:  # todo adjust to data type
             code += f"function relu(x: {self.leo_type}) -> {self.leo_type} {{\n"
             code += f"if x < 0{self.leo_type} {{"
             code += f"return 0{self.leo_type};"
@@ -539,7 +539,7 @@ class _MLPTranspiler(_ModelTranspilerBase):
         prune_threshold_weights=0,
         prune_threshold_bias=0,
     ):
-        leo_code_snippets = self._transpile_mlp_logic_to_leo_code_3(
+        leo_code_snippets = self._transpile_mlp_logic_to_leo_code_1(
             mlp,
             model_as_input,
             indentation="",
