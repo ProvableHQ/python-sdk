@@ -1,13 +1,13 @@
 [tool.poetry]
 name = "zkml"
-version = "0.0.1-beta.2"
+version = "0.0.2-beta.1"
 description = "A transpiler for Python machine learning models to Leo for zero-knowledge inference"
 authors = [
     "Konstantin Pandl <konstantin@aleo.org>",
     "Michael Turner <mturner@aleo.org>"
 ]
 readme = "README.md"
-license = "Apache-2.0"
+license = "GPL-3.0"
 include = ["LICENSE.md"]
 repository = "https://github.com/AleoHQ/python-sdk/tree/master/zkml"
 
