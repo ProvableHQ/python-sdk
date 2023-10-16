@@ -571,6 +571,7 @@ def prepare_MNIST_haar():
 
 def prepare_MNIST_MLP(train_features_resized_normalized, val_features_resized_normalized, test_features_resized_normalized, train_labels_tensor, validation_labels_tensor, test_labels, hidden_neuron_specification=None, prune=True):
 
+    torch.manual_seed(0)
 
     def evaluate_model(model):
         model.eval()  # Set the model to evaluation mode
