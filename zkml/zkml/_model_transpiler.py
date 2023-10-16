@@ -13,7 +13,7 @@ from ._input_generator import _InputGenerator
 from ._leo_helper import _get_leo_integer_type
 
 
-def _get_model_transpiler(model, validation_data, fixed_point_scaling_factor=None):
+def _get_model_transpiler(model, validation_data, fixed_point_scaling_factor=None, **kwargs):
     if isinstance(model, sklearn.tree._classes.DecisionTreeClassifier):
         return _DecisionTreeTranspiler(model, validation_data, fixed_point_scaling_factor)
     elif isinstance(
@@ -25,7 +25,7 @@ def _get_model_transpiler(model, validation_data, fixed_point_scaling_factor=Non
                 "The model uses the activation function "
                 f"{model.activation}, but only ReLU is supported."
             )
-        return _MLPTranspiler(model, validation_data, fixed_point_scaling_factor)
+        return _MLPTranspiler(model, validation_data, fixed_point_scaling_factor, **kwargs)
     else:
         raise ValueError("Model is not supported.")
 
@@ -369,8 +369,18 @@ class _DecisionTreeTranspiler(_ModelTranspilerBase):
 
 
 class _MLPTranspiler(_ModelTranspilerBase):
-    def __init__(self, model, validation_data, pre_set_fixed_point_scaling_factor):
+    def __init__(self, model, validation_data, pre_set_fixed_point_scaling_factor, **kwargs):
         super().__init__(model, validation_data, pre_set_fixed_point_scaling_factor)
+
+        if("data_representation_type" in kwargs):
+            self.data_representation_type = kwargs["data_representation_type"]
+        else:
+            self.data_representation_type = "int"
+
+        if("layer_wise_fixed_point_scaling_factor" in kwargs):
+            self.layer_wise_fixed_point_scaling_factor = kwargs["layer_wise_fixed_point_scaling_factor"]
+        else:
+            self.layer_wise_fixed_point_scaling_factor = True
 
     def _get_numeric_range_model(self):
         minimum = None
@@ -542,14 +552,33 @@ class _MLPTranspiler(_ModelTranspilerBase):
         prune_threshold_weights=0,
         prune_threshold_bias=0,
     ):
-        leo_code_snippets = self._transpile_mlp_logic_to_leo_code_3(
-            mlp,
-            model_as_input,
-            indentation="",
-            prune_threshold_weights=0,
-            prune_threshold_bias=0,
-        )
-        return leo_code_snippets
+        
+        if (self.data_representation_type == "int" and self.layer_wise_fixed_point_scaling_factor):
+            return self._transpile_mlp_logic_to_leo_code_3(
+                mlp,
+                model_as_input,
+                indentation,
+                prune_threshold_weights,
+                prune_threshold_bias,
+            )
+        if(self.data_representation_type == "int" and not self.layer_wise_fixed_point_scaling_factor):
+            return self._transpile_mlp_logic_to_leo_code_4(
+                mlp,
+                model_as_input,
+                indentation,
+                prune_threshold_weights,
+                prune_threshold_bias,
+            )
+        if(self.data_representation_type == "field" and self.layer_wise_fixed_point_scaling_factor):
+            return self._transpile_mlp_logic_to_leo_code_1(
+                mlp,
+                model_as_input,
+                indentation,
+                prune_threshold_weights,
+                prune_threshold_bias,
+            )
+        if(self.data_representation_type == "field" and not self.layer_wise_fixed_point_scaling_factor):
+            raise NotImplementedError("This method is not implemented. You can use the field representation with layer-wise fixed point scaling factor, or the integer representation with or without layer-wise fixed point scaling factor.")
 
     def _transpile_mlp_logic_to_leo_code_1(
         self,
