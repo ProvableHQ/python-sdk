@@ -1,0 +1,12 @@
+// The program input for binary_tree_pahts/src/main.leo
+[main]
+public a: bool = true;
+b: bool = false;
+c: bool = false;
+d: bool = false;
+e: bool = false;
+f: bool = false;
+g: bool = false;
+h: bool = false;
+i: bool = false;
+j: bool = false;
