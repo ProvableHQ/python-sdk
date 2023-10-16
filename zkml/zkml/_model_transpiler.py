@@ -13,9 +13,9 @@ from ._input_generator import _InputGenerator
 from ._leo_helper import _get_leo_integer_type
 
 
-def _get_model_transpiler(model, validation_data):
+def _get_model_transpiler(model, validation_data, fixed_point_scaling_factor=None):
     if isinstance(model, sklearn.tree._classes.DecisionTreeClassifier):
-        return _DecisionTreeTranspiler(model, validation_data)
+        return _DecisionTreeTranspiler(model, validation_data, fixed_point_scaling_factor)
     elif isinstance(
         model, sklearn.neural_network._multilayer_perceptron.MLPClassifier
     ) or isinstance(model, sklearn.neural_network._multilayer_perceptron.MLPRegressor):
@@ -25,15 +25,16 @@ def _get_model_transpiler(model, validation_data):
                 "The model uses the activation function "
                 f"{model.activation}, but only ReLU is supported."
             )
-        return _MLPTranspiler(model, validation_data)
+        return _MLPTranspiler(model, validation_data, fixed_point_scaling_factor)
     else:
         raise ValueError("Model is not supported.")
 
 
 class _ModelTranspilerBase:
-    def __init__(self, model, validation_data):
+    def __init__(self, model, validation_data, pre_set_fixed_point_scaling_factor):
         self.model = model
         self.validation_data = validation_data
+        self.pre_set_fixed_point_scaling_factor = pre_set_fixed_point_scaling_factor
 
     def transpile(self, project_name, model_as_input):
         raise NotImplementedError("This method is not implemented.")
@@ -71,9 +72,11 @@ class _ModelTranspilerBase:
         min_decimal_value = 10 ** (-max_decimal_places)
         fixed_point_min_scaling_exponent = math.log2(1 / min_decimal_value)
         bits_for_fractional_part = math.ceil(fixed_point_min_scaling_exponent)
-        fixed_point_scaling_factor = 2**bits_for_fractional_part
 
-        fixed_point_scaling_factor = 16  # todo change
+        if(self.pre_set_fixed_point_scaling_factor is None):
+            fixed_point_scaling_factor = 2**bits_for_fractional_part
+        else:
+            fixed_point_scaling_factor = self.pre_set_fixed_point_scaling_factor
 
         if self.validation_data is not None:
             (
@@ -235,8 +238,8 @@ program {project_name}.aleo {{
 
 
 class _DecisionTreeTranspiler(_ModelTranspilerBase):
-    def __init__(self, model, validation_data):
-        super().__init__(model, validation_data)
+    def __init__(self, model, validation_data, pre_set_fixed_point_scaling_factor):
+        super().__init__(model, validation_data, pre_set_fixed_point_scaling_factor)
 
     def transpile(self, project_name: str, model_as_input: bool):
         """
@@ -366,8 +369,8 @@ class _DecisionTreeTranspiler(_ModelTranspilerBase):
 
 
 class _MLPTranspiler(_ModelTranspilerBase):
-    def __init__(self, model, validation_data):
-        super().__init__(model, validation_data)
+    def __init__(self, model, validation_data, pre_set_fixed_point_scaling_factor):
+        super().__init__(model, validation_data, pre_set_fixed_point_scaling_factor)
 
     def _get_numeric_range_model(self):
         minimum = None
