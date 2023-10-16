@@ -980,6 +980,68 @@ class TestLeoTranspiler(unittest.TestCase):
 
         self.assertGreaterEqual(accuracy_score, 0.9)
 
+            
+    def test_mlp_mnist_execute(self):  # noqa: D103
+        # store all three objects in one pickle file
+
+        import os
+        import pickle
+
+        # check if the pickle file exists
+
+        if os.path.exists("mnist_haar.pkl"):
+            # load the pickle file
+            with open("mnist_haar.pkl", "rb") as f:
+                train_features_resized_normalized, val_features_resized_normalized, test_features_resized_normalized, train_labels_tensor, validation_labels_tensor, test_labels = pickle.load(f)
+        else:
+            # Convert the example PyTorch MLP to sklearn MLP
+            train_features_resized_normalized, val_features_resized_normalized, test_features_resized_normalized, train_labels_tensor, validation_labels_tensor, test_labels = prepare_MNIST_haar()
+            with open("mnist_haar.pkl", "wb") as f:
+                pickle.dump([train_features_resized_normalized, val_features_resized_normalized, test_features_resized_normalized, train_labels_tensor, validation_labels_tensor, test_labels], f)
+
+        clf = prepare_MNIST_MLP(train_features_resized_normalized, val_features_resized_normalized, test_features_resized_normalized, train_labels_tensor, validation_labels_tensor, test_labels)
+
+        train_images_2d = train_features_resized_normalized.numpy()
+        test_images_2d = test_features_resized_normalized.numpy()
+
+        import logging
+        import os
+
+        import numpy as np
+
+        from zkml import LeoTranspiler
+
+        # Set the logger
+        logger = logging.getLogger()
+        logger.setLevel(logging.INFO)
+
+        # Transpile the deceision tree into Leo code
+        lt = LeoTranspiler(model=clf, validation_data=train_images_2d[0:200])
+        leo_project_path = os.path.join(os.getcwd(), library_name + "/tests/tmp/mnist")
+        leo_project_name = "sklearn_mlp_mnist_1"
+        lt.to_leo(path=leo_project_path, project_name=leo_project_name, fixed_point_scaling_factor=16)
+
+        # Compute the accuracy of the Leo program and the Python program on the test set
+        num_test_samples = len(test_images_2d)
+
+        # let's limit the number of test stamples to 1 to make the computation faster
+        num_test_samples = min(num_test_samples, 1)
+
+        python_predictions = clf.predict(test_images_2d)
+
+        leo_predictions = np.zeros(num_test_samples)
+        for i in range(num_test_samples):
+            # one_dim_array = test_images_2d[i].ravel()  # noqa: F841
+            # inputs = lt.model_transpiler.generate_input(test_images_2d[i])  # noqa: F841
+
+            lc = lt.execute(input=test_images_2d[i])
+            leo_predictions[i] = np.argmax(lc.output_decimal)
+
+        accuracy_score = np.sum(leo_predictions == python_predictions[0:num_test_samples]) / num_test_samples
+
+        self.assertGreaterEqual(accuracy_score, 0.9)
+
+
     def test_mlp_mnist_benchmark(self):  # noqa: D103
         # store all three objects in one pickle file
 
