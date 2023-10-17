@@ -6,6 +6,7 @@ import os
 import numpy as np
 import pandas as pd
 import sklearn
+from sklearn import tree
 from sklearn.neural_network import MLPClassifier
 
 from ._helper import _get_rounding_decimal_places
@@ -527,20 +528,21 @@ class _MLPTranspiler(_ModelTranspilerBase):
         )
         self.active_input_count = active_input_count
 
-        pseudocode = self.mlp_to_pseudocode(self.model)
-        with open(
-            os.path.join(
-                os.getcwd(),
-                "zkml",
-                "tests",
-                "tmp",
-                "mnist",
-                project_name,
-                "pseudocode.txt",
-            ),
-            "w",
-        ) as f:
-            f.write(pseudocode)
+        if(False):
+            pseudocode = self.mlp_to_pseudocode(self.model)
+            with open(
+                os.path.join(
+                    os.getcwd(),
+                    "zkml",
+                    "tests",
+                    "tmp",
+                    "mnist",
+                    project_name,
+                    "pseudocode.txt",
+                ),
+                "w",
+            ) as f:
+                f.write(pseudocode)
 
         return transpilation_result
 
