@@ -1,0 +1,11 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[tool.maturin]
+name = "aleo"
+version = "0.0.3"
+description = "A Python SDK for zero-knowledge cryptography based on Aleo"
+repository = "https://github.com/AleoHQ/python-sdk/tree/master/sdk"
+license = "GPL-3.0-or-later"
+authors = ["Konstantin Pandl", "Mike Turner"]
