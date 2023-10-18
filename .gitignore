@@ -4,3 +4,5 @@ myenv/
 tmp/
 
 .DS_Store
+
+*.pkl

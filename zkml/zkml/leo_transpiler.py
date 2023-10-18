@@ -57,7 +57,7 @@ class LeoTranspiler:
         self.transpilation_result = None
         self.leo_program_stored = False
 
-    def to_leo(self, path: Path, project_name: str, model_as_input: bool = False):
+    def to_leo(self, path: Path, project_name: str, model_as_input: bool = False, fixed_point_scaling_factor: Optional[int] = None, **kwargs):
         """Transpile and store the Leo program to a specified directory.
 
         This method transpiles the model to a Leo program and saves it, along with
@@ -92,7 +92,7 @@ class LeoTranspiler:
         Directories are created as needed to ensure the specified path exists.
         """
         self._check_installed_leo_version()
-        self.model_transpiler = _get_model_transpiler(self.model, self.validation_data)
+        self.model_transpiler = _get_model_transpiler(self.model, self.validation_data, fixed_point_scaling_factor, **kwargs)
 
         if self.transpilation_result is None or self.model_as_input != model_as_input:
             # Computing the number ranges and the fixed-point scaling factor
@@ -291,7 +291,7 @@ class LeoTranspiler:
                 if element.startswith("\n"):
                     continue
                 # check if is number
-                if element[0].isdigit():
+                if element[0].isdigit() or element[0] == "-":
                     element = element.split(self.model_transpiler.leo_type)[0]
                     outputs_fixed_point.append(int(element))
         else:

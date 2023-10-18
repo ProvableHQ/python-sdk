@@ -1,0 +1,7 @@
+// The program input for mlp2/src/main.leo
+[main]
+x0: i128 = 70i128;
+x1: i128 = 91i128;
+x2: i128 = 77i128;
+x3: i128 = 69i128;
+x4: i128 = 54i128;

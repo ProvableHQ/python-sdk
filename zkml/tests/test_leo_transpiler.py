@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import copy
 import os
 import unittest
 from zipfile import ZipFile
@@ -10,6 +11,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.tree import DecisionTreeClassifier
 
 from zkml import LeoTranspiler
+
+from .helper import prepare_MNIST_haar, prepare_MNIST_MLP
 
 library_name = "zkml"
 
@@ -755,6 +758,363 @@ class TestLeoTranspiler(unittest.TestCase):
             leo_predictions[i] = leo_computations[i].output_decimal[0]
 
             self.assertEqual(int(leo_predictions[i]), python_predictions[i])
+
+    def test_sklearn_mlp_dummy(self):  # noqa: D103
+        import numpy as np
+        from sklearn.neural_network import MLPRegressor
+
+        input_neurons = 5
+        hidden_neurons = 4
+        output_neurons = 3
+
+        sklearn_mlp = MLPRegressor(
+            hidden_layer_sizes=(hidden_neurons,),
+            activation="relu",
+            max_iter=1,
+            random_state=0,
+        )
+
+        training_data = np.zeros((output_neurons, input_neurons))
+        target_data = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+
+        sklearn_mlp.fit(training_data, target_data)
+
+        # make sklearn_mlp.coefs_[0] zeros
+        sklearn_mlp.coefs_[0] = np.zeros((input_neurons, hidden_neurons))
+        sklearn_mlp.coefs_[0][0][0] = 1
+
+        sklearn_mlp.intercepts_[0][0] = 0
+        sklearn_mlp.intercepts_[0][1] = 0
+        sklearn_mlp.intercepts_[0][2] = 0
+        sklearn_mlp.intercepts_[0][3] = 0
+
+        # make sklearn_mlp.coefs_[1] zeros
+        sklearn_mlp.coefs_[1] = np.zeros((hidden_neurons, output_neurons))
+        sklearn_mlp.coefs_[1][0][0] = 1
+
+        sklearn_mlp.intercepts_[1][1] = 0.5
+        sklearn_mlp.intercepts_[1][2] = 0
+
+        # predict the output of 1, 0, 0, 0 from the sklearn model
+
+        input_data = np.zeros((1, input_neurons))
+        input_data[0][0] = 1
+
+        # input input_data into the sklearn model
+
+        import logging
+
+        from zkml import LeoTranspiler
+
+        # Set the logger
+        logger = logging.getLogger()
+        logger.setLevel(logging.INFO)
+
+        # Transpile the deceision tree into Leo code
+        lt = LeoTranspiler(model=sklearn_mlp, validation_data=training_data)
+        leo_project_path = os.path.join(os.getcwd(), library_name + "/tests/tmp/mnist")
+        leo_project_name = "sklearn_mlp_mnist_1"
+        lt.to_leo(path=leo_project_path, project_name=leo_project_name, fixed_point_scaling_factor=16)
+
+        python_prediction = sklearn_mlp.predict([training_data[0]])
+        lc = lt.run(training_data[0])
+
+        python_predicted_class = np.argmax(python_prediction)
+        lc_predicted_class = np.argmax(lc.output_decimal)
+
+        self.assertEqual(python_predicted_class, lc_predicted_class)
+
+    def test_sklearn_mlp_dummy_dataset(self):  # noqa: D103
+        import numpy as np
+        from sklearn.neural_network import MLPRegressor
+
+        input_neurons = 5
+        hidden_neurons = 4
+        output_neurons = 3
+
+        sklearn_mlp = MLPRegressor(
+            hidden_layer_sizes=(hidden_neurons,),
+            activation="relu",
+            max_iter=1,
+            random_state=0,
+        )
+
+        training_data = np.zeros((output_neurons, input_neurons))
+        target_data = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+
+        sklearn_mlp.fit(training_data, target_data)
+
+        # make sklearn_mlp.coefs_[0] zeros
+        sklearn_mlp.coefs_[0] = np.zeros((input_neurons, hidden_neurons))
+        sklearn_mlp.coefs_[0][0][0] = 1
+        sklearn_mlp.coefs_[0][0][1] = 0.25
+
+        sklearn_mlp.intercepts_[0][1] = 0
+        sklearn_mlp.intercepts_[0][2] = 0
+        sklearn_mlp.intercepts_[0][3] = 0
+
+        # make sklearn_mlp.coefs_[1] zeros
+        sklearn_mlp.coefs_[1] = np.zeros((hidden_neurons, output_neurons))
+        sklearn_mlp.coefs_[1][0][0] = 1
+        sklearn_mlp.coefs_[1][0][1] = 0.5
+
+        sklearn_mlp.intercepts_[1][1] = 0
+        sklearn_mlp.intercepts_[1][2] = 0
+
+        # predict the output of 1, 0, 0, 0 from the sklearn model
+
+        input_data = np.zeros((1, input_neurons))
+        input_data[0][0] = 1
+
+        # input input_data into the sklearn model
+
+        import logging
+
+        from zkml import LeoTranspiler
+
+        # Set the logger
+        logger = logging.getLogger()
+        logger.setLevel(logging.INFO)
+
+        # Transpile the deceision tree into Leo code
+        lt = LeoTranspiler(model=sklearn_mlp, validation_data=training_data)
+        leo_project_path = os.path.join(os.getcwd(), library_name + "/tests/tmp/mnist")
+        leo_project_name = "sklearn_mlp_mnist_1"
+        lt.to_leo(path=leo_project_path, project_name=leo_project_name, fixed_point_scaling_factor=16)
+
+        python_prediction = sklearn_mlp.predict(training_data)
+        lc = lt.run(training_data)
+
+        for i in range(len(python_prediction)):
+            python_predicted_class = np.argmax(python_prediction[i])
+            lc_predicted_class = np.argmax(lc[i].output_decimal)
+
+            self.assertEqual(python_predicted_class, lc_predicted_class)
+
+        sklearn_mlp.fit(training_data, target_data)
+
+        lt = LeoTranspiler(model=sklearn_mlp, validation_data=training_data)
+        leo_project_path = os.path.join(os.getcwd(), library_name + "/tests/tmp/mnist")
+        leo_project_name = "sklearn_mlp_mnist_1"
+        lt.to_leo(path=leo_project_path, project_name=leo_project_name, fixed_point_scaling_factor=16)
+
+        # generate random test samples
+        num_test_samples = 50
+        np.random.seed(0)
+        test_data = np.random.rand(num_test_samples, input_neurons)
+
+        python_prediction = sklearn_mlp.predict(test_data)
+        lc = lt.run(test_data)
+
+        equal_count = 0
+        different_count = 0
+
+        for i in range(len(python_prediction)):
+            python_predicted_class = np.argmax(python_prediction[i])
+            lc_predicted_class = np.argmax(lc[i].output_decimal)
+
+            if python_predicted_class == lc_predicted_class:
+                equal_count += 1
+            else:
+                different_count += 1
+
+        self.assertGreaterEqual(equal_count/num_test_samples, 0.9)
+
+    def test_mlp_mnist_run(self):  # noqa: D103
+        # store all three objects in one pickle file
+
+        import os
+        import pickle
+
+        # check if the pickle file exists
+
+        if os.path.exists("mnist_haar.pkl"):
+            # load the pickle file
+            with open("mnist_haar.pkl", "rb") as f:
+                train_features_resized_normalized, val_features_resized_normalized, test_features_resized_normalized, train_labels_tensor, validation_labels_tensor, test_labels = pickle.load(f)
+        else:
+            # Convert the example PyTorch MLP to sklearn MLP
+            train_features_resized_normalized, val_features_resized_normalized, test_features_resized_normalized, train_labels_tensor, validation_labels_tensor, test_labels = prepare_MNIST_haar()
+            with open("mnist_haar.pkl", "wb") as f:
+                pickle.dump([train_features_resized_normalized, val_features_resized_normalized, test_features_resized_normalized, train_labels_tensor, validation_labels_tensor, test_labels], f)
+
+        clf = prepare_MNIST_MLP(train_features_resized_normalized, val_features_resized_normalized, test_features_resized_normalized, train_labels_tensor, validation_labels_tensor, test_labels)
+
+        train_images_2d = train_features_resized_normalized.numpy()
+        test_images_2d = test_features_resized_normalized.numpy()
+
+        import logging
+        import os
+
+        import numpy as np
+
+        from zkml import LeoTranspiler
+
+        # Set the logger
+        logger = logging.getLogger()
+        logger.setLevel(logging.INFO)
+
+        # Transpile the deceision tree into Leo code
+        lt = LeoTranspiler(model=clf, validation_data=train_images_2d[0:200])
+        leo_project_path = os.path.join(os.getcwd(), library_name + "/tests/tmp/mnist")
+        leo_project_name = "sklearn_mlp_mnist_1"
+        lt.to_leo(path=leo_project_path, project_name=leo_project_name, fixed_point_scaling_factor=16)
+
+        # Compute the accuracy of the Leo program and the Python program on the test set
+        num_test_samples = len(test_images_2d)
+
+        # let's limit the number of test stamples to 10 to make the computation faster
+        num_test_samples = min(num_test_samples, 10)
+
+        python_predictions = clf.predict(test_images_2d)
+
+        leo_predictions = np.zeros(num_test_samples)
+        for i in range(num_test_samples):
+            # one_dim_array = test_images_2d[i].ravel()  # noqa: F841
+            # inputs = lt.model_transpiler.generate_input(test_images_2d[i])  # noqa: F841
+
+            lc = lt.run(input=test_images_2d[i])
+            leo_predictions[i] = np.argmax(lc.output_decimal)
+
+        accuracy_score = np.sum(leo_predictions == python_predictions[0:num_test_samples]) / num_test_samples
+
+        self.assertGreaterEqual(accuracy_score, 0.9)
+
+            
+    def test_mlp_mnist_execute(self):  # noqa: D103
+        # store all three objects in one pickle file
+
+        import os
+        import pickle
+
+        # check if the pickle file exists
+
+        if os.path.exists("mnist_haar.pkl"):
+            # load the pickle file
+            with open("mnist_haar.pkl", "rb") as f:
+                train_features_resized_normalized, val_features_resized_normalized, test_features_resized_normalized, train_labels_tensor, validation_labels_tensor, test_labels = pickle.load(f)
+        else:
+            # Convert the example PyTorch MLP to sklearn MLP
+            train_features_resized_normalized, val_features_resized_normalized, test_features_resized_normalized, train_labels_tensor, validation_labels_tensor, test_labels = prepare_MNIST_haar()
+            with open("mnist_haar.pkl", "wb") as f:
+                pickle.dump([train_features_resized_normalized, val_features_resized_normalized, test_features_resized_normalized, train_labels_tensor, validation_labels_tensor, test_labels], f)
+
+        clf = prepare_MNIST_MLP(train_features_resized_normalized, val_features_resized_normalized, test_features_resized_normalized, train_labels_tensor, validation_labels_tensor, test_labels)
+
+        train_images_2d = train_features_resized_normalized.numpy()
+        test_images_2d = test_features_resized_normalized.numpy()
+
+        import logging
+        import os
+
+        import numpy as np
+
+        from zkml import LeoTranspiler
+
+        # Set the logger
+        logger = logging.getLogger()
+        logger.setLevel(logging.INFO)
+
+        # Transpile the deceision tree into Leo code
+        lt = LeoTranspiler(model=clf, validation_data=train_images_2d[0:200])
+        leo_project_path = os.path.join(os.getcwd(), library_name + "/tests/tmp/mnist")
+        leo_project_name = "sklearn_mlp_mnist_1"
+        lt.to_leo(path=leo_project_path, project_name=leo_project_name, fixed_point_scaling_factor=16)
+
+        # Compute the accuracy of the Leo program and the Python program on the test set
+        num_test_samples = len(test_images_2d)
+
+        # let's limit the number of test stamples to 1 to make the computation faster
+        num_test_samples = min(num_test_samples, 1)
+
+        python_predictions = clf.predict(test_images_2d)
+
+        leo_predictions = np.zeros(num_test_samples)
+        for i in range(num_test_samples):
+            # one_dim_array = test_images_2d[i].ravel()  # noqa: F841
+            # inputs = lt.model_transpiler.generate_input(test_images_2d[i])  # noqa: F841
+
+            lc = lt.execute(input=test_images_2d[i])
+            leo_predictions[i] = np.argmax(lc.output_decimal)
+
+        accuracy_score = np.sum(leo_predictions == python_predictions[0:num_test_samples]) / num_test_samples
+
+        self.assertGreaterEqual(accuracy_score, 0.9)
+
+
+    def test_mlp_mnist_benchmark(self):  # noqa: D103
+        # store all three objects in one pickle file
+
+        import os
+        import pickle
+
+        # check if the pickle file exists
+
+        if os.path.exists("mnist_haar.pkl"):
+            # load the pickle file
+            with open("mnist_haar.pkl", "rb") as f:
+                train_features_resized_normalized, val_features_resized_normalized, test_features_resized_normalized, train_labels_tensor, validation_labels_tensor, test_labels = pickle.load(f)
+        else:
+            # Convert the example PyTorch MLP to sklearn MLP
+            train_features_resized_normalized, val_features_resized_normalized, test_features_resized_normalized, train_labels_tensor, validation_labels_tensor, test_labels = prepare_MNIST_haar()
+            with open("mnist_haar.pkl", "wb") as f:
+                pickle.dump([train_features_resized_normalized, val_features_resized_normalized, test_features_resized_normalized, train_labels_tensor, validation_labels_tensor, test_labels], f)
+
+        # make dict
+        leo_run_results = {}
+        
+        for hidden_neurons in [10, 20, 30, 40]:
+
+            clf = prepare_MNIST_MLP(train_features_resized_normalized, val_features_resized_normalized, test_features_resized_normalized, train_labels_tensor, validation_labels_tensor, test_labels, hidden_neuron_specification=hidden_neurons, prune=True)
+
+            # get the number of neurons of clf
+            num_neurons = clf.coefs_[0].shape[0]
+
+            # number of neurons in hidden layers and output layer
+            for i in range(len(clf.intercepts_)):
+                num_neurons += clf.intercepts_[i].shape[0]
+
+            train_images_2d = train_features_resized_normalized.numpy()
+            test_images_2d = test_features_resized_normalized.numpy()
+
+            import logging
+            import os
+
+            import numpy as np
+
+            from zkml import LeoTranspiler
+
+            # Set the logger
+            logger = logging.getLogger()
+            logger.setLevel(logging.INFO)
+
+            # Transpile the deceision tree into Leo code
+            lt = LeoTranspiler(model=clf, validation_data=train_images_2d[0:200])
+            leo_project_path = os.path.join(os.getcwd(), library_name + "/tests/tmp/mnist")
+            leo_project_name = "sklearn_mlp_mnist_1"
+            lt.to_leo(path=leo_project_path, project_name=leo_project_name, fixed_point_scaling_factor=16)
+
+            # Compute the accuracy of the Leo program and the Python program on the test set
+            num_test_samples = len(test_images_2d)
+
+            # let's limit the number of test stamples to 1 to make the computation faster
+            num_test_samples = min(num_test_samples, 1)
+
+            python_predictions = clf.predict(test_images_2d)
+
+            leo_predictions = np.zeros(num_test_samples)
+            for i in range(num_test_samples):
+                one_dim_array = test_images_2d[i].ravel()  # noqa: F841
+                inputs = lt.model_transpiler.generate_input(test_images_2d[i])  # noqa: F841
+
+                lc = lt.run(input=test_images_2d[i])
+
+                leo_run_results[num_neurons] = lc.circuit_constraints
+
+            a = 0
+        a = 0
+
+
 
 
 if __name__ == "__main__":

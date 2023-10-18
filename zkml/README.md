@@ -57,7 +57,7 @@ This Python library offers the ability to transpile Python machine learning mode
    ```bash
    pip3 install -r requirements.txt
    ```
-- The examples demonstrate how to work with the Python to Leo transpiler. Currently, the transpiler supports sklearn decision tree models, and the examples cover the Iris dataset, the German credit dataset, and the MNIST dataset.
+- The examples demonstrate how to work with the Python to Leo transpiler. Currently, the transpiler supports scikit-learn decision tree and multilayer perceptron neural network models, and the examples cover the Iris dataset, the German credit dataset, and the MNIST dataset.
 
 **Notes**:
 - On some systems, "python" and "pip" might be used instead of "python3" and "pip3".

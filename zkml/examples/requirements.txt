@@ -1,2 +1,7 @@
 matplotlib>=3.7.3
 requests>=2.31.0
+opencv-python>=4.8.0.76
+scipy>=1.11.2
+torch
+torchvision
+torchaudio
