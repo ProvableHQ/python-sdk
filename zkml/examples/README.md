@@ -6,4 +6,4 @@ This folder contains usage examples for the Aleo zkml transpiler.
    ```bash
    pip3 install -r requirements.txt
    ```
-- For more information on the Aleo zkml transpiler and how to use Jupyter notebooks, please visit the [`README.md`](../README.md) file of the parent folder.
+- For more information on the Aleo zkml transpiler and how to use Jupyter notebooks, please visit the `README.md` file of the [`parent folder`](../).
