@@ -1,12 +1,16 @@
 [package]
 name = "aleo"
-authors = ["Konstantin Pandl", "Mike Turner"]
-version = "0.0.3"
+authors = ["Konstantin Pandl", "Mike Turner", "Roman Proskuryakov"]
+version = "0.1.0"
 description = "A Python sdk for zero-knowledge cryptography based on Aleo"
 edition = "2021"
 license = "GPL-3.0-or-later"
 
 [dependencies]
+anyhow = "1"
+pyo3 = { version = "0.20.0", features = ["extension-module", "anyhow"] }
 rand = { version = "^0.8" }
-pyo3 = { version = "0.18.2", features = ["extension-module"] }
-snarkvm = { version = "0.12.6", features = ["console"] }
+serde = "1"
+serde_json = "1"
+
+snarkvm = { version = "0.16.6", features = ["console"] }
