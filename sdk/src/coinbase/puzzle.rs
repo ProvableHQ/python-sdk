@@ -14,29 +14,28 @@
 // You should have received a copy of the GNU General Public License
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
+use crate::{coinbase::CoinbaseVerifyingKey, types::CoinbasePuzzleNative};
+
 use pyo3::prelude::*;
 
-mod account;
-mod coinbase;
-mod types;
+#[pyclass]
+pub struct CoinbasePuzzle(CoinbasePuzzleNative);
 
-use account::*;
-use coinbase::*;
+#[pymethods]
+impl CoinbasePuzzle {
+    /// Load the coinbase puzzle proving and verifying keys.
+    #[staticmethod]
+    fn load() -> anyhow::Result<Self> {
+        let coinbase_puzzle = CoinbasePuzzleNative::load()?;
+        Ok(Self(coinbase_puzzle))
+    }
 
-#[pymodule]
-#[pyo3(name = "aleo")]
-fn register_module(_py: Python, m: &PyModule) -> PyResult<()> {
-    m.add_class::<Account>()?;
-    m.add_class::<Address>()?;
-    m.add_class::<CoinbasePuzzle>()?;
-    m.add_class::<CoinbaseVerifyingKey>()?;
-    m.add_class::<ComputeKey>()?;
-    m.add_class::<EpochChallenge>()?;
-    m.add_class::<PrivateKey>()?;
-    m.add_class::<ProverSolution>()?;
-    m.add_class::<RecordCiphertext>()?;
-    m.add_class::<RecordPlaintext>()?;
-    m.add_class::<Signature>()?;
-    m.add_class::<ViewKey>()?;
-    Ok(())
+    /// Returns the coinbase verifying key.
+    fn verifying_key(&self) -> anyhow::Result<CoinbaseVerifyingKey> {
+        let verifying_key = self.0.coinbase_verifying_key().clone();
+        Ok(CoinbaseVerifyingKey::from_native(verifying_key))
+    }
+
+    #[classattr]
+    const __hash__: Option<PyObject> = None;
 }

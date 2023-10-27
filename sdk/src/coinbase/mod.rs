@@ -14,29 +14,14 @@
 // You should have received a copy of the GNU General Public License
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
-use pyo3::prelude::*;
+mod epoch_challenge;
+pub use epoch_challenge::EpochChallenge;
 
-mod account;
-mod coinbase;
-mod types;
+mod prover_solution;
+pub use prover_solution::ProverSolution;
 
-use account::*;
-use coinbase::*;
+mod puzzle;
+pub use puzzle::CoinbasePuzzle;
 
-#[pymodule]
-#[pyo3(name = "aleo")]
-fn register_module(_py: Python, m: &PyModule) -> PyResult<()> {
-    m.add_class::<Account>()?;
-    m.add_class::<Address>()?;
-    m.add_class::<CoinbasePuzzle>()?;
-    m.add_class::<CoinbaseVerifyingKey>()?;
-    m.add_class::<ComputeKey>()?;
-    m.add_class::<EpochChallenge>()?;
-    m.add_class::<PrivateKey>()?;
-    m.add_class::<ProverSolution>()?;
-    m.add_class::<RecordCiphertext>()?;
-    m.add_class::<RecordPlaintext>()?;
-    m.add_class::<Signature>()?;
-    m.add_class::<ViewKey>()?;
-    Ok(())
-}
+mod verifying_key;
+pub use verifying_key::CoinbaseVerifyingKey;

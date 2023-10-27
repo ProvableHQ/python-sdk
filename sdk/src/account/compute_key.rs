@@ -14,29 +14,43 @@
 // You should have received a copy of the GNU General Public License
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
+use crate::types::ComputeKeyNative;
+
 use pyo3::prelude::*;
 
-mod account;
-mod coinbase;
-mod types;
+use std::ops::Deref;
 
-use account::*;
-use coinbase::*;
+#[pyclass(frozen)]
+pub struct ComputeKey(ComputeKeyNative);
 
-#[pymodule]
-#[pyo3(name = "aleo")]
-fn register_module(_py: Python, m: &PyModule) -> PyResult<()> {
-    m.add_class::<Account>()?;
-    m.add_class::<Address>()?;
-    m.add_class::<CoinbasePuzzle>()?;
-    m.add_class::<CoinbaseVerifyingKey>()?;
-    m.add_class::<ComputeKey>()?;
-    m.add_class::<EpochChallenge>()?;
-    m.add_class::<PrivateKey>()?;
-    m.add_class::<ProverSolution>()?;
-    m.add_class::<RecordCiphertext>()?;
-    m.add_class::<RecordPlaintext>()?;
-    m.add_class::<Signature>()?;
-    m.add_class::<ViewKey>()?;
-    Ok(())
+impl ComputeKey {
+    pub fn from_native(compute_key: ComputeKeyNative) -> Self {
+        Self(compute_key)
+    }
+}
+
+impl Deref for ComputeKey {
+    type Target = ComputeKeyNative;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[pymethods]
+impl ComputeKey {
+    /// Returns the signature public key.
+    fn pk_sig(&self) -> String {
+        self.0.pk_sig().to_string()
+    }
+
+    /// Returns the signature public randomizer.
+    fn pr_sig(&self) -> String {
+        self.0.pr_sig().to_string()
+    }
+
+    /// Returns a reference to the PRF secret key.
+    fn sk_prf(&self) -> String {
+        self.0.sk_prf().to_string()
+    }
 }
