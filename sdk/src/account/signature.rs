@@ -32,45 +32,23 @@ use std::{
 #[pyclass(frozen)]
 pub struct Signature(SignatureNative);
 
-impl Signature {
-    pub fn from_native(signature: SignatureNative) -> Self {
-        Self(signature)
-    }
-}
-
-impl Deref for Signature {
-    type Target = SignatureNative;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
 #[pymethods]
 impl Signature {
-    /// Returns a signature for the given message (as bytes) using the private key.
-    #[staticmethod]
-    pub fn sign(private_key: &PrivateKey, message: &[u8]) -> anyhow::Result<Self> {
-        let signature = private_key.sign_bytes(message, &mut StdRng::from_entropy())?;
-        Ok(Self(signature))
+    /// Returns the verifier challenge.
+    fn challenge(&self) -> String {
+        self.0.challenge().to_string()
     }
 
-    /// Verifies (challenge == challenge') && (address == address') where:
-    ///     challenge' := HashToScalar(G^response pk_sig^challenge, pk_sig, pr_sig, address, message)
-    pub fn verify(&self, address: &Address, message: &[u8]) -> bool {
-        self.0.verify_bytes(address, message)
+    /// Returns the signer compute key.
+    fn compute_key(&self) -> ComputeKey {
+        ComputeKey::from(self.0.compute_key())
     }
 
-    /// Reads in the signature string.
+    /// Creates a signature from a string representation.
     #[staticmethod]
     fn from_string(s: &str) -> anyhow::Result<Self> {
         let signature = FromStr::from_str(s)?;
         Ok(Self(signature))
-    }
-
-    /// Returns the verifier challenge.
-    fn challenge(&self) -> String {
-        self.0.challenge().to_string()
     }
 
     /// Returns the prover response.
@@ -78,9 +56,23 @@ impl Signature {
         self.0.response().to_string()
     }
 
-    /// Returns the signer compute key.
-    fn compute_key(&self) -> ComputeKey {
-        ComputeKey::from_native(self.0.compute_key())
+    /// Returns a signature for the given message (as bytes) using the private key.
+    #[staticmethod]
+    pub fn sign(private_key: &PrivateKey, message: &[u8]) -> anyhow::Result<Self> {
+        let signature = private_key.sign_bytes(message, &mut StdRng::from_entropy())?;
+        Ok(Self(signature))
+    }
+
+    /// Returns a string representation of the signature.
+    #[allow(clippy::inherent_to_string)]
+    fn to_string(&self) -> String {
+        self.0.to_string()
+    }
+
+    /// Verifies (challenge == challenge') && (address == address') where:
+    ///     challenge' := HashToScalar(G^response pk_sig^challenge, pk_sig, pr_sig, address, message)
+    pub fn verify(&self, address: &Address, message: &[u8]) -> bool {
+        self.0.verify_bytes(address, message)
     }
 
     fn __str__(&self) -> String {
@@ -95,5 +87,19 @@ impl Signature {
         let mut hasher = DefaultHasher::new();
         self.0.hash(&mut hasher);
         hasher.finish()
+    }
+}
+
+impl Deref for Signature {
+    type Target = SignatureNative;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<SignatureNative> for Signature {
+    fn from(signature: SignatureNative) -> Self {
+        Self(signature)
     }
 }

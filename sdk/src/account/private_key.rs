@@ -30,41 +30,43 @@ use std::{
 };
 
 #[pyclass(frozen)]
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq)]
 pub struct PrivateKey(PrivateKeyNative);
-
-impl Deref for PrivateKey {
-    type Target = PrivateKeyNative;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
 
 #[pymethods]
 impl PrivateKey {
     /// Generates a new private key using a cryptographically secure random number generator
+    #[allow(clippy::new_without_default)]
     #[new]
-    pub fn random() -> Self {
-        let key = PrivateKeyNative::new(&mut StdRng::from_entropy()).unwrap();
-        Self(key)
+    pub fn new() -> Self {
+        Self(PrivateKeyNative::new(&mut StdRng::from_entropy()).unwrap())
+    }
+
+    /// Derives the account address from an account private key.
+    pub fn address(&self) -> anyhow::Result<Address> {
+        Ok(Address::from(AddressNative::try_from(&self.0)?))
+    }
+
+    /// Derives the account compute key from an account private key.
+    fn compute_key(&self) -> ComputeKey {
+        let compute_key = ComputeKeyNative::try_from(&self.0).unwrap();
+        ComputeKey::from(compute_key)
     }
 
     /// Reads in an account private key from a base58 string.
     #[staticmethod]
-    fn from_string(s: &str) -> anyhow::Result<Self> {
-        let private_key = FromStr::from_str(s)?;
-        Ok(Self(private_key))
-    }
-
-    /// Returns a signature for the given message (as bytes) using the private key.
-    pub fn sign(&self, message: &[u8]) -> anyhow::Result<Signature> {
-        Signature::sign(self, message)
+    fn from_string(private_key: &str) -> anyhow::Result<Self> {
+        Ok(Self(PrivateKeyNative::from_str(private_key)?))
     }
 
     /// Returns the account seed.
     fn seed(&self) -> String {
         self.0.seed().to_string()
+    }
+
+    /// Returns a signature for the given message (as bytes) using the private key.
+    pub fn sign(&self, message: &[u8]) -> anyhow::Result<Signature> {
+        Signature::sign(self, message)
     }
 
     /// Returns the signature secret key.
@@ -77,22 +79,17 @@ impl PrivateKey {
         self.0.r_sig().to_string()
     }
 
-    /// Derives the account address from an account private key.
-    pub fn address(&self) -> Address {
-        let address = AddressNative::try_from(&self.0).unwrap();
-        Address::from_native(address)
-    }
-
-    /// Derives the account compute key from an account private key.
-    fn compute_key(&self) -> ComputeKey {
-        let compute_key = ComputeKeyNative::try_from(&self.0).unwrap();
-        ComputeKey::from_native(compute_key)
+    /// Returns the private key as a base58 string.
+    #[allow(clippy::inherent_to_string)]
+    #[allow(clippy::wrong_self_convention)]
+    fn to_string(&self) -> String {
+        self.0.to_string()
     }
 
     /// Initializes a new account view key from an account private key.
     pub fn view_key(&self) -> ViewKey {
         let view_key = ViewKeyNative::try_from(&self.0).unwrap();
-        ViewKey::from_native(view_key)
+        ViewKey::from(view_key)
     }
 
     fn __str__(&self) -> String {
@@ -107,5 +104,25 @@ impl PrivateKey {
         let mut hasher = DefaultHasher::new();
         self.0.hash(&mut hasher);
         hasher.finish()
+    }
+}
+
+impl Deref for PrivateKey {
+    type Target = PrivateKeyNative;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<PrivateKey> for PrivateKeyNative {
+    fn from(private_key: PrivateKey) -> Self {
+        private_key.0
+    }
+}
+
+impl From<PrivateKeyNative> for PrivateKey {
+    fn from(private_key: PrivateKeyNative) -> Self {
+        Self(private_key)
     }
 }

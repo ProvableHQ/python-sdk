@@ -29,20 +29,6 @@ use std::{
 #[derive(Clone)]
 pub struct Address(AddressNative);
 
-impl Address {
-    pub fn from_native(address: AddressNative) -> Self {
-        Self(address)
-    }
-}
-
-impl Deref for Address {
-    type Target = AddressNative;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
 #[pymethods]
 impl Address {
     /// Reads in an account address string.
@@ -50,6 +36,12 @@ impl Address {
     fn from_string(s: &str) -> anyhow::Result<Self> {
         let address = FromStr::from_str(s)?;
         Ok(Self(address))
+    }
+
+    /// Returns the address as a base58 string.
+    #[allow(clippy::inherent_to_string)]
+    fn to_string(&self) -> String {
+        self.0.to_string()
     }
 
     fn __str__(&self) -> String {
@@ -64,5 +56,19 @@ impl Address {
         let mut hasher = DefaultHasher::new();
         self.0.hash(&mut hasher);
         hasher.finish()
+    }
+}
+
+impl Deref for Address {
+    type Target = AddressNative;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<AddressNative> for Address {
+    fn from(address: AddressNative) -> Self {
+        Self(address)
     }
 }

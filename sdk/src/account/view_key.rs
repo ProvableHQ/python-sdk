@@ -31,22 +31,13 @@ use std::{
 #[derive(Clone)]
 pub struct ViewKey(ViewKeyNative);
 
-impl ViewKey {
-    pub fn from_native(view_key: ViewKeyNative) -> Self {
-        Self(view_key)
-    }
-}
-
-impl Deref for ViewKey {
-    type Target = ViewKeyNative;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
 #[pymethods]
 impl ViewKey {
+    /// Decrypt a record ciphertext with a view key
+    pub fn decrypt(&self, record_ciphertext: &RecordCiphertext) -> anyhow::Result<RecordPlaintext> {
+        record_ciphertext.decrypt(self)
+    }
+
     /// Reads in an account view key from a base58 string.
     #[staticmethod]
     fn from_string(s: &str) -> anyhow::Result<Self> {
@@ -54,20 +45,21 @@ impl ViewKey {
         Ok(Self(view_key))
     }
 
-    /// Returns the address corresponding to the view key.
-    fn to_address(&self) -> Address {
-        let address = self.0.to_address();
-        Address::from_native(address)
-    }
-
-    /// Decrypt a record ciphertext with a view key
-    pub fn decrypt(&self, record_ciphertext: &RecordCiphertext) -> anyhow::Result<RecordPlaintext> {
-        record_ciphertext.decrypt(self)
-    }
-
     /// Determines whether the record belongs to the account.
     pub fn is_owner(&self, record_ciphertext: &RecordCiphertext) -> bool {
         record_ciphertext.is_owner(self)
+    }
+
+    /// Returns the address corresponding to the view key.
+    fn to_address(&self) -> Address {
+        let address = self.0.to_address();
+        Address::from(address)
+    }
+
+    /// Returns the view key as a base58 string.
+    #[allow(clippy::inherent_to_string)]
+    fn to_string(&self) -> String {
+        self.0.to_string()
     }
 
     fn __str__(&self) -> String {
@@ -82,5 +74,19 @@ impl ViewKey {
         let mut hasher = DefaultHasher::new();
         self.0.hash(&mut hasher);
         hasher.finish()
+    }
+}
+
+impl Deref for ViewKey {
+    type Target = ViewKeyNative;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<ViewKeyNative> for ViewKey {
+    fn from(view_key: ViewKeyNative) -> Self {
+        Self(view_key)
     }
 }

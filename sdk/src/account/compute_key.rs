@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
-use crate::types::ComputeKeyNative;
+use crate::{types::ComputeKeyNative, Address};
 
 use pyo3::prelude::*;
 
@@ -23,22 +23,13 @@ use std::ops::Deref;
 #[pyclass(frozen)]
 pub struct ComputeKey(ComputeKeyNative);
 
-impl ComputeKey {
-    pub fn from_native(compute_key: ComputeKeyNative) -> Self {
-        Self(compute_key)
-    }
-}
-
-impl Deref for ComputeKey {
-    type Target = ComputeKeyNative;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
 #[pymethods]
 impl ComputeKey {
+    /// Returns the address from the compute key.
+    fn address(&self) -> Address {
+        Address::from(self.0.to_address())
+    }
+
     /// Returns the signature public key.
     fn pk_sig(&self) -> String {
         self.0.pk_sig().to_string()
@@ -52,5 +43,19 @@ impl ComputeKey {
     /// Returns a reference to the PRF secret key.
     fn sk_prf(&self) -> String {
         self.0.sk_prf().to_string()
+    }
+}
+
+impl Deref for ComputeKey {
+    type Target = ComputeKeyNative;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<ComputeKeyNative> for ComputeKey {
+    fn from(compute_key: ComputeKeyNative) -> Self {
+        Self(compute_key)
     }
 }

@@ -46,7 +46,7 @@ impl ProverSolution {
 
     /// Returns the address of the prover.
     fn address(&self) -> Address {
-        Address::from_native(self.0.address())
+        Address::from(self.0.address())
     }
 
     /// Returns `true` if the prover solution is valid.
