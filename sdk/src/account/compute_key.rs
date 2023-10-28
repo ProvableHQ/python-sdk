@@ -26,21 +26,25 @@ pub struct ComputeKey(ComputeKeyNative);
 #[pymethods]
 impl ComputeKey {
     /// Returns the address from the compute key.
+    #[getter]
     fn address(&self) -> Address {
         Address::from(self.0.to_address())
     }
 
     /// Returns the signature public key.
+    #[getter]
     fn pk_sig(&self) -> String {
         self.0.pk_sig().to_string()
     }
 
     /// Returns the signature public randomizer.
+    #[getter]
     fn pr_sig(&self) -> String {
         self.0.pr_sig().to_string()
     }
 
     /// Returns a reference to the PRF secret key.
+    #[getter]
     fn sk_prf(&self) -> String {
         self.0.sk_prf().to_string()
     }

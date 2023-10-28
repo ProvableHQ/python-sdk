@@ -31,6 +31,7 @@ impl CoinbasePuzzle {
     }
 
     /// Returns the coinbase verifying key.
+    #[getter]
     fn verifying_key(&self) -> anyhow::Result<CoinbaseVerifyingKey> {
         let verifying_key = self.0.coinbase_verifying_key().clone();
         Ok(CoinbaseVerifyingKey::from(verifying_key))

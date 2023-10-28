@@ -45,6 +45,7 @@ impl ProverSolution {
     }
 
     /// Returns the address of the prover.
+    #[getter]
     fn address(&self) -> Address {
         Address::from(self.0.address())
     }
