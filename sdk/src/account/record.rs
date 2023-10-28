@@ -86,11 +86,13 @@ impl RecordPlaintext {
     }
 
     /// Returns the owner of the record as a string
+    #[getter]
     fn owner(&self) -> String {
         self.0.owner().to_string()
     }
 
     /// Returns the nonce of the record as a string
+    #[getter]
     fn nonce(&self) -> String {
         self.0.nonce().to_string()
     }

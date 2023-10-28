@@ -35,11 +35,13 @@ pub struct Signature(SignatureNative);
 #[pymethods]
 impl Signature {
     /// Returns the verifier challenge.
+    #[getter]
     fn challenge(&self) -> String {
         self.0.challenge().to_string()
     }
 
     /// Returns the signer compute key.
+    #[getter]
     fn compute_key(&self) -> ComputeKey {
         ComputeKey::from(self.0.compute_key())
     }
@@ -52,6 +54,7 @@ impl Signature {
     }
 
     /// Returns the prover response.
+    #[getter]
     fn response(&self) -> String {
         self.0.response().to_string()
     }

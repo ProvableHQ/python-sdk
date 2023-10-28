@@ -51,7 +51,8 @@ impl ViewKey {
     }
 
     /// Returns the address corresponding to the view key.
-    fn to_address(&self) -> Address {
+    #[getter]
+    fn address(&self) -> Address {
         let address = self.0.to_address();
         Address::from(address)
     }

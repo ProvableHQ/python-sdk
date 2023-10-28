@@ -9,16 +9,16 @@ def test_sanity():
     private_key = aleo.PrivateKey.from_string(c_private_key)
     
     assert str(private_key) == c_private_key
-    assert str(private_key.view_key()) == c_view_key
-    assert str(private_key.address()) == c_address
+    assert str(private_key.view_key) == c_view_key
+    assert str(private_key.address) == c_address
 
     view_key = aleo.ViewKey.from_string(c_view_key)
     assert str(view_key) == c_view_key
-    assert view_key == private_key.view_key()
+    assert view_key == private_key.view_key
 
     address = aleo.Address.from_string(c_address)
     assert str(address) == c_address
-    assert address == private_key.address()
+    assert address == private_key.address
 
 def test_decrypt_success():
     c_plaintext = """{
@@ -47,14 +47,14 @@ def test_signature_verify():
 def test_account_sanity():
     private_key = aleo.PrivateKey.from_string("APrivateKey1zkp3dQx4WASWYQVWKkq14v3RoQDfY2kbLssUj7iifi1VUQ6")
     account = aleo.Account.from_private_key(private_key)
-    assert account.private_key() == private_key
+    assert account.private_key == private_key
     assert account == aleo.Account.from_private_key(private_key)
     message = bytes("asd", "utf-8")
     bad_message = bytes("qwe", "utf-8")
     signature = account.sign(message)
     assert account.verify(signature, message)
     assert not account.verify(signature, bad_message)
-    assert signature.verify(account.address(), message)
+    assert signature.verify(account.address, message)
 
 def test_coinbase():
     address = aleo.Address.from_string("aleo16xwtrvntrfnan84sy3qg2gdkkp5u5p7sjc882lx8n06fjx2k0yqsklw8sv")
@@ -63,7 +63,7 @@ def test_coinbase():
     challenge = aleo.EpochChallenge.from_json(challenge_json)
     solution = aleo.ProverSolution.from_json(solution_json)
 
-    assert solution.address() == address
+    assert solution.address == address
     assert str(challenge) == challenge_json
     assert str(solution) == solution_json
 

@@ -43,11 +43,13 @@ impl PrivateKey {
     }
 
     /// Derives the account address from an account private key.
+    #[getter]
     pub fn address(&self) -> anyhow::Result<Address> {
         Ok(Address::from(AddressNative::try_from(&self.0)?))
     }
 
     /// Derives the account compute key from an account private key.
+    #[getter]
     fn compute_key(&self) -> ComputeKey {
         let compute_key = ComputeKeyNative::try_from(&self.0).unwrap();
         ComputeKey::from(compute_key)
@@ -60,6 +62,7 @@ impl PrivateKey {
     }
 
     /// Returns the account seed.
+    #[getter]
     fn seed(&self) -> String {
         self.0.seed().to_string()
     }
@@ -70,11 +73,13 @@ impl PrivateKey {
     }
 
     /// Returns the signature secret key.
+    #[getter]
     fn sk_sig(&self) -> String {
         self.0.sk_sig().to_string()
     }
 
     /// Returns the signature randomizer.
+    #[getter]
     fn r_sig(&self) -> String {
         self.0.r_sig().to_string()
     }
@@ -87,6 +92,7 @@ impl PrivateKey {
     }
 
     /// Initializes a new account view key from an account private key.
+    #[getter]
     pub fn view_key(&self) -> ViewKey {
         let view_key = ViewKeyNative::try_from(&self.0).unwrap();
         ViewKey::from(view_key)

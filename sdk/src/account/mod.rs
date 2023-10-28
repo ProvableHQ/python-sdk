@@ -67,16 +67,19 @@ impl Account {
     }
 
     /// Returns an account private key.
+    #[getter]
     fn private_key(&self) -> PrivateKey {
         self.private_key
     }
 
     /// Returns an account view key.
+    #[getter]
     fn view_key(&self) -> ViewKey {
         self.view_key.clone()
     }
 
     /// Returns an account address.
+    #[getter]
     fn address(&self) -> Address {
         self.address.clone()
     }
