@@ -15,6 +15,12 @@ for line in lines:
         line = line.replace("if ", "if(")
         line = line.replace(" {", "){")
 
+    line = line.replace(":  =", " =")
+
+    if("return " in line and "(" in line):
+        line = line.replace("(", "[")
+        line = line.replace(")", "]")
+
     lines_changed.append(line)
 
 # store the lines in a new file
