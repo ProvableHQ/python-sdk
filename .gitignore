@@ -2,6 +2,7 @@
 sandbox/
 myenv/
 tmp/
+.history/
 
 .DS_Store
 
