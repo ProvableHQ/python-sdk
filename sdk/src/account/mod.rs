@@ -51,15 +51,14 @@ impl Account {
     /// Generates a new account using a cryptographically secure random number generator
     #[new]
     fn new() -> Self {
-        let private_key = PrivateKey::random();
-        Self::from_private_key(private_key)
+        Self::from(PrivateKey::new())
     }
 
     /// Creates a new account from the given private key.
     #[staticmethod]
     fn from_private_key(private_key: PrivateKey) -> Self {
         let view_key = private_key.view_key();
-        let address = private_key.address();
+        let address = private_key.address().unwrap();
         Self {
             private_key,
             view_key,
@@ -69,7 +68,7 @@ impl Account {
 
     /// Returns an account private key.
     fn private_key(&self) -> PrivateKey {
-        self.private_key.clone()
+        self.private_key
     }
 
     /// Returns an account view key.
@@ -93,8 +92,8 @@ impl Account {
     }
 
     /// Decrypts a record ciphertext with a view key
-    fn decrypt(&self, cipherrecord: &RecordCiphertext) -> anyhow::Result<RecordPlaintext> {
-        cipherrecord.decrypt(&self.view_key)
+    fn decrypt(&self, record_ciphertext: &RecordCiphertext) -> anyhow::Result<RecordPlaintext> {
+        record_ciphertext.decrypt(&self.view_key)
     }
 
     /// Determines whether the record belongs to the account.
@@ -117,5 +116,11 @@ impl Account {
         "account".hash(&mut hasher);
         self.private_key.hash(&mut hasher);
         hasher.finish()
+    }
+}
+
+impl From<PrivateKey> for Account {
+    fn from(private_key: PrivateKey) -> Self {
+        Self::from_private_key(private_key)
     }
 }

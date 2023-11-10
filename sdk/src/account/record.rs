@@ -15,9 +15,13 @@
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
 use crate::{
-    account::ViewKey,
-    types::{RecordCiphertextNative, RecordPlaintextNative},
+    account::{PrivateKey, ViewKey},
+    types::{
+        IdentifierNative, ProgramIDNative, RecordCiphertextNative,
+        RecordPlaintextNative,
+    },
 };
+use std::ops::Deref;
 
 use pyo3::prelude::*;
 
@@ -28,11 +32,16 @@ pub struct RecordCiphertext(RecordCiphertextNative);
 
 #[pymethods]
 impl RecordCiphertext {
-    /// Reads in the ciphertext string.
+    /// Creates a record ciphertext from string
     #[staticmethod]
     fn from_string(s: &str) -> anyhow::Result<Self> {
-        let view_key = FromStr::from_str(s)?;
-        Ok(Self(view_key))
+        Ok(Self::from(RecordCiphertextNative::from_str(s)?))
+    }
+
+    /// Returns the record ciphertext as a string.
+    #[allow(clippy::inherent_to_string)]
+    fn to_string(&self) -> String {
+        self.0.to_string()
     }
 
     /// Decrypts self into plaintext using the given view key and checks that the owner matches the view key.
@@ -41,7 +50,7 @@ impl RecordCiphertext {
         Ok(RecordPlaintext(plaintext))
     }
 
-    /// Determines whether the record belongs to the account.
+    /// Determines whether the record belongs to the view key associated with an account.
     pub fn is_owner(&self, view_key: &ViewKey) -> bool {
         self.0.is_owner(view_key)
     }
@@ -51,12 +60,80 @@ impl RecordCiphertext {
     }
 }
 
+impl Deref for RecordCiphertext {
+    type Target = RecordCiphertextNative;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<RecordCiphertextNative> for RecordCiphertext {
+    fn from(record_ciphertext: RecordCiphertextNative) -> Self {
+        Self(record_ciphertext)
+    }
+}
+
 #[pyclass(frozen)]
 pub struct RecordPlaintext(RecordPlaintextNative);
 
 #[pymethods]
 impl RecordPlaintext {
+    /// Reads in the plaintext string.
+    #[staticmethod]
+    fn from_string(s: &str) -> anyhow::Result<Self> {
+        Ok(Self::from(RecordPlaintextNative::from_str(s)?))
+    }
+
+    /// Returns the owner of the record as a string
+    fn owner(&self) -> String {
+        self.0.owner().to_string()
+    }
+
+    /// Returns the nonce of the record as a string
+    fn nonce(&self) -> String {
+        self.0.nonce().to_string()
+    }
+
+    /// Attempt to get the serial number of a record to determine whether or not is has been spent
+    pub fn serial_number_string(
+        &self,
+        private_key: &PrivateKey,
+        program_id: &str,
+        record_name: &str,
+    ) -> anyhow::Result<String> {
+        let parsed_program_id = ProgramIDNative::from_str(program_id)?;
+        let record_identifier = IdentifierNative::from_str(record_name)?;
+        let commitment = self.to_commitment(&parsed_program_id, &record_identifier)?;
+        let serial_number = RecordPlaintextNative::serial_number(**private_key, commitment)?;
+        Ok(serial_number.to_string())
+    }
+
+    /// Returns the plaintext as a string.
+    #[allow(clippy::inherent_to_string)]
+    fn to_string(&self) -> String {
+        self.0.to_string()
+    }
+
+    fn __eq__(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+
     fn __str__(&self) -> String {
         self.0.to_string()
+    }
+}
+
+impl Deref for RecordPlaintext {
+    type Target = RecordPlaintextNative;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<RecordPlaintextNative> for RecordPlaintext {
+    fn from(record_plaintext: RecordPlaintextNative) -> Self {
+        Self(record_plaintext)
     }
 }

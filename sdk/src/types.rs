@@ -19,7 +19,8 @@ use snarkvm::prelude::coinbase::{
     CoinbasePuzzle, CoinbaseVerifyingKey, EpochChallenge, ProverSolution,
 };
 use snarkvm::prelude::{
-    Address, Ciphertext, ComputeKey, Plaintext, PrivateKey, Record, Signature, ViewKey,
+    Address, Ciphertext, ComputeKey, Identifier, Plaintext, PrivateKey, ProgramID, Record,
+    Signature, ViewKey,
 };
 
 // Account types
@@ -31,6 +32,10 @@ pub type ViewKeyNative = ViewKey<CurrentNetwork>;
 
 // Network types
 pub type CurrentNetwork = Testnet3;
+
+// Program Types
+pub type IdentifierNative = Identifier<CurrentNetwork>;
+pub type ProgramIDNative = ProgramID<CurrentNetwork>;
 
 // Record types
 pub type CiphertextNative = Ciphertext<CurrentNetwork>;

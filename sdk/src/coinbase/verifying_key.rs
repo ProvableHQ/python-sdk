@@ -23,8 +23,11 @@ use std::ops::Deref;
 #[pyclass(frozen)]
 pub struct CoinbaseVerifyingKey(CoinbaseVerifyingKeyNative);
 
-impl CoinbaseVerifyingKey {
-    pub fn from_native(key: CoinbaseVerifyingKeyNative) -> Self {
+#[pymethods]
+impl CoinbaseVerifyingKey {}
+
+impl From<CoinbaseVerifyingKeyNative> for CoinbaseVerifyingKey {
+    fn from(key: CoinbaseVerifyingKeyNative) -> Self {
         Self(key)
     }
 }
@@ -36,6 +39,3 @@ impl Deref for CoinbaseVerifyingKey {
         &self.0
     }
 }
-
-#[pymethods]
-impl CoinbaseVerifyingKey {}
