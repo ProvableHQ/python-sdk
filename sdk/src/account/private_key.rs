@@ -79,19 +79,13 @@ impl PrivateKey {
         self.0.r_sig().to_string()
     }
 
-    /// Returns the private key as a base58 string.
-    #[allow(clippy::inherent_to_string)]
-    #[allow(clippy::wrong_self_convention)]
-    fn to_string(&self) -> String {
-        self.0.to_string()
-    }
-
     /// Initializes a new account view key from an account private key.
     pub fn view_key(&self) -> ViewKey {
         let view_key = ViewKeyNative::try_from(&self.0).unwrap();
         ViewKey::from(view_key)
     }
 
+    /// Returns the private key as a base58 string.
     fn __str__(&self) -> String {
         self.0.to_string()
     }

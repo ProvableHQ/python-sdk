@@ -16,10 +16,7 @@
 
 use crate::{
     account::{PrivateKey, ViewKey},
-    types::{
-        IdentifierNative, ProgramIDNative, RecordCiphertextNative,
-        RecordPlaintextNative,
-    },
+    types::{IdentifierNative, ProgramIDNative, RecordCiphertextNative, RecordPlaintextNative},
 };
 use std::ops::Deref;
 
@@ -38,12 +35,6 @@ impl RecordCiphertext {
         Ok(Self::from(RecordCiphertextNative::from_str(s)?))
     }
 
-    /// Returns the record ciphertext as a string.
-    #[allow(clippy::inherent_to_string)]
-    fn to_string(&self) -> String {
-        self.0.to_string()
-    }
-
     /// Decrypts self into plaintext using the given view key and checks that the owner matches the view key.
     pub fn decrypt(&self, view_key: &ViewKey) -> anyhow::Result<RecordPlaintext> {
         let plaintext = self.0.decrypt(view_key)?;
@@ -55,6 +46,7 @@ impl RecordCiphertext {
         self.0.is_owner(view_key)
     }
 
+    /// Returns the record ciphertext as a string.
     fn __str__(&self) -> String {
         self.0.to_string()
     }
@@ -110,17 +102,12 @@ impl RecordPlaintext {
     }
 
     /// Returns the plaintext as a string.
-    #[allow(clippy::inherent_to_string)]
-    fn to_string(&self) -> String {
+    fn __str__(&self) -> String {
         self.0.to_string()
     }
 
     fn __eq__(&self, other: &Self) -> bool {
         self.0 == other.0
-    }
-
-    fn __str__(&self) -> String {
-        self.0.to_string()
     }
 }
 

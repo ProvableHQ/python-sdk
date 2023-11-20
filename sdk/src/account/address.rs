@@ -39,11 +39,6 @@ impl Address {
     }
 
     /// Returns the address as a base58 string.
-    #[allow(clippy::inherent_to_string)]
-    fn to_string(&self) -> String {
-        self.0.to_string()
-    }
-
     fn __str__(&self) -> String {
         self.0.to_string()
     }

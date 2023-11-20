@@ -63,18 +63,13 @@ impl Signature {
         Ok(Self(signature))
     }
 
-    /// Returns a string representation of the signature.
-    #[allow(clippy::inherent_to_string)]
-    fn to_string(&self) -> String {
-        self.0.to_string()
-    }
-
     /// Verifies (challenge == challenge') && (address == address') where:
     ///     challenge' := HashToScalar(G^response pk_sig^challenge, pk_sig, pr_sig, address, message)
     pub fn verify(&self, address: &Address, message: &[u8]) -> bool {
         self.0.verify_bytes(address, message)
     }
 
+    /// Returns a string representation of the signature.
     fn __str__(&self) -> String {
         self.0.to_string()
     }
