@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import aleo
 import unittest
-import json
+
 
 class TestAleo(unittest.TestCase):
 
@@ -11,7 +11,7 @@ class TestAleo(unittest.TestCase):
         c_address = "aleo184vuwr5u7u0ha5f5k44067dd2uaqewxx6pe5ltha5pv99wvhfqxqv339h4"
 
         private_key = aleo.PrivateKey.from_string(c_private_key)
-        
+
         self.assertEqual(str(private_key), c_private_key)
         self.assertEqual(str(private_key.view_key()), c_view_key)
         self.assertEqual(str(private_key.address()), c_address)
@@ -40,7 +40,8 @@ class TestAleo(unittest.TestCase):
         self.assertEqual(str(plaintext), c_plaintext)
 
     def test_signature_verify(self):
-        address = aleo.Address.from_string("aleo16u4ecz4yqq0udtnmsy8qzvj8emnua24n27c264f2t3unekdlpy8sh4hat2")
+        address = aleo.Address.from_string(
+            "aleo16u4ecz4yqq0udtnmsy8qzvj8emnua24n27c264f2t3unekdlpy8sh4hat2")
         c_signature = "sign1q366eqppwqvmsq0epddmkpqr7ul5rkkltewatf4wdwd82l5yhypdwfnrng6tkj3ryx36wz2dptfq4aev8pwl85u9u6fk48mwmqe35q7h3ptmdtcfxxlcc6ardzayk5ykn2xzp5mhv3spwl3ajgc3y8mfqdmqs7fq3w4wc6j65e3z9ttthqwfy570yef6l9f8klnskzsu9adquzsjwhw"
         signature = aleo.Signature.from_string(c_signature)
         message = bytes("asd", "utf-8")
@@ -50,7 +51,8 @@ class TestAleo(unittest.TestCase):
         self.assertEqual(signature, aleo.Signature.from_string(c_signature))
 
     def test_account_sanity(self):
-        private_key = aleo.PrivateKey.from_string("APrivateKey1zkp3dQx4WASWYQVWKkq14v3RoQDfY2kbLssUj7iifi1VUQ6")
+        private_key = aleo.PrivateKey.from_string(
+            "APrivateKey1zkp3dQx4WASWYQVWKkq14v3RoQDfY2kbLssUj7iifi1VUQ6")
         account = aleo.Account.from_private_key(private_key)
 
         self.assertEqual(account.private_key(), private_key)
@@ -65,7 +67,8 @@ class TestAleo(unittest.TestCase):
         self.assertTrue(signature.verify(account.address(), message))
 
     def test_coinbase(self):
-        address = aleo.Address.from_string("aleo16xwtrvntrfnan84sy3qg2gdkkp5u5p7sjc882lx8n06fjx2k0yqsklw8sv")
+        address = aleo.Address.from_string(
+            "aleo16xwtrvntrfnan84sy3qg2gdkkp5u5p7sjc882lx8n06fjx2k0yqsklw8sv")
         solution_json = "{\"partial_solution\":{\"address\":\"aleo16xwtrvntrfnan84sy3qg2gdkkp5u5p7sjc882lx8n06fjx2k0yqsklw8sv\",\"nonce\":5751994693410499959,\"commitment\":\"puzzle163g3gms8kle6z7pfrnelsxmt5qk88sycdxjrfd2chfrmcaa58uv28u4amjhhzyc08wr6ur2hjsusqvgm7mp\"},\"proof.w\":{\"x\":\"46184004058746376929865476153864114989216680475842020861467330568081354981230088442717116178378251337401583339204\",\"y\":\"183283507821413711045927236980084997259573867323884239590264843665205515176450368153011402822680772267880564185790\",\"infinity\":false}}"
         challenge_json = "{\"epoch_number\":233,\"epoch_block_hash\":\"ab15lsq2zxsvr0am25afrvnczglagu7utpzuzn2sp94f3vyefm4558quexrn3\",\"degree\":8191}"
         challenge = aleo.EpochChallenge.from_json(challenge_json)
@@ -79,6 +82,42 @@ class TestAleo(unittest.TestCase):
         # puzzle = aleo.CoinbasePuzzle.load()
         # verifying_key = puzzle.verifying_key()
         # assert solution.verify(verifying_key, challenge, 100)
+
+    def test_transfer(self):
+        private_key = aleo.PrivateKey.from_string(
+            "APrivateKey1zkp3dQx4WASWYQVWKkq14v3RoQDfY2kbLssUj7iifi1VUQ6")
+        destination = aleo.Address.from_string(
+            "aleo16u4ecz4yqq0udtnmsy8qzvj8emnua24n27c264f2t3unekdlpy8sh4hat2")
+        amount = aleo.Credits(0.3)
+        query = aleo.Query.rest("https://explorer.hamp.app")
+        process = aleo.Process.load()
+        credits = aleo.Program.credits()
+        process.add_program(credits)
+        transfer_name = aleo.Identifier.from_string("transfer_public")
+        transfer_auth = process.authorize(private_key, credits.id(), transfer_name, [
+            aleo.Value.from_literal(aleo.Literal.from_address(destination)),
+            aleo.Value.from_literal(aleo.Literal.from_u64(
+                aleo.U64(int(amount.micro())))),
+        ])
+        (_transfer_resp, transfer_trace) = process.execute(transfer_auth)
+        transfer_trace.prepare(query)
+        transfer_execution = transfer_trace.prove_execution(
+            aleo.Locator(credits.id(), aleo.Identifier.from_string("transfer")))
+        execution_id = transfer_execution.execution_id()
+        process.verify_execution(transfer_execution)
+
+        (fee_cost, _) = process.execution_cost(transfer_execution)
+        fee_priority = None
+        fee_auth = process.authorize_fee_public(
+            private_key, fee_cost, execution_id, fee_priority)
+        (_fee_resp, fee_trace) = process.execute(fee_auth)
+        fee_trace.prepare(query)
+        fee = fee_trace.prove_fee()
+        process.verify_fee(fee, execution_id)
+
+        transaction = aleo.Transaction.from_execution(transfer_execution, fee)
+        print(transaction.to_json())
+
 
 if __name__ == "__main__":
     unittest.main()
