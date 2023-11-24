@@ -14,10 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
-use crate::{
-    account::{Address, RecordCiphertext, RecordPlaintext},
-    types::ViewKeyNative,
-};
+use crate::{types::ViewKeyNative, Address, RecordCiphertext, RecordPlaintext};
 
 use pyo3::prelude::*;
 
@@ -81,7 +78,7 @@ impl Deref for ViewKey {
 }
 
 impl From<ViewKeyNative> for ViewKey {
-    fn from(view_key: ViewKeyNative) -> Self {
-        Self(view_key)
+    fn from(value: ViewKeyNative) -> Self {
+        Self(value)
     }
 }

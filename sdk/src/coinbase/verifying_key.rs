@@ -27,8 +27,8 @@ pub struct CoinbaseVerifyingKey(CoinbaseVerifyingKeyNative);
 impl CoinbaseVerifyingKey {}
 
 impl From<CoinbaseVerifyingKeyNative> for CoinbaseVerifyingKey {
-    fn from(key: CoinbaseVerifyingKeyNative) -> Self {
-        Self(key)
+    fn from(value: CoinbaseVerifyingKeyNative) -> Self {
+        Self(value)
     }
 }
 

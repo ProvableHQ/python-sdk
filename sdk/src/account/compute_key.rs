@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
-use crate::{types::ComputeKeyNative, Address};
+use crate::{types::ComputeKeyNative, Address, Group, Scalar};
 
 use pyo3::prelude::*;
 
@@ -27,22 +27,22 @@ pub struct ComputeKey(ComputeKeyNative);
 impl ComputeKey {
     /// Returns the address from the compute key.
     fn address(&self) -> Address {
-        Address::from(self.0.to_address())
+        self.0.to_address().into()
     }
 
     /// Returns the signature public key.
-    fn pk_sig(&self) -> String {
-        self.0.pk_sig().to_string()
+    fn pk_sig(&self) -> Group {
+        self.0.pk_sig().into()
     }
 
     /// Returns the signature public randomizer.
-    fn pr_sig(&self) -> String {
-        self.0.pr_sig().to_string()
+    fn pr_sig(&self) -> Group {
+        self.0.pr_sig().into()
     }
 
     /// Returns a reference to the PRF secret key.
-    fn sk_prf(&self) -> String {
-        self.0.sk_prf().to_string()
+    fn sk_prf(&self) -> Scalar {
+        self.0.sk_prf().into()
     }
 }
 
@@ -55,7 +55,7 @@ impl Deref for ComputeKey {
 }
 
 impl From<ComputeKeyNative> for ComputeKey {
-    fn from(compute_key: ComputeKeyNative) -> Self {
-        Self(compute_key)
+    fn from(value: ComputeKeyNative) -> Self {
+        Self(value)
     }
 }

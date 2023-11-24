@@ -34,8 +34,7 @@ impl Address {
     /// Reads in an account address string.
     #[staticmethod]
     fn from_string(s: &str) -> anyhow::Result<Self> {
-        let address = FromStr::from_str(s)?;
-        Ok(Self(address))
+        AddressNative::from_str(s).map(Self)
     }
 
     /// Returns the address as a base58 string.
@@ -63,7 +62,7 @@ impl Deref for Address {
 }
 
 impl From<AddressNative> for Address {
-    fn from(address: AddressNative) -> Self {
-        Self(address)
+    fn from(value: AddressNative) -> Self {
+        Self(value)
     }
 }

@@ -79,7 +79,7 @@ impl Deref for EpochChallenge {
 
 #[pymethods]
 impl EpochChallenge {
-    /// Reads in an epoch challenge from a json string.
+    /// Parses an epoch challenge from a JSON string.
     #[staticmethod]
     fn from_json(json: String) -> anyhow::Result<Self> {
         Ok(serde_json::from_str(&json)?)

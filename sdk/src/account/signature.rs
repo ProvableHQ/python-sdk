@@ -14,10 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
-use crate::{
-    account::{Address, ComputeKey, PrivateKey},
-    types::SignatureNative,
-};
+use crate::{types::SignatureNative, Address, ComputeKey, PrivateKey, Scalar};
 
 use pyo3::prelude::*;
 use rand::{rngs::StdRng, SeedableRng};
@@ -30,37 +27,38 @@ use std::{
 };
 
 #[pyclass(frozen)]
+#[derive(Clone)]
 pub struct Signature(SignatureNative);
 
 #[pymethods]
 impl Signature {
     /// Returns the verifier challenge.
-    fn challenge(&self) -> String {
-        self.0.challenge().to_string()
+    fn challenge(&self) -> Scalar {
+        self.0.challenge().into()
     }
 
     /// Returns the signer compute key.
     fn compute_key(&self) -> ComputeKey {
-        ComputeKey::from(self.0.compute_key())
+        self.0.compute_key().into()
     }
 
     /// Creates a signature from a string representation.
     #[staticmethod]
     fn from_string(s: &str) -> anyhow::Result<Self> {
-        let signature = FromStr::from_str(s)?;
-        Ok(Self(signature))
+        FromStr::from_str(s).map(Self)
     }
 
     /// Returns the prover response.
-    fn response(&self) -> String {
-        self.0.response().to_string()
+    fn response(&self) -> Scalar {
+        self.0.response().into()
     }
 
     /// Returns a signature for the given message (as bytes) using the private key.
     #[staticmethod]
     pub fn sign(private_key: &PrivateKey, message: &[u8]) -> anyhow::Result<Self> {
-        let signature = private_key.sign_bytes(message, &mut StdRng::from_entropy())?;
-        Ok(Self(signature))
+        private_key
+            .sign_bytes(message, &mut StdRng::from_entropy())
+            .map(Self)
     }
 
     /// Verifies (challenge == challenge') && (address == address') where:
@@ -94,7 +92,7 @@ impl Deref for Signature {
 }
 
 impl From<SignatureNative> for Signature {
-    fn from(signature: SignatureNative) -> Self {
-        Self(signature)
+    fn from(value: SignatureNative) -> Self {
+        Self(value)
     }
 }

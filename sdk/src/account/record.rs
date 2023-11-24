@@ -15,8 +15,8 @@
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
 use crate::{
-    account::{PrivateKey, ViewKey},
-    types::{IdentifierNative, ProgramIDNative, RecordCiphertextNative, RecordPlaintextNative},
+    types::{RecordCiphertextNative, RecordPlaintextNative},
+    Field, Group, Identifier, PrivateKey, ProgramID, ViewKey,
 };
 use std::ops::Deref;
 
@@ -32,13 +32,12 @@ impl RecordCiphertext {
     /// Creates a record ciphertext from string
     #[staticmethod]
     fn from_string(s: &str) -> anyhow::Result<Self> {
-        Ok(Self::from(RecordCiphertextNative::from_str(s)?))
+        RecordCiphertextNative::from_str(s).map(Self)
     }
 
     /// Decrypts self into plaintext using the given view key and checks that the owner matches the view key.
     pub fn decrypt(&self, view_key: &ViewKey) -> anyhow::Result<RecordPlaintext> {
-        let plaintext = self.0.decrypt(view_key)?;
-        Ok(RecordPlaintext(plaintext))
+        self.0.decrypt(view_key).map(Into::into)
     }
 
     /// Determines whether the record belongs to the view key associated with an account.
@@ -61,12 +60,13 @@ impl Deref for RecordCiphertext {
 }
 
 impl From<RecordCiphertextNative> for RecordCiphertext {
-    fn from(record_ciphertext: RecordCiphertextNative) -> Self {
-        Self(record_ciphertext)
+    fn from(value: RecordCiphertextNative) -> Self {
+        Self(value)
     }
 }
 
 #[pyclass(frozen)]
+#[derive(Clone)]
 pub struct RecordPlaintext(RecordPlaintextNative);
 
 #[pymethods]
@@ -74,7 +74,7 @@ impl RecordPlaintext {
     /// Reads in the plaintext string.
     #[staticmethod]
     fn from_string(s: &str) -> anyhow::Result<Self> {
-        Ok(Self::from(RecordPlaintextNative::from_str(s)?))
+        RecordPlaintextNative::from_str(s).map(Self)
     }
 
     /// Returns the owner of the record as a string
@@ -82,23 +82,20 @@ impl RecordPlaintext {
         self.0.owner().to_string()
     }
 
-    /// Returns the nonce of the record as a string
-    fn nonce(&self) -> String {
-        self.0.nonce().to_string()
+    /// Returns the nonce of the program record.
+    fn nonce(&self) -> Group {
+        (*self.0.nonce()).into()
     }
 
     /// Attempt to get the serial number of a record to determine whether or not is has been spent
-    pub fn serial_number_string(
+    pub fn serial_number(
         &self,
         private_key: &PrivateKey,
-        program_id: &str,
-        record_name: &str,
-    ) -> anyhow::Result<String> {
-        let parsed_program_id = ProgramIDNative::from_str(program_id)?;
-        let record_identifier = IdentifierNative::from_str(record_name)?;
-        let commitment = self.to_commitment(&parsed_program_id, &record_identifier)?;
-        let serial_number = RecordPlaintextNative::serial_number(**private_key, commitment)?;
-        Ok(serial_number.to_string())
+        program_id: &ProgramID,
+        record_identifier: &Identifier,
+    ) -> anyhow::Result<Field> {
+        let commitment = self.to_commitment(program_id, record_identifier)?;
+        RecordPlaintextNative::serial_number(**private_key, commitment).map(Into::into)
     }
 
     /// Returns the plaintext as a string.
@@ -120,7 +117,13 @@ impl Deref for RecordPlaintext {
 }
 
 impl From<RecordPlaintextNative> for RecordPlaintext {
-    fn from(record_plaintext: RecordPlaintextNative) -> Self {
-        Self(record_plaintext)
+    fn from(value: RecordPlaintextNative) -> Self {
+        Self(value)
+    }
+}
+
+impl From<RecordPlaintext> for RecordPlaintextNative {
+    fn from(value: RecordPlaintext) -> Self {
+        value.0
     }
 }
