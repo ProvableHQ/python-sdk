@@ -34,18 +34,17 @@ impl ProgramID {
     /// Parses a string into a program ID.
     #[staticmethod]
     fn from_string(s: &str) -> anyhow::Result<Self> {
-        let program_id = FromStr::from_str(s)?;
-        Ok(Self(program_id))
+        ProgramIDNative::from_str(s).map(Self)
     }
 
     /// Returns the program name.
     fn name(&self) -> Identifier {
-        Identifier::from(*self.0.name())
+        (*self.0.name()).into()
     }
 
     /// Returns the network-level domain (NLD).
     fn network(&self) -> Identifier {
-        Identifier::from(*self.0.network())
+        (*self.0.network()).into()
     }
 
     /// Returns `true` if the network-level domain is `aleo`.

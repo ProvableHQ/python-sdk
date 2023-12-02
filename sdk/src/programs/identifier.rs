@@ -34,8 +34,7 @@ impl Identifier {
     /// Parses an identifier from a string.
     #[staticmethod]
     fn from_string(s: &str) -> anyhow::Result<Self> {
-        let identifier = FromStr::from_str(s)?;
-        Ok(Self(identifier))
+        IdentifierNative::from_str(s).map(Self)
     }
 
     /// Returns the identifier as a string.

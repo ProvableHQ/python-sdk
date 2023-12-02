@@ -38,8 +38,7 @@ impl ViewKey {
     /// Reads in an account view key from a base58 string.
     #[staticmethod]
     fn from_string(s: &str) -> anyhow::Result<Self> {
-        let view_key = FromStr::from_str(s)?;
-        Ok(Self(view_key))
+        ViewKeyNative::from_str(s).map(Into::into)
     }
 
     /// Determines whether the record belongs to the account.
@@ -49,8 +48,7 @@ impl ViewKey {
 
     /// Returns the address corresponding to the view key.
     fn to_address(&self) -> Address {
-        let address = self.0.to_address();
-        Address::from(address)
+        self.0.to_address().into()
     }
 
     /// Returns the view key as a base58 string.

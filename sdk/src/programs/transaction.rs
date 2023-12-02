@@ -20,6 +20,7 @@ use crate::{
 };
 
 use pyo3::prelude::*;
+use snarkvm::prelude::{FromBytes, ToBytes};
 
 use std::str::FromStr;
 
@@ -44,7 +45,18 @@ impl Transaction {
         self.0.to_string()
     }
 
-    /// Returns the Transaction as a string.
+    /// Constructs a Transation from a byte array.
+    #[staticmethod]
+    fn from_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
+        TransactionNative::from_bytes_le(bytes).map(Self)
+    }
+
+    /// Returns the byte representation of a Transaction.
+    fn bytes(&self) -> anyhow::Result<Vec<u8>> {
+        self.0.to_bytes_le()
+    }
+
+    /// Returns the Transaction as a JSON string.
     fn __str__(&self) -> String {
         self.to_json()
     }

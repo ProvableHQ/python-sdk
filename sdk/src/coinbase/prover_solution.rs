@@ -21,6 +21,7 @@ use crate::{
 };
 
 use pyo3::prelude::*;
+use snarkvm::prelude::{FromBytes, ToBytes};
 
 use std::{
     collections::hash_map::DefaultHasher,
@@ -32,16 +33,26 @@ pub struct ProverSolution(ProverSolutionNative);
 
 #[pymethods]
 impl ProverSolution {
-    /// Reads in a prover solution from a JSON string.
+    /// Reads in a ProverSolution from a JSON string.
     #[staticmethod]
-    fn from_json(json: String) -> anyhow::Result<Self> {
-        let solution = serde_json::from_str(&json)?;
-        Ok(Self(solution))
+    fn from_json(json: &str) -> anyhow::Result<Self> {
+        Ok(Self(serde_json::from_str(json)?))
     }
 
-    /// Serialize the given prover solution as a JSON string.
+    /// Serialize the given ProverSolution as a JSON string.
     fn to_json(&self) -> anyhow::Result<String> {
         Ok(serde_json::to_string(&self.0)?)
+    }
+
+    /// Constructs a ProverSolution from a byte array.
+    #[staticmethod]
+    fn from_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
+        ProverSolutionNative::from_bytes_le(bytes).map(Self)
+    }
+
+    /// Returns the byte representation of a ProverSolution.
+    fn bytes(&self) -> anyhow::Result<Vec<u8>> {
+        self.0.to_bytes_le()
     }
 
     /// Returns the address of the prover.
@@ -59,6 +70,7 @@ impl ProverSolution {
         self.0.verify(verifying_key, epoch_challenge, proof_target)
     }
 
+    /// Returns the ProverSolution as a JSON string.
     fn __str__(&self) -> anyhow::Result<String> {
         self.to_json()
     }

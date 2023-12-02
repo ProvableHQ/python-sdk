@@ -44,7 +44,7 @@ impl Value {
     /// Initializes the value from a record.
     #[staticmethod]
     fn from_record_plaintext(record_plaintext: RecordPlaintext) -> Self {
-        Self(ValueNative::from(Into::<RecordPlaintextNative>::into(
+        Self(ValueNative::from(RecordPlaintextNative::from(
             record_plaintext,
         )))
     }

@@ -30,15 +30,13 @@ impl ProvingKey {
     /// Parses a proving key from string.
     #[staticmethod]
     fn from_string(s: &str) -> anyhow::Result<Self> {
-        let proving_key = FromStr::from_str(s)?;
-        Ok(Self(proving_key))
+        ProvingKeyNative::from_str(s).map(Self)
     }
 
     /// Constructs a proving key from a byte array
     #[staticmethod]
     fn from_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
-        let proving_key = ProvingKeyNative::from_bytes_le(bytes)?;
-        Ok(Self(proving_key))
+        ProvingKeyNative::from_bytes_le(bytes).map(Self)
     }
 
     /// Returns the byte representation of a proving key

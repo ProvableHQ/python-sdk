@@ -17,6 +17,7 @@
 use crate::{types::FeeNative, Address, Transition};
 
 use pyo3::prelude::*;
+use snarkvm::prelude::{FromBytes, ToBytes};
 
 use std::ops::Deref;
 
@@ -46,9 +47,31 @@ impl Fee {
         self.0.transition().clone().into()
     }
 
-    /// Returns the Fee as a string.
-    fn __str__(&self) -> String {
-        self.0.to_string()
+    /// Reads in a Fee from a JSON string.
+    #[staticmethod]
+    fn from_json(json: &str) -> anyhow::Result<Self> {
+        Ok(Self(serde_json::from_str(json)?))
+    }
+
+    /// Serialize the given Fee as a JSON string.
+    fn to_json(&self) -> anyhow::Result<String> {
+        Ok(serde_json::to_string(&self.0)?)
+    }
+
+    /// Constructs a Fee from a byte array.
+    #[staticmethod]
+    fn from_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
+        FeeNative::from_bytes_le(bytes).map(Self)
+    }
+
+    /// Returns the byte representation of a Fee.
+    fn bytes(&self) -> anyhow::Result<Vec<u8>> {
+        self.0.to_bytes_le()
+    }
+
+    /// Returns the Fee as a JSON string.
+    fn __str__(&self) -> anyhow::Result<String> {
+        self.to_json()
     }
 
     fn __eq__(&self, other: &Self) -> bool {

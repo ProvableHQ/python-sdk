@@ -31,19 +31,18 @@ impl Program {
     /// Creates a program from source code.
     #[staticmethod]
     fn from_source(s: &str) -> anyhow::Result<Self> {
-        let program = FromStr::from_str(s)?;
-        Ok(Self(program))
+        ProgramNative::from_str(s).map(Self)
     }
 
     /// Returns the credits.aleo program
     #[staticmethod]
     fn credits() -> Self {
-        Program::from(ProgramNative::credits().unwrap())
+        Self(ProgramNative::credits().unwrap())
     }
 
     /// Returns the id of the program
     fn id(&self) -> ProgramID {
-        ProgramID::from(*self.0.id())
+        (*self.0.id()).into()
     }
 
     /// Returns all function names present in the program

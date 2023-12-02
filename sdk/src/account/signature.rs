@@ -45,7 +45,7 @@ impl Signature {
     /// Creates a signature from a string representation.
     #[staticmethod]
     fn from_string(s: &str) -> anyhow::Result<Self> {
-        FromStr::from_str(s).map(Self)
+        SignatureNative::from_str(s).map(Self)
     }
 
     /// Returns the prover response.

@@ -17,6 +17,7 @@
 use crate::{types::ExecutionNative, Field};
 
 use pyo3::prelude::*;
+use snarkvm::prelude::{FromBytes, ToBytes};
 
 use std::ops::Deref;
 
@@ -26,9 +27,36 @@ pub struct Execution(ExecutionNative);
 
 #[pymethods]
 impl Execution {
-    /// Returns the execution ID.
+    /// Returns the Execution ID.
     fn execution_id(&self) -> anyhow::Result<Field> {
         self.0.to_execution_id().map(Into::into)
+    }
+
+    /// Reads in an Execution from a JSON string.
+    #[staticmethod]
+    fn from_json(json: &str) -> anyhow::Result<Self> {
+        Ok(Self(serde_json::from_str(json)?))
+    }
+
+    /// Serialize the given Execution as a JSON string.
+    fn to_json(&self) -> anyhow::Result<String> {
+        Ok(serde_json::to_string(&self.0)?)
+    }
+
+    /// Constructs an Execution from a byte array.
+    #[staticmethod]
+    fn from_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
+        ExecutionNative::from_bytes_le(bytes).map(Self)
+    }
+
+    /// Returns the byte representation of an Execution.
+    fn bytes(&self) -> anyhow::Result<Vec<u8>> {
+        self.0.to_bytes_le()
+    }
+
+    /// Returns the Execution as a JSON string.
+    fn __str__(&self) -> anyhow::Result<String> {
+        self.to_json()
     }
 }
 

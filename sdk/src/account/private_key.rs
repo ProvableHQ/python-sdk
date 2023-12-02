@@ -51,8 +51,7 @@ impl PrivateKey {
 
     /// Derives the account compute key from an account private key.
     fn compute_key(&self) -> ComputeKey {
-        let compute_key = ComputeKeyNative::try_from(&self.0).unwrap();
-        compute_key.into()
+        ComputeKeyNative::try_from(&self.0).unwrap().into()
     }
 
     /// Reads in an account private key from a base58 string.

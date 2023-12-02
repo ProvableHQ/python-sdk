@@ -17,13 +17,41 @@
 use crate::types::AuthorizationNative;
 
 use pyo3::prelude::*;
+use snarkvm::prelude::{FromBytes, ToBytes};
 
 #[pyclass(frozen)]
 #[derive(Clone)]
 pub struct Authorization(AuthorizationNative);
 
 #[pymethods]
-impl Authorization {}
+impl Authorization {
+    /// Reads in an Authorization from a JSON string.
+    #[staticmethod]
+    fn from_json(json: &str) -> anyhow::Result<Self> {
+        Ok(Self(serde_json::from_str(json)?))
+    }
+
+    /// Serialize the given Authorization as a JSON string.
+    fn to_json(&self) -> anyhow::Result<String> {
+        Ok(serde_json::to_string(&self.0)?)
+    }
+
+    /// Constructs an Authorization from a byte array.
+    #[staticmethod]
+    fn from_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
+        AuthorizationNative::from_bytes_le(bytes).map(Self)
+    }
+
+    /// Returns the byte representation of an Authorization.
+    fn bytes(&self) -> anyhow::Result<Vec<u8>> {
+        self.0.to_bytes_le()
+    }
+
+    /// Returns the Authorization as a JSON string.
+    fn __str__(&self) -> anyhow::Result<String> {
+        self.to_json()
+    }
+}
 
 impl From<AuthorizationNative> for Authorization {
     fn from(value: AuthorizationNative) -> Self {
