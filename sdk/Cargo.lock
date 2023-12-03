@@ -43,6 +43,7 @@ name = "aleo"
 version = "0.2.0"
 dependencies = [
  "anyhow",
+ "openssl",
  "pyo3",
  "rand",
  "serde",

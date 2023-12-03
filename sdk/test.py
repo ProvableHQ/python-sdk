@@ -78,10 +78,9 @@ class TestAleo(unittest.TestCase):
         self.assertEqual(str(challenge), challenge_json)
         self.assertEqual(str(solution), solution_json)
 
-        # Skip it because it takes too much time to load the puzzle
-        # puzzle = aleo.CoinbasePuzzle.load()
-        # verifying_key = puzzle.verifying_key()
-        # assert solution.verify(verifying_key, challenge, 100)
+        puzzle = aleo.CoinbasePuzzle.load()
+        verifying_key = puzzle.verifying_key()
+        assert solution.verify(verifying_key, challenge, 100)
 
     def test_transfer(self):
         private_key = aleo.PrivateKey.from_string(

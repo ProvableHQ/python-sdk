@@ -9,3 +9,7 @@ description = "A Python SDK for zero-knowledge cryptography based on Aleo"
 repository = "https://github.com/AleoHQ/python-sdk/tree/master/sdk"
 license = "GPL-3.0-or-later"
 authors = ["Konstantin Pandl", "Mike Turner", "Roman Proskuryakov"]
+
+[tool.pyright]
+reportMissingModuleSource = false # don't report missing aleo.so for CI purposes
+strict = ['./']

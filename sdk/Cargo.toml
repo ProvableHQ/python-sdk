@@ -6,10 +6,14 @@ description = "A Python sdk for zero-knowledge cryptography based on Aleo"
 edition = "2021"
 license = "GPL-3.0-or-later"
 
+[lib]
+crate-type = ["cdylib"]
+
 [dependencies]
 anyhow = "1"
+openssl = "0.10"
+pyo3 = { version = "0.20.0", features = ["extension-module", "abi3-py37", "anyhow"] }
 rand = { version = "^0.8" }
-pyo3 = { version = "0.20.0", features = ["extension-module", "anyhow"] }
 serde = "1"
 serde_json = "1"
 
