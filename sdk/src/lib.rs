@@ -29,6 +29,9 @@ use coinbase::*;
 use credits::*;
 use programs::*;
 
+/// The Aleo Python SDK provides a set of libraries aimed at empowering
+/// Python developers with zk (zero-knowledge) programming capabilities
+/// via the usage of Aleo's zkSnarks.
 #[pymodule]
 #[pyo3(name = "aleo")]
 fn register_module(_py: Python, m: &PyModule) -> PyResult<()> {

@@ -21,6 +21,7 @@ use snarkvm::prelude::{FromBytes, ToBytes};
 
 use std::ops::Deref;
 
+/// The type represents a call to an Aleo program.
 #[pyclass]
 #[derive(Clone)]
 pub struct Execution(ExecutionNative);

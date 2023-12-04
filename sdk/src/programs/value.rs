@@ -23,6 +23,7 @@ use pyo3::prelude::*;
 
 use std::str::FromStr;
 
+/// The Aleo value type to interact with a call to an Aleo program.
 #[pyclass(frozen)]
 #[derive(Clone)]
 pub struct Value(ValueNative);

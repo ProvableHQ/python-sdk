@@ -24,6 +24,7 @@ use snarkvm::prelude::{FromBytes, ToBytes};
 
 use std::str::FromStr;
 
+/// Represents a transaction of a deploy, execute or fee type.
 #[pyclass(frozen)]
 pub struct Transaction(TransactionNative);
 

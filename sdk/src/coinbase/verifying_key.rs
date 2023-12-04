@@ -20,6 +20,7 @@ use pyo3::prelude::*;
 
 use std::ops::Deref;
 
+/// The Aleo coinbase verifying key type.
 #[pyclass(frozen)]
 pub struct CoinbaseVerifyingKey(CoinbaseVerifyingKeyNative);
 

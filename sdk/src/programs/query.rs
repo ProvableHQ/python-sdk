@@ -18,6 +18,7 @@ use crate::types::QueryNative;
 
 use pyo3::prelude::*;
 
+/// The Aleo query type.
 #[pyclass]
 #[derive(Clone)]
 pub struct Query(QueryNative);

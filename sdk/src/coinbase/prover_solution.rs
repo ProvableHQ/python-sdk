@@ -28,6 +28,7 @@ use std::{
     hash::{Hash, Hasher},
 };
 
+/// The prover solution for the coinbase puzzle from a prover.
 #[pyclass(frozen)]
 pub struct ProverSolution(ProverSolutionNative);
 

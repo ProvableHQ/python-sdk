@@ -25,6 +25,7 @@ use std::{
     str::FromStr,
 };
 
+/// A program ID is of the form `{name}.{network}`.
 #[pyclass(frozen)]
 #[derive(Clone)]
 pub struct ProgramID(ProgramIDNative);

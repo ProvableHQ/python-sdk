@@ -22,6 +22,7 @@ use crate::{
 use pyo3::prelude::*;
 use snarkvm::prelude::{FromBytes, ToBytes};
 
+/// The Aleo transition type.
 #[pyclass(frozen)]
 pub struct Transition(TransitionNative);
 

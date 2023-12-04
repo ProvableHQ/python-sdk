@@ -25,6 +25,7 @@ use std::{
     str::FromStr,
 };
 
+/// The Aleo address type.
 #[pyclass(frozen)]
 #[derive(Clone)]
 pub struct Address(AddressNative);

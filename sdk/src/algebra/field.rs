@@ -26,6 +26,7 @@ use std::{
     str::FromStr,
 };
 
+/// The Aleo field type.
 #[pyclass(frozen)]
 #[derive(Clone)]
 pub struct Field(FieldNative);

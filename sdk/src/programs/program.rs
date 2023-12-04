@@ -23,6 +23,7 @@ use pyo3::prelude::*;
 
 use std::{ops::Deref, str::FromStr};
 
+/// The Aleo program type.
 #[pyclass(frozen)]
 pub struct Program(ProgramNative);
 

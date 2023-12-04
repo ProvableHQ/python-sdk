@@ -16,6 +16,7 @@
 
 use pyo3::prelude::*;
 
+/// The type represents the amount of Aleo credits.
 #[pyclass(frozen)]
 #[derive(Clone, Copy)]
 pub struct Credits(f64);
@@ -43,6 +44,7 @@ impl Credits {
     const __hash__: Option<PyObject> = None;
 }
 
+/// The type represents the amount of Aleo microcredits.
 #[pyclass(frozen)]
 #[derive(Clone, Copy)]
 pub struct MicroCredits(u64);

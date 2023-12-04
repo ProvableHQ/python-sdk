@@ -21,6 +21,7 @@ use snarkvm::prelude::{FromBytes, ToBytes};
 
 use std::str::FromStr;
 
+/// The Aleo verifying key type.
 #[pyclass(frozen)]
 #[derive(Clone)]
 pub struct VerifyingKey(VerifyingKeyNative);

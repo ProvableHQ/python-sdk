@@ -22,6 +22,7 @@ use crate::{
 use pyo3::prelude::*;
 use rand::{rngs::StdRng, SeedableRng};
 
+/// The Aleo trace type.
 #[pyclass]
 pub struct Trace(TraceNative);
 

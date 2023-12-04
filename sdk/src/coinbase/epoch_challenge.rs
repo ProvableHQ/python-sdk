@@ -22,6 +22,7 @@ use snarkvm::prelude::{FromBytes, ToBytes};
 
 use std::ops::Deref;
 
+/// The Aleo coinbase epoch challenge type.
 #[pyclass(frozen)]
 pub struct EpochChallenge(EpochChallengeNative);
 

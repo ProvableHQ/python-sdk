@@ -1,3 +1,4 @@
+from __future__ import annotations
 from typing import List, Optional, Tuple
 
 
@@ -97,8 +98,6 @@ class Field:
 class Group:
     @staticmethod
     def from_string(s: str) -> Group: ...
-    @staticmethod
-    def from_u128(u128: int) -> Group: ...
     @staticmethod
     def zero() -> Group: ...
 

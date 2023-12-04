@@ -25,6 +25,7 @@ use std::{
     str::FromStr,
 };
 
+/// The Aleo identifier type.
 #[pyclass(frozen)]
 #[derive(Clone)]
 pub struct Identifier(IdentifierNative);

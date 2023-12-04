@@ -18,6 +18,7 @@ use crate::{programs::Value, types::ResponseNative};
 
 use pyo3::prelude::*;
 
+/// The Aleo response type.
 #[pyclass(frozen)]
 pub struct Response(ResponseNative);
 

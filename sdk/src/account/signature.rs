@@ -26,6 +26,7 @@ use std::{
     str::FromStr,
 };
 
+/// The Aleo signature type.
 #[pyclass(frozen)]
 #[derive(Clone)]
 pub struct Signature(SignatureNative);

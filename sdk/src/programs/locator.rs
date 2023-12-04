@@ -28,6 +28,7 @@ use std::{
     str::FromStr,
 };
 
+/// A locator is of the form `{program_id}/{resource}` (i.e. `howard.aleo/notify`).
 #[pyclass(frozen)]
 #[derive(Clone)]
 pub struct Locator(LocatorNative);

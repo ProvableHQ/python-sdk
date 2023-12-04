@@ -29,6 +29,7 @@ use std::{
     str::FromStr,
 };
 
+/// The Aleo private key type.
 #[pyclass(frozen)]
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub struct PrivateKey(PrivateKeyNative);

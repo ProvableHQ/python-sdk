@@ -18,6 +18,7 @@ use crate::{coinbase::CoinbaseVerifyingKey, types::CoinbasePuzzleNative};
 
 use pyo3::prelude::*;
 
+/// The Aleo coinbase puzzle type.
 #[pyclass]
 pub struct CoinbasePuzzle(CoinbasePuzzleNative);
 

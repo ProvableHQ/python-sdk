@@ -26,6 +26,7 @@ use std::{
     str::FromStr,
 };
 
+/// The Aleo group type.
 #[pyclass(frozen)]
 #[derive(Clone)]
 pub struct Group(GroupNative);

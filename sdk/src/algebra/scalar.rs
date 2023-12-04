@@ -26,6 +26,7 @@ use std::{
     str::FromStr,
 };
 
+/// The Aleo scalar type.
 #[pyclass(frozen)]
 #[derive(Clone)]
 pub struct Scalar(ScalarNative);

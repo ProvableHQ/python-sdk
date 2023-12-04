@@ -24,6 +24,7 @@ use pyo3::prelude::*;
 use rand::{rngs::StdRng, SeedableRng};
 use snarkvm::prelude::cost_in_microcredits;
 
+/// The Aleo process type.
 #[pyclass]
 pub struct Process(ProcessNative);
 

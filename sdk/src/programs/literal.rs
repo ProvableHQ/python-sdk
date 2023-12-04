@@ -27,6 +27,7 @@ use std::{
     str::FromStr,
 };
 
+/// The literal type represents all supported types in snarkVM.
 #[pyclass(frozen)]
 #[derive(Clone)]
 pub struct Literal(LiteralNative);

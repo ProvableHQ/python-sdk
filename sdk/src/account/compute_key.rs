@@ -20,6 +20,7 @@ use pyo3::prelude::*;
 
 use std::ops::Deref;
 
+/// The Aleo compute key type.
 #[pyclass(frozen)]
 pub struct ComputeKey(ComputeKeyNative);
 

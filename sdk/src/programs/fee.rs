@@ -21,6 +21,7 @@ use snarkvm::prelude::{FromBytes, ToBytes};
 
 use std::ops::Deref;
 
+/// The type represents a fee paid to the network, used for rejected transactions.
 #[pyclass(frozen)]
 #[derive(Clone)]
 pub struct Fee(FeeNative);

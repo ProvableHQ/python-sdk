@@ -23,6 +23,7 @@ use std::{
     hash::{Hash, Hasher},
 };
 
+/// The Aleo boolean type.
 #[pyclass(frozen)]
 #[derive(Copy, Clone)]
 pub struct Boolean(BooleanNative);

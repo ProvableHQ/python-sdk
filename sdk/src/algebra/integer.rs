@@ -28,7 +28,8 @@ use std::{
 };
 
 macro_rules! integer {
-    ($export_ty:ident, $native:ident, $machine:ident) => {
+    ($export_ty:ident, $native:ident, $machine:ident, $desc:literal) => {
+        #[doc = concat!("The Aleo ", $desc, " type.")]
         #[pyclass(frozen)]
         #[derive(Copy, Clone)]
         pub struct $export_ty($native);
@@ -73,14 +74,14 @@ macro_rules! integer {
     };
 }
 
-integer!(I8, I8Native, i8);
-integer!(I16, I16Native, i16);
-integer!(I32, I32Native, i32);
-integer!(I64, I64Native, i64);
-integer!(I128, I128Native, i128);
+integer!(I8, I8Native, i8, "signed I8");
+integer!(I16, I16Native, i16, "signed I16");
+integer!(I32, I32Native, i32, "signed I32");
+integer!(I64, I64Native, i64, "signed I64");
+integer!(I128, I128Native, i128, "signed I128");
 
-integer!(U8, U8Native, u8);
-integer!(U16, U16Native, u16);
-integer!(U32, U32Native, u32);
-integer!(U64, U64Native, u64);
-integer!(U128, U128Native, u128);
+integer!(U8, U8Native, u8, "unsigned U8");
+integer!(U16, U16Native, u16, "unsigned U16");
+integer!(U32, U32Native, u32, "unsigned U32");
+integer!(U64, U64Native, u64, "unsigned U64");
+integer!(U128, U128Native, u128, "unsigned U128");

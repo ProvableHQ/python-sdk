@@ -24,6 +24,7 @@ use pyo3::prelude::*;
 
 use std::str::FromStr;
 
+/// A value(ciphertext) stored in program record.
 #[pyclass(frozen)]
 pub struct RecordCiphertext(RecordCiphertextNative);
 
@@ -65,6 +66,7 @@ impl From<RecordCiphertextNative> for RecordCiphertext {
     }
 }
 
+/// A value(plaintext) stored in program record.
 #[pyclass(frozen)]
 #[derive(Clone)]
 pub struct RecordPlaintext(RecordPlaintextNative);
