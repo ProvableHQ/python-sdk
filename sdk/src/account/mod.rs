@@ -111,7 +111,7 @@ impl Account {
 
     fn __hash__(&self) -> u64 {
         let mut hasher = DefaultHasher::new();
-        // because it's enouth to hash the private key only we add a dummy string so that:
+        // because it's enough to hash the private key only we add a dummy string so that:
         // hash(Account) != hash(PrivateKey)
         "account".hash(&mut hasher);
         self.private_key.hash(&mut hasher);
