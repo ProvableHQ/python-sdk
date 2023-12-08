@@ -14,29 +14,24 @@
 // You should have received a copy of the GNU General Public License
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
-use crate::types::CoinbaseVerifyingKeyNative;
+use crate::{programs::Value, types::ResponseNative};
 
 use pyo3::prelude::*;
 
-use std::ops::Deref;
-
-/// The Aleo coinbase verifying key type.
+/// The Aleo response type.
 #[pyclass(frozen)]
-pub struct CoinbaseVerifyingKey(CoinbaseVerifyingKeyNative);
+pub struct Response(ResponseNative);
 
 #[pymethods]
-impl CoinbaseVerifyingKey {}
-
-impl From<CoinbaseVerifyingKeyNative> for CoinbaseVerifyingKey {
-    fn from(value: CoinbaseVerifyingKeyNative) -> Self {
-        Self(value)
+impl Response {
+    /// Returns the function outputs.
+    fn outputs(&self) -> Vec<Value> {
+        self.0.outputs().iter().cloned().map(Into::into).collect()
     }
 }
 
-impl Deref for CoinbaseVerifyingKey {
-    type Target = CoinbaseVerifyingKeyNative;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
+impl From<ResponseNative> for Response {
+    fn from(value: ResponseNative) -> Self {
+        Self(value)
     }
 }

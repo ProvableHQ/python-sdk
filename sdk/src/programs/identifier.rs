@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
-use crate::types::AddressNative;
+use crate::types::IdentifierNative;
 
 use pyo3::prelude::*;
 
@@ -25,20 +25,20 @@ use std::{
     str::FromStr,
 };
 
-/// The Aleo address type.
+/// The Aleo identifier type.
 #[pyclass(frozen)]
 #[derive(Clone)]
-pub struct Address(AddressNative);
+pub struct Identifier(IdentifierNative);
 
 #[pymethods]
-impl Address {
-    /// Reads in an account address string.
+impl Identifier {
+    /// Parses an identifier from a string.
     #[staticmethod]
     fn from_string(s: &str) -> anyhow::Result<Self> {
-        AddressNative::from_str(s).map(Self)
+        IdentifierNative::from_str(s).map(Self)
     }
 
-    /// Returns the address as a base58 string.
+    /// Returns the identifier as a string.
     fn __str__(&self) -> String {
         self.0.to_string()
     }
@@ -54,16 +54,22 @@ impl Address {
     }
 }
 
-impl Deref for Address {
-    type Target = AddressNative;
+impl Deref for Identifier {
+    type Target = IdentifierNative;
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl From<AddressNative> for Address {
-    fn from(value: AddressNative) -> Self {
+impl From<IdentifierNative> for Identifier {
+    fn from(value: IdentifierNative) -> Self {
         Self(value)
+    }
+}
+
+impl From<Identifier> for IdentifierNative {
+    fn from(value: Identifier) -> Self {
+        value.0
     }
 }

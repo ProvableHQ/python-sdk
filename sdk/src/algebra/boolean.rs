@@ -14,49 +14,49 @@
 // You should have received a copy of the GNU General Public License
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
-use crate::{types::ComputeKeyNative, Address, Group, Scalar};
+use crate::types::BooleanNative;
 
 use pyo3::prelude::*;
 
-use std::ops::Deref;
+use std::{
+    collections::hash_map::DefaultHasher,
+    hash::{Hash, Hasher},
+};
 
-/// The Aleo compute key type.
+/// The Aleo boolean type.
 #[pyclass(frozen)]
-pub struct ComputeKey(ComputeKeyNative);
+#[derive(Copy, Clone)]
+pub struct Boolean(BooleanNative);
 
 #[pymethods]
-impl ComputeKey {
-    /// Returns the address from the compute key.
-    fn address(&self) -> Address {
-        self.0.to_address().into()
+impl Boolean {
+    #[new]
+    fn new(value: bool) -> Self {
+        Self(BooleanNative::new(value))
     }
 
-    /// Returns the signature public key.
-    fn pk_sig(&self) -> Group {
-        self.0.pk_sig().into()
+    /// Returns the boolean as a string.
+    fn __str__(&self) -> String {
+        self.0.to_string()
     }
 
-    /// Returns the signature public randomizer.
-    fn pr_sig(&self) -> Group {
-        self.0.pr_sig().into()
+    fn __bool__(&self) -> bool {
+        *self.0
     }
 
-    /// Returns a reference to the PRF secret key.
-    fn sk_prf(&self) -> Scalar {
-        self.0.sk_prf().into()
+    fn __eq__(&self, other: &Self) -> bool {
+        self.0 == other.0
     }
-}
 
-impl Deref for ComputeKey {
-    type Target = ComputeKeyNative;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
+    fn __hash__(&self) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        self.0.hash(&mut hasher);
+        hasher.finish()
     }
 }
 
-impl From<ComputeKeyNative> for ComputeKey {
-    fn from(value: ComputeKeyNative) -> Self {
-        Self(value)
+impl From<Boolean> for BooleanNative {
+    fn from(value: Boolean) -> Self {
+        value.0
     }
 }

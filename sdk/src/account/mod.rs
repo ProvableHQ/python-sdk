@@ -39,6 +39,9 @@ use std::{
     hash::{Hash, Hasher},
 };
 
+/// Key management class. Enables the creation of a new Aleo Account,
+/// importation of an existing account from an existing private key,
+/// and message signing and verification functionality.
 #[pyclass(frozen)]
 pub struct Account {
     private_key: PrivateKey,

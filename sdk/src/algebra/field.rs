@@ -14,9 +14,10 @@
 // You should have received a copy of the GNU General Public License
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
-use crate::types::AddressNative;
+use crate::types::FieldNative;
 
 use pyo3::prelude::*;
+use snarkvm::prelude::Zero;
 
 use std::{
     collections::hash_map::DefaultHasher,
@@ -25,20 +26,32 @@ use std::{
     str::FromStr,
 };
 
-/// The Aleo address type.
+/// The Aleo field type.
 #[pyclass(frozen)]
 #[derive(Clone)]
-pub struct Address(AddressNative);
+pub struct Field(FieldNative);
 
 #[pymethods]
-impl Address {
-    /// Reads in an account address string.
+impl Field {
+    /// Parses a field from a string.
     #[staticmethod]
     fn from_string(s: &str) -> anyhow::Result<Self> {
-        AddressNative::from_str(s).map(Self)
+        FieldNative::from_str(s).map(Self)
     }
 
-    /// Returns the address as a base58 string.
+    /// Initializes a new field from a `u128`.
+    #[staticmethod]
+    fn from_u128(value: u128) -> Self {
+        FieldNative::from_u128(value).into()
+    }
+
+    /// Returns the `0` element of the field.
+    #[staticmethod]
+    fn zero() -> Self {
+        FieldNative::zero().into()
+    }
+
+    /// Returns the Field as a string.
     fn __str__(&self) -> String {
         self.0.to_string()
     }
@@ -54,16 +67,22 @@ impl Address {
     }
 }
 
-impl Deref for Address {
-    type Target = AddressNative;
+impl Deref for Field {
+    type Target = FieldNative;
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl From<AddressNative> for Address {
-    fn from(value: AddressNative) -> Self {
+impl From<FieldNative> for Field {
+    fn from(value: FieldNative) -> Self {
         Self(value)
+    }
+}
+
+impl From<Field> for FieldNative {
+    fn from(value: Field) -> Self {
+        value.0
     }
 }

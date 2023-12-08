@@ -14,29 +14,53 @@
 // You should have received a copy of the GNU General Public License
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
-use crate::types::CoinbaseVerifyingKeyNative;
+mod authorization;
+pub use authorization::Authorization;
 
-use pyo3::prelude::*;
+mod execution;
+pub use execution::Execution;
 
-use std::ops::Deref;
+mod fee;
+pub use fee::Fee;
 
-/// The Aleo coinbase verifying key type.
-#[pyclass(frozen)]
-pub struct CoinbaseVerifyingKey(CoinbaseVerifyingKeyNative);
+mod identifier;
+pub use identifier::Identifier;
 
-#[pymethods]
-impl CoinbaseVerifyingKey {}
+mod literal;
+pub use literal::Literal;
 
-impl From<CoinbaseVerifyingKeyNative> for CoinbaseVerifyingKey {
-    fn from(value: CoinbaseVerifyingKeyNative) -> Self {
-        Self(value)
-    }
-}
+mod locator;
+pub use locator::Locator;
 
-impl Deref for CoinbaseVerifyingKey {
-    type Target = CoinbaseVerifyingKeyNative;
+mod process;
+pub use process::Process;
 
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
+mod program_id;
+pub use program_id::ProgramID;
+
+mod program;
+pub use program::Program;
+
+mod proving_key;
+pub use proving_key::ProvingKey;
+
+mod response;
+pub use response::Response;
+
+mod query;
+pub use query::Query;
+
+mod trace;
+pub use trace::Trace;
+
+mod transaction;
+pub use transaction::Transaction;
+
+mod transition;
+pub use transition::Transition;
+
+mod value;
+pub use value::Value;
+
+mod verifying_key;
+pub use verifying_key::VerifyingKey;

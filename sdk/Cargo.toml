@@ -1,7 +1,7 @@
 [package]
 name = "aleo"
 authors = ["Konstantin Pandl", "Mike Turner", "Roman Proskuryakov"]
-version = "0.1.0"
+version = "0.2.0"
 description = "A Python sdk for zero-knowledge cryptography based on Aleo"
 edition = "2021"
 license = "GPL-3.0-or-later"

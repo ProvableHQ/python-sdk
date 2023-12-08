@@ -14,56 +14,58 @@
 // You should have received a copy of the GNU General Public License
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
-use crate::types::AddressNative;
+use crate::types::VerifyingKeyNative;
 
 use pyo3::prelude::*;
+use snarkvm::prelude::{FromBytes, ToBytes};
 
-use std::{
-    collections::hash_map::DefaultHasher,
-    hash::{Hash, Hasher},
-    ops::Deref,
-    str::FromStr,
-};
+use std::str::FromStr;
 
-/// The Aleo address type.
+/// The Aleo verifying key type.
 #[pyclass(frozen)]
 #[derive(Clone)]
-pub struct Address(AddressNative);
+pub struct VerifyingKey(VerifyingKeyNative);
 
 #[pymethods]
-impl Address {
-    /// Reads in an account address string.
+impl VerifyingKey {
+    /// Parses a veryifying key from string.
     #[staticmethod]
     fn from_string(s: &str) -> anyhow::Result<Self> {
-        AddressNative::from_str(s).map(Self)
+        VerifyingKeyNative::from_str(s).map(Self)
     }
 
-    /// Returns the address as a base58 string.
+    /// Constructs a proving key from a byte array
+    #[staticmethod]
+    fn from_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
+        VerifyingKeyNative::from_bytes_le(bytes).map(Self)
+    }
+
+    /// Returns the byte representation of a veryfying key
+    fn bytes(&self) -> anyhow::Result<Vec<u8>> {
+        self.0.to_bytes_le()
+    }
+
+    /// Returns the verifying key as a string.
     fn __str__(&self) -> String {
         self.0.to_string()
     }
 
     fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
+        *self.0 == *other.0
     }
 
-    fn __hash__(&self) -> u64 {
-        let mut hasher = DefaultHasher::new();
-        self.0.hash(&mut hasher);
-        hasher.finish()
-    }
+    #[classattr]
+    const __hash__: Option<PyObject> = None;
 }
 
-impl Deref for Address {
-    type Target = AddressNative;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl From<AddressNative> for Address {
-    fn from(value: AddressNative) -> Self {
+impl From<VerifyingKeyNative> for VerifyingKey {
+    fn from(value: VerifyingKeyNative) -> Self {
         Self(value)
+    }
+}
+
+impl From<VerifyingKey> for VerifyingKeyNative {
+    fn from(value: VerifyingKey) -> Self {
+        value.0
     }
 }

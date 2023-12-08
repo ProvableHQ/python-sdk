@@ -18,6 +18,7 @@ use crate::{coinbase::CoinbaseVerifyingKey, types::CoinbasePuzzleNative};
 
 use pyo3::prelude::*;
 
+/// The Aleo coinbase puzzle type.
 #[pyclass]
 pub struct CoinbasePuzzle(CoinbasePuzzleNative);
 
@@ -26,14 +27,12 @@ impl CoinbasePuzzle {
     /// Load the coinbase puzzle proving and verifying keys.
     #[staticmethod]
     fn load() -> anyhow::Result<Self> {
-        let coinbase_puzzle = CoinbasePuzzleNative::load()?;
-        Ok(Self(coinbase_puzzle))
+        CoinbasePuzzleNative::load().map(Self)
     }
 
     /// Returns the coinbase verifying key.
-    fn verifying_key(&self) -> anyhow::Result<CoinbaseVerifyingKey> {
-        let verifying_key = self.0.coinbase_verifying_key().clone();
-        Ok(CoinbaseVerifyingKey::from(verifying_key))
+    fn verifying_key(&self) -> CoinbaseVerifyingKey {
+        self.0.coinbase_verifying_key().clone().into()
     }
 
     #[classattr]

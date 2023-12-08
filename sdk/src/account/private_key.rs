@@ -15,8 +15,8 @@
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
 use crate::{
-    account::{Address, ComputeKey, Signature, ViewKey},
     types::{AddressNative, ComputeKeyNative, PrivateKeyNative, ViewKeyNative},
+    Address, ComputeKey, Field, Scalar, Signature, ViewKey,
 };
 
 use pyo3::prelude::*;
@@ -29,6 +29,7 @@ use std::{
     str::FromStr,
 };
 
+/// The Aleo private key type.
 #[pyclass(frozen)]
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub struct PrivateKey(PrivateKeyNative);
@@ -39,29 +40,30 @@ impl PrivateKey {
     #[allow(clippy::new_without_default)]
     #[new]
     pub fn new() -> Self {
-        Self(PrivateKeyNative::new(&mut StdRng::from_entropy()).unwrap())
+        PrivateKeyNative::new(&mut StdRng::from_entropy())
+            .unwrap()
+            .into()
     }
 
     /// Derives the account address from an account private key.
     pub fn address(&self) -> anyhow::Result<Address> {
-        Ok(Address::from(AddressNative::try_from(&self.0)?))
+        AddressNative::try_from(&self.0).map(Into::into)
     }
 
     /// Derives the account compute key from an account private key.
     fn compute_key(&self) -> ComputeKey {
-        let compute_key = ComputeKeyNative::try_from(&self.0).unwrap();
-        ComputeKey::from(compute_key)
+        ComputeKeyNative::try_from(&self.0).unwrap().into()
     }
 
     /// Reads in an account private key from a base58 string.
     #[staticmethod]
     fn from_string(private_key: &str) -> anyhow::Result<Self> {
-        Ok(Self(PrivateKeyNative::from_str(private_key)?))
+        PrivateKeyNative::from_str(private_key).map(Self)
     }
 
     /// Returns the account seed.
-    fn seed(&self) -> String {
-        self.0.seed().to_string()
+    fn seed(&self) -> Field {
+        self.0.seed().into()
     }
 
     /// Returns a signature for the given message (as bytes) using the private key.
@@ -70,28 +72,22 @@ impl PrivateKey {
     }
 
     /// Returns the signature secret key.
-    fn sk_sig(&self) -> String {
-        self.0.sk_sig().to_string()
+    fn sk_sig(&self) -> Scalar {
+        self.0.sk_sig().into()
     }
 
     /// Returns the signature randomizer.
-    fn r_sig(&self) -> String {
-        self.0.r_sig().to_string()
-    }
-
-    /// Returns the private key as a base58 string.
-    #[allow(clippy::inherent_to_string)]
-    #[allow(clippy::wrong_self_convention)]
-    fn to_string(&self) -> String {
-        self.0.to_string()
+    fn r_sig(&self) -> Scalar {
+        self.0.r_sig().into()
     }
 
     /// Initializes a new account view key from an account private key.
     pub fn view_key(&self) -> ViewKey {
         let view_key = ViewKeyNative::try_from(&self.0).unwrap();
-        ViewKey::from(view_key)
+        view_key.into()
     }
 
+    /// Returns the private key as a base58 string.
     fn __str__(&self) -> String {
         self.0.to_string()
     }
@@ -116,13 +112,13 @@ impl Deref for PrivateKey {
 }
 
 impl From<PrivateKey> for PrivateKeyNative {
-    fn from(private_key: PrivateKey) -> Self {
-        private_key.0
+    fn from(value: PrivateKey) -> Self {
+        value.0
     }
 }
 
 impl From<PrivateKeyNative> for PrivateKey {
-    fn from(private_key: PrivateKeyNative) -> Self {
-        Self(private_key)
+    fn from(value: PrivateKeyNative) -> Self {
+        Self(value)
     }
 }

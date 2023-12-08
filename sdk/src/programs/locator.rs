@@ -14,7 +14,10 @@
 // You should have received a copy of the GNU General Public License
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
-use crate::types::AddressNative;
+use crate::{
+    programs::{Identifier, ProgramID},
+    types::LocatorNative,
+};
 
 use pyo3::prelude::*;
 
@@ -25,20 +28,46 @@ use std::{
     str::FromStr,
 };
 
-/// The Aleo address type.
+/// A locator is of the form `{program_id}/{resource}` (i.e. `howard.aleo/notify`).
 #[pyclass(frozen)]
 #[derive(Clone)]
-pub struct Address(AddressNative);
+pub struct Locator(LocatorNative);
 
 #[pymethods]
-impl Address {
-    /// Reads in an account address string.
-    #[staticmethod]
-    fn from_string(s: &str) -> anyhow::Result<Self> {
-        AddressNative::from_str(s).map(Self)
+impl Locator {
+    /// Initializes a locator from a program ID and resource.
+    #[new]
+    fn new(program_id: ProgramID, resource: Identifier) -> Self {
+        LocatorNative::new(program_id.into(), resource.into()).into()
     }
 
-    /// Returns the address as a base58 string.
+    /// Parses a Locator from a string.
+    #[staticmethod]
+    fn from_string(s: &str) -> anyhow::Result<Self> {
+        LocatorNative::from_str(s).map(Self)
+    }
+
+    /// Returns the program ID.
+    fn program_id(&self) -> ProgramID {
+        (*self.0.program_id()).into()
+    }
+
+    /// Returns the program name.
+    fn name(&self) -> Identifier {
+        (*self.0.name()).into()
+    }
+
+    /// Returns the network-level domain (NLD).
+    fn network(&self) -> Identifier {
+        (*self.0.network()).into()
+    }
+
+    /// Returns the resource name.
+    fn resource(&self) -> Identifier {
+        (*self.0.resource()).into()
+    }
+
+    /// Returns the Locator as a string.
     fn __str__(&self) -> String {
         self.0.to_string()
     }
@@ -54,16 +83,22 @@ impl Address {
     }
 }
 
-impl Deref for Address {
-    type Target = AddressNative;
+impl Deref for Locator {
+    type Target = LocatorNative;
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl From<AddressNative> for Address {
-    fn from(value: AddressNative) -> Self {
+impl From<LocatorNative> for Locator {
+    fn from(value: LocatorNative) -> Self {
         Self(value)
+    }
+}
+
+impl From<Locator> for LocatorNative {
+    fn from(value: Locator) -> Self {
+        value.0
     }
 }

@@ -14,9 +14,10 @@
 // You should have received a copy of the GNU General Public License
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
-use crate::types::AddressNative;
+use crate::types::ScalarNative;
 
 use pyo3::prelude::*;
+use snarkvm::prelude::Zero;
 
 use std::{
     collections::hash_map::DefaultHasher,
@@ -25,20 +26,26 @@ use std::{
     str::FromStr,
 };
 
-/// The Aleo address type.
+/// The Aleo scalar type.
 #[pyclass(frozen)]
 #[derive(Clone)]
-pub struct Address(AddressNative);
+pub struct Scalar(ScalarNative);
 
 #[pymethods]
-impl Address {
-    /// Reads in an account address string.
+impl Scalar {
+    /// Parses a scalar from a string.
     #[staticmethod]
     fn from_string(s: &str) -> anyhow::Result<Self> {
-        AddressNative::from_str(s).map(Self)
+        ScalarNative::from_str(s).map(Self)
     }
 
-    /// Returns the address as a base58 string.
+    /// Returns the `0` element of the scalar.
+    #[staticmethod]
+    fn zero() -> Self {
+        ScalarNative::zero().into()
+    }
+
+    /// Returns the Scalar as a string.
     fn __str__(&self) -> String {
         self.0.to_string()
     }
@@ -54,16 +61,22 @@ impl Address {
     }
 }
 
-impl Deref for Address {
-    type Target = AddressNative;
+impl Deref for Scalar {
+    type Target = ScalarNative;
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl From<AddressNative> for Address {
-    fn from(value: AddressNative) -> Self {
+impl From<ScalarNative> for Scalar {
+    fn from(value: ScalarNative) -> Self {
         Self(value)
+    }
+}
+
+impl From<Scalar> for ScalarNative {
+    fn from(value: Scalar) -> Self {
+        value.0
     }
 }

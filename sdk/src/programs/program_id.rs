@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
-use crate::types::AddressNative;
+use crate::{programs::Identifier, types::ProgramIDNative};
 
 use pyo3::prelude::*;
 
@@ -25,20 +25,35 @@ use std::{
     str::FromStr,
 };
 
-/// The Aleo address type.
+/// A program ID is of the form `{name}.{network}`.
 #[pyclass(frozen)]
 #[derive(Clone)]
-pub struct Address(AddressNative);
+pub struct ProgramID(ProgramIDNative);
 
 #[pymethods]
-impl Address {
-    /// Reads in an account address string.
+impl ProgramID {
+    /// Parses a string into a program ID.
     #[staticmethod]
     fn from_string(s: &str) -> anyhow::Result<Self> {
-        AddressNative::from_str(s).map(Self)
+        ProgramIDNative::from_str(s).map(Self)
     }
 
-    /// Returns the address as a base58 string.
+    /// Returns the program name.
+    fn name(&self) -> Identifier {
+        (*self.0.name()).into()
+    }
+
+    /// Returns the network-level domain (NLD).
+    fn network(&self) -> Identifier {
+        (*self.0.network()).into()
+    }
+
+    /// Returns `true` if the network-level domain is `aleo`.
+    fn is_aleo(&self) -> bool {
+        self.0.is_aleo()
+    }
+
+    /// Returns the program ID as a string.
     fn __str__(&self) -> String {
         self.0.to_string()
     }
@@ -54,16 +69,22 @@ impl Address {
     }
 }
 
-impl Deref for Address {
-    type Target = AddressNative;
+impl Deref for ProgramID {
+    type Target = ProgramIDNative;
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl From<AddressNative> for Address {
-    fn from(value: AddressNative) -> Self {
+impl From<ProgramIDNative> for ProgramID {
+    fn from(value: ProgramIDNative) -> Self {
         Self(value)
+    }
+}
+
+impl From<ProgramID> for ProgramIDNative {
+    fn from(value: ProgramID) -> Self {
+        value.0
     }
 }
