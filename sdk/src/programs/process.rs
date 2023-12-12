@@ -152,7 +152,7 @@ impl Process {
     /// Executes the given authorization.
     fn execute(&self, authorization: Authorization) -> anyhow::Result<(Response, Trace)> {
         self.0
-            .execute::<CurrentAleo>(authorization.into())
+            .execute::<CurrentAleo, _>(authorization.into(), &mut StdRng::from_entropy())
             .map(|(r, t)| (Response::from(r), Trace::from(t)))
     }
 
