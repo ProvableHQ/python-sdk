@@ -45,4 +45,4 @@ jobs:
           python -m venv .env
           source .env/bin/activate
           maturin develop --release --features openssl/vendored
-          python test.py
+          python python/aleo/test.py
