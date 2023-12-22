@@ -7,4 +7,4 @@ python3 -m venv .env
 source .env/bin/activate
 pip install maturin
 maturin develop
-python test.py
+python python/test.py

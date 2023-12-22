@@ -33,7 +33,7 @@ use programs::*;
 /// Python developers with zk (zero-knowledge) programming capabilities
 /// via the usage of Aleo's zkSnarks.
 #[pymodule]
-#[pyo3(name = "aleo")]
+#[pyo3(name = "_aleolib")]
 fn register_module(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Account>()?;
     m.add_class::<Address>()?;
