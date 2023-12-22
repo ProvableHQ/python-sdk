@@ -27,7 +27,7 @@ use std::{
 
 /// The Aleo identifier type.
 #[pyclass(frozen)]
-#[derive(Clone)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct Identifier(IdentifierNative);
 
 #[pymethods]

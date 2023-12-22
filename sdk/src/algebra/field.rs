@@ -16,7 +16,8 @@
 
 use crate::types::FieldNative;
 
-use pyo3::prelude::*;
+use pyo3::{exceptions::PyZeroDivisionError, prelude::*};
+use rand::{distributions::Standard, prelude::*};
 use snarkvm::prelude::Zero;
 
 use std::{
@@ -39,6 +40,20 @@ impl Field {
         FieldNative::from_str(s).map(Self)
     }
 
+    /// Generates a new field using a cryptographically secure random number generator
+    #[staticmethod]
+    fn random() -> Self {
+        StdRng::from_entropy()
+            .sample::<FieldNative, _>(Standard)
+            .into()
+    }
+
+    /// Initializes a new field as a domain separator.
+    #[staticmethod]
+    fn domain_separator(domain: &str) -> Self {
+        Self(FieldNative::new_domain_separator(domain))
+    }
+
     /// Initializes a new field from a `u128`.
     #[staticmethod]
     fn from_u128(value: u128) -> Self {
@@ -54,6 +69,18 @@ impl Field {
     /// Returns the Field as a string.
     fn __str__(&self) -> String {
         self.0.to_string()
+    }
+
+    fn __mul__(&self, other: Self) -> Self {
+        Self(self.0 * other.0)
+    }
+
+    fn __truediv__(&self, other: Self) -> PyResult<Self> {
+        if other.is_zero() {
+            Err(PyZeroDivisionError::new_err("division by zero"))
+        } else {
+            Ok(Self(self.0 / other.0))
+        }
     }
 
     fn __eq__(&self, other: &Self) -> bool {

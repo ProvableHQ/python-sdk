@@ -55,6 +55,12 @@ impl PrivateKey {
         ComputeKeyNative::try_from(&self.0).unwrap().into()
     }
 
+    /// Returns the account private key from an account seed.
+    #[staticmethod]
+    fn from_seed(seed: Field) -> anyhow::Result<Self> {
+        PrivateKeyNative::try_from(seed.into()).map(Self)
+    }
+
     /// Reads in an account private key from a base58 string.
     #[staticmethod]
     fn from_string(private_key: &str) -> anyhow::Result<Self> {
