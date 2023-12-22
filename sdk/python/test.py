@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
-import aleo
 import unittest
-
+import aleo
 
 class TestAleo(unittest.TestCase):
 
@@ -65,6 +64,20 @@ class TestAleo(unittest.TestCase):
         self.assertTrue(account.verify(signature, message))
         self.assertFalse(account.verify(signature, bad_message))
         self.assertTrue(signature.verify(account.address(), message))
+
+    def test_encrypt_decrypt_sk(self):
+        private_key = aleo.PrivateKey.from_string(
+            "APrivateKey1zkpJYx2NZeJYB74JHpzvQGpKneTP75Dk8dao6paugZXtCz3")
+        ciphertext = aleo.Ciphertext.from_string(
+            "ciphertext1qvqt0sp0pp49gjeh50alfalt7ug3g8y7ha6cl3jkavcsnz8d0y9jwr27taxfrwd5kly8lah53qure3vxav6zxr7txattdvscv0kf3vcuqv9cmzj32znx4uwxdawcj3273zhgm8qwpxqczlctuvjvc596mgsqjxwz37f")
+        recovered = aleo.Encryptor.decrypt_private_key_with_secret(ciphertext, "qwe123")
+
+        self.assertEqual(private_key, recovered)
+
+        encrypted = aleo.Encryptor.encrypt_private_key_with_secret(private_key, "asd123")
+        other_recovered = aleo.Encryptor.decrypt_private_key_with_secret(encrypted, "asd123")
+
+        self.assertEqual(private_key, other_recovered)
 
     def test_coinbase(self):
         address = aleo.Address.from_string(
