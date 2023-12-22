@@ -82,3 +82,9 @@ impl From<ViewKeyNative> for ViewKey {
         Self(value)
     }
 }
+
+impl From<ViewKey> for ViewKeyNative {
+    fn from(value: ViewKey) -> Self {
+        value.0
+    }
+}

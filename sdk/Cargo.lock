@@ -43,6 +43,8 @@ name = "aleo"
 version = "0.2.0"
 dependencies = [
  "anyhow",
+ "indexmap",
+ "once_cell",
  "openssl",
  "pyo3",
  "rand",
