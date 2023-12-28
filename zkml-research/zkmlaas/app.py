@@ -31,15 +31,13 @@ def transpile(file_content):
     import pickle
     model = pickle.loads(file_content)
 
-
-    
-    
     lt = LeoTranspiler(model=model)
     model_name = f"model_{len(model_names)}, {model.__class__.__name__}"
     leo_project_name = f"project_{len(model_names)}"
     lt.to_leo(path=tmp_path, project_name=leo_project_name)
-    # Example: return "model_name", {"num_inputs": 3}
-    return model_name, {"num_inputs": 3}
+    num_inputs = len(lt.model_transpiler.input_generator.input_list)
+    
+    return model_name, {"num_inputs": num_inputs}
 
 def proof(*args):
     # Insert the calculation logic here
