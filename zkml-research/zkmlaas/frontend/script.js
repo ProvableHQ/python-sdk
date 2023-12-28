@@ -18,11 +18,18 @@ function loadModels() {
         .then(data => {
             const modelList = document.getElementById('modelList');
             if (data.length > 0) {
-                modelList.innerHTML = data.map(model => `<li>${model}</li>`).join('');
+                modelList.innerHTML = data.map((model, index) => `<li><a href="#" onclick="goToInferencePage(${index})">${model}</a></li>`).join('');
             } else {
                 modelList.innerHTML = 'No transpiled models yet.';
             }
         });
+}
+
+function goToInferencePage(modelIndex) {
+    // Hier können Sie die Logik implementieren, um zur Inferenzseite zu navigieren
+    // z.B. Speichern des gewählten Modellindex in localStorage und Weiterleitung
+    localStorage.setItem('selectedModelIndex', modelIndex);
+    window.location.href = '/static/inference.html'; // Angenommen, Ihre Inferenzseite heißt 'inference.html'
 }
 
 function uploadFile(file) {
