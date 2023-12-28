@@ -10,14 +10,17 @@ body {
     justify-content: space-around;
 }
 
-.model-list {
+.section {
     width: 40%;
+}
+
+.model-list, .upload-area {
     border: 1px solid #ddd;
-    padding: 10px;
+    padding: 20px;
+    min-height: 150px; /* Stellen Sie die Höhe nach Bedarf ein */
 }
 
 .upload-area {
-    width: 40%;
     border: 2px dashed #ddd;
     padding: 20px;
     cursor: pointer;
