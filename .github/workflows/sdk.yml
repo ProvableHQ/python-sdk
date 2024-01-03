@@ -49,4 +49,7 @@ jobs:
           sphinx-build -b doctest docs/source/ _readthedocs/doctest
       - name: Test
         run: |
-          python test.py
+          python -m venv .env
+          source .env/bin/activate
+          maturin develop --release --features openssl/vendored
+          python python/test.py

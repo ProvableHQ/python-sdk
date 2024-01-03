@@ -29,6 +29,9 @@ pub use record::{RecordCiphertext, RecordPlaintext};
 mod signature;
 pub use signature::Signature;
 
+mod text;
+pub use text::{Ciphertext, Plaintext};
+
 mod view_key;
 pub use view_key::ViewKey;
 

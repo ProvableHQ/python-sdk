@@ -1,14 +1,28 @@
+[project]
+name = "aleo"
+description = "A Python SDK for zero-knowledge cryptography based on Aleo"
+version = "0.2.0"
+readme = "Readme.md"
+license = {file = "LICENSE.md"}
+authors = [
+    {name = "Konstantin Pandl"},
+    {name = "Mike Turner"},
+    {name = "Roman Proskuryakov"},
+]
+classifiers = [  # Optional
+  "Programming Language :: Python :: 3",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/AleoHQ/python-sdk"
+
 [build-system]
 requires = ["maturin>=1.0,<2.0"]
 build-backend = "maturin"
 
 [tool.maturin]
-name = "aleo"
-version = "0.2.0"
-description = "A Python SDK for zero-knowledge cryptography based on Aleo"
-repository = "https://github.com/AleoHQ/python-sdk/tree/master/sdk"
-license = "GPL-3.0-or-later"
-authors = ["Konstantin Pandl", "Mike Turner", "Roman Proskuryakov"]
+python-source = "python"
+module-name = "aleo._aleolib"
 
 [tool.pyright]
 reportMissingModuleSource = false # don't report missing aleo.so for CI purposes

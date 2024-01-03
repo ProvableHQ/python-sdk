@@ -20,6 +20,7 @@ mod account;
 mod algebra;
 mod coinbase;
 mod credits;
+mod network;
 mod programs;
 mod types;
 
@@ -27,18 +28,20 @@ use account::*;
 use algebra::*;
 use coinbase::*;
 use credits::*;
+use network::*;
 use programs::*;
 
 /// The Aleo Python SDK provides a set of libraries aimed at empowering
 /// Python developers with zk (zero-knowledge) programming capabilities
 /// via the usage of Aleo's zkSnarks.
 #[pymodule]
-#[pyo3(name = "aleo")]
+#[pyo3(name = "_aleolib")]
 fn register_module(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Account>()?;
     m.add_class::<Address>()?;
     m.add_class::<Authorization>()?;
     m.add_class::<Boolean>()?;
+    m.add_class::<Ciphertext>()?;
     m.add_class::<CoinbasePuzzle>()?;
     m.add_class::<CoinbaseVerifyingKey>()?;
     m.add_class::<ComputeKey>()?;
@@ -57,6 +60,8 @@ fn register_module(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Literal>()?;
     m.add_class::<Locator>()?;
     m.add_class::<MicroCredits>()?;
+    m.add_class::<Network>()?;
+    m.add_class::<Plaintext>()?;
     m.add_class::<PrivateKey>()?;
     m.add_class::<Process>()?;
     m.add_class::<Program>()?;

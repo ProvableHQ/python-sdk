@@ -141,6 +141,12 @@ impl Literal {
     }
 }
 
+impl From<LiteralNative> for Literal {
+    fn from(value: LiteralNative) -> Self {
+        Self(value)
+    }
+}
+
 impl From<Literal> for LiteralNative {
     fn from(value: Literal) -> Self {
         value.0
