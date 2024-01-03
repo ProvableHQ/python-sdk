@@ -271,7 +271,7 @@ def prepare_MNIST_haar():
 
 
 
-    # conver to pytorch tensors
+    # convertto pytorch tensors
     import torch
 
     train_images_tensor_initial = torch.from_numpy(train_images_2d).float()
