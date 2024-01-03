@@ -4,7 +4,7 @@ on:
   workflow_call:
 
 jobs:
-  sdk_check:
+  check:
     name: Check
     runs-on: ubuntu-latest
     defaults:
@@ -22,9 +22,9 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           workdir: ./sdk
           fail_on_error: true
-  sdk_test:
+  build_test:
     name: Build & Test
-    needs: [sdk_check]
+    needs: [check]
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -40,6 +40,13 @@ jobs:
         with:
           args: --release --features openssl/vendored
           working-directory: ./sdk
+      - name: Install Wheel
+        run: pip install target/wheels/*.whl
+      - name: Build & Test RTD
+        run: |
+          pip install -r docs/requirements.txt
+          sphinx-build docs/source/ _readthedocs/
+          sphinx-build -b doctest docs/source/ _readthedocs/doctest
       - name: Test
         run: |
           python -m venv .env

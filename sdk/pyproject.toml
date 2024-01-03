@@ -26,4 +26,5 @@ module-name = "aleo._aleolib"
 
 [tool.pyright]
 reportMissingModuleSource = false # don't report missing aleo.so for CI purposes
+ignore = ['./docs']
 strict = ['./']
