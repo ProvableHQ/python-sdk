@@ -12,4 +12,5 @@ authors = ["Konstantin Pandl", "Mike Turner", "Roman Proskuryakov"]
 
 [tool.pyright]
 reportMissingModuleSource = false # don't report missing aleo.so for CI purposes
+ignore = ['./docs']
 strict = ['./']
