@@ -26,8 +26,8 @@ intersphinx_mapping = {
     'python': ('https://docs.python.org/3', None)
 }
 
-autoapi_dirs = ['../../']
-autoapi_file_patterns = ['aleo.pyi']
+autoapi_dirs = ['./', '../../python/aleo']
+autoapi_file_patterns = ['__init__.pyi']
 autoapi_generate_api_docs = True
 autoapi_add_toctree_entry = False
 autoapi_keep_files = False

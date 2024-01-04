@@ -17,6 +17,20 @@ Working with accounts
     >>> same_account = aleo.Account.from_private_key(private_key)
     >>> assert account == same_account
 
+Encrypted key materials
+************************************
+
+.. doctest::
+
+    >>> ciphertext = aleo.Ciphertext.from_string(
+    ... "ciphertext1qvqt0sp0pp49gjeh50alfalt7ug3g8y7ha6\
+    ... cl3jkavcsnz8d0y9jwr27taxfrwd5kly8lah53qure3vxav\
+    ... 6zxr7txattdvscv0kf3vcuqv9cmzj32znx4uwxdawcj3273\
+    ... zhgm8qwpxqczlctuvjvc596mgsqjxwz37f")
+    >>> decrypted = aleo.Encryptor.decrypt_private_key_with_secret(ciphertext, "qwe123")
+    >>> account = aleo.Account.from_private_key(decrypted)
+    >>> str(account)
+    'aleo1w58eg85ckl76c0pzzf4mdg2y39t9t7jfvp9u2fvnj2a2t8aquqpqrlycqt'
 
 Working with signatures
 ***********************
