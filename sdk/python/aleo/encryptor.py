@@ -1,18 +1,22 @@
 from __future__ import annotations
 
-from ._aleolib import PrivateKey, Ciphertext, Field, Network, Identifier, Plaintext, Literal
+from . import PrivateKey, Ciphertext, Field, Network, Identifier, Plaintext, Literal
 
 
 class Encryptor:
+    """Class for encrypting and decrypting Aleo key material into ciphertext.
+    """
     @staticmethod
-    # Encrypt a private key into ciphertext using a secret
     def encrypt_private_key_with_secret(private_key: PrivateKey, secret: str) -> Ciphertext:
+        """Encrypts a private key into ciphertext using a secret.
+        """
         seed = private_key.seed()
         return Encryptor.__encrypt_field(seed, secret, "private_key")
 
     @staticmethod
-    # Decrypt a private key from ciphertext using a secret
     def decrypt_private_key_with_secret(ciphertext: Ciphertext, secret: str) -> PrivateKey:
+        """Decrypts a private key from ciphertext using a secret.
+        """
         seed = Encryptor.__decrypt_field(ciphertext, secret, "private_key")
         return PrivateKey.from_seed(seed)
 
