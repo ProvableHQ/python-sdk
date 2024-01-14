@@ -46,7 +46,7 @@ impl Transaction {
         self.0.to_string()
     }
 
-    /// Constructs a Transation from a byte array.
+    /// Constructs a Transaction from a byte array.
     #[staticmethod]
     fn from_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
         TransactionNative::from_bytes_le(bytes).map(Self)

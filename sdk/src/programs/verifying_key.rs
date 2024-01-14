@@ -28,7 +28,7 @@ pub struct VerifyingKey(VerifyingKeyNative);
 
 #[pymethods]
 impl VerifyingKey {
-    /// Parses a veryifying key from string.
+    /// Parses a verifying key from string.
     #[staticmethod]
     fn from_string(s: &str) -> anyhow::Result<Self> {
         VerifyingKeyNative::from_str(s).map(Self)
@@ -40,7 +40,7 @@ impl VerifyingKey {
         VerifyingKeyNative::from_bytes_le(bytes).map(Self)
     }
 
-    /// Returns the byte representation of a veryfying key
+    /// Returns the byte representation of a verifying key
     fn bytes(&self) -> anyhow::Result<Vec<u8>> {
         self.0.to_bytes_le()
     }
