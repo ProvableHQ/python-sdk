@@ -15,7 +15,7 @@
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
 use snarkvm::circuit::network::AleoV0;
-use snarkvm::console::network::Testnet3;
+use snarkvm::console::network::MainnetV0;
 use snarkvm::prelude::coinbase::{
     CoinbasePuzzle, CoinbaseVerifyingKey, EpochChallenge, ProverSolution,
 };
@@ -55,7 +55,7 @@ pub type U64Native = U64<CurrentNetwork>;
 pub type U128Native = U128<CurrentNetwork>;
 
 // Network types
-pub type CurrentNetwork = Testnet3;
+pub type CurrentNetwork = MainnetV0;
 pub type CurrentAleo = AleoV0;
 
 // Program Types

@@ -15,6 +15,8 @@
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
 use crate::types::VerifyingKeyNative;
+use std::ops::Deref;
+use std::sync::Arc;
 
 use pyo3::prelude::*;
 use snarkvm::prelude::{FromBytes, ToBytes};
@@ -22,7 +24,7 @@ use snarkvm::prelude::{FromBytes, ToBytes};
 use std::str::FromStr;
 
 /// The Aleo verifying key type.
-#[pyclass(frozen)]
+#[pyclass()]
 #[derive(Clone)]
 pub struct VerifyingKey(VerifyingKeyNative);
 
@@ -38,6 +40,13 @@ impl VerifyingKey {
     #[staticmethod]
     fn from_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
         VerifyingKeyNative::from_bytes_le(bytes).map(Self)
+    }
+
+    #[staticmethod]
+    fn underreport_constraints(key: VerifyingKey, num_constraints: usize) -> VerifyingKey {
+        let mut vk = key.0.deref().clone();
+        vk.circuit_info.num_constraints -= num_constraints;
+        VerifyingKey(VerifyingKeyNative::new(Arc::new(vk)))
     }
 
     /// Returns the byte representation of a veryfying key

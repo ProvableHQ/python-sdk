@@ -166,43 +166,4 @@ impl Process {
         self.0.verify_fee(fee, deployment_or_execution_id.into())
     }
 
-    /// Returns the *minimum* cost in microcredits to publish the given execution (total cost, (storage cost, finalize cost)).
-    fn execution_cost(
-        &self,
-        execution: &Execution,
-    ) -> anyhow::Result<(MicroCredits, (MicroCredits, MicroCredits))> {
-        // Compute the storage cost in microcredits.
-        let storage_cost = execution.size_in_bytes()?;
-
-        // Compute the finalize cost in microcredits.
-        let mut finalize_cost = 0u64;
-
-        for transition in execution.transitions() {
-            let program = self.0.get_program(transition.program_id())?;
-            let function = program.get_function(transition.function_name())?;
-            let cost = match function.finalize_logic() {
-                Some(finalize) => cost_in_microcredits(finalize)?,
-                None => continue,
-            };
-            // Accumulate the finalize cost.
-            finalize_cost = finalize_cost.checked_add(cost).ok_or(anyhow::anyhow!(
-                "The finalize cost computation overflowed for an execution"
-            ))?;
-        }
-
-        // Compute the total cost in microcredits.
-        let total_cost = storage_cost
-            .checked_add(finalize_cost)
-            .ok_or(anyhow::anyhow!(
-                "The total cost computation overflowed for an execution"
-            ))?;
-
-        Ok((
-            MicroCredits::from(total_cost),
-            (
-                MicroCredits::from(storage_cost),
-                MicroCredits::from(finalize_cost),
-            ),
-        ))
-    }
 }

@@ -45,12 +45,12 @@ impl Transition {
 
     /// Returns true if this is a bond transition.
     fn is_bond(&self) -> bool {
-        self.0.is_bond()
+        self.0.is_bond_public()
     }
 
     /// Returns true if this is an unbond transition.
     fn is_unbond(&self) -> bool {
-        self.0.is_unbond()
+        self.0.is_unbond_public()
     }
 
     /// Returns true if this is a fee_private transition.

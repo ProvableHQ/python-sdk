@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import unittest
 import aleo
+import pkg_resources
 
 class TestAleo(unittest.TestCase):
 
@@ -132,4 +133,5 @@ class TestAleo(unittest.TestCase):
 
 
 if __name__ == "__main__":
+    print("Aleo version:", pkg_resources.get_distribution('aleo').version)
     unittest.main()

@@ -20,4 +20,8 @@ rand = { version = "^0.8" }
 serde = "1"
 serde_json = "1"
 
-snarkvm = { version = "0.16.6", features = ["console"] }
+[dependencies.snarkvm]
+git = "https://github.com/AleoHQ/snarkVM.git"
+rev = "01c8b09"
+#version = "=0.16.18"
+features = [ "console" ]
