@@ -23,7 +23,7 @@ use snarkvm::prelude::query::Query;
 use snarkvm::prelude::store::helpers::memory::BlockMemory;
 use snarkvm::prelude::transaction::Transaction;
 use snarkvm::prelude::{
-    Address, Authorization, Boolean, Ciphertext, ComputeKey, Execution, Fee, Field, Group,
+    Address, Authorization, Boolean, Ciphertext, ComputeKey, Deployment, Execution, Fee, Field, Group,
     Identifier, Literal, Locator, Plaintext, PrivateKey, Process, Program, ProgramID, ProvingKey,
     Record, Response, Scalar, Signature, Trace, Transition, Value, VerifyingKey, ViewKey, I128,
     I16, I32, I64, I8, U128, U16, U32, U64, U8,
@@ -61,6 +61,7 @@ pub type CurrentAleo = AleoV0;
 // Program Types
 type CurrentBlockMemory = BlockMemory<CurrentNetwork>;
 pub type AuthorizationNative = Authorization<CurrentNetwork>;
+pub type DeploymentNative = Deployment<CurrentNetwork>;
 pub type ExecutionNative = Execution<CurrentNetwork>;
 pub type FeeNative = Fee<CurrentNetwork>;
 pub type IdentifierNative = Identifier<CurrentNetwork>;
