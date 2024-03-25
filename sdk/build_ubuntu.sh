@@ -24,4 +24,3 @@ source $HOME/.cargo/env
 python3 -m venv .env
 source .env/bin/activate
 pip install maturin
-maturin build
