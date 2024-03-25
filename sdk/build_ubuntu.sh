@@ -20,7 +20,9 @@ sudo apt-get install -y \
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 source $HOME/.cargo/env
 
+# install pip
+sudo apt-get install -y python3-pip
+
 # Install python sdk
-python3 -m venv .env
-source .env/bin/activate
-pip install maturin
+pip3 install maturin
+echo 'export PATH="$PATH:$(python3 -m site --user-base)/bin"' >> ~/.bashrc
