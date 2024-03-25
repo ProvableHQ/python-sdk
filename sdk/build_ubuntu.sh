@@ -14,9 +14,10 @@ sudo apt-get install -y \
 	xz-utils \
 	ufw
 
+sudo apt-get update
+sudo apt-get install -y patchelf
 
 # Install Rust
-
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 source $HOME/.cargo/env
 
