@@ -16,14 +16,12 @@ sudo apt-get install -y \
 
 sudo apt-get update
 sudo apt-get install -y patchelf
+sudo apt install -y pkg-config libssl-dev
 
 # Install Rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 source $HOME/.cargo/env
 
-# install pip
-sudo apt-get install -y python3-pip
-
 # Install python sdk
-pip3 install maturin
-echo 'export PATH="$PATH:$(python3 -m site --user-base)/bin"' >> ~/.bashrc
+python3.11 -m pip install maturin
+echo 'export PATH="$PATH:$(python3.11 -m site --user-base)/bin"' >> ~/.bashrc
