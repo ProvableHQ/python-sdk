@@ -49,6 +49,17 @@ class TestAleo(unittest.TestCase):
         self.assertFalse(signature.verify(address, bad_message))
         self.assertEqual(signature, aleo.Signature.from_string(c_signature))
 
+    def test_signature_verify_value(self):
+        address = aleo.Address.from_string(
+            "aleo184vuwr5u7u0ha5f5k44067dd2uaqewxx6pe5ltha5pv99wvhfqxqv339h4")
+        c_signature = "sign1m9jrzpea7c8gdd0q7fp7pwszy6ar4du5p03aj8798c7pvwur9qqfhakcuf0xqelct6u8qylr0tkqwt46kngtg7capdlj6qeqkqevyqnavkjwgtm3t90lvxdrjjl07td0k4w5sysm7w22lfhfkqgdk690pcu5an22wssu4q6d3754cljxugdnrnccneldp79m3j5drzxs0s4sx2u5zze"
+        signature = aleo.Signature.from_string(c_signature)
+        message = "5field"
+        bad_message = "5u8"
+        self.assertTrue(signature.verify_value(address, message))
+        self.assertFalse(signature.verify_value(address, bad_message))
+        self.assertEqual(signature, aleo.Signature.from_string(c_signature))
+
     def test_account_sanity(self):
         private_key = aleo.PrivateKey.from_string(
             "APrivateKey1zkp3dQx4WASWYQVWKkq14v3RoQDfY2kbLssUj7iifi1VUQ6")
@@ -64,6 +75,14 @@ class TestAleo(unittest.TestCase):
         self.assertTrue(account.verify(signature, message))
         self.assertFalse(account.verify(signature, bad_message))
         self.assertTrue(signature.verify(account.address(), message))
+
+        message_value = "5field"
+        bad_message_value = "5u8"
+        signature_value = account.sign_value(message_value)
+
+        self.assertTrue(account.verify_value(signature_value, message_value))
+        self.assertFalse(account.verify_value(signature_value, bad_message_value))
+        self.assertTrue(signature_value.verify_value(account.address(), message_value))
 
     def test_encrypt_decrypt_sk(self):
         private_key = aleo.PrivateKey.from_string(
