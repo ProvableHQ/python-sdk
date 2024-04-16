@@ -92,9 +92,19 @@ impl Account {
         self.private_key.sign(message)
     }
 
+    /// Returns a signature for the given message (as an aleo value)
+    fn sign_value(&self, value: &str) -> anyhow::Result<Signature> {
+        self.private_key.sign_value(value)
+    }
+
     /// Verifies the signature of the given message.
     fn verify(&self, signature: &Signature, message: &[u8]) -> bool {
         signature.verify(&self.address, message)
+    }
+
+    /// Verifies the signature of the given value.
+    fn verify_value(&self, signature: &Signature, value: &str) -> bool {
+        signature.verify_value(&self.address, value)
     }
 
     /// Decrypts a record ciphertext with a view key
