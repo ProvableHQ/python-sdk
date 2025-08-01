@@ -12,4 +12,3 @@ zkml>=0.0.2b2
 jupyterlab>=4.2,<5.0
 ipykernel>=6.29,<7.0
 pyobjc-framework-AVFoundation; sys_platform == "darwin"
-opencv-python
