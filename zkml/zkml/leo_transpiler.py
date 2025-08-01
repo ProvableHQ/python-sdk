@@ -379,8 +379,9 @@ class LeoTranspiler:
         -------
         None
         """
-        content = """NETWORK=testnet3
+        content = """NETWORK=testnet
 PRIVATE_KEY=APrivateKey1zkpHtqVWT6fSHgUMNxsuVf7eaR6id2cj7TieKY1Z8CP5rCD
+ENDPOINT=https://api.explorer.provable.com/v1
 """
         folder_dir = os.path.join(self.project_dir)
         # Make sure path exists
