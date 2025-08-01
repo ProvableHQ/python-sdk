@@ -1,5 +1,6 @@
-from sklearn import tree
 from sklearn.utils.multiclass import unique_labels
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+import matplotlib.pyplot as plt
 
 def plot_mlp_architecture(clf, ax=None):
     """
@@ -61,3 +62,51 @@ def summarize_mlp(clf):
         w.size + b.size for w, b in zip(clf.coefs_, clf.intercepts_)
     )
     print(f"Total parameters: {total_params:,}")
+
+
+    
+def plot_confusion_matrix(y_true, y_pred, *,
+                          labels=None,
+                          normalize=None,
+                          ax=None,
+                          title="Confusion matrix",
+                          cmap="Blues"):
+    """
+    Plot a confusion matrix for classification results.
+
+    Parameters
+    ----------
+    y_true : array-like
+        Ground-truth labels.
+    y_pred : array-like
+        Predicted labels.
+    labels : list, optional
+        Class labels (order on both axes). If None, uses the union of labels
+        present in y_true and y_pred.
+    normalize : {'true', 'pred', 'all'}, default None
+        Normalization mode passed to sklearn.metrics.confusion_matrix.
+    ax : matplotlib.axes.Axes, optional
+        Existing axes to draw on. If None, a new figure/axes is created.
+    title : str, default "Confusion matrix"
+        Title shown above the plot.
+    cmap : str or matplotlib Colormap, default "Blues"
+        Colormap used for the heat-map.
+
+    Returns
+    -------
+    numpy.ndarray
+        The underlying confusion-matrix array (for further inspection if needed).
+    """
+    if labels is None:
+        labels = unique_labels(y_true, y_pred)
+
+    cm = confusion_matrix(y_true, y_pred, labels=labels, normalize=normalize)
+
+    if ax is None:
+        _, ax = plt.subplots(figsize=(4, 4))
+
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=labels)
+    disp.plot(ax=ax, cmap=cmap, colorbar=False)
+    ax.set_title(title)
+    plt.tight_layout()
+    plt.show()
