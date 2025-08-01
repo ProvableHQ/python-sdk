@@ -14,8 +14,8 @@
 ## 2  Clone the repo & create a virtual env
 
 ```bash
-git clone https://github.com/<your-org>/kya-workshop.git
-cd kya-workshop
+git clone https://github.com/ProvableHQ/python-sdk.git
+cd zkml-research/kya_face
 
 # Create & activate a venv named .venv
 python -m venv .venv
