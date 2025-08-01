@@ -37,4 +37,4 @@ pip install -r requirements.txt
 
 ## 4  Open the Jupyter notebook
 
-Open `kya.ipynb`, e.g., through VS code (choosing the `venv`) or through running `jupyter lab`
+Open `kya.ipynb`, e.g., through VS Code (choosing the `venv`).
