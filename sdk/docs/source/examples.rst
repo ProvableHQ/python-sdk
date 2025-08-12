@@ -44,6 +44,18 @@ Working with signatures
     >>> restored = aleo.Signature.from_string(serialized)
     >>> assert account.verify(restored, message)
 
+Working with signatures using Aleo values
+***********************
+
+.. doctest::
+
+    >>> account = aleo.Account()
+    >>> message = '5field'
+    >>> signature = account.sign_value(message)
+    >>> serialized = str(signature)
+    >>> restored = aleo.Signature.from_string(serialized)
+    >>> assert account.verify_value(restored, message)
+
 
 Calling a **transfer_public** function
 **************************************

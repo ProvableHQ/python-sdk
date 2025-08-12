@@ -14,7 +14,11 @@
 // You should have received a copy of the GNU General Public License
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
-use crate::{types::SignatureNative, Address, ComputeKey, PrivateKey, Scalar};
+use crate::{
+    types::{SignatureNative, ValueNative},
+    Address, ComputeKey, PrivateKey, Scalar,
+};
+use snarkvm::console::program::ToFields;
 
 use pyo3::prelude::*;
 use rand::{rngs::StdRng, SeedableRng};
@@ -62,10 +66,29 @@ impl Signature {
             .map(Self)
     }
 
+    /// Returns a signature for the given message (as bytes) using the private key.
+    #[staticmethod]
+    pub fn sign_value(private_key: &PrivateKey, value: &str) -> anyhow::Result<Self> {
+        let fields = ValueNative::from_str(value)?.to_fields()?;
+        private_key
+            .deref()
+            .sign(&fields, &mut StdRng::from_entropy())
+            .map(Self)
+    }
+
     /// Verifies (challenge == challenge') && (address == address') where:
     ///     challenge' := HashToScalar(G^response pk_sig^challenge, pk_sig, pr_sig, address, message)
     pub fn verify(&self, address: &Address, message: &[u8]) -> bool {
         self.0.verify_bytes(address, message)
+    }
+
+    /// Verifies (challenge == challenge') && (address == address') where:
+    ///     challenge' := HashToScalar(G^response pk_sig^challenge, pk_sig, pr_sig, address, message)
+    pub fn verify_value(&self, address: &Address, value: &str) -> bool {
+        let Ok(fields) = ValueNative::from_str(value).and_then(|v| v.to_fields()) else {
+            return false;
+        };
+        self.0.verify(address, &fields)
     }
 
     /// Returns a string representation of the signature.

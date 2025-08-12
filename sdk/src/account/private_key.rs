@@ -77,6 +77,11 @@ impl PrivateKey {
         Signature::sign(self, message)
     }
 
+    /// Returns a signature for the given message (as a field) using the private key.
+    pub fn sign_value(&self, value: &str) -> anyhow::Result<Signature> {
+        Signature::sign_value(self, value)
+    }
+
     /// Returns the signature secret key.
     fn sk_sig(&self) -> Scalar {
         self.0.sk_sig().into()
