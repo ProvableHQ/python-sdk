@@ -5,7 +5,7 @@ programming capabilities via the usage of Aleo's zkSnarks.
 
 Currently this SDK is in alpha preview stage. It can be installed by using the following command:
    ```bash
-   pip3 install zkml
+   pip3 install aleo
    ```
 
 Alternatively, you can clone it from [GitHub](https://github.com/AleoHQ/python-sdk/tree/master/sdk) and run:
