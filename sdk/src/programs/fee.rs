@@ -39,11 +39,13 @@ impl Fee {
     }
 
     /// Returns the payer, if the fee is public.
+    #[getter]
     fn payer(&self) -> Option<Address> {
         self.0.payer().map(Into::into)
     }
 
     /// Returns the transition.
+    #[getter]
     fn transition(&self) -> Transition {
         self.0.transition().clone().into()
     }
