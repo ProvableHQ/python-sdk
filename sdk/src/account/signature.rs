@@ -17,7 +17,7 @@
 use crate::{types::SignatureNative, Address, ComputeKey, PrivateKey, Scalar};
 
 use pyo3::prelude::*;
-use rand::{rngs::StdRng, SeedableRng};
+use rand::rngs::StdRng;
 
 use std::{
     collections::hash_map::DefaultHasher,
@@ -34,11 +34,13 @@ pub struct Signature(SignatureNative);
 #[pymethods]
 impl Signature {
     /// Returns the verifier challenge.
+    #[getter]
     fn challenge(&self) -> Scalar {
         self.0.challenge().into()
     }
 
     /// Returns the signer compute key.
+    #[getter]
     fn compute_key(&self) -> ComputeKey {
         self.0.compute_key().into()
     }
@@ -50,6 +52,7 @@ impl Signature {
     }
 
     /// Returns the prover response.
+    #[getter]
     fn response(&self) -> Scalar {
         self.0.response().into()
     }
@@ -58,7 +61,7 @@ impl Signature {
     #[staticmethod]
     pub fn sign(private_key: &PrivateKey, message: &[u8]) -> anyhow::Result<Self> {
         private_key
-            .sign_bytes(message, &mut StdRng::from_entropy())
+            .sign_bytes(message, &mut rand::make_rng::<StdRng>())
             .map(Self)
     }
 

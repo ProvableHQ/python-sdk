@@ -20,7 +20,7 @@ use crate::{
 };
 
 use pyo3::prelude::*;
-use rand::{rngs::StdRng, SeedableRng};
+use rand::rngs::StdRng;
 
 use std::{
     collections::hash_map::DefaultHasher,
@@ -37,20 +37,21 @@ pub struct PrivateKey(PrivateKeyNative);
 #[pymethods]
 impl PrivateKey {
     /// Generates a new private key using a cryptographically secure random number generator
-    #[allow(clippy::new_without_default)]
-    #[new]
-    pub fn new() -> Self {
-        PrivateKeyNative::new(&mut StdRng::from_entropy())
+    #[staticmethod]
+    pub fn random() -> Self {
+        PrivateKeyNative::new(&mut rand::make_rng::<StdRng>())
             .unwrap()
             .into()
     }
 
     /// Derives the account address from an account private key.
+    #[getter]
     pub fn address(&self) -> anyhow::Result<Address> {
         AddressNative::try_from(&self.0).map(Into::into)
     }
 
     /// Derives the account compute key from an account private key.
+    #[getter]
     fn compute_key(&self) -> ComputeKey {
         ComputeKeyNative::try_from(&self.0).unwrap().into()
     }
@@ -68,6 +69,7 @@ impl PrivateKey {
     }
 
     /// Returns the account seed.
+    #[getter]
     fn seed(&self) -> Field {
         self.0.seed().into()
     }
@@ -88,6 +90,7 @@ impl PrivateKey {
     }
 
     /// Initializes a new account view key from an account private key.
+    #[getter]
     pub fn view_key(&self) -> ViewKey {
         let view_key = ViewKeyNative::try_from(&self.0).unwrap();
         view_key.into()

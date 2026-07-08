@@ -79,12 +79,20 @@ impl RecordPlaintext {
         RecordPlaintextNative::from_str(s).map(Self)
     }
 
+    /// Returns the version of the program record.
+    #[getter]
+    fn version(&self) -> u8 {
+        **self.0.version()
+    }
+
     /// Returns the owner of the record as a string
+    #[getter]
     fn owner(&self) -> String {
         self.0.owner().to_string()
     }
 
     /// Returns the nonce of the program record.
+    #[getter]
     fn nonce(&self) -> Group {
         (*self.0.nonce()).into()
     }
@@ -95,8 +103,9 @@ impl RecordPlaintext {
         private_key: &PrivateKey,
         program_id: &ProgramID,
         record_identifier: &Identifier,
+        record_view_key: &Field,
     ) -> anyhow::Result<Field> {
-        let commitment = self.to_commitment(program_id, record_identifier)?;
+        let commitment = self.to_commitment(program_id, record_identifier, &**record_view_key)?;
         RecordPlaintextNative::serial_number(**private_key, commitment).map(Into::into)
     }
 

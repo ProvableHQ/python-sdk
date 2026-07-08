@@ -27,6 +27,7 @@ pub struct ComputeKey(ComputeKeyNative);
 #[pymethods]
 impl ComputeKey {
     /// Returns the address from the compute key.
+    #[getter]
     fn address(&self) -> Address {
         self.0.to_address().into()
     }

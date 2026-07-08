@@ -20,7 +20,6 @@ use crate::{
 };
 use std::ops::Deref;
 
-use once_cell::sync::OnceCell;
 use pyo3::{exceptions::PyTypeError, prelude::*};
 
 use std::{collections::HashMap, str::FromStr};
@@ -98,14 +97,14 @@ impl Plaintext {
     #[staticmethod]
     fn new_struct(kv: Vec<(Identifier, Plaintext)>) -> Self {
         let kv: Vec<_> = kv.into_iter().map(|(k, v)| (k.into(), v.into())).collect();
-        PlaintextNative::Struct(indexmap::IndexMap::from_iter(kv), OnceCell::new()).into()
+        PlaintextNative::Struct(indexmap::IndexMap::from_iter(kv), std::sync::OnceLock::new()).into()
     }
 
     /// Returns a new Plaintext::Array from a list of values.
     #[staticmethod]
     fn new_array(values: Vec<Plaintext>) -> Self {
         let values: Vec<_> = values.into_iter().map(Into::into).collect();
-        PlaintextNative::Array(values, OnceCell::new()).into()
+        PlaintextNative::Array(values, std::sync::OnceLock::new()).into()
     }
 
     /// Encrypts self to the given address under the given randomizer.
