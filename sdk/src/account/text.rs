@@ -97,7 +97,11 @@ impl Plaintext {
     #[staticmethod]
     fn new_struct(kv: Vec<(Identifier, Plaintext)>) -> Self {
         let kv: Vec<_> = kv.into_iter().map(|(k, v)| (k.into(), v.into())).collect();
-        PlaintextNative::Struct(indexmap::IndexMap::from_iter(kv), std::sync::OnceLock::new()).into()
+        PlaintextNative::Struct(
+            indexmap::IndexMap::from_iter(kv),
+            std::sync::OnceLock::new(),
+        )
+        .into()
     }
 
     /// Returns a new Plaintext::Array from a list of values.

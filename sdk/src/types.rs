@@ -14,10 +14,10 @@
 // You should have received a copy of the GNU General Public License
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
-#[cfg(not(feature = "testnet"))]
-use snarkvm::circuit::network::AleoV0;
 #[cfg(feature = "testnet")]
 use snarkvm::circuit::network::AleoTestnetV0;
+#[cfg(not(feature = "testnet"))]
+use snarkvm::circuit::network::AleoV0;
 #[cfg(not(feature = "testnet"))]
 use snarkvm::console::network::MainnetV0;
 #[cfg(feature = "testnet")]
@@ -25,13 +25,13 @@ use snarkvm::console::network::TestnetV0;
 use snarkvm::ledger::block::{Fee, Transaction};
 use snarkvm::ledger::query::Query;
 use snarkvm::ledger::store::helpers::memory::BlockMemory;
-use snarkvm::synthesizer::{Process, Trace};
 use snarkvm::prelude::{
-    Address, Authorization, Boolean, Ciphertext, ComputeKey, Execution, Field, Group,
-    Identifier, Literal, Locator, Plaintext, PrivateKey, Program, ProgramID, ProvingKey,
-    Record, Response, Scalar, Signature, Transition, Value, VerifyingKey, ViewKey, I128,
-    I16, I32, I64, I8, U128, U16, U32, U64, U8,
+    Address, Authorization, Boolean, Ciphertext, ComputeKey, Execution, Field, Group, Identifier,
+    Literal, Locator, Plaintext, PrivateKey, Program, ProgramID, ProvingKey, Record, Response,
+    Scalar, Signature, Transition, Value, VerifyingKey, ViewKey, I128, I16, I32, I64, I8, U128,
+    U16, U32, U64, U8,
 };
+use snarkvm::synthesizer::{Process, Trace};
 
 // Network selection (feature-gated; MainnetV0 by default).
 #[cfg(not(feature = "testnet"))]
