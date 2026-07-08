@@ -15,19 +15,29 @@
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
 use snarkvm::circuit::network::AleoV0;
-use snarkvm::console::network::Testnet3;
-use snarkvm::prelude::coinbase::{
-    CoinbasePuzzle, CoinbaseVerifyingKey, EpochChallenge, ProverSolution,
-};
-use snarkvm::prelude::query::Query;
-use snarkvm::prelude::store::helpers::memory::BlockMemory;
-use snarkvm::prelude::transaction::Transaction;
+#[cfg(feature = "testnet")]
+use snarkvm::circuit::network::AleoTestnetV0;
+use snarkvm::console::network::{MainnetV0, TestnetV0};
+use snarkvm::ledger::block::{Fee, Transaction};
+use snarkvm::ledger::query::Query;
+use snarkvm::ledger::store::helpers::memory::BlockMemory;
+use snarkvm::synthesizer::{Process, Trace};
 use snarkvm::prelude::{
-    Address, Authorization, Boolean, Ciphertext, ComputeKey, Execution, Fee, Field, Group,
-    Identifier, Literal, Locator, Plaintext, PrivateKey, Process, Program, ProgramID, ProvingKey,
-    Record, Response, Scalar, Signature, Trace, Transition, Value, VerifyingKey, ViewKey, I128,
+    Address, Authorization, Boolean, Ciphertext, ComputeKey, Execution, Field, Group,
+    Identifier, Literal, Locator, Plaintext, PrivateKey, Program, ProgramID, ProvingKey,
+    Record, Response, Scalar, Signature, Transition, Value, VerifyingKey, ViewKey, I128,
     I16, I32, I64, I8, U128, U16, U32, U64, U8,
 };
+
+// Network selection (feature-gated; MainnetV0 by default).
+#[cfg(not(feature = "testnet"))]
+pub type CurrentNetwork = MainnetV0;
+#[cfg(not(feature = "testnet"))]
+pub type CurrentAleo = AleoV0;
+#[cfg(feature = "testnet")]
+pub type CurrentNetwork = TestnetV0;
+#[cfg(feature = "testnet")]
+pub type CurrentAleo = AleoTestnetV0;
 
 // Account types
 pub type AddressNative = Address<CurrentNetwork>;
@@ -54,12 +64,8 @@ pub type U32Native = U32<CurrentNetwork>;
 pub type U64Native = U64<CurrentNetwork>;
 pub type U128Native = U128<CurrentNetwork>;
 
-// Network types
-pub type CurrentNetwork = Testnet3;
-pub type CurrentAleo = AleoV0;
-
-// Program Types
-type CurrentBlockMemory = BlockMemory<CurrentNetwork>;
+// Program types
+pub type CurrentBlockMemory = BlockMemory<CurrentNetwork>;
 pub type AuthorizationNative = Authorization<CurrentNetwork>;
 pub type ExecutionNative = Execution<CurrentNetwork>;
 pub type FeeNative = Fee<CurrentNetwork>;
@@ -83,9 +89,3 @@ pub type CiphertextNative = Ciphertext<CurrentNetwork>;
 pub type PlaintextNative = Plaintext<CurrentNetwork>;
 pub type RecordCiphertextNative = Record<CurrentNetwork, CiphertextNative>;
 pub type RecordPlaintextNative = Record<CurrentNetwork, PlaintextNative>;
-
-// Coinbase types
-pub type CoinbasePuzzleNative = CoinbasePuzzle<CurrentNetwork>;
-pub type CoinbaseVerifyingKeyNative = CoinbaseVerifyingKey<CurrentNetwork>;
-pub type EpochChallengeNative = EpochChallenge<CurrentNetwork>;
-pub type ProverSolutionNative = ProverSolution<CurrentNetwork>;
