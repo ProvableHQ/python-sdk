@@ -28,15 +28,14 @@ jobs:
           name: Build and develop the package
           command: |
             . .env/bin/activate
-            cd sdk
-            maturin develop
+            maturin develop --features mainnet
       # Run the unittests
       - run:
           name: Run tests
           command: |
             . .env/bin/activate
-            cd sdk
-            python3 test.py
+            pip install pytest
+            python -m pytest python/tests -v
 
 workflows:
   version: 2
