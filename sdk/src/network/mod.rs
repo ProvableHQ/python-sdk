@@ -42,7 +42,7 @@ impl Network {
     /// The network version.
     #[staticmethod]
     fn edition() -> u16 {
-        CurrentNetwork::EDITION
+        0 // Network edition is fixed to 0 in snarkvm 4.7.3
     }
 
     /// Returns the Poseidon hash with an input rate of 2.
