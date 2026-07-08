@@ -39,12 +39,6 @@ impl Network {
         CurrentNetwork::ID
     }
 
-    /// The network version.
-    #[staticmethod]
-    fn edition() -> u16 {
-        0 // Network edition is fixed to 0 in snarkvm 4.7.3
-    }
-
     /// Returns the Poseidon hash with an input rate of 2.
     #[staticmethod]
     fn hash_psd2(input: Vec<Field>) -> anyhow::Result<Field> {
