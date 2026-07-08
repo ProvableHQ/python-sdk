@@ -30,7 +30,6 @@ dependencies = [
  "anyhow",
  "indexmap",
  "once_cell",
- "openssl",
  "pyo3",
  "rand",
  "serde",

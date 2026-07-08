@@ -40,7 +40,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          args: --release --out dist --find-interpreter --manifest-path ./sdk/Cargo.toml --features openssl/vendored
+          args: --release --out dist --find-interpreter --manifest-path ./sdk/Cargo.toml
           manylinux: auto
           before-script-linux: |
             # If we're running on rhel centos, install needed packages.
@@ -75,7 +75,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          args: --release --out dist --find-interpreter --manifest-path ./sdk/Cargo.toml --features openssl/vendored
+          args: --release --out dist --find-interpreter --manifest-path ./sdk/Cargo.toml
           sccache: 'true'
       - name: Upload wheels
         uses: actions/upload-artifact@v3
@@ -98,7 +98,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          args: --release --out dist --find-interpreter --manifest-path ./sdk/Cargo.toml --features openssl/vendored
+          args: --release --out dist --find-interpreter --manifest-path ./sdk/Cargo.toml
           sccache: 'true'
       - name: Upload wheels
         uses: actions/upload-artifact@v3
