@@ -179,7 +179,7 @@ impl Process {
             })
             .collect::<anyhow::Result<IndexMap<_, _>>>()?;
         ProcessNative::verify_execution(
-            ConsensusVersion::V15,
+            ConsensusVersion::V17,
             VarunaVersion::V2,
             InclusionVersion::V1,
             &execution,
@@ -190,7 +190,7 @@ impl Process {
     /// Verifies the given fee is valid. Note: This does not check that the global state root exists in the ledger.
     fn verify_fee(&self, fee: &Fee, deployment_or_execution_id: Field) -> anyhow::Result<()> {
         self.0.verify_fee(
-            ConsensusVersion::V15,
+            ConsensusVersion::V17,
             VarunaVersion::V2,
             InclusionVersion::V1,
             fee,
@@ -200,6 +200,6 @@ impl Process {
 
     /// Returns the *minimum* cost in microcredits to publish the given execution (total cost, (storage cost, finalize cost)).
     fn execution_cost(&self, execution: &Execution) -> anyhow::Result<(u64, (u64, u64))> {
-        execution_cost(&self.0, &execution.clone().into(), ConsensusVersion::V15)
+        execution_cost(&self.0, &execution.clone().into(), ConsensusVersion::V17)
     }
 }
