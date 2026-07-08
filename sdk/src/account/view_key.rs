@@ -50,7 +50,7 @@ impl ViewKey {
 
     /// Returns the address corresponding to the view key.
     #[getter]
-    fn to_address(&self) -> Address {
+    fn address(&self) -> Address {
         self.0.to_address().into()
     }
 

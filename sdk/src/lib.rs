@@ -1,3 +1,6 @@
+// pyo3 0.20 macro expansion triggers this lint on newer rustc; remove after pyo3 >= 0.21 upgrade
+#![allow(non_local_definitions)]
+
 // Copyright (C) 2019-2023 Aleo Systems Inc.
 // This file is part of the Aleo SDK library.
 
