@@ -14,10 +14,14 @@
 // You should have received a copy of the GNU General Public License
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
+#[cfg(not(feature = "testnet"))]
 use snarkvm::circuit::network::AleoV0;
 #[cfg(feature = "testnet")]
 use snarkvm::circuit::network::AleoTestnetV0;
-use snarkvm::console::network::{MainnetV0, TestnetV0};
+#[cfg(not(feature = "testnet"))]
+use snarkvm::console::network::MainnetV0;
+#[cfg(feature = "testnet")]
+use snarkvm::console::network::TestnetV0;
 use snarkvm::ledger::block::{Fee, Transaction};
 use snarkvm::ledger::query::Query;
 use snarkvm::ledger::store::helpers::memory::BlockMemory;
