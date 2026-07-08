@@ -1,7 +1,11 @@
 {
   "_source": "github.com/ProvableHQ/sdk@543b41e0a7e3d6a8a49ae8d0870809dc92b88684",
   "decrypt_kat": {
+    "_private_key_source": "owning private key for view_key below, vendored from ProvableHQ/sdk@543b41e test constants",
+    "private_key": "APrivateKey1zkpJkyYRGYtkeHDaFfwsKtUJzia7csiWhfBWPXWhXJzy9Ls",
     "view_key": "AViewKey1ccEt8A2Ryva5rxnKcAbn7wgTaTsb79tzkKHFpeKsm9NX",
+    "_record_view_key_source": "ProvableHQ/sdk@543b41e wasm/src/record/record_ciphertext.rs:224",
+    "record_view_key": "4445718830394614891114647247073357094867447866913203502139893824059966201724field",
     "non_owner_view_key": "AViewKey1e2WyreaH5H4RBcioLL2GnxvHk5Ud46EtwycnhTdXLmXp",
     "ciphertext": "record1qyqsqpe2szk2wwwq56akkwx586hkndl3r8vzdwve32lm7elvphh37rsyqyxx66trwfhkxun9v35hguerqqpqzqrtjzeu6vah9x2me2exkgege824sd8x2379scspmrmtvczs0d93qttl7y92ga0k0rsexu409hu3vlehe3yxjhmey3frh2z5pxm5cmxsv4un97q",
     "owner": "aleo1j7qxyunfldj2lp8hsvy7mw5k8zaqgjfyr72x2gh3x4ewgae8v5gscf5jh3",

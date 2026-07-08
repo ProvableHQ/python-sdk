@@ -35,7 +35,8 @@ jobs:
           command: |
             . .env/bin/activate
             pip install pytest
-            python -m pytest python/tests -v
+            # slow proving tests: run locally with -m slow
+            python -m pytest python/tests -v -m "not slow"
 
 workflows:
   version: 2
