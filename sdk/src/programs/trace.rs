@@ -15,8 +15,8 @@
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
 use crate::{
-    types::{CurrentAleo, LocatorNative, QueryNative, TraceNative},
-    Execution, Fee, Locator, Query, Transition,
+    types::{CurrentAleo, QueryNative, TraceNative},
+    Execution, Fee, Query, Transition,
 };
 
 use pyo3::prelude::*;
@@ -55,12 +55,10 @@ impl Trace {
     }
 
     /// Returns a new execution with a proof, for the current inclusion assignments and global state root.
-    fn prove_execution(&self, locator: Locator) -> anyhow::Result<Execution> {
-        let locator: LocatorNative = locator.into();
-        let locator_s = locator.to_string();
+    fn prove_execution(&self, locator: &str) -> anyhow::Result<Execution> {
         self.0
             .prove_execution::<CurrentAleo, _>(
-                &locator_s,
+                locator,
                 VarunaVersion::V2,
                 &mut rand::make_rng::<StdRng>(),
             )

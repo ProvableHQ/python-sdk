@@ -27,7 +27,6 @@ from aleo.mainnet import (
     Execution,
     Field,
     Identifier,
-    Locator,
     PrivateKey,
     Process,
     ProgramID,
@@ -136,9 +135,7 @@ def proven_execution(process, signer):
     auth = _authorize_transfer_public(process, signer)
     _, trace = process.execute(auth)
     trace.prepare(Query.rest(ENDPOINT))
-    # NOTE: despite the .pyi stub saying `locator: str`, the native binding
-    # requires a Locator object; a plain str raises TypeError.
-    return trace.prove_execution(Locator.from_string("credits.aleo/transfer_public"))
+    return trace.prove_execution("credits.aleo/transfer_public")
 
 
 @pytest.mark.slow
@@ -165,7 +162,7 @@ def test_prove_and_verify_execution(process, proven_execution):
     assert tampered["transitions"][0]["scm"] != "0field"
     tampered["transitions"][0]["scm"] = "0field"
     tampered_execution = Execution.from_json(json.dumps(tampered))
-    with pytest.raises(Exception):
+    with pytest.raises(RuntimeError):
         process.verify_execution(tampered_execution)
 
 
@@ -187,7 +184,7 @@ def test_prove_fee_and_transaction(process, signer, proven_execution):
 
     # verify_fee raises on failure; it must be bound to the same execution id.
     assert process.verify_fee(fee, execution_id) is None
-    with pytest.raises(Exception):
+    with pytest.raises(RuntimeError):
         process.verify_fee(fee, Field.zero())
 
     # Assemble a transaction and JSON round-trip it.
