@@ -29,28 +29,31 @@ pub struct Transition(TransitionNative);
 #[pymethods]
 impl Transition {
     /// Returns the transition ID.
+    #[getter]
     fn id(&self) -> String {
         self.0.id().to_string()
     }
 
     /// Returns the program ID.
+    #[getter]
     fn program_id(&self) -> ProgramID {
         (*self.0.program_id()).into()
     }
 
     /// Returns the function name.
+    #[getter]
     fn function_name(&self) -> Identifier {
         (*self.0.function_name()).into()
     }
 
-    /// Returns true if this is a bond transition.
-    fn is_bond(&self) -> bool {
-        self.0.is_bond()
+    /// Returns true if this is a bond_public transition.
+    fn is_bond_public(&self) -> bool {
+        self.0.is_bond_public()
     }
 
-    /// Returns true if this is an unbond transition.
-    fn is_unbond(&self) -> bool {
-        self.0.is_unbond()
+    /// Returns true if this is an unbond_public transition.
+    fn is_unbond_public(&self) -> bool {
+        self.0.is_unbond_public()
     }
 
     /// Returns true if this is a fee_private transition.

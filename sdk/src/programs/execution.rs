@@ -29,6 +29,7 @@ pub struct Execution(ExecutionNative);
 #[pymethods]
 impl Execution {
     /// Returns the Execution ID.
+    #[getter]
     fn execution_id(&self) -> anyhow::Result<Field> {
         self.0.to_execution_id().map(Into::into)
     }

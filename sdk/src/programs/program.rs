@@ -42,11 +42,13 @@ impl Program {
     }
 
     /// Returns the id of the program
+    #[getter]
     fn id(&self) -> ProgramID {
         (*self.0.id()).into()
     }
 
     /// Returns all function names present in the program
+    #[getter]
     fn functions(&self) -> Vec<Identifier> {
         self.0
             .functions()
@@ -56,6 +58,7 @@ impl Program {
     }
 
     /// Returns the imports of the program
+    #[getter]
     fn imports(&self) -> Vec<ProgramID> {
         self.0
             .imports()
@@ -65,6 +68,7 @@ impl Program {
     }
 
     /// Returns the source code of the program
+    #[getter]
     fn source(&self) -> String {
         self.0.to_string()
     }

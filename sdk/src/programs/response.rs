@@ -25,6 +25,7 @@ pub struct Response(ResponseNative);
 #[pymethods]
 impl Response {
     /// Returns the function outputs.
+    #[getter]
     fn outputs(&self) -> Vec<Value> {
         self.0.outputs().iter().cloned().map(Into::into).collect()
     }

@@ -48,21 +48,25 @@ impl Locator {
     }
 
     /// Returns the program ID.
+    #[getter]
     fn program_id(&self) -> ProgramID {
         (*self.0.program_id()).into()
     }
 
     /// Returns the program name.
+    #[getter]
     fn name(&self) -> Identifier {
         (*self.0.name()).into()
     }
 
     /// Returns the network-level domain (NLD).
+    #[getter]
     fn network(&self) -> Identifier {
         (*self.0.network()).into()
     }
 
     /// Returns the resource name.
+    #[getter]
     fn resource(&self) -> Identifier {
         (*self.0.resource()).into()
     }

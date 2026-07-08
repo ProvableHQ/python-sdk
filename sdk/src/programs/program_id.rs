@@ -39,11 +39,13 @@ impl ProgramID {
     }
 
     /// Returns the program name.
+    #[getter]
     fn name(&self) -> Identifier {
         (*self.0.name()).into()
     }
 
     /// Returns the network-level domain (NLD).
+    #[getter]
     fn network(&self) -> Identifier {
         (*self.0.network()).into()
     }
