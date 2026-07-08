@@ -22,7 +22,7 @@ build-backend = "maturin"
 
 [tool.maturin]
 python-source = "python"
-module-name = "aleo._aleolib"
+module-name = "aleo._aleolib_mainnet"
 
 [tool.pyright]
 reportMissingModuleSource = false # don't report missing aleo.so for CI purposes

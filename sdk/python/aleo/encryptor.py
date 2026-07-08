@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from . import PrivateKey, Ciphertext, Field, Network, Identifier, Plaintext, Literal
+from .mainnet import PrivateKey, Ciphertext, Field, Network, Identifier, Plaintext, Literal
 
 
 class Encryptor:

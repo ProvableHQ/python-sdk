@@ -1,6 +1,4 @@
 from __future__ import annotations
 
-from ._aleolib import *
+from . import mainnet
 from .encryptor import *
-
-__doc__ = _aleolib.__doc__
