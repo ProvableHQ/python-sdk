@@ -17,8 +17,8 @@
 use crate::types::FieldNative;
 
 use pyo3::{exceptions::PyZeroDivisionError, prelude::*};
-use rand::{distributions::Standard, prelude::*};
-use snarkvm::prelude::Zero;
+use rand::rngs::StdRng;
+use snarkvm::prelude::{Uniform, Zero};
 
 use std::{
     collections::hash_map::DefaultHasher,
@@ -43,9 +43,7 @@ impl Field {
     /// Generates a new field using a cryptographically secure random number generator
     #[staticmethod]
     fn random() -> Self {
-        StdRng::from_entropy()
-            .sample::<FieldNative, _>(Standard)
-            .into()
+        <FieldNative as Uniform>::rand(&mut rand::make_rng::<StdRng>()).into()
     }
 
     /// Initializes a new field as a domain separator.
