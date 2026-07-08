@@ -18,7 +18,6 @@ use pyo3::prelude::*;
 
 mod account;
 mod algebra;
-mod coinbase;
 mod credits;
 mod network;
 mod programs;
@@ -26,7 +25,6 @@ mod types;
 
 use account::*;
 use algebra::*;
-use coinbase::*;
 use credits::*;
 use network::*;
 use programs::*;
@@ -34,19 +32,15 @@ use programs::*;
 /// The Aleo Python SDK provides a set of libraries aimed at empowering
 /// Python developers with zk (zero-knowledge) programming capabilities
 /// via the usage of Aleo's zkSnarks.
-#[pymodule]
-#[pyo3(name = "_aleolib")]
-fn register_module(_py: Python, m: &PyModule) -> PyResult<()> {
+/// Registers all classes into the module (shared by both network builds).
+fn register(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Account>()?;
     m.add_class::<Address>()?;
     m.add_class::<Authorization>()?;
     m.add_class::<Boolean>()?;
     m.add_class::<Ciphertext>()?;
-    m.add_class::<CoinbasePuzzle>()?;
-    m.add_class::<CoinbaseVerifyingKey>()?;
     m.add_class::<ComputeKey>()?;
     m.add_class::<Credits>()?;
-    m.add_class::<EpochChallenge>()?;
     m.add_class::<Execution>()?;
     m.add_class::<Fee>()?;
     m.add_class::<Field>()?;
@@ -66,7 +60,6 @@ fn register_module(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Process>()?;
     m.add_class::<Program>()?;
     m.add_class::<ProgramID>()?;
-    m.add_class::<ProverSolution>()?;
     m.add_class::<ProvingKey>()?;
     m.add_class::<Query>()?;
     m.add_class::<RecordCiphertext>()?;
@@ -86,4 +79,18 @@ fn register_module(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<VerifyingKey>()?;
     m.add_class::<ViewKey>()?;
     Ok(())
+}
+
+#[cfg(not(feature = "testnet"))]
+#[pymodule]
+#[pyo3(name = "_aleolib_mainnet")]
+fn aleolib_mainnet(py: Python, m: &PyModule) -> PyResult<()> {
+    register(py, m)
+}
+
+#[cfg(feature = "testnet")]
+#[pymodule]
+#[pyo3(name = "_aleolib_testnet")]
+fn aleolib_testnet(py: Python, m: &PyModule) -> PyResult<()> {
+    register(py, m)
 }
