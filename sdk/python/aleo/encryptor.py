@@ -10,7 +10,7 @@ class Encryptor:
     def encrypt_private_key_with_secret(private_key: PrivateKey, secret: str) -> Ciphertext:
         """Encrypts a private key into ciphertext using a secret.
         """
-        seed = private_key.seed()
+        seed = private_key.seed
         return Encryptor.__encrypt_field(seed, secret, "private_key")
 
     @staticmethod

@@ -7,6 +7,9 @@ edition = "2021"
 license = "GPL-3.0-or-later"
 
 [lib]
+# NOTE: internal crate name only. The importable module name is set by
+# pyproject.toml [tool.maturin] module-name + the cfg-gated #[pyo3(name)]
+# in src/lib.rs (_aleolib_mainnet / _aleolib_testnet).
 name = "_aleolib"
 crate-type = ["cdylib"]
 
