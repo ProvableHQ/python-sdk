@@ -1,4 +1,5 @@
 """Tests for the aleo.abi integration hook."""
+import importlib.util
 import json
 import sys
 
@@ -34,6 +35,13 @@ function get_token:
     output r0 as Token.record;"""
 
 
+_HAS_ALEO_ABI = importlib.util.find_spec("aleo_abi") is not None
+requires_aleo_abi = pytest.mark.skipif(
+    not _HAS_ALEO_ABI, reason="aleo-abi not installed (pip install aleo-abi)"
+)
+
+
+@requires_aleo_abi
 def test_generate_abi_credits():
     """generate_abi(Program.credits()) returns dict with program=='credits.aleo'."""
     from aleo import abi
@@ -45,6 +53,7 @@ def test_generate_abi_credits():
     assert len(result.get("functions", [])) > 0
 
 
+@requires_aleo_abi
 def test_generate_abi_string_input():
     """generate_abi works with a raw bytecode string."""
     from aleo import abi

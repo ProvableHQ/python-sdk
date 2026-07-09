@@ -99,7 +99,7 @@ jobs:
 
   build-abi:
     name: abi-build (${{ matrix.platform.name }})
-    needs: []
+    needs: [tests]
     runs-on: ${{ matrix.platform.runner }}
     strategy:
       fail-fast: false
@@ -168,7 +168,7 @@ jobs:
           path: sdk/dist
 
   sdist-abi:
-    needs: []
+    needs: [tests]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -101,3 +101,44 @@ jobs:
       # would prove twice, so they run in a single worker on purpose.
       - name: pytest (proving suite)
         run: python -m pytest python/tests -v -m slow
+
+  test-abi:
+    name: Test (aleo-abi package)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            sdk
+            sdk-abi
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # The canary for build-graph isolation: leo's snarkvm feature flags
+      # (dev_skip_checks etc.) must never leak into the main SDK's lockfile.
+      - name: Assert main-crate isolation from leo features
+        run: |
+          count=$(grep -c "dev_skip_checks" sdk/Cargo.lock || true)
+          if [ "$count" != "0" ]; then
+            echo "::error::sdk/Cargo.lock references dev_skip_checks — leo build graph leaked into the main crate"
+            exit 1
+          fi
+      - name: Build both wheels
+        run: |
+          pip install maturin pytest requests
+          maturin build --release --features mainnet --manifest-path sdk/Cargo.toml --out dist
+          maturin build --release --manifest-path sdk-abi/Cargo.toml --out dist
+      - name: Install wheels
+        run: |
+          pip install --no-index --find-links dist aleo aleo-abi
+      - name: pytest (aleo-abi package suite)
+        run: python -m pytest sdk-abi/python/tests -v
+      - name: pytest (main-package abi hook)
+        run: |
+          cd sdk
+          python -m pytest python/tests/test_abi_hook.py -v
