@@ -1,0 +1,134 @@
+"""Shared models, error types, retry logic and JWT helpers for AleoNetworkClient."""
+from __future__ import annotations
+
+import random
+import time
+from typing import Any
+from urllib.parse import urlparse
+
+
+class AleoNetworkError(Exception):
+    """Raised when an Aleo network API call fails."""
+
+    def __init__(self, message: str, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+
+
+class AleoProvingError(Exception):
+    """Raised when DPS proving fails (non-retried errors)."""
+
+    def __init__(self, message: str, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+
+
+FIVE_MINUTES_MS: int = 5 * 60 * 1000
+DEFAULT_HOST: str = "https://api.provable.com/v2"
+DEFAULT_NETWORK: str = "mainnet"
+SDK_HEADERS: set[str] = {"x-aleo-sdk-version", "x-aleo-environment", "x-aleo-method"}
+
+
+def package_version() -> str:
+    try:
+        from importlib.metadata import version
+        return version("aleo")
+    except Exception:
+        return "0.0.0"
+
+
+def make_default_headers() -> dict[str, str]:
+    return {
+        "X-Aleo-SDK-Version": package_version(),
+        "X-Aleo-environment": "python",
+    }
+
+
+def user_headers(headers: dict[str, str]) -> dict[str, str]:
+    """Return only non-SDK headers (for custom transport mode)."""
+    return {k: v for k, v in headers.items() if k.lower() not in SDK_HEADERS}
+
+
+def method_headers(
+    headers: dict[str, str],
+    method: str,
+    has_custom_transport: bool,
+) -> dict[str, str]:
+    if has_custom_transport:
+        return user_headers(headers)
+    return {**headers, "X-ALEO-METHOD": method}
+
+
+def jwt_origin(host: str) -> str:
+    """Derive the JWT origin from a host URL (scheme+host+port, no path)."""
+    parsed = urlparse(host)
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+def jwt_expired(jwt_data: dict[str, Any]) -> bool:
+    """Return True if jwt_data is missing or expiring within 5 minutes."""
+    if not jwt_data:
+        return True
+    exp: int = jwt_data.get("expiration", 0)
+    return now_ms() >= exp - FIVE_MINUTES_MS
+
+
+def validate_block_range(start: int, end: int) -> None:
+    if start < 0:
+        raise ValueError("start must be >= 0")
+    if start > end:
+        raise ValueError("start must be <= end")
+    if end - start > 50:
+        raise ValueError("Block range cannot exceed 50 blocks")
+
+
+def strip_quotes(s: str) -> str:
+    """Strip quote characters (TS semantics for deployment tx IDs)."""
+    return s.replace('"', "")
+
+
+def retry_with_backoff(
+    fn: Any,
+    *,
+    attempts: int = 5,
+    base_delay: float = 0.1,
+) -> Any:
+    """Retry fn() up to `attempts` times on AleoNetworkError with status>=500."""
+    last_err: Exception | None = None
+    for n in range(attempts):
+        try:
+            return fn()
+        except AleoNetworkError as exc:
+            if exc.status is not None and exc.status >= 500:
+                last_err = exc
+                delay = base_delay * (2 ** n) + random.uniform(0, 0.05)
+                time.sleep(delay)
+            else:
+                raise
+    raise last_err  # type: ignore[misc]
+
+
+async def async_retry_with_backoff(
+    fn: Any,
+    *,
+    attempts: int = 5,
+    base_delay: float = 0.1,
+) -> Any:
+    """Async version of retry_with_backoff."""
+    import asyncio
+    last_err: Exception | None = None
+    for n in range(attempts):
+        try:
+            return await fn()
+        except AleoNetworkError as exc:
+            if exc.status is not None and exc.status >= 500:
+                last_err = exc
+                delay = base_delay * (2 ** n) + random.uniform(0, 0.05)
+                await asyncio.sleep(delay)
+            else:
+                raise
+    raise last_err  # type: ignore[misc]

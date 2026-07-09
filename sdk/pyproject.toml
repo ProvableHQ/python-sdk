@@ -13,6 +13,13 @@ classifiers = [  # Optional
   "Programming Language :: Python :: 3",
 ]
 
+[project.dependencies]
+dependencies = ["requests>=2"]
+
+[project.optional-dependencies]
+async = ["httpx>=0.27"]
+dps = ["pynacl>=1.5"]
+
 [project.urls]
 "Homepage" = "https://github.com/AleoHQ/python-sdk"
 
