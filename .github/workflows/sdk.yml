@@ -142,8 +142,13 @@ jobs:
       - name: Install wheels
         run: |
           pip install --find-links dist aleo aleo-abi
+      # Run each suite from inside its package dir so pytest uses that
+      # package's own pytest.ini (sdk-abi/pytest.ini, sdk/pytest.ini) rather
+      # than walking up to the stale legacy root setup.cfg.
       - name: pytest (aleo-abi package suite)
-        run: python -m pytest sdk-abi/python/tests -v
+        run: |
+          cd sdk-abi
+          python -m pytest python/tests -v
       - name: pytest (main-package abi hook)
         run: |
           cd sdk
