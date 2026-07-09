@@ -17,9 +17,20 @@
 use crate::types::ProvingKeyNative;
 
 use pyo3::prelude::*;
+use sha2::Digest;
 use snarkvm::prelude::{FromBytes, ToBytes};
 
 use std::str::FromStr;
+
+/// Extract the `prover_checksum` field from an embedded METADATA JSON string.
+fn prover_checksum_from_meta(metadata_json: &'static str) -> String {
+    let meta: serde_json::Value =
+        serde_json::from_str(metadata_json).expect("Metadata was not well-formatted");
+    meta["prover_checksum"]
+        .as_str()
+        .expect("Failed to parse prover_checksum")
+        .to_string()
+}
 
 /// The Aleo proving key type.
 #[pyclass(frozen)]
@@ -56,6 +67,361 @@ impl ProvingKey {
 
     #[classattr]
     const __hash__: Option<PyObject> = None;
+
+    // ---- Task 8 additions ----
+
+    /// Returns the SHA256 hex checksum of the proving key bytes.
+    fn checksum(&self) -> anyhow::Result<String> {
+        let bytes = self.0.to_bytes_le()?;
+        Ok(hex::encode(sha2::Sha256::digest(&bytes)))
+    }
+
+    // ---- is_*_prover checkers ----
+
+    fn is_bond_public_prover(&self) -> bool {
+        #[cfg(not(feature = "testnet"))]
+        {
+            self.checksum()
+                .map(|cs| {
+                    cs == prover_checksum_from_meta(
+                        snarkvm::parameters::mainnet::BondPublicProver::METADATA,
+                    )
+                })
+                .unwrap_or(false)
+        }
+        #[cfg(feature = "testnet")]
+        {
+            self.checksum()
+                .map(|cs| {
+                    cs == prover_checksum_from_meta(
+                        snarkvm::parameters::testnet::BondPublicProver::METADATA,
+                    )
+                })
+                .unwrap_or(false)
+        }
+    }
+
+    fn is_bond_validator_prover(&self) -> bool {
+        #[cfg(not(feature = "testnet"))]
+        {
+            self.checksum()
+                .map(|cs| {
+                    cs == prover_checksum_from_meta(
+                        snarkvm::parameters::mainnet::BondValidatorProver::METADATA,
+                    )
+                })
+                .unwrap_or(false)
+        }
+        #[cfg(feature = "testnet")]
+        {
+            self.checksum()
+                .map(|cs| {
+                    cs == prover_checksum_from_meta(
+                        snarkvm::parameters::testnet::BondValidatorProver::METADATA,
+                    )
+                })
+                .unwrap_or(false)
+        }
+    }
+
+    fn is_claim_unbond_public_prover(&self) -> bool {
+        #[cfg(not(feature = "testnet"))]
+        {
+            self.checksum()
+                .map(|cs| {
+                    cs == prover_checksum_from_meta(
+                        snarkvm::parameters::mainnet::ClaimUnbondPublicProver::METADATA,
+                    )
+                })
+                .unwrap_or(false)
+        }
+        #[cfg(feature = "testnet")]
+        {
+            self.checksum()
+                .map(|cs| {
+                    cs == prover_checksum_from_meta(
+                        snarkvm::parameters::testnet::ClaimUnbondPublicProver::METADATA,
+                    )
+                })
+                .unwrap_or(false)
+        }
+    }
+
+    fn is_fee_private_prover(&self) -> bool {
+        #[cfg(not(feature = "testnet"))]
+        {
+            self.checksum()
+                .map(|cs| {
+                    cs == prover_checksum_from_meta(
+                        snarkvm::parameters::mainnet::FeePrivateProver::METADATA,
+                    )
+                })
+                .unwrap_or(false)
+        }
+        #[cfg(feature = "testnet")]
+        {
+            self.checksum()
+                .map(|cs| {
+                    cs == prover_checksum_from_meta(
+                        snarkvm::parameters::testnet::FeePrivateProver::METADATA,
+                    )
+                })
+                .unwrap_or(false)
+        }
+    }
+
+    fn is_fee_public_prover(&self) -> bool {
+        #[cfg(not(feature = "testnet"))]
+        {
+            self.checksum()
+                .map(|cs| {
+                    cs == prover_checksum_from_meta(
+                        snarkvm::parameters::mainnet::FeePublicProver::METADATA,
+                    )
+                })
+                .unwrap_or(false)
+        }
+        #[cfg(feature = "testnet")]
+        {
+            self.checksum()
+                .map(|cs| {
+                    cs == prover_checksum_from_meta(
+                        snarkvm::parameters::testnet::FeePublicProver::METADATA,
+                    )
+                })
+                .unwrap_or(false)
+        }
+    }
+
+    fn is_inclusion_prover(&self) -> bool {
+        #[cfg(not(feature = "testnet"))]
+        {
+            self.checksum()
+                .map(|cs| {
+                    cs == prover_checksum_from_meta(
+                        snarkvm::parameters::mainnet::InclusionProver::METADATA,
+                    )
+                })
+                .unwrap_or(false)
+        }
+        #[cfg(feature = "testnet")]
+        {
+            self.checksum()
+                .map(|cs| {
+                    cs == prover_checksum_from_meta(
+                        snarkvm::parameters::testnet::InclusionProver::METADATA,
+                    )
+                })
+                .unwrap_or(false)
+        }
+    }
+
+    fn is_join_prover(&self) -> bool {
+        #[cfg(not(feature = "testnet"))]
+        {
+            self.checksum()
+                .map(|cs| {
+                    cs == prover_checksum_from_meta(
+                        snarkvm::parameters::mainnet::JoinProver::METADATA,
+                    )
+                })
+                .unwrap_or(false)
+        }
+        #[cfg(feature = "testnet")]
+        {
+            self.checksum()
+                .map(|cs| {
+                    cs == prover_checksum_from_meta(
+                        snarkvm::parameters::testnet::JoinProver::METADATA,
+                    )
+                })
+                .unwrap_or(false)
+        }
+    }
+
+    fn is_set_validator_state_prover(&self) -> bool {
+        #[cfg(not(feature = "testnet"))]
+        {
+            self.checksum()
+                .map(|cs| {
+                    cs == prover_checksum_from_meta(
+                        snarkvm::parameters::mainnet::SetValidatorStateProver::METADATA,
+                    )
+                })
+                .unwrap_or(false)
+        }
+        #[cfg(feature = "testnet")]
+        {
+            self.checksum()
+                .map(|cs| {
+                    cs == prover_checksum_from_meta(
+                        snarkvm::parameters::testnet::SetValidatorStateProver::METADATA,
+                    )
+                })
+                .unwrap_or(false)
+        }
+    }
+
+    fn is_split_prover(&self) -> bool {
+        #[cfg(not(feature = "testnet"))]
+        {
+            self.checksum()
+                .map(|cs| {
+                    cs == prover_checksum_from_meta(
+                        snarkvm::parameters::mainnet::SplitProver::METADATA,
+                    )
+                })
+                .unwrap_or(false)
+        }
+        #[cfg(feature = "testnet")]
+        {
+            self.checksum()
+                .map(|cs| {
+                    cs == prover_checksum_from_meta(
+                        snarkvm::parameters::testnet::SplitProver::METADATA,
+                    )
+                })
+                .unwrap_or(false)
+        }
+    }
+
+    fn is_transfer_private_prover(&self) -> bool {
+        #[cfg(not(feature = "testnet"))]
+        {
+            self.checksum()
+                .map(|cs| {
+                    cs == prover_checksum_from_meta(
+                        snarkvm::parameters::mainnet::TransferPrivateProver::METADATA,
+                    )
+                })
+                .unwrap_or(false)
+        }
+        #[cfg(feature = "testnet")]
+        {
+            self.checksum()
+                .map(|cs| {
+                    cs == prover_checksum_from_meta(
+                        snarkvm::parameters::testnet::TransferPrivateProver::METADATA,
+                    )
+                })
+                .unwrap_or(false)
+        }
+    }
+
+    fn is_transfer_private_to_public_prover(&self) -> bool {
+        #[cfg(not(feature = "testnet"))]
+        {
+            self.checksum()
+                .map(|cs| {
+                    cs == prover_checksum_from_meta(
+                        snarkvm::parameters::mainnet::TransferPrivateToPublicProver::METADATA,
+                    )
+                })
+                .unwrap_or(false)
+        }
+        #[cfg(feature = "testnet")]
+        {
+            self.checksum()
+                .map(|cs| {
+                    cs == prover_checksum_from_meta(
+                        snarkvm::parameters::testnet::TransferPrivateToPublicProver::METADATA,
+                    )
+                })
+                .unwrap_or(false)
+        }
+    }
+
+    fn is_transfer_public_prover(&self) -> bool {
+        #[cfg(not(feature = "testnet"))]
+        {
+            self.checksum()
+                .map(|cs| {
+                    cs == prover_checksum_from_meta(
+                        snarkvm::parameters::mainnet::TransferPublicProver::METADATA,
+                    )
+                })
+                .unwrap_or(false)
+        }
+        #[cfg(feature = "testnet")]
+        {
+            self.checksum()
+                .map(|cs| {
+                    cs == prover_checksum_from_meta(
+                        snarkvm::parameters::testnet::TransferPublicProver::METADATA,
+                    )
+                })
+                .unwrap_or(false)
+        }
+    }
+
+    fn is_transfer_public_as_signer_prover(&self) -> bool {
+        #[cfg(not(feature = "testnet"))]
+        {
+            self.checksum()
+                .map(|cs| {
+                    cs == prover_checksum_from_meta(
+                        snarkvm::parameters::mainnet::TransferPublicAsSignerProver::METADATA,
+                    )
+                })
+                .unwrap_or(false)
+        }
+        #[cfg(feature = "testnet")]
+        {
+            self.checksum()
+                .map(|cs| {
+                    cs == prover_checksum_from_meta(
+                        snarkvm::parameters::testnet::TransferPublicAsSignerProver::METADATA,
+                    )
+                })
+                .unwrap_or(false)
+        }
+    }
+
+    fn is_transfer_public_to_private_prover(&self) -> bool {
+        #[cfg(not(feature = "testnet"))]
+        {
+            self.checksum()
+                .map(|cs| {
+                    cs == prover_checksum_from_meta(
+                        snarkvm::parameters::mainnet::TransferPublicToPrivateProver::METADATA,
+                    )
+                })
+                .unwrap_or(false)
+        }
+        #[cfg(feature = "testnet")]
+        {
+            self.checksum()
+                .map(|cs| {
+                    cs == prover_checksum_from_meta(
+                        snarkvm::parameters::testnet::TransferPublicToPrivateProver::METADATA,
+                    )
+                })
+                .unwrap_or(false)
+        }
+    }
+
+    fn is_unbond_public_prover(&self) -> bool {
+        #[cfg(not(feature = "testnet"))]
+        {
+            self.checksum()
+                .map(|cs| {
+                    cs == prover_checksum_from_meta(
+                        snarkvm::parameters::mainnet::UnbondPublicProver::METADATA,
+                    )
+                })
+                .unwrap_or(false)
+        }
+        #[cfg(feature = "testnet")]
+        {
+            self.checksum()
+                .map(|cs| {
+                    cs == prover_checksum_from_meta(
+                        snarkvm::parameters::testnet::UnbondPublicProver::METADATA,
+                    )
+                })
+                .unwrap_or(false)
+        }
+    }
 }
 
 impl From<ProvingKeyNative> for ProvingKey {

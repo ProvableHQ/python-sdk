@@ -342,3 +342,71 @@ def test_all_16_verifier_getters_and_is_checkers():
         is_checker = IS_CHECKER_MAP[getter]
         result = getattr(vk, is_checker)()
         assert result is True, f"{getter}: {is_checker}() returned {result}, expected True"
+
+
+# ---------------------------------------------------------------------------
+# Task 8: ProvingKey additions (checksum, is_*_prover)
+# ---------------------------------------------------------------------------
+from aleo.mainnet import ProvingKey  # noqa: E402
+
+# All 15 is_*_prover method names
+PROVER_CHECKER_METHODS = [
+    "is_bond_public_prover",
+    "is_bond_validator_prover",
+    "is_claim_unbond_public_prover",
+    "is_fee_private_prover",
+    "is_fee_public_prover",
+    "is_inclusion_prover",
+    "is_join_prover",
+    "is_set_validator_state_prover",
+    "is_split_prover",
+    "is_transfer_private_prover",
+    "is_transfer_private_to_public_prover",
+    "is_transfer_public_prover",
+    "is_transfer_public_as_signer_prover",
+    "is_transfer_public_to_private_prover",
+    "is_unbond_public_prover",
+]
+
+
+def test_proving_key_checksum_shape():
+    """Shape test: checksum() method exists and raises on invalid bytes (not AttributeError)."""
+    with pytest.raises(Exception, match=r"."):
+        ProvingKey.from_bytes(bytes(10)).checksum()
+
+
+def test_proving_key_checker_methods_exist():
+    """API-surface test: all 15 is_*_prover methods exist and are callable on ProvingKey."""
+    for method_name in PROVER_CHECKER_METHODS:
+        assert callable(getattr(ProvingKey, method_name, None)), (
+            f"ProvingKey.{method_name} is not callable"
+        )
+
+
+@pytest.mark.slow
+def test_proving_key_split_prover_checksum():
+    """Slow: downloads split.prover, verifies checksum() matches metadata and is_split_prover() is True."""
+    import urllib.request
+
+    meta = Metadata.split()
+    url = meta.prover  # e.g. https://parameters.provable.com/mainnet/split.prover.XXXXXXX
+    try:
+        with urllib.request.urlopen(url, timeout=120) as resp:
+            prover_bytes = resp.read()
+    except Exception:
+        pytest.skip("network unavailable or download failed")
+
+    pk = ProvingKey.from_bytes(prover_bytes)
+
+    # checksum() should return a 64-char hex string
+    cs = pk.checksum()
+    assert isinstance(cs, str)
+    assert len(cs) == 64
+    assert all(c in "0123456789abcdef" for c in cs)
+
+    # The first 7 chars of the checksum appear in the prover URL
+    assert cs[:7] in url, f"checksum prefix {cs[:7]} not found in URL {url}"
+
+    # is_split_prover() must be True; a different checker must be False
+    assert pk.is_split_prover() is True
+    assert pk.is_bond_public_prover() is False
