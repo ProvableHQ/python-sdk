@@ -306,6 +306,23 @@ def test_scalar_div():
     assert (a / b) == a.divide(b)
 
 
+def test_scalar_sub():
+    a = Scalar.from_string("5scalar")
+    b = Scalar.from_string("3scalar")
+    assert str(a - b) == "2scalar"
+    assert (a - b) == a.subtract(b)
+
+
+def test_scalar_pow_and_negate():
+    a = Scalar.from_string("2scalar")
+    b = Scalar.from_string("3scalar")
+    assert str(a**b) == "8scalar"
+    assert (a**b) == a.pow(b)
+    # negation: a + (-a) == 0
+    assert (a + (-a)) == Scalar.zero()
+    assert (-a) == a.negate()
+
+
 def test_scalar_div_zero():
     a = Scalar.from_string("1scalar")
     with pytest.raises(ZeroDivisionError):

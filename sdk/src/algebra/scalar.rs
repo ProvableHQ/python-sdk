@@ -17,7 +17,7 @@
 use crate::{types::ScalarNative, Field};
 
 use pyo3::{exceptions::PyZeroDivisionError, prelude::*};
-use snarkvm::prelude::{One, ToField, Zero};
+use snarkvm::prelude::{One, Pow, ToField, Zero};
 
 use std::{
     collections::hash_map::DefaultHasher,
@@ -93,6 +93,16 @@ impl Scalar {
         }
     }
 
+    /// Returns self raised to the power of other.
+    fn pow(&self, other: Self) -> Self {
+        Self(Pow::pow(self.0, other.0))
+    }
+
+    /// Returns the negation of self.
+    fn negate(&self) -> Self {
+        Self(-self.0)
+    }
+
     /// Returns the Scalar as a string.
     fn __str__(&self) -> String {
         self.0.to_string()
@@ -122,6 +132,14 @@ impl Scalar {
 
     fn __truediv__(&self, other: Self) -> PyResult<Self> {
         self.divide(other)
+    }
+
+    fn __pow__(&self, other: Self, _modulo: Option<u32>) -> Self {
+        self.pow(other)
+    }
+
+    fn __neg__(&self) -> Self {
+        self.negate()
     }
 }
 
