@@ -26,6 +26,9 @@ pub use graph_key::GraphKey;
 mod private_key;
 pub use private_key::PrivateKey;
 
+mod private_key_ciphertext;
+pub use private_key_ciphertext::PrivateKeyCiphertext;
+
 mod record;
 pub use record::{RecordCiphertext, RecordPlaintext};
 

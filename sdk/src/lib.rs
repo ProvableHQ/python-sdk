@@ -68,6 +68,7 @@ fn register(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Pedersen64>()?;
     m.add_class::<Pedersen128>()?;
     m.add_class::<Plaintext>()?;
+    m.add_class::<PrivateKeyCiphertext>()?;
     m.add_class::<Poseidon2>()?;
     m.add_class::<Poseidon4>()?;
     m.add_class::<Poseidon8>()?;

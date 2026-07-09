@@ -71,6 +71,12 @@ macro_rules! integer {
                 value.0
             }
         }
+
+        impl From<$native> for $export_ty {
+            fn from(value: $native) -> Self {
+                Self(value)
+            }
+        }
     };
 }
 

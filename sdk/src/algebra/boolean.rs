@@ -60,3 +60,9 @@ impl From<Boolean> for BooleanNative {
         value.0
     }
 }
+
+impl From<BooleanNative> for Boolean {
+    fn from(value: BooleanNative) -> Self {
+        Self(value)
+    }
+}
