@@ -63,7 +63,7 @@ class TestU8:
         assert a * b == a.multiply(b)
 
     def test_div_zero_raises(self):
-        with pytest.raises(OverflowError):
+        with pytest.raises(ZeroDivisionError):
             U8(5) // U8(0)
 
     def test_floordiv_eq_divide(self):
@@ -85,8 +85,16 @@ class TestU8:
     def test_rem(self):
         assert U8(10).rem(U8(3)) == U8(1)
 
+    def test_rem_zero_divisor_raises(self):
+        with pytest.raises(ZeroDivisionError):
+            U8(10).rem(U8(0))
+
     def test_rem_wrapped(self):
         assert U8(10).rem_wrapped(U8(3)) == U8(1)
+
+    def test_rem_wrapped_zero_divisor_raises(self):
+        with pytest.raises(ZeroDivisionError):
+            U8(10).rem_wrapped(U8(0))
 
     def test_pow_u8(self):
         # 2^8 = 256 overflows u8
@@ -231,6 +239,23 @@ class TestI8:
     def test_to_field_from_field(self):
         v = I8(-42)
         assert I8.from_field(v.to_field()) == v
+
+    def test_rem_zero_divisor_raises(self):
+        with pytest.raises(ZeroDivisionError):
+            I8(10).rem(I8(0))
+
+    def test_rem_wrapped_zero_divisor_raises(self):
+        with pytest.raises(ZeroDivisionError):
+            I8(10).rem_wrapped(I8(0))
+
+    def test_rem_min_neg1_raises_overflow(self):
+        # i8::MIN % -1 overflows (checked_rem returns None); should raise OverflowError
+        with pytest.raises(OverflowError):
+            I8(-128).rem(I8(-1))
+
+    def test_rem_wrapped_min_neg1(self):
+        # rem_wrapped uses wrapping_rem: i8::MIN wrapping_rem -1 == 0 in Rust stdlib
+        assert I8(-128).rem_wrapped(I8(-1)) == I8(0)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -467,8 +492,10 @@ class TestFieldNewMethods:
 
     def test_random_distinct(self):
         a, b = Field.random(), Field.random()
-        # Astronomically unlikely to collide
-        assert a != b or True  # just ensure it runs
+        assert isinstance(a, Field)
+        assert isinstance(b, Field)
+        # Astronomically unlikely to collide over BLS12-377 field
+        assert a != b
 
 
 # ═══════════════════════════════════════════════════════════════

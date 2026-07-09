@@ -22,10 +22,13 @@ use crate::{
     Boolean, Field, Scalar,
 };
 
-use pyo3::{exceptions::PyOverflowError, prelude::*};
+use pyo3::{
+    exceptions::{PyOverflowError, PyZeroDivisionError},
+    prelude::*,
+};
 use rand::rngs::StdRng;
 use snarkvm::prelude::{
-    AddWrapped, DivWrapped, FromBits, FromBytes, FromField, FromFields, MulWrapped, One, Pow, Rem,
+    AddWrapped, DivWrapped, FromBits, FromBytes, FromField, FromFields, MulWrapped, One,
     RemWrapped, SubWrapped, ToBits, ToBytes, ToField, Uniform, Zero,
 };
 
@@ -35,20 +38,6 @@ use std::{
     str::FromStr,
     sync::OnceLock,
 };
-
-// ── helper: convert a snarkvm panic ("halt") into a Python OverflowError ──────
-fn wrap_overflow<T, F: FnOnce() -> T + std::panic::UnwindSafe>(f: F) -> PyResult<T> {
-    std::panic::catch_unwind(f).map_err(|e| {
-        let msg = if let Some(s) = e.downcast_ref::<String>() {
-            s.clone()
-        } else if let Some(s) = e.downcast_ref::<&str>() {
-            s.to_string()
-        } else {
-            "integer arithmetic overflow or panic".to_string()
-        };
-        PyOverflowError::new_err(msg)
-    })
-}
 
 // ── Unsigned integer macro ────────────────────────────────────────────────────
 // All methods for unsigned integers in a single #[pymethods] block.
@@ -155,27 +144,54 @@ macro_rules! integer_unsigned {
             // ── checked arithmetic ─────────────────────────────────────────
 
             fn add(&self, other: Self) -> PyResult<Self> {
-                let a = self.0;
-                let b = other.0;
-                wrap_overflow(move || Self(a + b))
+                (*self.0)
+                    .checked_add(*other.0)
+                    .map(|v| Self($native::new(v)))
+                    .ok_or_else(|| {
+                        PyOverflowError::new_err(concat!(
+                            stringify!($machine),
+                            " addition overflowed"
+                        ))
+                    })
             }
 
             fn subtract(&self, other: Self) -> PyResult<Self> {
-                let a = self.0;
-                let b = other.0;
-                wrap_overflow(move || Self(a - b))
+                (*self.0)
+                    .checked_sub(*other.0)
+                    .map(|v| Self($native::new(v)))
+                    .ok_or_else(|| {
+                        PyOverflowError::new_err(concat!(
+                            stringify!($machine),
+                            " subtraction overflowed"
+                        ))
+                    })
             }
 
             fn multiply(&self, other: Self) -> PyResult<Self> {
-                let a = self.0;
-                let b = other.0;
-                wrap_overflow(move || Self(a * b))
+                (*self.0)
+                    .checked_mul(*other.0)
+                    .map(|v| Self($native::new(v)))
+                    .ok_or_else(|| {
+                        PyOverflowError::new_err(concat!(
+                            stringify!($machine),
+                            " multiplication overflowed"
+                        ))
+                    })
             }
 
             fn divide(&self, other: Self) -> PyResult<Self> {
-                let a = self.0;
-                let b = other.0;
-                wrap_overflow(move || Self(a / b))
+                if *other.0 == 0 {
+                    return Err(PyZeroDivisionError::new_err("integer division by zero"));
+                }
+                (*self.0)
+                    .checked_div(*other.0)
+                    .map(|v| Self($native::new(v)))
+                    .ok_or_else(|| {
+                        PyOverflowError::new_err(concat!(
+                            stringify!($machine),
+                            " division overflowed"
+                        ))
+                    })
             }
 
             // ── wrapped ────────────────────────────────────────────────────
@@ -198,32 +214,59 @@ macro_rules! integer_unsigned {
 
             // ── remainder ─────────────────────────────────────────────────
 
-            fn rem(&self, other: Self) -> Self {
-                Self(self.0.rem(&other.0))
+            fn rem(&self, other: Self) -> PyResult<Self> {
+                if *other.0 == 0 {
+                    return Err(PyZeroDivisionError::new_err("integer remainder by zero"));
+                }
+                // For unsigned types, checked_rem only fails on zero divisor (already handled).
+                (*self.0)
+                    .checked_rem(*other.0)
+                    .map(|v| Self($native::new(v)))
+                    .ok_or_else(|| {
+                        PyOverflowError::new_err(concat!(
+                            stringify!($machine),
+                            " remainder overflowed"
+                        ))
+                    })
             }
 
-            fn rem_wrapped(&self, other: Self) -> Self {
-                Self(self.0.rem_wrapped(&other.0))
+            fn rem_wrapped(&self, other: Self) -> PyResult<Self> {
+                if *other.0 == 0 {
+                    return Err(PyZeroDivisionError::new_err("integer remainder by zero"));
+                }
+                Ok(Self(self.0.rem_wrapped(&other.0)))
             }
 
             // ── power ──────────────────────────────────────────────────────
 
             fn pow_u8(&self, exp: U8) -> PyResult<Self> {
-                let base = self.0;
-                let e = exp.0;
-                wrap_overflow(move || Self(base.pow(&e)))
+                let exp_u32 = *exp.0 as u32;
+                (*self.0)
+                    .checked_pow(exp_u32)
+                    .map(|v| Self($native::new(v)))
+                    .ok_or_else(|| {
+                        PyOverflowError::new_err(concat!(stringify!($machine), " power overflowed"))
+                    })
             }
 
             fn pow_u16(&self, exp: U16) -> PyResult<Self> {
-                let base = self.0;
-                let e = exp.0;
-                wrap_overflow(move || Self(base.pow(&e)))
+                let exp_u32 = *exp.0 as u32;
+                (*self.0)
+                    .checked_pow(exp_u32)
+                    .map(|v| Self($native::new(v)))
+                    .ok_or_else(|| {
+                        PyOverflowError::new_err(concat!(stringify!($machine), " power overflowed"))
+                    })
             }
 
             fn pow_u32(&self, exp: U32) -> PyResult<Self> {
-                let base = self.0;
-                let e = exp.0;
-                wrap_overflow(move || Self(base.pow(&e)))
+                let exp_u32 = *exp.0;
+                (*self.0)
+                    .checked_pow(exp_u32)
+                    .map(|v| Self($native::new(v)))
+                    .ok_or_else(|| {
+                        PyOverflowError::new_err(concat!(stringify!($machine), " power overflowed"))
+                    })
             }
 
             // ── conversions ────────────────────────────────────────────────
@@ -461,38 +504,75 @@ macro_rules! integer_signed {
             // ── checked arithmetic ─────────────────────────────────────────
 
             fn add(&self, other: Self) -> PyResult<Self> {
-                let a = self.0;
-                let b = other.0;
-                wrap_overflow(move || Self(a + b))
+                (*self.0)
+                    .checked_add(*other.0)
+                    .map(|v| Self($native::new(v)))
+                    .ok_or_else(|| {
+                        PyOverflowError::new_err(concat!(
+                            stringify!($machine),
+                            " addition overflowed"
+                        ))
+                    })
             }
 
             fn subtract(&self, other: Self) -> PyResult<Self> {
-                let a = self.0;
-                let b = other.0;
-                wrap_overflow(move || Self(a - b))
+                (*self.0)
+                    .checked_sub(*other.0)
+                    .map(|v| Self($native::new(v)))
+                    .ok_or_else(|| {
+                        PyOverflowError::new_err(concat!(
+                            stringify!($machine),
+                            " subtraction overflowed"
+                        ))
+                    })
             }
 
             fn multiply(&self, other: Self) -> PyResult<Self> {
-                let a = self.0;
-                let b = other.0;
-                wrap_overflow(move || Self(a * b))
+                (*self.0)
+                    .checked_mul(*other.0)
+                    .map(|v| Self($native::new(v)))
+                    .ok_or_else(|| {
+                        PyOverflowError::new_err(concat!(
+                            stringify!($machine),
+                            " multiplication overflowed"
+                        ))
+                    })
             }
 
             fn divide(&self, other: Self) -> PyResult<Self> {
-                let a = self.0;
-                let b = other.0;
-                wrap_overflow(move || Self(a / b))
+                if *other.0 == 0 {
+                    return Err(PyZeroDivisionError::new_err("integer division by zero"));
+                }
+                (*self.0)
+                    .checked_div(*other.0)
+                    .map(|v| Self($native::new(v)))
+                    .ok_or_else(|| {
+                        PyOverflowError::new_err(concat!(
+                            stringify!($machine),
+                            " division overflowed"
+                        ))
+                    })
             }
 
             fn negate(&self) -> PyResult<Self> {
-                let v = self.0;
-                wrap_overflow(move || Self(-v))
+                (*self.0)
+                    .checked_neg()
+                    .map(|v| Self($native::new(v)))
+                    .ok_or_else(|| {
+                        PyOverflowError::new_err(concat!(
+                            stringify!($machine),
+                            " negation overflowed"
+                        ))
+                    })
             }
 
             fn abs_checked(&self) -> PyResult<Self> {
-                use snarkvm::prelude::AbsChecked;
-                let v = self.0;
-                wrap_overflow(move || Self(v.abs_checked()))
+                (*self.0)
+                    .checked_abs()
+                    .map(|v| Self($native::new(v)))
+                    .ok_or_else(|| {
+                        PyOverflowError::new_err(concat!(stringify!($machine), " abs overflowed"))
+                    })
             }
 
             fn abs_wrapped(&self) -> Self {
@@ -520,32 +600,59 @@ macro_rules! integer_signed {
 
             // ── remainder ─────────────────────────────────────────────────
 
-            fn rem(&self, other: Self) -> Self {
-                Self(self.0.rem(&other.0))
+            fn rem(&self, other: Self) -> PyResult<Self> {
+                if *other.0 == 0 {
+                    return Err(PyZeroDivisionError::new_err("integer remainder by zero"));
+                }
+                // For signed types, checked_rem also returns None for MIN % -1 (overflow).
+                (*self.0)
+                    .checked_rem(*other.0)
+                    .map(|v| Self($native::new(v)))
+                    .ok_or_else(|| {
+                        PyOverflowError::new_err(concat!(
+                            stringify!($machine),
+                            " remainder overflowed"
+                        ))
+                    })
             }
 
-            fn rem_wrapped(&self, other: Self) -> Self {
-                Self(self.0.rem_wrapped(&other.0))
+            fn rem_wrapped(&self, other: Self) -> PyResult<Self> {
+                if *other.0 == 0 {
+                    return Err(PyZeroDivisionError::new_err("integer remainder by zero"));
+                }
+                Ok(Self(self.0.rem_wrapped(&other.0)))
             }
 
             // ── power ──────────────────────────────────────────────────────
 
             fn pow_u8(&self, exp: U8) -> PyResult<Self> {
-                let base = self.0;
-                let e = exp.0;
-                wrap_overflow(move || Self(base.pow(&e)))
+                let exp_u32 = *exp.0 as u32;
+                (*self.0)
+                    .checked_pow(exp_u32)
+                    .map(|v| Self($native::new(v)))
+                    .ok_or_else(|| {
+                        PyOverflowError::new_err(concat!(stringify!($machine), " power overflowed"))
+                    })
             }
 
             fn pow_u16(&self, exp: U16) -> PyResult<Self> {
-                let base = self.0;
-                let e = exp.0;
-                wrap_overflow(move || Self(base.pow(&e)))
+                let exp_u32 = *exp.0 as u32;
+                (*self.0)
+                    .checked_pow(exp_u32)
+                    .map(|v| Self($native::new(v)))
+                    .ok_or_else(|| {
+                        PyOverflowError::new_err(concat!(stringify!($machine), " power overflowed"))
+                    })
             }
 
             fn pow_u32(&self, exp: U32) -> PyResult<Self> {
-                let base = self.0;
-                let e = exp.0;
-                wrap_overflow(move || Self(base.pow(&e)))
+                let exp_u32 = *exp.0;
+                (*self.0)
+                    .checked_pow(exp_u32)
+                    .map(|v| Self($native::new(v)))
+                    .ok_or_else(|| {
+                        PyOverflowError::new_err(concat!(stringify!($machine), " power overflowed"))
+                    })
             }
 
             // ── conversions ────────────────────────────────────────────────
