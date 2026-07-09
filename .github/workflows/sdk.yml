@@ -28,6 +28,12 @@ jobs:
       # Guard the testnet cfg seam — it only exists at compile time.
       - name: check (testnet)
         run: cargo check --no-default-features --features testnet
+      # pyright needs the package's third-party imports resolvable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install import-resolution deps for pyright
+        run: pip install requests httpx pynacl
       - uses: jordemort/action-pyright@v1
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -60,8 +66,8 @@ jobs:
           maturin build --release --features mainnet --out dist
       - name: Install wheel + test deps
         run: |
-          pip install --no-index --find-links dist aleo
-          pip install pytest pytest-xdist
+          pip install --find-links dist aleo
+          pip install pytest pytest-xdist httpx pynacl responses pytest-asyncio
       # Fast, offline tests; -n auto parallelizes across cores.
       - name: pytest (fast suite)
         run: python -m pytest python/tests -v -n auto -m "not slow"
@@ -95,8 +101,8 @@ jobs:
           maturin build --release --features mainnet --out dist
       - name: Install wheel + test deps
         run: |
-          pip install --no-index --find-links dist aleo
-          pip install pytest
+          pip install --find-links dist aleo
+          pip install pytest httpx pynacl responses pytest-asyncio
       # The two slow tests share one module-scoped proven execution; xdist
       # would prove twice, so they run in a single worker on purpose.
       - name: pytest (proving suite)
@@ -135,7 +141,7 @@ jobs:
           maturin build --release --manifest-path sdk-abi/Cargo.toml --out dist
       - name: Install wheels
         run: |
-          pip install --no-index --find-links dist aleo aleo-abi
+          pip install --find-links dist aleo aleo-abi
       - name: pytest (aleo-abi package suite)
         run: python -m pytest sdk-abi/python/tests -v
       - name: pytest (main-package abi hook)

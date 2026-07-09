@@ -83,7 +83,7 @@ jobs:
       - name: Smoke test wheel
         shell: bash
         run: |
-          pip install --no-index --find-links sdk/dist aleo
+          pip install --find-links sdk/dist aleo
           python -c "
           from aleo.mainnet import PrivateKey
           pk = PrivateKey.random()
@@ -142,7 +142,7 @@ jobs:
       - name: Smoke test wheel
         shell: bash
         run: |
-          pip install --no-index --find-links sdk-abi/dist aleo-abi
+          pip install --find-links sdk-abi/dist aleo-abi
           python -c "import aleo_abi; print(aleo_abi.generate_abi.__name__)"
       - name: Upload wheel
         uses: actions/upload-artifact@v4
