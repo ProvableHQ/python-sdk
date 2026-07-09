@@ -14,10 +14,10 @@
 // You should have received a copy of the GNU General Public License
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
-use crate::types::GroupNative;
+use crate::{types::GroupNative, Address, Field, Scalar};
 
 use pyo3::prelude::*;
-use snarkvm::prelude::Zero;
+use snarkvm::prelude::{Double, FromField, Zero};
 
 use std::{
     collections::hash_map::DefaultHasher,
@@ -45,6 +45,68 @@ impl Group {
         GroupNative::zero().into()
     }
 
+    /// Returns the prime subgroup generator.
+    #[staticmethod]
+    fn generator() -> Self {
+        GroupNative::generator().into()
+    }
+
+    /// Returns the group from a field element (x-coordinate recovery).
+    #[staticmethod]
+    fn from_field(field: &Field) -> anyhow::Result<Self> {
+        GroupNative::from_field(&**field).map(Self)
+    }
+
+    /// Returns the x-coordinate of the group element as a field.
+    fn to_x_coordinate(&self) -> Field {
+        self.0.to_x_coordinate().into()
+    }
+
+    /// Returns the address corresponding to this group element.
+    fn to_address(&self) -> Address {
+        Address::new(self.0)
+    }
+
+    /// Returns the double of this group element.
+    fn double(&self) -> Self {
+        Self(Double::double(&self.0))
+    }
+
+    /// Returns the sum of self and other.
+    fn add(&self, other: &Self) -> Self {
+        Self(self.0 + other.0)
+    }
+
+    /// Returns the difference of self and other.
+    fn subtract(&self, other: &Self) -> Self {
+        Self(self.0 - other.0)
+    }
+
+    /// Returns the negation of self.
+    fn negate(&self) -> Self {
+        Self(-self.0)
+    }
+
+    /// Returns self scaled by scalar (scalar multiplication).
+    fn scalar_multiply(&self, scalar: &Scalar) -> Self {
+        Self(self.0 * **scalar)
+    }
+
+    /// Returns the little-endian byte representation of the group element (x-coordinate).
+    fn to_bytes_le(&self) -> anyhow::Result<Vec<u8>> {
+        use snarkvm::prelude::ToBytes;
+        self.0.to_bytes_le()
+    }
+
+    /// Parses a group from little-endian bytes (x-coordinate).
+    #[staticmethod]
+    fn from_bytes_le(bytes: Vec<u8>) -> anyhow::Result<Self> {
+        use snarkvm::prelude::FromBytes;
+        GroupNative::from_bytes_le(&bytes).map(Self)
+    }
+
+    // ---------- dunders ----------
+
     /// Returns the Group as a string.
     fn __str__(&self) -> String {
         self.0.to_string()
@@ -58,6 +120,22 @@ impl Group {
         let mut hasher = DefaultHasher::new();
         self.0.hash(&mut hasher);
         hasher.finish()
+    }
+
+    fn __add__(&self, other: &Self) -> Self {
+        self.add(other)
+    }
+
+    fn __sub__(&self, other: &Self) -> Self {
+        self.subtract(other)
+    }
+
+    fn __neg__(&self) -> Self {
+        self.negate()
+    }
+
+    fn __mul__(&self, scalar: &Scalar) -> Self {
+        self.scalar_multiply(scalar)
     }
 }
 
@@ -78,5 +156,11 @@ impl From<GroupNative> for Group {
 impl From<Group> for GroupNative {
     fn from(value: Group) -> Self {
         value.0
+    }
+}
+
+impl From<&GroupNative> for Group {
+    fn from(value: &GroupNative) -> Self {
+        Self(*value)
     }
 }

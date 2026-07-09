@@ -53,6 +53,7 @@ fn register(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Execution>()?;
     m.add_class::<Fee>()?;
     m.add_class::<Field>()?;
+    m.add_class::<GraphKey>()?;
     m.add_class::<Group>()?;
     m.add_class::<Identifier>()?;
     m.add_class::<I8>()?;

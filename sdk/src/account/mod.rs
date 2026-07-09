@@ -20,6 +20,9 @@ pub use address::Address;
 mod compute_key;
 pub use compute_key::ComputeKey;
 
+mod graph_key;
+pub use graph_key::GraphKey;
+
 mod private_key;
 pub use private_key::PrivateKey;
 

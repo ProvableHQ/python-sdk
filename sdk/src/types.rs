@@ -26,10 +26,10 @@ use snarkvm::ledger::block::{Fee, Transaction};
 use snarkvm::ledger::query::Query;
 use snarkvm::ledger::store::helpers::memory::BlockMemory;
 use snarkvm::prelude::{
-    Address, Authorization, Boolean, Ciphertext, ComputeKey, Execution, Field, Group, Identifier,
-    Literal, Locator, Plaintext, PrivateKey, Program, ProgramID, ProvingKey, Record, Response,
-    Scalar, Signature, Transition, Value, VerifyingKey, ViewKey, I128, I16, I32, I64, I8, U128,
-    U16, U32, U64, U8,
+    Address, Authorization, Boolean, Ciphertext, ComputeKey, Execution, Field, GraphKey, Group,
+    Identifier, Literal, Locator, Plaintext, PrivateKey, Program, ProgramID, ProvingKey, Record,
+    Response, Scalar, Signature, Transition, Value, VerifyingKey, ViewKey, I128, I16, I32, I64, I8,
+    U128, U16, U32, U64, U8,
 };
 use snarkvm::synthesizer::{Process, Trace};
 
@@ -46,6 +46,7 @@ pub type CurrentAleo = AleoTestnetV0;
 // Account types
 pub type AddressNative = Address<CurrentNetwork>;
 pub type ComputeKeyNative = ComputeKey<CurrentNetwork>;
+pub type GraphKeyNative = GraphKey<CurrentNetwork>;
 pub type PrivateKeyNative = PrivateKey<CurrentNetwork>;
 pub type SignatureNative = Signature<CurrentNetwork>;
 pub type ViewKeyNative = ViewKey<CurrentNetwork>;

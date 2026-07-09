@@ -14,10 +14,9 @@
 // You should have received a copy of the GNU General Public License
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
-use crate::{types::ViewKeyNative, Address, Field, RecordCiphertext, RecordPlaintext, Scalar};
+use crate::{types::GraphKeyNative, Field, ViewKey};
 
 use pyo3::prelude::*;
-use snarkvm::prelude::ToField;
 
 use std::{
     collections::hash_map::DefaultHasher,
@@ -26,46 +25,32 @@ use std::{
     str::FromStr,
 };
 
-/// The account view key used to decrypt records and ciphertext.
+/// The account graph key used for record scanning.
 #[pyclass(frozen)]
 #[derive(Clone)]
-pub struct ViewKey(ViewKeyNative);
+pub struct GraphKey(GraphKeyNative);
 
 #[pymethods]
-impl ViewKey {
-    /// Decrypt a record ciphertext with a view key
-    pub fn decrypt(&self, record_ciphertext: &RecordCiphertext) -> anyhow::Result<RecordPlaintext> {
-        record_ciphertext.decrypt(self)
+impl GraphKey {
+    /// Derives the graph key from the given view key.
+    #[staticmethod]
+    fn from_view_key(view_key: &ViewKey) -> anyhow::Result<Self> {
+        GraphKeyNative::try_from(&**view_key).map(Self)
     }
 
-    /// Reads in an account view key from a base58 string.
+    /// Reads in an account graph key from a base58 string.
     #[staticmethod]
     fn from_string(s: &str) -> anyhow::Result<Self> {
-        ViewKeyNative::from_str(s).map(Into::into)
+        GraphKeyNative::from_str(s).map(Self)
     }
 
-    /// Determines whether the record belongs to the account.
-    pub fn is_owner(&self, record_ciphertext: &RecordCiphertext) -> bool {
-        record_ciphertext.is_owner(self)
-    }
-
-    /// Returns the address corresponding to the view key.
+    /// Returns the graph key tag `sk_tag`.
     #[getter]
-    fn address(&self) -> Address {
-        self.0.to_address().into()
+    fn sk_tag(&self) -> Field {
+        self.0.sk_tag().into()
     }
 
-    /// Returns the view key as a scalar.
-    pub fn to_scalar(&self) -> Scalar {
-        (*self.0).into()
-    }
-
-    /// Returns the view key as a field element.
-    pub fn to_field(&self) -> anyhow::Result<Field> {
-        self.0.to_field().map(Into::into)
-    }
-
-    /// Returns the view key as a base58 string.
+    /// Returns the graph key as a base58 string.
     fn __str__(&self) -> String {
         self.0.to_string()
     }
@@ -81,22 +66,22 @@ impl ViewKey {
     }
 }
 
-impl Deref for ViewKey {
-    type Target = ViewKeyNative;
+impl Deref for GraphKey {
+    type Target = GraphKeyNative;
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl From<ViewKeyNative> for ViewKey {
-    fn from(value: ViewKeyNative) -> Self {
+impl From<GraphKeyNative> for GraphKey {
+    fn from(value: GraphKeyNative) -> Self {
         Self(value)
     }
 }
 
-impl From<ViewKey> for ViewKeyNative {
-    fn from(value: ViewKey) -> Self {
+impl From<GraphKey> for GraphKeyNative {
+    fn from(value: GraphKey) -> Self {
         value.0
     }
 }

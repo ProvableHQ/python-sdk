@@ -15,14 +15,17 @@
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
 use crate::{
-    types::{RecordCiphertextNative, RecordPlaintextNative},
-    Field, Group, Identifier, PrivateKey, ProgramID, ViewKey,
+    types::{
+        IdentifierNative, LiteralNative, PlaintextNative, RecordCiphertextNative,
+        RecordPlaintextNative,
+    },
+    Field, GraphKey, Group, Identifier, Plaintext, PrivateKey, ProgramID, ViewKey,
 };
+use snarkvm::prelude::Entry;
 use std::ops::Deref;
+use std::str::FromStr;
 
 use pyo3::prelude::*;
-
-use std::str::FromStr;
 
 /// A value(ciphertext) stored in program record.
 #[pyclass(frozen)]
@@ -44,6 +47,35 @@ impl RecordCiphertext {
     /// Determines whether the record belongs to the view key associated with an account.
     pub fn is_owner(&self, view_key: &ViewKey) -> bool {
         self.0.is_owner(view_key)
+    }
+
+    /// Returns the nonce of the record ciphertext.
+    #[getter]
+    fn nonce(&self) -> Group {
+        (*self.0.nonce()).into()
+    }
+
+    /// Computes the record view key as `(nonce * view_key_scalar).to_x_coordinate()`.
+    pub fn record_view_key(&self, view_key: &ViewKey) -> Field {
+        (*self.0.nonce() * ***view_key).to_x_coordinate().into()
+    }
+
+    /// Decrypts self into plaintext using the given record view key (unchecked — no owner verification).
+    pub fn decrypt_with_record_view_key(
+        &self,
+        record_view_key: &Field,
+    ) -> anyhow::Result<RecordPlaintext> {
+        self.0
+            .decrypt_symmetric_unchecked(&**record_view_key)
+            .map(Into::into)
+    }
+
+    /// Computes the record tag from a graph key and commitment.
+    #[staticmethod]
+    fn tag(graph_key: &GraphKey, commitment: &Field) -> anyhow::Result<Field> {
+        #[allow(clippy::useless_conversion)]
+        RecordPlaintextNative::tag(graph_key.sk_tag().into(), commitment.clone().into())
+            .map(Into::into)
     }
 
     /// Returns the record ciphertext as a string.
@@ -85,7 +117,7 @@ impl RecordPlaintext {
         **self.0.version()
     }
 
-    /// Returns the owner of the record as a string
+    /// Returns the owner of the record as a string.
     #[getter]
     fn owner(&self) -> String {
         self.0.owner().to_string()
@@ -97,6 +129,64 @@ impl RecordPlaintext {
         (*self.0.nonce()).into()
     }
 
+    /// Returns the amount of microcredits in the record (0 if no microcredits field).
+    #[getter]
+    fn microcredits(&self) -> u64 {
+        self.0
+            .find(&[IdentifierNative::from_str("microcredits").unwrap()])
+            .ok()
+            .and_then(|entry| match entry {
+                Entry::Private(PlaintextNative::Literal(LiteralNative::U64(amount), _)) => {
+                    Some(*amount)
+                }
+                Entry::Public(PlaintextNative::Literal(LiteralNative::U64(amount), _)) => {
+                    Some(*amount)
+                }
+                _ => None,
+            })
+            .unwrap_or(0)
+    }
+
+    /// Returns the commitment of the record for the given program_id, record_name, and record_view_key.
+    pub fn commitment(
+        &self,
+        program_id: &ProgramID,
+        record_name: &Identifier,
+        record_view_key: &Field,
+    ) -> anyhow::Result<Field> {
+        self.0
+            .to_commitment(&**program_id, &**record_name, &**record_view_key)
+            .map(Into::into)
+    }
+
+    /// Computes the record view key as `(nonce * view_key_scalar).to_x_coordinate()`.
+    pub fn record_view_key(&self, view_key: &ViewKey) -> Field {
+        (*self.0.nonce() * ***view_key).to_x_coordinate().into()
+    }
+
+    /// Computes the record tag from a graph key and commitment.
+    pub fn tag(&self, graph_key: &GraphKey, commitment: &Field) -> anyhow::Result<Field> {
+        #[allow(clippy::useless_conversion)]
+        RecordPlaintextNative::tag(graph_key.sk_tag().into(), commitment.clone().into())
+            .map(Into::into)
+    }
+
+    /// Returns the record entry with the given name as a Plaintext.
+    pub fn get_member(&self, name: &str) -> anyhow::Result<Plaintext> {
+        let id = IdentifierNative::from_str(name)?;
+        let entry = self
+            .0
+            .data()
+            .get(&id)
+            .ok_or_else(|| anyhow::anyhow!("Record member '{}' not found", name))?;
+        let plaintext = match entry {
+            Entry::Constant(p) => p.clone(),
+            Entry::Public(p) => p.clone(),
+            Entry::Private(p) => p.clone(),
+        };
+        Ok(plaintext.into())
+    }
+
     /// Attempt to get the serial number of a record to determine whether or not is has been spent
     pub fn serial_number(
         &self,
@@ -105,7 +195,9 @@ impl RecordPlaintext {
         record_identifier: &Identifier,
         record_view_key: &Field,
     ) -> anyhow::Result<Field> {
-        let commitment = self.to_commitment(program_id, record_identifier, &**record_view_key)?;
+        let commitment =
+            self.0
+                .to_commitment(&**program_id, &**record_identifier, &**record_view_key)?;
         RecordPlaintextNative::serial_number(**private_key, commitment).map(Into::into)
     }
 
