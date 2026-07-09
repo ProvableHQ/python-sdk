@@ -508,13 +508,14 @@ class AleoNetworkClient:
         if resolved_jwt and resolved_jwt.get("jwt"):
             hdrs["Authorization"] = resolved_jwt["jwt"]
 
-        # Parse the proving request to determine routing
-        try:
-            from .mainnet import ProvingRequest  # type: ignore[attr-defined]
-        except ImportError:
-            raise ImportError("aleo mainnet module not available") from None
-
+        # Determine routing. A ProvingRequest object is used as-is (no import);
+        # only a serialized string needs parsing, via THIS client's network
+        # module (not hardcoded mainnet).
         if isinstance(proving_request, str):
+            if self._network == "testnet":
+                from .testnet import ProvingRequest  # type: ignore[attr-defined]
+            else:
+                from .mainnet import ProvingRequest  # type: ignore[attr-defined]
             pr_obj = ProvingRequest.from_string(proving_request)
         else:
             pr_obj = proving_request
