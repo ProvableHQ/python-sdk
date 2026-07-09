@@ -101,3 +101,12 @@ pub type InputNative = Input<CurrentNetwork>;
 pub type OutputNative = Output<CurrentNetwork>;
 pub type FutureNative = Future<CurrentNetwork>;
 pub type ArgumentNative = Argument<CurrentNetwork>;
+
+// Proof type
+pub type ProofNative = snarkvm::synthesizer::snark::Proof<CurrentNetwork>;
+
+// Dynamic record type
+pub type DynamicRecordNative = snarkvm::console::program::DynamicRecord<CurrentNetwork>;
+
+// State path type (for OfflineQuery)
+pub type StatePathNative = snarkvm::console::program::StatePath<CurrentNetwork>;
