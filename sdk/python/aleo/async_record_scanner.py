@@ -491,3 +491,61 @@ class AsyncRecordScanner:
         raise RecordNotFoundError(
             f"No credits record found with >= {microcredits} microcredits."
         )
+
+    async def find_credits_records(
+        self, microcredit_amounts: list[int], filter: OwnedFilter
+    ) -> list[OwnedRecord]:
+        """Find credits.aleo records whose microcredits are in microcredit_amounts.
+
+        Requires decrypt_enabled=True and a stored view key for the UUID.
+        """
+        # Resolve UUID
+        filter_uuid = filter.get("uuid", "")
+        if filter_uuid and uuid_is_valid(filter_uuid):
+            resolved_uuid = filter_uuid
+        elif self._uuid is not None:
+            resolved_uuid = str(self._uuid)
+        else:
+            raise UUIDError("No UUID configured.")
+
+        if not self.decrypt_enabled:
+            raise DecryptionNotEnabledError(
+                "decrypt_enabled must be True to use find_credits_records."
+            )
+
+        vk = self._view_keys.get(resolved_uuid)
+        if vk is None:
+            raise ViewKeyNotStoredError(
+                f"No view key stored for uuid '{resolved_uuid}'.",
+                uuid=resolved_uuid,
+            )
+
+        credits_filter: OwnedFilter = {
+            "unspent": filter.get("unspent", True),  # type: ignore[typeddict-item]
+            "filter": {  # type: ignore[typeddict-item]
+                "program": "credits.aleo",
+                "record": "credits",
+                **filter.get("filter", {}),  # type: ignore[arg-type]
+            },
+            "uuid": resolved_uuid,
+        }
+        if "responseFilter" in filter:
+            credits_filter["responseFilter"] = filter["responseFilter"]  # type: ignore[typeddict-item]
+
+        records = await self.find_records(credits_filter)
+
+        from .mainnet import RecordPlaintext  # type: ignore[attr-defined]
+        amounts_set = set(microcredit_amounts)
+        result: list[OwnedRecord] = []
+        for record in records:
+            pt_str = record.get("record_plaintext", "")
+            if not pt_str:
+                continue
+            try:
+                pt = RecordPlaintext.from_string(pt_str)
+                if pt.microcredits in amounts_set:
+                    result.append(record)
+            except Exception:
+                pass
+
+        return result

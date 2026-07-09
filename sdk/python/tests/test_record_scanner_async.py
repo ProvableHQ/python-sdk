@@ -62,6 +62,36 @@ OWNED_CREDITS_RECORDS = [
     },
 ]
 
+# Two credits records with plaintext bearing distinct microcredit amounts
+_RECORD_PLAINTEXT_1M = (
+    "{\n  owner: aleo1j7qxyunfldj2lp8hsvy7mw5k8zaqgjfyr72x2gh3x4ewgae8v5gscf5jh3.private,\n"
+    "  microcredits: 1000000u64.private,\n"
+    "  _nonce: 3077450429259593211617823051143573281856129402760267155982965992208217472983group.public,\n"
+    "  _version: 0u8.public\n}"
+)
+_RECORD_PLAINTEXT_2M = (
+    "{\n  owner: aleo1j7qxyunfldj2lp8hsvy7mw5k8zaqgjfyr72x2gh3x4ewgae8v5gscf5jh3.private,\n"
+    "  microcredits: 2000000u64.private,\n"
+    "  _nonce: 3077450429259593211617823051143573281856129402760267155982965992208217472983group.public,\n"
+    "  _version: 0u8.public\n}"
+)
+OWNED_CREDITS_RECORDS_MULTI = [
+    {
+        "record_ciphertext": RECORD_CIPHERTEXT_STRING,
+        "record_plaintext": _RECORD_PLAINTEXT_1M,
+        "program_name": "credits.aleo",
+        "record_name": "credits",
+        "spent": False,
+    },
+    {
+        "record_ciphertext": RECORD_CIPHERTEXT_STRING,
+        "record_plaintext": _RECORD_PLAINTEXT_2M,
+        "program_name": "credits.aleo",
+        "record_name": "credits",
+        "spent": False,
+    },
+]
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -336,3 +366,66 @@ async def test_async_find_record_returns_first() -> None:
 
     record = await scanner.find_record({"uuid": GOLDEN_UUID})  # type: ignore[arg-type]
     assert record == owned_records[0]
+
+
+# ---------------------------------------------------------------------------
+# Extra: find_credits_records — decrypt not enabled
+# ---------------------------------------------------------------------------
+
+async def test_async_find_credits_records_decrypt_not_enabled() -> None:
+    scanner = _make_scanner(decrypt_enabled=False)
+    from aleo.mainnet import Field
+    scanner._uuid = Field.from_string(GOLDEN_UUID)
+
+    with pytest.raises(DecryptionNotEnabledError):
+        await scanner.find_credits_records([1_000_000], {})  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# Extra: find_credits_records — view key not stored
+# ---------------------------------------------------------------------------
+
+async def test_async_find_credits_records_view_key_not_stored() -> None:
+    scanner = _make_scanner(decrypt_enabled=True)
+    from aleo.mainnet import Field
+    scanner._uuid = Field.from_string(GOLDEN_UUID)
+
+    with pytest.raises(ViewKeyNotStoredError):
+        await scanner.find_credits_records([1_000_000], {})  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# Extra: find_credits_records — success path exact-match filtering
+# ---------------------------------------------------------------------------
+
+async def test_async_find_credits_records_success() -> None:
+    """find_credits_records returns only records whose microcredits are in the amounts list."""
+    routes = {"/records/owned": jr(OWNED_CREDITS_RECORDS_MULTI)}
+    scanner = _make_scanner(routes, decrypt_enabled=True)
+    from aleo.mainnet import Field
+    scanner._uuid = Field.from_string(GOLDEN_UUID)
+    vk = _golden_view_key()
+    scanner._view_keys[GOLDEN_UUID] = vk
+
+    # Request only 1_000_000 — should return exactly the first record
+    result = await scanner.find_credits_records([1_000_000], {})  # type: ignore[arg-type]
+    assert len(result) == 1
+    assert result[0]["record_plaintext"] == _RECORD_PLAINTEXT_1M
+
+    # Request both amounts — both records returned
+    routes2 = {"/records/owned": jr(OWNED_CREDITS_RECORDS_MULTI)}
+    scanner2 = _make_scanner(routes2, decrypt_enabled=True)
+    scanner2._uuid = Field.from_string(GOLDEN_UUID)
+    scanner2._view_keys[GOLDEN_UUID] = vk
+
+    result2 = await scanner2.find_credits_records([1_000_000, 2_000_000], {})  # type: ignore[arg-type]
+    assert len(result2) == 2
+
+    # Request an amount not present — empty list returned
+    routes3 = {"/records/owned": jr(OWNED_CREDITS_RECORDS_MULTI)}
+    scanner3 = _make_scanner(routes3, decrypt_enabled=True)
+    scanner3._uuid = Field.from_string(GOLDEN_UUID)
+    scanner3._view_keys[GOLDEN_UUID] = vk
+
+    result3 = await scanner3.find_credits_records([999], {})  # type: ignore[arg-type]
+    assert result3 == []
