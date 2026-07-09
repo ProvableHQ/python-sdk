@@ -62,5 +62,8 @@ pub use transition::Transition;
 mod value;
 pub use value::Value;
 
+mod proof;
+pub use proof::Proof;
+
 mod verifying_key;
 pub use verifying_key::VerifyingKey;

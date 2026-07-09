@@ -74,6 +74,7 @@ fn register(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Poseidon8>()?;
     m.add_class::<PrivateKey>()?;
     m.add_class::<Process>()?;
+    m.add_class::<Proof>()?;
     m.add_class::<Program>()?;
     m.add_class::<ProgramID>()?;
     m.add_class::<ProvingKey>()?;
