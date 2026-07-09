@@ -123,3 +123,80 @@ def test_offline_query_add_block_height():
     oq = OfflineQuery.new(0, STATE_ROOT)
     oq.add_block_height(42)
     assert '"block_height":42' in str(oq)
+
+
+# ---------------------------------------------------------------------------
+# Task 6: Program introspection methods
+# ---------------------------------------------------------------------------
+from aleo.mainnet import Program, Address  # noqa: E402
+
+# The credits.aleo program address for this snarkvm version.
+CREDITS_ADDRESS = "aleo1lqmly7ez2k48ajf5hs92ulphaqr05qm4n8qwzj8v0yprmasgpqgsez59gg"
+
+
+def test_program_has_function():
+    p = Program.credits()
+    assert p.has_function("transfer_public") is True
+    assert p.has_function("nonexistent_fn") is False
+
+
+def test_program_get_function_inputs_transfer_public():
+    """KAT: exact dict shape for credits.aleo/transfer_public.
+    transfer_public takes public inputs (receiver address and amount).
+    """
+    p = Program.credits()
+    inputs = p.get_function_inputs("transfer_public")
+    assert len(inputs) == 2
+    assert inputs[0]["type"] == "address"
+    assert inputs[0]["visibility"] == "public"
+    assert inputs[0]["register"] == "r0"
+    assert inputs[1]["type"] == "u64"
+    assert inputs[1]["visibility"] == "public"
+    assert inputs[1]["register"] == "r1"
+
+
+def test_program_get_mappings():
+    p = Program.credits()
+    mappings = p.get_mappings()
+    names = [m["name"] for m in mappings]
+    for expected in ["account", "bonded", "committee"]:
+        assert expected in names
+    for m in mappings:
+        assert "name" in m
+        assert "key_type" in m
+        assert "value_type" in m
+
+
+def test_program_get_record_members():
+    p = Program.credits()
+    rec = p.get_record_members("credits")
+    assert rec["type"] == "record"
+    assert rec["record"] == "credits"
+    members = rec["members"]
+    names = [m["name"] for m in members]
+    assert "microcredits" in names
+    assert "_nonce" in names
+
+
+def test_program_get_struct_members():
+    # Use a program that has structs
+    src = """program test_struct.aleo;
+struct point:
+    x as u32;
+    y as u32;
+function noop:
+    input r0 as u32.public;
+    output r0 as u32.public;
+"""
+    p = Program.from_source(src)
+    members = p.get_struct_members("point")
+    assert isinstance(members, list)
+    names = [m["name"] for m in members]
+    assert "x" in names
+    assert "y" in names
+
+
+def test_program_address():
+    p = Program.credits()
+    addr = p.address()
+    assert str(addr) == CREDITS_ADDRESS
