@@ -515,3 +515,91 @@ def test_ciphertext_decrypt_with_transition_info_wrong_vk_fails():
         ct.decrypt_with_transition_info(
             other_vk, tpk, _TASK9_PROGRAM, _TASK9_FUNCTION, _TASK9_INDEX
         )
+
+
+# ---------------------------------------------------------------------------
+# Task 9 cross-validation: Ciphertext.decrypt_with_transition_view_key vs
+# Transition.decrypt_transition (independently tested in test_chain_data.py).
+#
+# The self-generated KAT tests above only prove "the code decrypts its own
+# output". A shared derivation bug (e.g. wrong field order in hash_psd4) would
+# not be caught because both paths would share the same defect.
+#
+# This test uses the vendored hello_hello.aleo/main fixture from
+# test_chain_data.py, which has a real private input at index 1 (value "2u32")
+# encrypted under the transition view key derived from DECRYPTION_PRIVATE_KEY.
+# Transition.decrypt_transition was independently tested in test_chain_data.py
+# (TestTransition.test_decrypt_transition), so agreeing with it here catches
+# any bug that affects only one of the two derivation paths.
+# ---------------------------------------------------------------------------
+
+# Vendored from test_chain_data.py (hello_hello.aleo/main, mainnet fixture):
+_XVAL_TRANSITION_JSON = (
+    '{"id":"au1mguuz0dh20f78802m4z0py7n08xhl0pz60llzck63mhl8pc8l5xqxpwgtn",'
+    '"program":"hello_hello.aleo","function":"main",'
+    '"inputs":['
+    '{"type":"public","id":"6393584049543470937057043098611271993206122889317039351966319038535020834557field","value":"1u32"},'
+    '{"type":"private","id":"8207446256045172951742235001162005156507562935942883128759030124682934277495field",'
+    '"value":"ciphertext1qyqqgz9qnupeld9vr4vuwp6yrpmhgtkvmgag5m7mmrruw0r6je666qgqdswk3"}'
+    '],'
+    '"outputs":[{"type":"private","id":"127469473292952941321346770257126666363371158501875622169294663492714835110field",'
+    '"value":"ciphertext1qyqyapkjuxm9dcslgyjf7hkr2k3dek500z40gjspnwvll0uawj23vzgggc405"}],'
+    '"tpk":"7647553513996966044119163122930125808381703910407273818947266861843062002251group",'
+    '"tcm":"4479413938380109857414238205380483440836495997450846894155088299187217672609field",'
+    '"scm":"6461007226176477784737642021400489186736987671609840640950580467598882134642field"}'
+)
+_XVAL_PRIVATE_KEY = "APrivateKey1zkp8CZNn3yeCseEtxuVPbDCwSyhGW6yZKUYKfgXmcpoGPWH"
+# Index 1 is the private input (r1 as u32.private); index 0 is public.
+_XVAL_PRIVATE_INPUT_INDEX = 1
+_XVAL_PRIVATE_INPUT_CT = "ciphertext1qyqqgz9qnupeld9vr4vuwp6yrpmhgtkvmgag5m7mmrruw0r6je666qgqdswk3"
+_XVAL_EXPECTED_PLAINTEXT = "2u32"
+
+
+def test_ciphertext_decrypt_cross_validates_with_transition_decrypt():
+    """Cross-validation: Ciphertext.decrypt_with_transition_view_key agrees with
+    Transition.decrypt_transition for the same private input.
+
+    Path A (reference, independently tested in test_chain_data.py):
+      transition.decrypt_transition(tvk) -> read decrypted input value.
+
+    Path B (method under review):
+      Ciphertext.from_string(ct_str).decrypt_with_transition_view_key(tvk, program, fn, index).
+
+    If hash_psd4 field ordering or any other step in the key derivation were
+    wrong in exactly one path, this test would fail even though the KAT tests
+    pass (since those exercise only Path B with a self-generated vector).
+    """
+    from aleo.mainnet import PrivateKey
+
+    pk = PrivateKey.from_string(_XVAL_PRIVATE_KEY)
+    transition = Transition.from_json(_XVAL_TRANSITION_JSON)
+    tvk = transition.tvk(pk.view_key)
+
+    # Path A: Transition.decrypt_transition — independent implementation.
+    decrypted = transition.decrypt_transition(tvk)
+    decrypted_inputs = decrypted.inputs()
+    # The private input at index 1 is now exposed as a public plaintext.
+    path_a_input = decrypted_inputs[_XVAL_PRIVATE_INPUT_INDEX]
+    assert path_a_input["type"] == "public", (
+        f"Expected decrypted input to have type 'public', got {path_a_input['type']!r}"
+    )
+    path_a_value = path_a_input["value"]
+
+    # Path B: Ciphertext.decrypt_with_transition_view_key — the method under review.
+    ct = Ciphertext.from_string(_XVAL_PRIVATE_INPUT_CT)
+    path_b_plaintext = ct.decrypt_with_transition_view_key(
+        tvk, "hello_hello.aleo", "main", _XVAL_PRIVATE_INPUT_INDEX
+    )
+    path_b_value = str(path_b_plaintext)
+
+    # Both paths must agree with each other and with the known plaintext.
+    assert path_a_value == _XVAL_EXPECTED_PLAINTEXT, (
+        f"Path A (decrypt_transition) returned {path_a_value!r}, expected {_XVAL_EXPECTED_PLAINTEXT!r}"
+    )
+    assert path_b_value == _XVAL_EXPECTED_PLAINTEXT, (
+        f"Path B (decrypt_with_transition_view_key) returned {path_b_value!r}, expected {_XVAL_EXPECTED_PLAINTEXT!r}"
+    )
+    assert path_a_value == path_b_value, (
+        f"Path A ({path_a_value!r}) and Path B ({path_b_value!r}) disagree — "
+        "derivation bug in one of the two implementations"
+    )
