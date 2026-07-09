@@ -18,7 +18,7 @@ use crate::types::FieldNative;
 
 use pyo3::{exceptions::PyZeroDivisionError, prelude::*};
 use rand::rngs::StdRng;
-use snarkvm::prelude::{Uniform, Zero};
+use snarkvm::prelude::{ToBits, Uniform, Zero};
 
 use std::{
     collections::hash_map::DefaultHasher,
@@ -89,6 +89,11 @@ impl Field {
         let mut hasher = DefaultHasher::new();
         self.0.hash(&mut hasher);
         hasher.finish()
+    }
+
+    /// Returns the little-endian bit representation of the field element.
+    pub fn to_bits_le(&self) -> Vec<bool> {
+        self.0.to_bits_le()
     }
 }
 

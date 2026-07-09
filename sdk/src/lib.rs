@@ -21,6 +21,7 @@ use pyo3::prelude::*;
 
 mod account;
 mod algebra;
+mod algorithms;
 mod credits;
 mod network;
 mod programs;
@@ -28,6 +29,7 @@ mod types;
 
 use account::*;
 use algebra::*;
+use algorithms::*;
 use credits::*;
 use network::*;
 use programs::*;
@@ -40,6 +42,10 @@ fn register(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Account>()?;
     m.add_class::<Address>()?;
     m.add_class::<Authorization>()?;
+    m.add_class::<BHP256>()?;
+    m.add_class::<BHP512>()?;
+    m.add_class::<BHP768>()?;
+    m.add_class::<BHP1024>()?;
     m.add_class::<Boolean>()?;
     m.add_class::<Ciphertext>()?;
     m.add_class::<ComputeKey>()?;
@@ -58,7 +64,12 @@ fn register(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Locator>()?;
     m.add_class::<MicroCredits>()?;
     m.add_class::<Network>()?;
+    m.add_class::<Pedersen64>()?;
+    m.add_class::<Pedersen128>()?;
     m.add_class::<Plaintext>()?;
+    m.add_class::<Poseidon2>()?;
+    m.add_class::<Poseidon4>()?;
+    m.add_class::<Poseidon8>()?;
     m.add_class::<PrivateKey>()?;
     m.add_class::<Process>()?;
     m.add_class::<Program>()?;
