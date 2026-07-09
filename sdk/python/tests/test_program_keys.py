@@ -263,3 +263,82 @@ def test_program_address():
     p = Program.credits()
     addr = p.address()
     assert str(addr) == CREDITS_ADDRESS
+
+
+# ---------------------------------------------------------------------------
+# Task 7: VerifyingKey additions (checksum, num_constraints, credits statics, is_*_verifier)
+# ---------------------------------------------------------------------------
+from aleo.mainnet import VerifyingKey  # noqa: E402
+
+# KAT from wasm tests (mainnet) — sha256 of the raw verifier bytes / to_bytes_le() round-trip
+TRANSFER_PUBLIC_VK_CHECKSUM = "ea77f42a35b3f891e7753c7333df365f356883550c4602df11f270237bef340d"
+TRANSFER_PUBLIC_NUM_CONSTRAINTS = 12326
+
+# All 16 (function_name, getter_name) pairs for credits + inclusion
+CREDITS_VERIFIER_GETTERS = [
+    ("bond_public", "bond_public_verifier"),
+    ("bond_validator", "bond_validator_verifier"),
+    ("claim_unbond_public", "claim_unbond_public_verifier"),
+    ("fee_private", "fee_private_verifier"),
+    ("fee_public", "fee_public_verifier"),
+    ("join", "join_verifier"),
+    ("set_validator_state", "set_validator_state_verifier"),
+    ("split", "split_verifier"),
+    ("transfer_private", "transfer_private_verifier"),
+    ("transfer_private_to_public", "transfer_private_to_public_verifier"),
+    ("transfer_public", "transfer_public_verifier"),
+    ("transfer_public_as_signer", "transfer_public_as_signer_verifier"),
+    ("transfer_public_to_private", "transfer_public_to_private_verifier"),
+    ("unbond_public", "unbond_public_verifier"),
+    # inclusion
+    (None, "inclusion_verifier"),
+]
+
+
+def test_verifying_key_checksum():
+    vk = VerifyingKey.transfer_public_verifier()
+    assert vk.checksum() == TRANSFER_PUBLIC_VK_CHECKSUM
+
+
+def test_verifying_key_num_constraints():
+    vk = VerifyingKey.transfer_public_verifier()
+    assert vk.num_constraints() == TRANSFER_PUBLIC_NUM_CONSTRAINTS
+
+
+def test_verifying_key_bond_public_verifier_is_checker():
+    bond = VerifyingKey.bond_public_verifier()
+    transfer = VerifyingKey.transfer_public_verifier()
+    assert bond.is_bond_public_verifier() is True
+    assert transfer.is_bond_public_verifier() is False
+
+
+def test_verifying_key_inclusion_verifier():
+    vk = VerifyingKey.inclusion_verifier()
+    assert vk.is_inclusion_verifier() is True
+    assert vk.is_bond_public_verifier() is False
+
+
+def test_all_16_verifier_getters_and_is_checkers():
+    """Iterate all 16 getters and verify each is_* self-check returns True."""
+    IS_CHECKER_MAP = {
+        "bond_public_verifier": "is_bond_public_verifier",
+        "bond_validator_verifier": "is_bond_validator_verifier",
+        "claim_unbond_public_verifier": "is_claim_unbond_public_verifier",
+        "fee_private_verifier": "is_fee_private_verifier",
+        "fee_public_verifier": "is_fee_public_verifier",
+        "join_verifier": "is_join_verifier",
+        "set_validator_state_verifier": "is_set_validator_state_verifier",
+        "split_verifier": "is_split_verifier",
+        "transfer_private_verifier": "is_transfer_private_verifier",
+        "transfer_private_to_public_verifier": "is_transfer_private_to_public_verifier",
+        "transfer_public_verifier": "is_transfer_public_verifier",
+        "transfer_public_as_signer_verifier": "is_transfer_public_as_signer_verifier",
+        "transfer_public_to_private_verifier": "is_transfer_public_to_private_verifier",
+        "unbond_public_verifier": "is_unbond_public_verifier",
+        "inclusion_verifier": "is_inclusion_verifier",
+    }
+    for _fn_name, getter in CREDITS_VERIFIER_GETTERS:
+        vk = getattr(VerifyingKey, getter)()
+        is_checker = IS_CHECKER_MAP[getter]
+        result = getattr(vk, is_checker)()
+        assert result is True, f"{getter}: {is_checker}() returned {result}, expected True"
