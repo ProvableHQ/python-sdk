@@ -166,6 +166,12 @@ def test_program_get_mappings():
         assert "key_type" in m
         assert "value_type" in m
 
+    # Additional assertions for account mapping values
+    account_mapping = next((m for m in mappings if m["name"] == "account"), None)
+    assert account_mapping is not None
+    assert account_mapping["key_type"] == "address"
+    assert account_mapping["value_type"] == "u64"
+
 
 def test_program_get_record_members():
     p = Program.credits()
@@ -176,6 +182,17 @@ def test_program_get_record_members():
     names = [m["name"] for m in members]
     assert "microcredits" in names
     assert "_nonce" in names
+
+    # Additional assertions for member shape
+    microcredits_member = next((m for m in members if m["name"] == "microcredits"), None)
+    assert microcredits_member is not None
+    assert microcredits_member["type"] == "u64"
+    assert microcredits_member["visibility"] == "private"
+
+    nonce_member = next((m for m in members if m["name"] == "_nonce"), None)
+    assert nonce_member is not None
+    assert nonce_member["type"] == "group"
+    assert nonce_member["visibility"] == "public"
 
 
 def test_program_get_struct_members():
@@ -194,6 +211,52 @@ function noop:
     names = [m["name"] for m in members]
     assert "x" in names
     assert "y" in names
+
+    # Additional assertions for full dict shape
+    for member in members:
+        assert set(member.keys()) == {"name", "type"}
+        if member["name"] == "x":
+            assert member["type"] == "u32"
+        elif member["name"] == "y":
+            assert member["type"] == "u32"
+
+
+def test_program_get_function_inputs_record():
+    """KAT: exact dict shape for credits.aleo/transfer_private.
+    transfer_private takes a record input (credits) and public/private field inputs.
+    This mirrors the wasm test_get_inputs KAT for transfer_private.
+    """
+    p = Program.credits()
+    inputs = p.get_function_inputs("transfer_private")
+    assert len(inputs) == 3
+
+    # Input 0: record type
+    assert inputs[0]["type"] == "record"
+    assert inputs[0]["record"] == "credits"
+    assert inputs[0]["register"] == "r0"
+    assert "members" in inputs[0]
+
+    # Check record members
+    members = inputs[0]["members"]
+    microcredits = next((m for m in members if m["name"] == "microcredits"), None)
+    assert microcredits is not None
+    assert microcredits["type"] == "u64"
+    assert microcredits["visibility"] == "private"
+
+    nonce = next((m for m in members if m["name"] == "_nonce"), None)
+    assert nonce is not None
+    assert nonce["type"] == "group"
+    assert nonce["visibility"] == "public"
+
+    # Input 1: address (private)
+    assert inputs[1]["type"] == "address"
+    assert inputs[1]["visibility"] == "private"
+    assert inputs[1]["register"] == "r1"
+
+    # Input 2: u64 (private)
+    assert inputs[2]["type"] == "u64"
+    assert inputs[2]["visibility"] == "private"
+    assert inputs[2]["register"] == "r2"
 
 
 def test_program_address():
