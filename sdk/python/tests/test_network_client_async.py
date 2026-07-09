@@ -390,8 +390,11 @@ async def test_async_get_transaction_object() -> None:
     """Async get_transaction_object calls the right URL."""
     tx_json = '{"type": "execute", "id": "at1fake"}'
 
+    hits: list[str] = []
+
     def handler(req: httpx.Request) -> httpx.Response:
         url = str(req.url)
+        hits.append(url)
         if "/transaction/at1fake" in url:
             return httpx.Response(200, text=tx_json)
         return httpx.Response(404)
@@ -400,18 +403,17 @@ async def test_async_get_transaction_object() -> None:
     try:
         obj = await c.get_transaction_object("at1fake")
         assert obj is not None
-    except ImportError:
-        pytest.skip("aleo mainnet module not available")
-    except Exception as exc:
-        # Transaction.from_json may reject a trivial fixture; just check the URL was hit
-        assert "at1fake" in str(exc) or True  # acceptable: we proved the method exists and calls through
+    except Exception:
+        # Transaction.from_json rejects the trivial fixture — fine; the
+        # load-bearing assertion is that the endpoint was actually called.
+        pass
+    assert any("/transaction/at1fake" in u for u in hits)
 
 
 # ---------------------------------------------------------------------------
 # DPS (async) — representative subset
 # ---------------------------------------------------------------------------
 
-@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_async_dps_authorization_routes_correctly() -> None:
     """Async DPS: authorization-variant PR hits /prove/authorization; ciphertext decrypts correctly."""
@@ -457,7 +459,6 @@ async def test_async_dps_authorization_routes_correctly() -> None:
     assert decrypted == bytes(pr.bytes())
 
 
-@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_async_dps_request_variant_routes_to_prove_request() -> None:
     """Async DPS: Request-variant ProvingRequest hits /prove/request."""
@@ -518,7 +519,6 @@ async def test_async_dps_request_variant_routes_to_prove_request() -> None:
     assert decrypted == bytes(pr.bytes())
 
 
-@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_async_dps_400_not_retried() -> None:
     """Async DPS: 400 returned verbatim, not retried."""
