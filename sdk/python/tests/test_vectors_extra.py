@@ -62,13 +62,12 @@ def test_fourth_derivation_pair():
 
 
 # ---------------------------------------------------------------------------
-# Foreign record decrypt KAT
+# Foreign record non-ownership KAT
 # source: sdk/tests/data/account-data.ts foreignCiphertextString / foreignViewKeyString
-# The beacon key must NOT own this ciphertext.  Actual ownership/decrypt is
-# verified: foreignViewKey.is_owner → True; beaconViewKey.is_owner → False.
-# Note: RecordCiphertext.decrypt() on this vector returns 'Insufficient bits'
-# at the snarkvm level (short record format); ownership/non-ownership check is
-# the meaningful assertion here, matching the TS SDK test (account.test.ts:163).
+# The TS SDK only ever asserts NON-ownership for this ciphertext
+# (account.test.ts:163); it never successfully decrypts it with any key.
+# Verified against our binding: neither the beacon view key nor the "foreign"
+# view key owns it, and decrypt raises (snarkvm 'Insufficient bits').
 # ---------------------------------------------------------------------------
 
 _FOREIGN_CT = (
@@ -82,15 +81,16 @@ _BEACON_VK = "AViewKey1mSnpFFC8Mj4fXbK5YiWgZ3mjiV8CxA79bYNa8ymUpTrw"
 
 
 def test_foreign_record_ownership_kat():
-    """Foreign ciphertext: beaconViewKey must not be its owner."""
-    ct = RecordCiphertext.from_string(
-        "record1qyqsq553yxz8ylwqyqfmcfmwz03x6xsxf2h2kypcwhykzgm50ut4sus"
-        "yqyxx66trwfhkxun9v35hguerqqpqzqyjt8kxnp28v83t460knvp0dq86a3r3dy"
-        "ve945u0xqeksq323paqtegslprdc5zypksrja7rmctx90jnpeq5sqkwlfct7ygy9"
-        "90a5pqs7y5pt0"
-    )
+    """Foreign ciphertext: neither key owns it; decrypt must raise."""
+    ct = RecordCiphertext.from_string(_FOREIGN_CT)
     beacon_vk = ViewKey.from_string(_BEACON_VK)
+    foreign_vk = ViewKey.from_string(_FOREIGN_VK)
     assert ct.is_owner(beacon_vk) is False
+    assert ct.is_owner(foreign_vk) is False
+    with pytest.raises(RuntimeError):
+        ct.decrypt(foreign_vk)
+    with pytest.raises(RuntimeError):
+        ct.decrypt(beacon_vk)
 
 
 # ---------------------------------------------------------------------------

@@ -18,10 +18,6 @@ _KNOWN_ADDRESS = "aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9p
 
 
 class TestAccountRandom:
-    def test_random_returns_account(self):
-        acc = Account.random()
-        assert acc is not None
-
     def test_random_properties_accessible(self):
         acc = Account.random()
         pk_str = str(acc.private_key)
