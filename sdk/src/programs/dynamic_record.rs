@@ -88,8 +88,7 @@ impl DynamicRecord {
     }
 
     fn __eq__(&self, other: &Self) -> bool {
-        // Compare via string representation
-        self.0.to_string() == other.0.to_string()
+        self.0 == other.0
     }
 
     #[classattr]

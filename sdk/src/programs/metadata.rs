@@ -10,21 +10,12 @@ const BASE_URL: &str = "https://parameters.provable.com/mainnet/";
 #[cfg(feature = "testnet")]
 const BASE_URL: &str = "https://parameters.provable.com/testnet/";
 
-fn prover_checksum(metadata_json: &'static str) -> String {
+fn read_prover_checksum(metadata_json: &'static str) -> String {
     let meta: serde_json::Value =
         serde_json::from_str(metadata_json).expect("Metadata was not well-formatted");
     meta["prover_checksum"]
         .as_str()
-        .expect("Failed to parse prover checksum")
-        .to_string()
-}
-
-fn verifier_checksum(metadata_json: &'static str) -> String {
-    let meta: serde_json::Value =
-        serde_json::from_str(metadata_json).expect("Metadata was not well-formatted");
-    meta["verifier_checksum"]
-        .as_str()
-        .expect("Failed to parse verifier checksum")
+        .expect("Failed to parse prover_checksum")
         .to_string()
 }
 
@@ -32,10 +23,11 @@ fn make_metadata(
     name: &str,
     verifying_key_js_name: &str,
     locator: &str,
-    metadata_json: &'static str,
+    prover_meta: &'static str,
+    verifier_meta: &'static str,
 ) -> Metadata {
-    let pc = prover_checksum(metadata_json);
-    let vc = verifier_checksum(metadata_json);
+    let pc = read_prover_checksum(prover_meta);
+    let vc = read_prover_checksum(verifier_meta);
     Metadata {
         name: name.to_string(),
         locator: locator.to_string(),
@@ -73,22 +65,24 @@ impl Metadata {
     fn bond_public() -> Metadata {
         #[cfg(not(feature = "testnet"))]
         {
-            use snarkvm::parameters::mainnet::BondPublicProver;
+            use snarkvm::parameters::mainnet::{BondPublicProver, BondPublicVerifier};
             make_metadata(
                 "bond_public",
                 "bondPublicVerifier",
                 "credits.aleo/bond_public",
                 BondPublicProver::METADATA,
+                BondPublicVerifier::METADATA,
             )
         }
         #[cfg(feature = "testnet")]
         {
-            use snarkvm::parameters::testnet::BondPublicProver;
+            use snarkvm::parameters::testnet::{BondPublicProver, BondPublicVerifier};
             make_metadata(
                 "bond_public",
                 "bondPublicVerifier",
                 "credits.aleo/bond_public",
                 BondPublicProver::METADATA,
+                BondPublicVerifier::METADATA,
             )
         }
     }
@@ -97,22 +91,24 @@ impl Metadata {
     fn bond_validator() -> Metadata {
         #[cfg(not(feature = "testnet"))]
         {
-            use snarkvm::parameters::mainnet::BondValidatorProver;
+            use snarkvm::parameters::mainnet::{BondValidatorProver, BondValidatorVerifier};
             make_metadata(
                 "bond_validator",
                 "bondValidatorVerifier",
                 "credits.aleo/bond_validator",
                 BondValidatorProver::METADATA,
+                BondValidatorVerifier::METADATA,
             )
         }
         #[cfg(feature = "testnet")]
         {
-            use snarkvm::parameters::testnet::BondValidatorProver;
+            use snarkvm::parameters::testnet::{BondValidatorProver, BondValidatorVerifier};
             make_metadata(
                 "bond_validator",
                 "bondValidatorVerifier",
                 "credits.aleo/bond_validator",
                 BondValidatorProver::METADATA,
+                BondValidatorVerifier::METADATA,
             )
         }
     }
@@ -121,22 +117,28 @@ impl Metadata {
     fn claim_unbond_public() -> Metadata {
         #[cfg(not(feature = "testnet"))]
         {
-            use snarkvm::parameters::mainnet::ClaimUnbondPublicProver;
+            use snarkvm::parameters::mainnet::{
+                ClaimUnbondPublicProver, ClaimUnbondPublicVerifier,
+            };
             make_metadata(
                 "claim_unbond_public",
                 "claimUnbondPublicVerifier",
                 "credits.aleo/claim_unbond_public",
                 ClaimUnbondPublicProver::METADATA,
+                ClaimUnbondPublicVerifier::METADATA,
             )
         }
         #[cfg(feature = "testnet")]
         {
-            use snarkvm::parameters::testnet::ClaimUnbondPublicProver;
+            use snarkvm::parameters::testnet::{
+                ClaimUnbondPublicProver, ClaimUnbondPublicVerifier,
+            };
             make_metadata(
                 "claim_unbond_public",
                 "claimUnbondPublicVerifier",
                 "credits.aleo/claim_unbond_public",
                 ClaimUnbondPublicProver::METADATA,
+                ClaimUnbondPublicVerifier::METADATA,
             )
         }
     }
@@ -145,22 +147,24 @@ impl Metadata {
     fn fee_private() -> Metadata {
         #[cfg(not(feature = "testnet"))]
         {
-            use snarkvm::parameters::mainnet::FeePrivateProver;
+            use snarkvm::parameters::mainnet::{FeePrivateProver, FeePrivateVerifier};
             make_metadata(
                 "fee_private",
                 "feePrivateVerifier",
                 "credits.aleo/fee_private",
                 FeePrivateProver::METADATA,
+                FeePrivateVerifier::METADATA,
             )
         }
         #[cfg(feature = "testnet")]
         {
-            use snarkvm::parameters::testnet::FeePrivateProver;
+            use snarkvm::parameters::testnet::{FeePrivateProver, FeePrivateVerifier};
             make_metadata(
                 "fee_private",
                 "feePrivateVerifier",
                 "credits.aleo/fee_private",
                 FeePrivateProver::METADATA,
+                FeePrivateVerifier::METADATA,
             )
         }
     }
@@ -169,22 +173,24 @@ impl Metadata {
     fn fee_public() -> Metadata {
         #[cfg(not(feature = "testnet"))]
         {
-            use snarkvm::parameters::mainnet::FeePublicProver;
+            use snarkvm::parameters::mainnet::{FeePublicProver, FeePublicVerifier};
             make_metadata(
                 "fee_public",
                 "feePublicVerifier",
                 "credits.aleo/fee_public",
                 FeePublicProver::METADATA,
+                FeePublicVerifier::METADATA,
             )
         }
         #[cfg(feature = "testnet")]
         {
-            use snarkvm::parameters::testnet::FeePublicProver;
+            use snarkvm::parameters::testnet::{FeePublicProver, FeePublicVerifier};
             make_metadata(
                 "fee_public",
                 "feePublicVerifier",
                 "credits.aleo/fee_public",
                 FeePublicProver::METADATA,
+                FeePublicVerifier::METADATA,
             )
         }
     }
@@ -193,22 +199,24 @@ impl Metadata {
     fn inclusion() -> Metadata {
         #[cfg(not(feature = "testnet"))]
         {
-            use snarkvm::parameters::mainnet::InclusionProver;
+            use snarkvm::parameters::mainnet::{InclusionProver, InclusionVerifier};
             make_metadata(
                 "inclusion",
                 "inclusionVerifier",
                 "inclusion",
                 InclusionProver::METADATA,
+                InclusionVerifier::METADATA,
             )
         }
         #[cfg(feature = "testnet")]
         {
-            use snarkvm::parameters::testnet::InclusionProver;
+            use snarkvm::parameters::testnet::{InclusionProver, InclusionVerifier};
             make_metadata(
                 "inclusion",
                 "inclusionVerifier",
                 "inclusion",
                 InclusionProver::METADATA,
+                InclusionVerifier::METADATA,
             )
         }
     }
@@ -217,22 +225,24 @@ impl Metadata {
     fn join() -> Metadata {
         #[cfg(not(feature = "testnet"))]
         {
-            use snarkvm::parameters::mainnet::JoinProver;
+            use snarkvm::parameters::mainnet::{JoinProver, JoinVerifier};
             make_metadata(
                 "join",
                 "joinVerifier",
                 "credits.aleo/join",
                 JoinProver::METADATA,
+                JoinVerifier::METADATA,
             )
         }
         #[cfg(feature = "testnet")]
         {
-            use snarkvm::parameters::testnet::JoinProver;
+            use snarkvm::parameters::testnet::{JoinProver, JoinVerifier};
             make_metadata(
                 "join",
                 "joinVerifier",
                 "credits.aleo/join",
                 JoinProver::METADATA,
+                JoinVerifier::METADATA,
             )
         }
     }
@@ -241,22 +251,28 @@ impl Metadata {
     fn set_validator_state() -> Metadata {
         #[cfg(not(feature = "testnet"))]
         {
-            use snarkvm::parameters::mainnet::SetValidatorStateProver;
+            use snarkvm::parameters::mainnet::{
+                SetValidatorStateProver, SetValidatorStateVerifier,
+            };
             make_metadata(
                 "set_validator_state",
                 "setValidatorStateVerifier",
                 "credits.aleo/set_validator_state",
                 SetValidatorStateProver::METADATA,
+                SetValidatorStateVerifier::METADATA,
             )
         }
         #[cfg(feature = "testnet")]
         {
-            use snarkvm::parameters::testnet::SetValidatorStateProver;
+            use snarkvm::parameters::testnet::{
+                SetValidatorStateProver, SetValidatorStateVerifier,
+            };
             make_metadata(
                 "set_validator_state",
                 "setValidatorStateVerifier",
                 "credits.aleo/set_validator_state",
                 SetValidatorStateProver::METADATA,
+                SetValidatorStateVerifier::METADATA,
             )
         }
     }
@@ -265,22 +281,24 @@ impl Metadata {
     fn split() -> Metadata {
         #[cfg(not(feature = "testnet"))]
         {
-            use snarkvm::parameters::mainnet::SplitProver;
+            use snarkvm::parameters::mainnet::{SplitProver, SplitVerifier};
             make_metadata(
                 "split",
                 "splitVerifier",
                 "credits.aleo/split",
                 SplitProver::METADATA,
+                SplitVerifier::METADATA,
             )
         }
         #[cfg(feature = "testnet")]
         {
-            use snarkvm::parameters::testnet::SplitProver;
+            use snarkvm::parameters::testnet::{SplitProver, SplitVerifier};
             make_metadata(
                 "split",
                 "splitVerifier",
                 "credits.aleo/split",
                 SplitProver::METADATA,
+                SplitVerifier::METADATA,
             )
         }
     }
@@ -289,22 +307,24 @@ impl Metadata {
     fn transfer_private() -> Metadata {
         #[cfg(not(feature = "testnet"))]
         {
-            use snarkvm::parameters::mainnet::TransferPrivateProver;
+            use snarkvm::parameters::mainnet::{TransferPrivateProver, TransferPrivateVerifier};
             make_metadata(
                 "transfer_private",
                 "transferPrivateVerifier",
                 "credits.aleo/transfer_private",
                 TransferPrivateProver::METADATA,
+                TransferPrivateVerifier::METADATA,
             )
         }
         #[cfg(feature = "testnet")]
         {
-            use snarkvm::parameters::testnet::TransferPrivateProver;
+            use snarkvm::parameters::testnet::{TransferPrivateProver, TransferPrivateVerifier};
             make_metadata(
                 "transfer_private",
                 "transferPrivateVerifier",
                 "credits.aleo/transfer_private",
                 TransferPrivateProver::METADATA,
+                TransferPrivateVerifier::METADATA,
             )
         }
     }
@@ -313,22 +333,28 @@ impl Metadata {
     fn transfer_private_to_public() -> Metadata {
         #[cfg(not(feature = "testnet"))]
         {
-            use snarkvm::parameters::mainnet::TransferPrivateToPublicProver;
+            use snarkvm::parameters::mainnet::{
+                TransferPrivateToPublicProver, TransferPrivateToPublicVerifier,
+            };
             make_metadata(
                 "transfer_private_to_public",
                 "transferPrivateToPublicVerifier",
                 "credits.aleo/transfer_private_to_public",
                 TransferPrivateToPublicProver::METADATA,
+                TransferPrivateToPublicVerifier::METADATA,
             )
         }
         #[cfg(feature = "testnet")]
         {
-            use snarkvm::parameters::testnet::TransferPrivateToPublicProver;
+            use snarkvm::parameters::testnet::{
+                TransferPrivateToPublicProver, TransferPrivateToPublicVerifier,
+            };
             make_metadata(
                 "transfer_private_to_public",
                 "transferPrivateToPublicVerifier",
                 "credits.aleo/transfer_private_to_public",
                 TransferPrivateToPublicProver::METADATA,
+                TransferPrivateToPublicVerifier::METADATA,
             )
         }
     }
@@ -337,22 +363,24 @@ impl Metadata {
     fn transfer_public() -> Metadata {
         #[cfg(not(feature = "testnet"))]
         {
-            use snarkvm::parameters::mainnet::TransferPublicProver;
+            use snarkvm::parameters::mainnet::{TransferPublicProver, TransferPublicVerifier};
             make_metadata(
                 "transfer_public",
                 "transferPublicVerifier",
                 "credits.aleo/transfer_public",
                 TransferPublicProver::METADATA,
+                TransferPublicVerifier::METADATA,
             )
         }
         #[cfg(feature = "testnet")]
         {
-            use snarkvm::parameters::testnet::TransferPublicProver;
+            use snarkvm::parameters::testnet::{TransferPublicProver, TransferPublicVerifier};
             make_metadata(
                 "transfer_public",
                 "transferPublicVerifier",
                 "credits.aleo/transfer_public",
                 TransferPublicProver::METADATA,
+                TransferPublicVerifier::METADATA,
             )
         }
     }
@@ -361,22 +389,28 @@ impl Metadata {
     fn transfer_public_as_signer() -> Metadata {
         #[cfg(not(feature = "testnet"))]
         {
-            use snarkvm::parameters::mainnet::TransferPublicAsSignerProver;
+            use snarkvm::parameters::mainnet::{
+                TransferPublicAsSignerProver, TransferPublicAsSignerVerifier,
+            };
             make_metadata(
                 "transfer_public_as_signer",
                 "transferPublicAsSignerVerifier",
                 "credits.aleo/transfer_public_as_signer",
                 TransferPublicAsSignerProver::METADATA,
+                TransferPublicAsSignerVerifier::METADATA,
             )
         }
         #[cfg(feature = "testnet")]
         {
-            use snarkvm::parameters::testnet::TransferPublicAsSignerProver;
+            use snarkvm::parameters::testnet::{
+                TransferPublicAsSignerProver, TransferPublicAsSignerVerifier,
+            };
             make_metadata(
                 "transfer_public_as_signer",
                 "transferPublicAsSignerVerifier",
                 "credits.aleo/transfer_public_as_signer",
                 TransferPublicAsSignerProver::METADATA,
+                TransferPublicAsSignerVerifier::METADATA,
             )
         }
     }
@@ -385,22 +419,28 @@ impl Metadata {
     fn transfer_public_to_private() -> Metadata {
         #[cfg(not(feature = "testnet"))]
         {
-            use snarkvm::parameters::mainnet::TransferPublicToPrivateProver;
+            use snarkvm::parameters::mainnet::{
+                TransferPublicToPrivateProver, TransferPublicToPrivateVerifier,
+            };
             make_metadata(
                 "transfer_public_to_private",
                 "transferPublicToPrivateVerifier",
                 "credits.aleo/transfer_public_to_private",
                 TransferPublicToPrivateProver::METADATA,
+                TransferPublicToPrivateVerifier::METADATA,
             )
         }
         #[cfg(feature = "testnet")]
         {
-            use snarkvm::parameters::testnet::TransferPublicToPrivateProver;
+            use snarkvm::parameters::testnet::{
+                TransferPublicToPrivateProver, TransferPublicToPrivateVerifier,
+            };
             make_metadata(
                 "transfer_public_to_private",
                 "transferPublicToPrivateVerifier",
                 "credits.aleo/transfer_public_to_private",
                 TransferPublicToPrivateProver::METADATA,
+                TransferPublicToPrivateVerifier::METADATA,
             )
         }
     }
@@ -409,22 +449,24 @@ impl Metadata {
     fn unbond_public() -> Metadata {
         #[cfg(not(feature = "testnet"))]
         {
-            use snarkvm::parameters::mainnet::UnbondPublicProver;
+            use snarkvm::parameters::mainnet::{UnbondPublicProver, UnbondPublicVerifier};
             make_metadata(
                 "unbond_public",
                 "unbondPublicVerifier",
                 "credits.aleo/unbond_public",
                 UnbondPublicProver::METADATA,
+                UnbondPublicVerifier::METADATA,
             )
         }
         #[cfg(feature = "testnet")]
         {
-            use snarkvm::parameters::testnet::UnbondPublicProver;
+            use snarkvm::parameters::testnet::{UnbondPublicProver, UnbondPublicVerifier};
             make_metadata(
                 "unbond_public",
                 "unbondPublicVerifier",
                 "credits.aleo/unbond_public",
                 UnbondPublicProver::METADATA,
+                UnbondPublicVerifier::METADATA,
             )
         }
     }

@@ -58,6 +58,6 @@ impl OfflineQuery {
 
     /// Serializes the offline query as a JSON string.
     fn __str__(&self) -> String {
-        serde_json::to_string(self).unwrap()
+        serde_json::to_string(self).expect("OfflineQuery serialization failed")
     }
 }

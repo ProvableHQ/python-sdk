@@ -1,4 +1,5 @@
 """Tests for W4d2 wasm-parity additions."""
+import re
 import pytest
 from aleo.mainnet import Proof, DynamicRecord, RecordPlaintext, Metadata, OfflineQuery
 
@@ -84,6 +85,7 @@ def test_metadata_bond_public():
     assert "bond_public.prover." in m.prover
     assert "bond_public.verifier." in m.verifier
     assert "parameters.provable.com/mainnet" in m.prover
+    assert re.match(r"^bond_public\.verifier\.[0-9a-f]{7}$", m.verifier)
 
 
 def test_metadata_transfer_public():
