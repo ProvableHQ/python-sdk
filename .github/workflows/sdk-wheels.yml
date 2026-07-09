@@ -60,8 +60,12 @@ jobs:
       - name: Build wheel
         uses: PyO3/maturin-action@v1
         with:
+          # Run from sdk/ so cargo picks up sdk/.cargo/config.toml (macOS
+          # needs its dynamic_lookup link flags; cargo resolves config from
+          # the working directory, not the manifest path).
+          working-directory: ./sdk
           target: ${{ matrix.platform.target }}
-          args: --release --out dist --features mainnet --manifest-path ./sdk/Cargo.toml
+          args: --release --out dist --features mainnet
           sccache: 'true'
           manylinux: ${{ startsWith(matrix.platform.name, 'linux') && '2_28' || 'auto' }}
           # The manylinux container needs git (snarkvm is a git dependency)
@@ -77,7 +81,7 @@ jobs:
       - name: Smoke test wheel
         shell: bash
         run: |
-          pip install --no-index --find-links dist aleo
+          pip install --no-index --find-links sdk/dist aleo
           python -c "
           from aleo.mainnet import PrivateKey
           pk = PrivateKey.random()
@@ -89,7 +93,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: wheels-${{ matrix.platform.name }}
-          path: dist
+          path: sdk/dist
 
   sdist:
     needs: [tests]
@@ -99,13 +103,14 @@ jobs:
       - name: Build sdist
         uses: PyO3/maturin-action@v1
         with:
+          working-directory: ./sdk
           command: sdist
-          args: --out dist --manifest-path ./sdk/Cargo.toml
+          args: --out dist
       - name: Upload sdist
         uses: actions/upload-artifact@v4
         with:
           name: wheels-sdist
-          path: dist
+          path: sdk/dist
 
   release:
     name: Release
