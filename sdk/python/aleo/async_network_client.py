@@ -1,8 +1,21 @@
-"""Asynchronous Aleo network client (httpx-based)."""
+"""Asynchronous Aleo network client (httpx-based).
+
+Transport contract (async)
+--------------------------
+When ``transport`` is supplied it must be an instance of
+:class:`httpx.AsyncBaseTransport`.  It is passed directly to
+``httpx.AsyncClient(transport=...)``, giving the caller full control over the
+underlying connection (useful for mocking and custom proxies).
+
+When transport is provided, SDK-internal headers (``X-Aleo-SDK-Version``,
+``X-Aleo-environment``, ``X-ALEO-METHOD``) are suppressed so the caller has
+full control over the wire format.
+"""
 from __future__ import annotations
 
 import json
 from typing import Any
+from urllib.parse import quote
 
 from ._client_common import (
     DEFAULT_HOST,
@@ -21,7 +34,32 @@ from .security import encrypt_proving_request
 
 
 class AsyncAleoNetworkClient:
-    """Asynchronous client for the Aleo REST API (httpx-based)."""
+    """Asynchronous client for the Aleo REST API (httpx-based).
+
+    Parameters
+    ----------
+    host:
+        Versioned API root, e.g. ``"https://api.provable.com/v2"``.
+    network:
+        Network name appended to ``host`` for all node endpoints (default
+        ``"mainnet"``).
+    headers:
+        Additional request headers merged on top of the SDK defaults.
+    prover_uri:
+        Base URI for the DPS prover (without network suffix).
+    record_scanner_uri:
+        Base URI for the record scanner service.
+    transport:
+        Optional :class:`httpx.AsyncBaseTransport` instance passed directly
+        to ``httpx.AsyncClient``.  SDK-internal telemetry headers are
+        suppressed in this mode.
+    api_key:
+        Provable API key used to refresh JWTs.
+    consumer_id:
+        Consumer ID paired with *api_key* for JWT refresh.
+    jwt_data:
+        Pre-populated JWT dict ``{"jwt": str, "expiration": int}``.
+    """
 
     def __init__(
         self,
@@ -48,7 +86,7 @@ class AsyncAleoNetworkClient:
         self._network: str = network
         self._host: str = f"{host}/{network}"
         self._has_custom_transport: bool = transport is not None
-        self._transport = transport
+        self._transport: Any = transport
         self._account: Any = None
         self._verbose_errors: bool = True
         self.api_key: str | None = api_key
@@ -66,7 +104,12 @@ class AsyncAleoNetworkClient:
         else:
             self.headers = make_default_headers()
 
-        self._client: Any = httpx.AsyncClient()
+        # Pass the transport to httpx when provided (e.g. httpx.MockTransport
+        # for tests, or a custom httpx.AsyncBaseTransport for production use).
+        if transport is not None:
+            self._client: Any = httpx.AsyncClient(transport=transport)
+        else:
+            self._client = httpx.AsyncClient()
 
     # ── Mutators ──────────────────────────────────────────────────────────
 
@@ -222,7 +265,7 @@ class AsyncAleoNetworkClient:
         return str(await self._get("/stateRoot/latest", "getStateRoot"))
 
     async def get_state_paths(self, commitments: list[str]) -> list[Any]:
-        csv = ",".join(commitments)
+        csv = ",".join(quote(c, safe="") for c in commitments)
         return await self._get(f"/statePaths?commitments={csv}", "getStatePaths")
 
     # ── Program endpoints ─────────────────────────────────────────────────
@@ -239,6 +282,80 @@ class AsyncAleoNetworkClient:
     async def get_program_amendment_count(self, program_id: str) -> Any:
         raw = await self._get_raw(f"/program/{program_id}/amendment_count", "getProgramAmendmentCount")
         return json.loads(raw)
+
+    async def get_program_object(self, program_id: str, edition: int | None = None) -> Any:
+        try:
+            from .mainnet import Program  # type: ignore[attr-defined]
+        except ImportError:
+            raise ImportError("aleo mainnet module not available") from None
+        source = await self.get_program(program_id, edition)
+        return Program.from_source(source)
+
+    async def get_program_imports(
+        self,
+        program_id: str,
+        imports: dict[str, str] | None = None,
+    ) -> dict[str, str]:
+        if imports is None:
+            imports = {}
+        try:
+            from .mainnet import Program  # type: ignore[attr-defined]
+        except ImportError:
+            raise ImportError("aleo mainnet module not available") from None
+
+        source = await self.get_program(program_id)
+        return await self._collect_program_imports(source, imports)
+
+    async def _collect_program_imports(
+        self,
+        source: str,
+        imports: dict[str, str],
+    ) -> dict[str, str]:
+        """Async DFS import collection — source already fetched, no re-fetch."""
+        try:
+            from .mainnet import Program  # type: ignore[attr-defined]
+        except ImportError:
+            raise ImportError("aleo mainnet module not available") from None
+        prog = Program.from_source(source)
+        for imp_id_obj in prog.imports:
+            imp_id = str(imp_id_obj)
+            if imp_id not in imports:
+                imp_source = await self.get_program(imp_id)
+                # Recurse into nested imports before recording this one
+                await self._collect_program_imports(imp_source, imports)
+                imports[imp_id] = imp_source
+        return imports
+
+    async def get_program_import_names(self, program_id: str) -> list[str]:
+        try:
+            from .mainnet import Program  # type: ignore[attr-defined]
+        except ImportError:
+            raise ImportError("aleo mainnet module not available") from None
+        source = await self.get_program(program_id)
+        prog = Program.from_source(source)
+        return [str(imp) for imp in prog.imports]
+
+    async def get_program_mapping_plaintext(
+        self, program_id: str, mapping_name: str, key: str
+    ) -> Any:
+        try:
+            from .mainnet import Plaintext  # type: ignore[attr-defined]
+        except ImportError:
+            raise ImportError("aleo mainnet module not available") from None
+        raw = await self._get_raw(
+            f"/program/{program_id}/mapping/{mapping_name}/{key}",
+            "getProgramMappingPlaintext",
+        )
+        import json as _json
+        return Plaintext.from_string(_json.loads(raw))
+
+    async def get_transaction_object(self, tx_id: str) -> Any:
+        try:
+            from .mainnet import Transaction  # type: ignore[attr-defined]
+        except ImportError:
+            raise ImportError("aleo mainnet module not available") from None
+        raw = await self._get_raw(f"/transaction/{tx_id}", "getTransactionObject")
+        return Transaction.from_json(raw)
 
     async def get_program_mapping_names(self, program_id: str) -> list[str]:
         return await self._get(f"/program/{program_id}/mappings", "getProgramMappingNames")

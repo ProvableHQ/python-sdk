@@ -1,8 +1,24 @@
-"""Synchronous Aleo network client (requests-based)."""
+"""Synchronous Aleo network client (requests-based).
+
+Transport contract (sync)
+-------------------------
+When ``transport`` is supplied it must be a callable with the signature::
+
+    transport(method: str, url: str, **kwargs) -> requests.Response
+
+``method`` is the HTTP verb (``"GET"`` or ``"POST"``); ``url`` is the full
+URL string; ``kwargs`` are the same keyword arguments that would normally be
+passed to ``requests.Session.request`` (e.g. ``headers``, ``data``).
+
+When transport is provided, SDK-internal headers (``X-Aleo-SDK-Version``,
+``X-Aleo-environment``, ``X-ALEO-METHOD``) are suppressed so the caller has
+full control over the wire format.
+"""
 from __future__ import annotations
 
 import json
 from typing import Any
+from urllib.parse import quote
 
 import requests
 
@@ -23,7 +39,33 @@ from .security import encrypt_proving_request
 
 
 class AleoNetworkClient:
-    """Synchronous client for the Aleo REST API."""
+    """Synchronous client for the Aleo REST API.
+
+    Parameters
+    ----------
+    host:
+        Versioned API root, e.g. ``"https://api.provable.com/v2"``.
+    network:
+        Network name appended to ``host`` for all node endpoints (default
+        ``"mainnet"``).
+    headers:
+        Additional request headers merged on top of the SDK defaults.
+    prover_uri:
+        Base URI for the DPS prover (without network suffix).
+    record_scanner_uri:
+        Base URI for the record scanner service.
+    transport:
+        Optional callable ``(method, url, **kwargs) -> requests.Response``.
+        When provided every HTTP request is routed through it instead of the
+        internal :class:`requests.Session`.  SDK-internal telemetry headers
+        are suppressed in this mode.
+    api_key:
+        Provable API key used to refresh JWTs.
+    consumer_id:
+        Consumer ID paired with *api_key* for JWT refresh.
+    jwt_data:
+        Pre-populated JWT dict ``{"jwt": str, "expiration": int}``.
+    """
 
     def __init__(
         self,
@@ -42,7 +84,7 @@ class AleoNetworkClient:
         self._network: str = network
         self._host: str = f"{host}/{network}"  # full base for node endpoints
         self._has_custom_transport: bool = transport is not None
-        self._transport: Any = transport  # unused in sync; kept for parity
+        self._transport: Any = transport
         self._account: Any = None
         self._verbose_errors: bool = True
         self.api_key: str | None = api_key
@@ -63,6 +105,28 @@ class AleoNetworkClient:
             self.headers = make_default_headers()
 
         self._session: requests.Session = requests.Session()
+
+    # ── Internal HTTP core ────────────────────────────────────────────────
+
+    def _http(
+        self,
+        method: str,
+        url: str,
+        **kwargs: Any,
+    ) -> requests.Response:
+        """Route an HTTP request through the custom transport or the shared session.
+
+        All public GET/POST helpers call this method so that a custom
+        *transport* is honoured consistently.  If *transport* is callable it is
+        invoked as ``transport(method, url, **kwargs)``; otherwise the shared
+        :class:`requests.Session` is used (transport was provided only to
+        signal custom-transport mode for header suppression).
+        """
+        if callable(self._transport):
+            resp: Any = self._transport(method, url, **kwargs)
+        else:
+            resp = self._session.request(method, url, **kwargs)
+        return resp  # type: ignore[return-value]
 
     # ── Mutators ──────────────────────────────────────────────────────────
 
@@ -101,7 +165,7 @@ class AleoNetworkClient:
         hdrs = self._request_headers(method_name)
 
         def _do() -> Any:
-            resp = self._session.get(url, headers=hdrs)
+            resp = self._http("GET", url, headers=hdrs)
             if not resp.ok:
                 raise AleoNetworkError(
                     f"GET {url} returned {resp.status_code}: {resp.text}",
@@ -116,7 +180,7 @@ class AleoNetworkClient:
         hdrs = self._request_headers(method_name)
 
         def _do() -> str:
-            resp = self._session.get(url, headers=hdrs)
+            resp = self._http("GET", url, headers=hdrs)
             if not resp.ok:
                 raise AleoNetworkError(
                     f"GET {url} returned {resp.status_code}: {resp.text}",
@@ -140,7 +204,7 @@ class AleoNetworkClient:
         }
 
         def _do() -> requests.Response:
-            resp = self._session.post(url, data=body.encode(), headers=hdrs)
+            resp = self._http("POST", url, data=body.encode(), headers=hdrs)
             if not resp.ok:
                 raise AleoNetworkError(
                     f"POST {url} returned {resp.status_code}: {resp.text}",
@@ -159,7 +223,7 @@ class AleoNetworkClient:
             **self._request_headers("refreshJwt"),
             "X-Provable-API-Key": api_key,
         }
-        resp = self._session.post(url, headers=hdrs)
+        resp = self._http("POST", url, headers=hdrs)
         if not resp.ok:
             raise AleoNetworkError(
                 f"JWT refresh failed: {resp.status_code}: {resp.text}",
@@ -218,7 +282,7 @@ class AleoNetworkClient:
         return str(self._get("/stateRoot/latest", "getStateRoot"))
 
     def get_state_paths(self, commitments: list[str]) -> list[Any]:
-        csv = ",".join(commitments)
+        csv = ",".join(quote(c, safe="") for c in commitments)
         return self._get(f"/statePaths?commitments={csv}", "getStatePaths")
 
     # ── Program endpoints ─────────────────────────────────────────────────
@@ -396,7 +460,7 @@ class AleoNetworkClient:
                     f"Transaction {tx_id} did not appear after {timeout}s"
                 )
             try:
-                resp = self._session.get(url, headers=hdrs)
+                resp = self._http("GET", url, headers=hdrs)
                 if not resp.ok:
                     text = resp.text
                     if resp.status_code >= 400 and resp.status_code < 500 and "Invalid URL" in text:
@@ -460,7 +524,7 @@ class AleoNetworkClient:
 
         def _send_once() -> dict[str, Any]:
             # Fetch pubkey + session cookie
-            pk_resp = self._session.get(f"{prover_uri}/pubkey", headers=hdrs)
+            pk_resp = self._http("GET", f"{prover_uri}/pubkey", headers=hdrs)
             if not pk_resp.ok:
                 raise AleoNetworkError(
                     f"Failed to fetch pubkey: {pk_resp.status_code}",
@@ -480,7 +544,8 @@ class AleoNetworkClient:
             if cookie:
                 post_hdrs["Cookie"] = cookie
 
-            resp = self._session.post(
+            resp = self._http(
+                "POST",
                 f"{prover_uri}{endpoint}",
                 data=payload.encode(),
                 headers=post_hdrs,

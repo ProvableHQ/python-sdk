@@ -155,6 +155,7 @@ def test_block_range_exactly_50_ok() -> None:
     resp_lib.add(resp_lib.GET, f"{HOST}/blocks", json=[])
     c = make_client()
     c.get_block_range(0, 50)  # span=50, should not raise
+    assert len(resp_lib.calls) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -241,6 +242,26 @@ def test_per_method_header() -> None:
     c.get_block(42)
     req_headers = resp_lib.calls[0].request.headers
     assert req_headers.get("X-ALEO-METHOD") == "getBlock"
+
+
+def test_custom_transport_callable_used_for_requests() -> None:
+    """A callable transport is invoked for every HTTP request."""
+    import requests as _requests
+    calls: list[tuple[str, str]] = []
+
+    def my_transport(method: str, url: str, **kwargs: Any) -> _requests.Response:
+        calls.append((method, url))
+        r = _requests.Response()
+        r.status_code = 200
+        r._content = b'{"height": 77}'
+        return r
+
+    c = AleoNetworkClient(BASE, network=NET, transport=my_transport)
+    result = c.get_block(77)
+    assert result["height"] == 77
+    assert len(calls) == 1
+    assert calls[0][0] == "GET"
+    assert "/block/77" in calls[0][1]
 
 
 @resp_lib.activate
@@ -431,6 +452,26 @@ def _load_proving_request() -> Any:
     return ProvingRequest.from_string(pr_str)
 
 
+def _build_request_variant_pr() -> Any:
+    """Build a Request-variant ProvingRequest via ExecutionRequest.sign."""
+    from aleo.mainnet import PrivateKey, ExecutionRequest, ProvingRequest  # type: ignore[attr-defined]
+    private_key = PrivateKey.from_string(
+        "APrivateKey1zkp8CZNn3yeCseEtxuVPbDCwSyhGW6yZKUYKfgXmcpoGPWH"
+    )
+    exec_req = ExecutionRequest.sign(
+        private_key,
+        "credits.aleo",
+        "transfer_public",
+        ["aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px", "100u64"],
+        ["address.public", "u64.public"],
+        None,
+        None,
+        True,
+        False,
+    )
+    return ProvingRequest.from_request(exec_req, None, False)
+
+
 @pytest.fixture
 def nacl_keypair() -> Any:
     """Generate a real X25519 keypair for DPS mock tests."""
@@ -441,7 +482,6 @@ def nacl_keypair() -> Any:
     return sk, pk_b64
 
 
-@pytest.mark.slow
 @resp_lib.activate
 def test_dps_authorization_variant_routes_correctly(nacl_keypair: Any) -> None:
     """Authorization-variant PR hits /prove/authorization; ciphertext decrypts correctly."""
@@ -465,10 +505,7 @@ def test_dps_authorization_variant_routes_correctly(nacl_keypair: Any) -> None:
     # Inject a non-expiring JWT so no refresh is triggered
     c.jwt_data = {"jwt": "Bearer testjwt", "expiration": 99999999999999}
 
-    try:
-        pr = _load_proving_request()
-    except Exception:
-        pytest.skip("ProvingRequest WASM not available (compile in progress)")
+    pr = _load_proving_request()
 
     result = c.submit_proving_request_safe(pr)
     assert result["ok"] is True
@@ -486,7 +523,46 @@ def test_dps_authorization_variant_routes_correctly(nacl_keypair: Any) -> None:
     assert decrypted == bytes(pr.bytes())
 
 
-@pytest.mark.slow
+@resp_lib.activate
+def test_dps_request_variant_routes_to_prove_request(nacl_keypair: Any) -> None:
+    """Request-variant PR (passed as string) hits /prove/request; ciphertext decrypts correctly."""
+    from nacl.public import SealedBox
+    import base64
+
+    sk, pk_b64 = nacl_keypair
+    prover = "https://prover.provable.prove"
+
+    resp_lib.add(
+        resp_lib.GET, f"{prover}/mainnet/pubkey",
+        json={"key_id": "k1", "public_key": pk_b64},
+    )
+    resp_lib.add(
+        resp_lib.POST, f"{prover}/mainnet/prove/request",
+        json={"transaction": "at1req", "broadcast_result": {"status": "accepted"}},
+    )
+
+    c = AleoNetworkClient(BASE, network=NET, prover_uri=prover)
+    c.jwt_data = {"jwt": "Bearer testjwt", "expiration": 99999999999999}
+
+    pr = _build_request_variant_pr()
+    pr_str = str(pr)  # pass STRING to test deserialization routing
+
+    result = c.submit_proving_request_safe(pr_str)
+    assert result["ok"] is True
+
+    # Verify the POST hit /prove/request (not /prove/authorization)
+    post_calls = [c for c in resp_lib.calls if c.request.method == "POST"]
+    assert len(post_calls) == 1
+    assert "prove/request" in post_calls[0].request.url
+
+    # Verify ciphertext decrypts to same bytes as the original PR
+    post_body = json.loads(post_calls[0].request.body)
+    ciphertext = base64.b64decode(post_body["ciphertext"])
+    box = SealedBox(sk)
+    decrypted = box.decrypt(ciphertext)
+    assert decrypted == bytes(pr.bytes())
+
+
 @resp_lib.activate
 def test_dps_400_returned_verbatim_not_retried(nacl_keypair: Any) -> None:
     """400 from prover returned as ok=False; not retried."""
@@ -505,10 +581,7 @@ def test_dps_400_returned_verbatim_not_retried(nacl_keypair: Any) -> None:
     c = AleoNetworkClient(BASE, network=NET, prover_uri=prover)
     c.jwt_data = {"jwt": "Bearer testjwt", "expiration": 99999999999999}
 
-    try:
-        pr = _load_proving_request()
-    except Exception:
-        pytest.skip("ProvingRequest WASM not available")
+    pr = _load_proving_request()
 
     result = c.submit_proving_request_safe(pr)
     assert result["ok"] is False
@@ -518,7 +591,6 @@ def test_dps_400_returned_verbatim_not_retried(nacl_keypair: Any) -> None:
     assert len(post_calls) == 1
 
 
-@pytest.mark.slow
 @resp_lib.activate
 def test_dps_503_retried(nacl_keypair: Any) -> None:
     """503 from prover is retried."""
@@ -541,10 +613,7 @@ def test_dps_503_retried(nacl_keypair: Any) -> None:
     c = AleoNetworkClient(BASE, network=NET, prover_uri=prover)
     c.jwt_data = {"jwt": "Bearer testjwt", "expiration": 99999999999999}
 
-    try:
-        pr = _load_proving_request()
-    except Exception:
-        pytest.skip("ProvingRequest WASM not available")
+    pr = _load_proving_request()
 
     with patch("aleo._client_common.time.sleep"):
         result = c.submit_proving_request_safe(pr)
@@ -554,7 +623,6 @@ def test_dps_503_retried(nacl_keypair: Any) -> None:
     assert len(post_calls) == 3
 
 
-@pytest.mark.slow
 @resp_lib.activate
 def test_dps_cookie_echoed(nacl_keypair: Any) -> None:
     """set-cookie from /pubkey is echoed back as Cookie on the prove POST."""
@@ -574,17 +642,13 @@ def test_dps_cookie_echoed(nacl_keypair: Any) -> None:
     c = AleoNetworkClient(BASE, network=NET, prover_uri=prover)
     c.jwt_data = {"jwt": "Bearer testjwt", "expiration": 99999999999999}
 
-    try:
-        pr = _load_proving_request()
-    except Exception:
-        pytest.skip("ProvingRequest WASM not available")
+    pr = _load_proving_request()
 
     c.submit_proving_request_safe(pr)
     post_calls = [c for c in resp_lib.calls if c.request.method == "POST"]
     assert post_calls[-1].request.headers.get("Cookie") == "session=mysession"
 
 
-@pytest.mark.slow
 @resp_lib.activate
 def test_dps_authorization_header_sent(nacl_keypair: Any) -> None:
     """JWT is sent as Authorization header on prove POST."""
@@ -603,17 +667,13 @@ def test_dps_authorization_header_sent(nacl_keypair: Any) -> None:
     c = AleoNetworkClient(BASE, network=NET, prover_uri=prover)
     c.jwt_data = {"jwt": "Bearer myjwt", "expiration": 99999999999999}
 
-    try:
-        pr = _load_proving_request()
-    except Exception:
-        pytest.skip("ProvingRequest WASM not available")
+    pr = _load_proving_request()
 
     c.submit_proving_request_safe(pr)
     post_calls = [c for c in resp_lib.calls if c.request.method == "POST"]
     assert post_calls[-1].request.headers.get("Authorization") == "Bearer myjwt"
 
 
-@pytest.mark.slow
 @resp_lib.activate
 def test_dps_submit_proving_request_raises_on_failure(nacl_keypair: Any) -> None:
     """submit_proving_request raises AleoProvingError on failure."""
@@ -633,10 +693,7 @@ def test_dps_submit_proving_request_raises_on_failure(nacl_keypair: Any) -> None
     c = AleoNetworkClient(BASE, network=NET, prover_uri=prover)
     c.jwt_data = {"jwt": "Bearer jwt", "expiration": 99999999999999}
 
-    try:
-        pr = _load_proving_request()
-    except Exception:
-        pytest.skip("ProvingRequest WASM not available")
+    pr = _load_proving_request()
 
     with pytest.raises(AleoProvingError) as exc_info:
         c.submit_proving_request(pr)

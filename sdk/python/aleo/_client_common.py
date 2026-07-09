@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import random
 import time
-from typing import Any
+from typing import Any, Callable, TypeVar
 from urllib.parse import urlparse
+
+_T = TypeVar("_T")
 
 
 class AleoNetworkError(Exception):
@@ -92,11 +94,11 @@ def strip_quotes(s: str) -> str:
 
 
 def retry_with_backoff(
-    fn: Any,
+    fn: Callable[[], _T],
     *,
     attempts: int = 5,
     base_delay: float = 0.1,
-) -> Any:
+) -> _T:
     """Retry fn() up to `attempts` times on AleoNetworkError with status>=500."""
     last_err: Exception | None = None
     for n in range(attempts):
@@ -113,7 +115,7 @@ def retry_with_backoff(
 
 
 async def async_retry_with_backoff(
-    fn: Any,
+    fn: Callable[[], Any],
     *,
     attempts: int = 5,
     base_delay: float = 0.1,

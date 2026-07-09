@@ -13,7 +13,6 @@ classifiers = [  # Optional
   "Programming Language :: Python :: 3",
 ]
 
-[project.dependencies]
 dependencies = ["requests>=2"]
 
 [project.optional-dependencies]
