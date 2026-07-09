@@ -410,3 +410,108 @@ def test_proving_key_split_prover_checksum():
     # is_split_prover() must be True; a different checker must be False
     assert pk.is_split_prover() is True
     assert pk.is_bond_public_prover() is False
+
+
+# ---------------------------------------------------------------------------
+# Task 9: Ciphertext.decrypt_with_transition_view_key and decrypt_with_transition_info
+# ---------------------------------------------------------------------------
+from aleo.mainnet import Ciphertext, ViewKey, Transition, Group, Field  # noqa: E402
+
+# KAT generated for MainnetV0 (network ID 0):
+#   Private key: APrivateKey1zkp8CZNn3yeCseEtxuVPbDCwSyhGW6yZKUYKfgXmcpoGPWH
+#   tpk: Group::generator()
+#   tvk: (tpk * vk_scalar).to_x_coordinate()
+#   ciphertext: encrypt_symmetric(hash_psd4([function_id, tvk, Field::from_u16(1)]))
+#   on plaintext "42u32" with program="hello_hello.aleo", function="hello", index=1
+#
+# NOTE: The wasm SDK KAT used network ID 1 (testnet). This SDK targets MainnetV0
+# (network ID 0), so the wasm KAT ciphertext does not decrypt to the expected
+# "2u32" on mainnet. These tests use a self-generated KAT verified by a Rust unit
+# test to ensure correctness with the actual network ID.
+_TASK9_PK_STR = "APrivateKey1zkp8CZNn3yeCseEtxuVPbDCwSyhGW6yZKUYKfgXmcpoGPWH"
+_TASK9_TPK_STR = "1540945439182663264862696551825005342995406165131907382295858612069623286213group"
+_TASK9_TVK_STR = "5913691033198561235987877735437800286574097563446004224670039882724243551875field"
+_TASK9_CT_STR = "ciphertext1qyqxk3s4jy4cz265h82q8m0z7zm0jr8w8xkh89a2qpy82kq0ja8w5rq2qj5rw"
+_TASK9_PROGRAM = "hello_hello.aleo"
+_TASK9_FUNCTION = "hello"
+_TASK9_INDEX = 1
+_TASK9_EXPECTED = "42u32"
+
+
+def test_ciphertext_decrypt_with_transition_view_key():
+    """KAT: decrypt_with_transition_view_key returns '42u32' for the mainnet KAT."""
+    tvk = Field.from_string(_TASK9_TVK_STR)
+    ct = Ciphertext.from_string(_TASK9_CT_STR)
+    plaintext = ct.decrypt_with_transition_view_key(
+        tvk, _TASK9_PROGRAM, _TASK9_FUNCTION, _TASK9_INDEX
+    )
+    assert str(plaintext) == _TASK9_EXPECTED
+
+
+def test_ciphertext_decrypt_with_transition_info():
+    """KAT: decrypt_with_transition_info returns '42u32' for the mainnet KAT."""
+    from aleo.mainnet import PrivateKey
+
+    pk = PrivateKey.from_string(_TASK9_PK_STR)
+    vk = pk.view_key
+    tpk = Group.from_string(_TASK9_TPK_STR)
+    ct = Ciphertext.from_string(_TASK9_CT_STR)
+    plaintext = ct.decrypt_with_transition_info(
+        vk, tpk, _TASK9_PROGRAM, _TASK9_FUNCTION, _TASK9_INDEX
+    )
+    assert str(plaintext) == _TASK9_EXPECTED
+
+
+def test_ciphertext_decrypt_methods_agree():
+    """Self-consistency: both methods produce identical plaintexts for the same inputs."""
+    from aleo.mainnet import PrivateKey
+
+    pk = PrivateKey.from_string(_TASK9_PK_STR)
+    vk = pk.view_key
+    tpk = Group.from_string(_TASK9_TPK_STR)
+    tvk = Field.from_string(_TASK9_TVK_STR)
+    ct = Ciphertext.from_string(_TASK9_CT_STR)
+
+    p_tvk = ct.decrypt_with_transition_view_key(
+        tvk, _TASK9_PROGRAM, _TASK9_FUNCTION, _TASK9_INDEX
+    )
+    p_info = ct.decrypt_with_transition_info(
+        vk, tpk, _TASK9_PROGRAM, _TASK9_FUNCTION, _TASK9_INDEX
+    )
+    assert str(p_tvk) == str(p_info)
+
+
+def test_ciphertext_decrypt_wrong_index_fails():
+    """Decrypting with the wrong index must raise (different symmetric key)."""
+    tvk = Field.from_string(_TASK9_TVK_STR)
+    ct = Ciphertext.from_string(_TASK9_CT_STR)
+    with pytest.raises(Exception):
+        ct.decrypt_with_transition_view_key(
+            tvk, _TASK9_PROGRAM, _TASK9_FUNCTION, 0  # wrong index
+        )
+
+
+def test_ciphertext_decrypt_wrong_program_fails():
+    """Decrypting with the wrong program name must raise."""
+    tvk = Field.from_string(_TASK9_TVK_STR)
+    ct = Ciphertext.from_string(_TASK9_CT_STR)
+    with pytest.raises(Exception):
+        ct.decrypt_with_transition_view_key(
+            tvk, "credits.aleo", _TASK9_FUNCTION, _TASK9_INDEX
+        )
+
+
+def test_ciphertext_decrypt_with_transition_info_wrong_vk_fails():
+    """Decrypting with a different view key must raise."""
+    from aleo.mainnet import PrivateKey
+
+    other_pk = PrivateKey.from_string(
+        "APrivateKey1zkpJkyYRGYtkeHDaFfwsKtUJzia7csiWhfBWPXWhXJzy9Ls"
+    )
+    other_vk = other_pk.view_key
+    tpk = Group.from_string(_TASK9_TPK_STR)
+    ct = Ciphertext.from_string(_TASK9_CT_STR)
+    with pytest.raises(Exception):
+        ct.decrypt_with_transition_info(
+            other_vk, tpk, _TASK9_PROGRAM, _TASK9_FUNCTION, _TASK9_INDEX
+        )

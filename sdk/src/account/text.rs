@@ -15,7 +15,10 @@
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
 use crate::{
-    types::{CiphertextNative, FieldNative, IdentifierNative, LiteralNative, PlaintextNative},
+    types::{
+        CiphertextNative, CurrentNetwork, FieldNative, IdentifierNative, LiteralNative,
+        PlaintextNative, ProgramIDNative, U16Native,
+    },
     Address, Field, Group, Identifier, Literal, Scalar, ViewKey,
 };
 use std::ops::Deref;
@@ -23,7 +26,8 @@ use std::ops::Deref;
 use pyo3::{exceptions::PyTypeError, prelude::*};
 
 use snarkvm::prelude::{
-    FromBits, FromBytes, FromFields, ToBits, ToBitsRaw, ToBytes, ToFields, ToFieldsRaw,
+    compute_function_id, FromBits, FromBytes, FromFields, Network, ToBits, ToBitsRaw, ToBytes,
+    ToFields, ToFieldsRaw,
 };
 use std::{collections::HashMap, str::FromStr};
 
@@ -51,6 +55,63 @@ impl Ciphertext {
         self.0
             .decrypt_symmetric(plaintext_view_key.into())
             .map(Into::into)
+    }
+
+    /// Decrypt a ciphertext using the transition view key and (program, function, index).
+    ///
+    /// Computes: function_id = compute_function_id(network_id, program_id, function_name);
+    /// ivk = hash_psd4([function_id, tvk, Field::from_u16(index)]);
+    /// then decrypts symmetrically with ivk.
+    fn decrypt_with_transition_view_key(
+        &self,
+        tvk: &Field,
+        program: &str,
+        function_name: &str,
+        index: u16,
+    ) -> anyhow::Result<Plaintext> {
+        let program_id = ProgramIDNative::from_str(program)?;
+        let function_ident = IdentifierNative::from_str(function_name)?;
+        let function_id = compute_function_id(
+            &U16Native::new(CurrentNetwork::ID),
+            &program_id,
+            &function_ident,
+        )?;
+        let index_field = FieldNative::from_u16(index);
+        let input_view_key = CurrentNetwork::hash_psd4(&[function_id, **tvk, index_field])
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        self.0
+            .decrypt_symmetric(input_view_key)
+            .map(Plaintext::from)
+            .map_err(|e| anyhow::anyhow!("{e}"))
+    }
+
+    /// Decrypt a ciphertext using the view key, transition public key, and (program, function, index).
+    ///
+    /// Derives tvk = (tpk * view_key_scalar).to_x_coordinate(), then calls
+    /// decrypt_with_transition_view_key logic internally.
+    fn decrypt_with_transition_info(
+        &self,
+        view_key: &ViewKey,
+        tpk: &Group,
+        program: &str,
+        function_name: &str,
+        index: u16,
+    ) -> anyhow::Result<Plaintext> {
+        let program_id = ProgramIDNative::from_str(program)?;
+        let function_ident = IdentifierNative::from_str(function_name)?;
+        let function_id = compute_function_id(
+            &U16Native::new(CurrentNetwork::ID),
+            &program_id,
+            &function_ident,
+        )?;
+        let tvk = (**tpk * ***view_key).to_x_coordinate();
+        let index_field = FieldNative::from_u16(index);
+        let input_view_key = CurrentNetwork::hash_psd4(&[function_id, tvk, index_field])
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        self.0
+            .decrypt_symmetric(input_view_key)
+            .map(Plaintext::from)
+            .map_err(|e| anyhow::anyhow!("{e}"))
     }
 
     /// Returns the ciphertext as a string.
