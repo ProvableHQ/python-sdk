@@ -13,8 +13,8 @@ Run them locally with: python -m pytest python/tests -v -m slow
 They are excluded from CI via -m "not slow".
 
 Endpoint note (verified empirically): Query.rest() wants the BASE url
-`https://api.explorer.provable.com/v1` — snarkvm's REST query appends the
-network path (`/mainnet/stateRoot/latest`) itself; passing `.../v1/mainnet`
+`https://api.explorer.provable.com/v2` — snarkvm's REST query appends the
+network path (`/mainnet/stateRoot/latest`) itself; passing `.../v2/mainnet`
 would double the network segment.
 """
 
@@ -38,7 +38,30 @@ from aleo.mainnet import (
 )
 from conftest import load_vectors
 
-ENDPOINT = "https://api.explorer.provable.com/v1"
+ENDPOINT = "https://api.explorer.provable.com/v2"
+
+
+def _prepare_with_retry(trace, attempts: int = 3, delay: float = 20.0) -> None:
+    """Prepare a trace against the live endpoint, retrying transient outages.
+
+    The Provable API intermittently returns 503s (nginx); a failed state-root
+    fetch here is infrastructure noise, not a proving regression, so retry a
+    few times before letting the error surface.
+    """
+    import time
+
+    last: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            trace.prepare(Query.rest(ENDPOINT))
+            return
+        except RuntimeError as exc:  # snarkvm surfaces HTTP failures as RuntimeError
+            last = exc
+            if attempt < attempts - 1:
+                time.sleep(delay)
+    assert last is not None
+    raise last
+
 
 CREDITS = ProgramID.from_string("credits.aleo")
 TRANSFER_PUBLIC = Identifier.from_string("transfer_public")
@@ -134,7 +157,7 @@ def proven_execution(process, signer):
     """
     auth = _authorize_transfer_public(process, signer)
     _, trace = process.execute(auth)
-    trace.prepare(Query.rest(ENDPOINT))
+    _prepare_with_retry(trace)
     return trace.prove_execution("credits.aleo/transfer_public")
 
 
@@ -177,7 +200,7 @@ def test_prove_fee_and_transaction(process, signer, proven_execution):
     assert fee_trace.is_fee() is True
     assert fee_trace.is_fee_public() is True
 
-    fee_trace.prepare(Query.rest(ENDPOINT))
+    _prepare_with_retry(fee_trace)
     fee = fee_trace.prove_fee()
     assert fee.is_fee_public() is True
     assert str(fee.payer) == str(signer.address)

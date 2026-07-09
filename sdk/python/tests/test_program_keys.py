@@ -274,7 +274,7 @@ from aleo.mainnet import VerifyingKey  # noqa: E402
 TRANSFER_PUBLIC_VK_CHECKSUM = "ea77f42a35b3f891e7753c7333df365f356883550c4602df11f270237bef340d"
 TRANSFER_PUBLIC_NUM_CONSTRAINTS = 12326
 
-# All 16 (function_name, getter_name) pairs for credits + inclusion
+# All 15 (function_name, getter_name) pairs for credits + inclusion
 CREDITS_VERIFIER_GETTERS = [
     ("bond_public", "bond_public_verifier"),
     ("bond_validator", "bond_validator_verifier"),
@@ -318,7 +318,7 @@ def test_verifying_key_inclusion_verifier():
     assert vk.is_bond_public_verifier() is False
 
 
-def test_all_16_verifier_getters_and_is_checkers():
+def test_all_15_verifier_getters_and_is_checkers():
     """Iterate all 16 getters and verify each is_* self-check returns True."""
     IS_CHECKER_MAP = {
         "bond_public_verifier": "is_bond_public_verifier",

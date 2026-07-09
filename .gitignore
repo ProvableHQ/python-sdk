@@ -6,4 +6,5 @@ tmp/
 
 .DS_Store
 
-*.pkl.idea/
+*.pkl
+.idea/
