@@ -1,3 +1,4 @@
+# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false
 """Asynchronous Aleo network client (httpx-based).
 
 Transport contract (async)

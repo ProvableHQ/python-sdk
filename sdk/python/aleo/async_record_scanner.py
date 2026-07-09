@@ -1,3 +1,4 @@
+# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false
 """Asynchronous RecordScanner (httpx-based) for delegated record scanning."""
 from __future__ import annotations
 

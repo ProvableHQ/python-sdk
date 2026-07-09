@@ -1,3 +1,4 @@
+# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false
 """PyNaCl sealed-box helpers for DPS encryption."""
 from __future__ import annotations
 

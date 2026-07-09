@@ -1,5 +1,6 @@
 # Copyright (C) 2024 Provable Inc.
 # SPDX-License-Identifier: GPL-3.0-or-later
+# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false
 """Integration hook: ABI generation via the aleo-abi package."""
 from __future__ import annotations
 
