@@ -65,6 +65,7 @@ fn register(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Literal>()?;
     m.add_class::<Locator>()?;
     m.add_class::<MicroCredits>()?;
+    m.add_class::<Metadata>()?;
     m.add_class::<Network>()?;
     m.add_class::<Pedersen64>()?;
     m.add_class::<Pedersen128>()?;

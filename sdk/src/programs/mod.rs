@@ -35,6 +35,9 @@ pub use literal::Literal;
 mod locator;
 pub use locator::Locator;
 
+mod metadata;
+pub use metadata::Metadata;
+
 mod process;
 pub use process::Process;
 

@@ -1,6 +1,6 @@
 """Tests for W4d2 wasm-parity additions."""
 import pytest
-from aleo.mainnet import Proof, DynamicRecord, RecordPlaintext
+from aleo.mainnet import Proof, DynamicRecord, RecordPlaintext, Metadata
 
 
 def test_proof_from_invalid_string():
@@ -74,3 +74,29 @@ def test_dynamic_record_to_bits_le():
 def test_dynamic_record_invalid():
     with pytest.raises(Exception):
         DynamicRecord.from_string("not a record")
+
+
+def test_metadata_bond_public():
+    m = Metadata.bond_public()
+    assert m.name == "bond_public"
+    assert m.locator == "credits.aleo/bond_public"
+    assert m.verifying_key == "bondPublicVerifier"
+    assert "bond_public.prover." in m.prover
+    assert "bond_public.verifier." in m.verifier
+    assert "parameters.provable.com/mainnet" in m.prover
+
+
+def test_metadata_transfer_public():
+    m = Metadata.transfer_public()
+    assert m.name == "transfer_public"
+    assert m.locator == "credits.aleo/transfer_public"
+
+
+def test_metadata_inclusion():
+    m = Metadata.inclusion()
+    assert m.name == "inclusion"
+    assert m.locator == "inclusion"
+
+
+def test_metadata_base_url():
+    assert "parameters.provable.com" in Metadata.base_url()
