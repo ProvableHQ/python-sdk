@@ -17,6 +17,9 @@
 mod authorization;
 pub use authorization::Authorization;
 
+mod dynamic_record;
+pub use dynamic_record::DynamicRecord;
+
 mod execution;
 pub use execution::Execution;
 

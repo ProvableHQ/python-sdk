@@ -50,6 +50,7 @@ fn register(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Ciphertext>()?;
     m.add_class::<ComputeKey>()?;
     m.add_class::<Credits>()?;
+    m.add_class::<DynamicRecord>()?;
     m.add_class::<Execution>()?;
     m.add_class::<Fee>()?;
     m.add_class::<Field>()?;
