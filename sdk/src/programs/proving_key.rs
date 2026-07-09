@@ -14,6 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
+use super::metadata::read_prover_checksum;
 use crate::types::ProvingKeyNative;
 
 use pyo3::prelude::*;
@@ -21,16 +22,6 @@ use sha2::Digest;
 use snarkvm::prelude::{FromBytes, ToBytes};
 
 use std::str::FromStr;
-
-/// Extract the `prover_checksum` field from an embedded METADATA JSON string.
-fn prover_checksum_from_meta(metadata_json: &'static str) -> String {
-    let meta: serde_json::Value =
-        serde_json::from_str(metadata_json).expect("Metadata was not well-formatted");
-    meta["prover_checksum"]
-        .as_str()
-        .expect("Failed to parse prover_checksum")
-        .to_string()
-}
 
 /// The Aleo proving key type.
 #[pyclass(frozen)]
@@ -83,7 +74,7 @@ impl ProvingKey {
         {
             self.checksum()
                 .map(|cs| {
-                    cs == prover_checksum_from_meta(
+                    cs == read_prover_checksum(
                         snarkvm::parameters::mainnet::BondPublicProver::METADATA,
                     )
                 })
@@ -93,7 +84,7 @@ impl ProvingKey {
         {
             self.checksum()
                 .map(|cs| {
-                    cs == prover_checksum_from_meta(
+                    cs == read_prover_checksum(
                         snarkvm::parameters::testnet::BondPublicProver::METADATA,
                     )
                 })
@@ -106,7 +97,7 @@ impl ProvingKey {
         {
             self.checksum()
                 .map(|cs| {
-                    cs == prover_checksum_from_meta(
+                    cs == read_prover_checksum(
                         snarkvm::parameters::mainnet::BondValidatorProver::METADATA,
                     )
                 })
@@ -116,7 +107,7 @@ impl ProvingKey {
         {
             self.checksum()
                 .map(|cs| {
-                    cs == prover_checksum_from_meta(
+                    cs == read_prover_checksum(
                         snarkvm::parameters::testnet::BondValidatorProver::METADATA,
                     )
                 })
@@ -129,7 +120,7 @@ impl ProvingKey {
         {
             self.checksum()
                 .map(|cs| {
-                    cs == prover_checksum_from_meta(
+                    cs == read_prover_checksum(
                         snarkvm::parameters::mainnet::ClaimUnbondPublicProver::METADATA,
                     )
                 })
@@ -139,7 +130,7 @@ impl ProvingKey {
         {
             self.checksum()
                 .map(|cs| {
-                    cs == prover_checksum_from_meta(
+                    cs == read_prover_checksum(
                         snarkvm::parameters::testnet::ClaimUnbondPublicProver::METADATA,
                     )
                 })
@@ -152,7 +143,7 @@ impl ProvingKey {
         {
             self.checksum()
                 .map(|cs| {
-                    cs == prover_checksum_from_meta(
+                    cs == read_prover_checksum(
                         snarkvm::parameters::mainnet::FeePrivateProver::METADATA,
                     )
                 })
@@ -162,7 +153,7 @@ impl ProvingKey {
         {
             self.checksum()
                 .map(|cs| {
-                    cs == prover_checksum_from_meta(
+                    cs == read_prover_checksum(
                         snarkvm::parameters::testnet::FeePrivateProver::METADATA,
                     )
                 })
@@ -175,7 +166,7 @@ impl ProvingKey {
         {
             self.checksum()
                 .map(|cs| {
-                    cs == prover_checksum_from_meta(
+                    cs == read_prover_checksum(
                         snarkvm::parameters::mainnet::FeePublicProver::METADATA,
                     )
                 })
@@ -185,7 +176,7 @@ impl ProvingKey {
         {
             self.checksum()
                 .map(|cs| {
-                    cs == prover_checksum_from_meta(
+                    cs == read_prover_checksum(
                         snarkvm::parameters::testnet::FeePublicProver::METADATA,
                     )
                 })
@@ -198,7 +189,7 @@ impl ProvingKey {
         {
             self.checksum()
                 .map(|cs| {
-                    cs == prover_checksum_from_meta(
+                    cs == read_prover_checksum(
                         snarkvm::parameters::mainnet::InclusionProver::METADATA,
                     )
                 })
@@ -208,7 +199,7 @@ impl ProvingKey {
         {
             self.checksum()
                 .map(|cs| {
-                    cs == prover_checksum_from_meta(
+                    cs == read_prover_checksum(
                         snarkvm::parameters::testnet::InclusionProver::METADATA,
                     )
                 })
@@ -221,9 +212,7 @@ impl ProvingKey {
         {
             self.checksum()
                 .map(|cs| {
-                    cs == prover_checksum_from_meta(
-                        snarkvm::parameters::mainnet::JoinProver::METADATA,
-                    )
+                    cs == read_prover_checksum(snarkvm::parameters::mainnet::JoinProver::METADATA)
                 })
                 .unwrap_or(false)
         }
@@ -231,9 +220,7 @@ impl ProvingKey {
         {
             self.checksum()
                 .map(|cs| {
-                    cs == prover_checksum_from_meta(
-                        snarkvm::parameters::testnet::JoinProver::METADATA,
-                    )
+                    cs == read_prover_checksum(snarkvm::parameters::testnet::JoinProver::METADATA)
                 })
                 .unwrap_or(false)
         }
@@ -244,7 +231,7 @@ impl ProvingKey {
         {
             self.checksum()
                 .map(|cs| {
-                    cs == prover_checksum_from_meta(
+                    cs == read_prover_checksum(
                         snarkvm::parameters::mainnet::SetValidatorStateProver::METADATA,
                     )
                 })
@@ -254,7 +241,7 @@ impl ProvingKey {
         {
             self.checksum()
                 .map(|cs| {
-                    cs == prover_checksum_from_meta(
+                    cs == read_prover_checksum(
                         snarkvm::parameters::testnet::SetValidatorStateProver::METADATA,
                     )
                 })
@@ -267,9 +254,7 @@ impl ProvingKey {
         {
             self.checksum()
                 .map(|cs| {
-                    cs == prover_checksum_from_meta(
-                        snarkvm::parameters::mainnet::SplitProver::METADATA,
-                    )
+                    cs == read_prover_checksum(snarkvm::parameters::mainnet::SplitProver::METADATA)
                 })
                 .unwrap_or(false)
         }
@@ -277,9 +262,7 @@ impl ProvingKey {
         {
             self.checksum()
                 .map(|cs| {
-                    cs == prover_checksum_from_meta(
-                        snarkvm::parameters::testnet::SplitProver::METADATA,
-                    )
+                    cs == read_prover_checksum(snarkvm::parameters::testnet::SplitProver::METADATA)
                 })
                 .unwrap_or(false)
         }
@@ -290,7 +273,7 @@ impl ProvingKey {
         {
             self.checksum()
                 .map(|cs| {
-                    cs == prover_checksum_from_meta(
+                    cs == read_prover_checksum(
                         snarkvm::parameters::mainnet::TransferPrivateProver::METADATA,
                     )
                 })
@@ -300,7 +283,7 @@ impl ProvingKey {
         {
             self.checksum()
                 .map(|cs| {
-                    cs == prover_checksum_from_meta(
+                    cs == read_prover_checksum(
                         snarkvm::parameters::testnet::TransferPrivateProver::METADATA,
                     )
                 })
@@ -313,7 +296,7 @@ impl ProvingKey {
         {
             self.checksum()
                 .map(|cs| {
-                    cs == prover_checksum_from_meta(
+                    cs == read_prover_checksum(
                         snarkvm::parameters::mainnet::TransferPrivateToPublicProver::METADATA,
                     )
                 })
@@ -323,7 +306,7 @@ impl ProvingKey {
         {
             self.checksum()
                 .map(|cs| {
-                    cs == prover_checksum_from_meta(
+                    cs == read_prover_checksum(
                         snarkvm::parameters::testnet::TransferPrivateToPublicProver::METADATA,
                     )
                 })
@@ -336,7 +319,7 @@ impl ProvingKey {
         {
             self.checksum()
                 .map(|cs| {
-                    cs == prover_checksum_from_meta(
+                    cs == read_prover_checksum(
                         snarkvm::parameters::mainnet::TransferPublicProver::METADATA,
                     )
                 })
@@ -346,7 +329,7 @@ impl ProvingKey {
         {
             self.checksum()
                 .map(|cs| {
-                    cs == prover_checksum_from_meta(
+                    cs == read_prover_checksum(
                         snarkvm::parameters::testnet::TransferPublicProver::METADATA,
                     )
                 })
@@ -359,7 +342,7 @@ impl ProvingKey {
         {
             self.checksum()
                 .map(|cs| {
-                    cs == prover_checksum_from_meta(
+                    cs == read_prover_checksum(
                         snarkvm::parameters::mainnet::TransferPublicAsSignerProver::METADATA,
                     )
                 })
@@ -369,7 +352,7 @@ impl ProvingKey {
         {
             self.checksum()
                 .map(|cs| {
-                    cs == prover_checksum_from_meta(
+                    cs == read_prover_checksum(
                         snarkvm::parameters::testnet::TransferPublicAsSignerProver::METADATA,
                     )
                 })
@@ -382,7 +365,7 @@ impl ProvingKey {
         {
             self.checksum()
                 .map(|cs| {
-                    cs == prover_checksum_from_meta(
+                    cs == read_prover_checksum(
                         snarkvm::parameters::mainnet::TransferPublicToPrivateProver::METADATA,
                     )
                 })
@@ -392,7 +375,7 @@ impl ProvingKey {
         {
             self.checksum()
                 .map(|cs| {
-                    cs == prover_checksum_from_meta(
+                    cs == read_prover_checksum(
                         snarkvm::parameters::testnet::TransferPublicToPrivateProver::METADATA,
                     )
                 })
@@ -405,7 +388,7 @@ impl ProvingKey {
         {
             self.checksum()
                 .map(|cs| {
-                    cs == prover_checksum_from_meta(
+                    cs == read_prover_checksum(
                         snarkvm::parameters::mainnet::UnbondPublicProver::METADATA,
                     )
                 })
@@ -415,7 +398,7 @@ impl ProvingKey {
         {
             self.checksum()
                 .map(|cs| {
-                    cs == prover_checksum_from_meta(
+                    cs == read_prover_checksum(
                         snarkvm::parameters::testnet::UnbondPublicProver::METADATA,
                     )
                 })

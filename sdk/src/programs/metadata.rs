@@ -10,7 +10,7 @@ const BASE_URL: &str = "https://parameters.provable.com/mainnet/";
 #[cfg(feature = "testnet")]
 const BASE_URL: &str = "https://parameters.provable.com/testnet/";
 
-fn read_prover_checksum(metadata_json: &'static str) -> String {
+pub(crate) fn read_prover_checksum(metadata_json: &'static str) -> String {
     let meta: serde_json::Value =
         serde_json::from_str(metadata_json).expect("Metadata was not well-formatted");
     meta["prover_checksum"]
