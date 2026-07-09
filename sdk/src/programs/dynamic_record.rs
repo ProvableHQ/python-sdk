@@ -3,10 +3,7 @@
 //
 // Licensed under GPL-3.0-or-later.
 
-use crate::{
-    types::DynamicRecordNative,
-    Address, Field, Group, RecordPlaintext,
-};
+use crate::{types::DynamicRecordNative, Address, Field, Group, RecordPlaintext};
 
 use pyo3::prelude::*;
 use snarkvm::prelude::{FromBytes, ToBits, ToBytes, ToFields};
@@ -41,7 +38,9 @@ impl DynamicRecord {
 
     /// Converts this DynamicRecord back to a RecordPlaintext.
     fn to_record(&self, owner_is_private: bool) -> anyhow::Result<RecordPlaintext> {
-        self.0.to_record(owner_is_private).map(RecordPlaintext::from)
+        self.0
+            .to_record(owner_is_private)
+            .map(RecordPlaintext::from)
     }
 
     /// Serializes the dynamic record to a little-endian byte array.
@@ -51,7 +50,9 @@ impl DynamicRecord {
 
     /// Returns the dynamic record as a vector of field elements.
     fn to_fields(&self) -> anyhow::Result<Vec<Field>> {
-        self.0.to_fields().map(|fs| fs.into_iter().map(Field::from).collect())
+        self.0
+            .to_fields()
+            .map(|fs| fs.into_iter().map(Field::from).collect())
     }
 
     /// Returns the dynamic record as a little-endian bit vector.

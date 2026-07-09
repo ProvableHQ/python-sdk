@@ -13,13 +13,19 @@ const BASE_URL: &str = "https://parameters.provable.com/testnet/";
 fn prover_checksum(metadata_json: &'static str) -> String {
     let meta: serde_json::Value =
         serde_json::from_str(metadata_json).expect("Metadata was not well-formatted");
-    meta["prover_checksum"].as_str().expect("Failed to parse prover checksum").to_string()
+    meta["prover_checksum"]
+        .as_str()
+        .expect("Failed to parse prover checksum")
+        .to_string()
 }
 
 fn verifier_checksum(metadata_json: &'static str) -> String {
     let meta: serde_json::Value =
         serde_json::from_str(metadata_json).expect("Metadata was not well-formatted");
-    meta["verifier_checksum"].as_str().expect("Failed to parse verifier checksum").to_string()
+    meta["verifier_checksum"]
+        .as_str()
+        .expect("Failed to parse verifier checksum")
+        .to_string()
 }
 
 fn make_metadata(
@@ -188,12 +194,22 @@ impl Metadata {
         #[cfg(not(feature = "testnet"))]
         {
             use snarkvm::parameters::mainnet::InclusionProver;
-            make_metadata("inclusion", "inclusionVerifier", "inclusion", InclusionProver::METADATA)
+            make_metadata(
+                "inclusion",
+                "inclusionVerifier",
+                "inclusion",
+                InclusionProver::METADATA,
+            )
         }
         #[cfg(feature = "testnet")]
         {
             use snarkvm::parameters::testnet::InclusionProver;
-            make_metadata("inclusion", "inclusionVerifier", "inclusion", InclusionProver::METADATA)
+            make_metadata(
+                "inclusion",
+                "inclusionVerifier",
+                "inclusion",
+                InclusionProver::METADATA,
+            )
         }
     }
 
@@ -202,12 +218,22 @@ impl Metadata {
         #[cfg(not(feature = "testnet"))]
         {
             use snarkvm::parameters::mainnet::JoinProver;
-            make_metadata("join", "joinVerifier", "credits.aleo/join", JoinProver::METADATA)
+            make_metadata(
+                "join",
+                "joinVerifier",
+                "credits.aleo/join",
+                JoinProver::METADATA,
+            )
         }
         #[cfg(feature = "testnet")]
         {
             use snarkvm::parameters::testnet::JoinProver;
-            make_metadata("join", "joinVerifier", "credits.aleo/join", JoinProver::METADATA)
+            make_metadata(
+                "join",
+                "joinVerifier",
+                "credits.aleo/join",
+                JoinProver::METADATA,
+            )
         }
     }
 
@@ -240,12 +266,22 @@ impl Metadata {
         #[cfg(not(feature = "testnet"))]
         {
             use snarkvm::parameters::mainnet::SplitProver;
-            make_metadata("split", "splitVerifier", "credits.aleo/split", SplitProver::METADATA)
+            make_metadata(
+                "split",
+                "splitVerifier",
+                "credits.aleo/split",
+                SplitProver::METADATA,
+            )
         }
         #[cfg(feature = "testnet")]
         {
             use snarkvm::parameters::testnet::SplitProver;
-            make_metadata("split", "splitVerifier", "credits.aleo/split", SplitProver::METADATA)
+            make_metadata(
+                "split",
+                "splitVerifier",
+                "credits.aleo/split",
+                SplitProver::METADATA,
+            )
         }
     }
 

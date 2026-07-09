@@ -67,6 +67,7 @@ fn register(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<MicroCredits>()?;
     m.add_class::<Metadata>()?;
     m.add_class::<Network>()?;
+    m.add_class::<OfflineQuery>()?;
     m.add_class::<Pedersen64>()?;
     m.add_class::<Pedersen128>()?;
     m.add_class::<Plaintext>()?;

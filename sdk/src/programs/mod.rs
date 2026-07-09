@@ -38,6 +38,9 @@ pub use locator::Locator;
 mod metadata;
 pub use metadata::Metadata;
 
+mod offline_query;
+pub use offline_query::OfflineQuery;
+
 mod process;
 pub use process::Process;
 

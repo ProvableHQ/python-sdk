@@ -1,6 +1,6 @@
 """Tests for W4d2 wasm-parity additions."""
 import pytest
-from aleo.mainnet import Proof, DynamicRecord, RecordPlaintext, Metadata
+from aleo.mainnet import Proof, DynamicRecord, RecordPlaintext, Metadata, OfflineQuery
 
 
 def test_proof_from_invalid_string():
@@ -100,3 +100,24 @@ def test_metadata_inclusion():
 
 def test_metadata_base_url():
     assert "parameters.provable.com" in Metadata.base_url()
+
+
+OFFLINE_QUERY_KAT = '{"block_height":0,"state_paths":{},"state_root":"sr1wjueje6hy86yw9j4lhl7jwvhjxwunw34paj4k3cn2wm5h5r2syfqd83yw4"}'
+STATE_ROOT = "sr1wjueje6hy86yw9j4lhl7jwvhjxwunw34paj4k3cn2wm5h5r2syfqd83yw4"
+
+
+def test_offline_query_kat():
+    oq = OfflineQuery.new(0, STATE_ROOT)
+    assert str(oq) == OFFLINE_QUERY_KAT
+
+
+def test_offline_query_round_trip():
+    oq = OfflineQuery.new(0, STATE_ROOT)
+    oq2 = OfflineQuery.from_string(str(oq))
+    assert str(oq2) == str(oq)
+
+
+def test_offline_query_add_block_height():
+    oq = OfflineQuery.new(0, STATE_ROOT)
+    oq.add_block_height(42)
+    assert '"block_height":42' in str(oq)
