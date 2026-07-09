@@ -23,6 +23,9 @@ pub use dynamic_record::DynamicRecord;
 mod execution;
 pub use execution::Execution;
 
+mod execution_request;
+pub use execution_request::ExecutionRequest;
+
 mod fee;
 pub use fee::Fee;
 
@@ -52,6 +55,9 @@ pub use program::Program;
 
 mod proving_key;
 pub use proving_key::ProvingKey;
+
+mod proving_request;
+pub use proving_request::ProvingRequest;
 
 mod response;
 pub use response::Response;

@@ -29,8 +29,8 @@ use snarkvm::ledger::store::helpers::memory::BlockMemory;
 use snarkvm::prelude::{
     Address, Argument, Authorization, Boolean, Ciphertext, ComputeKey, Execution, Field, Future,
     GraphKey, Group, Identifier, Literal, Locator, Plaintext, PrivateKey, Program, ProgramID,
-    ProvingKey, Record, Response, Scalar, Signature, Transition, Value, VerifyingKey, ViewKey,
-    I128, I16, I32, I64, I8, U128, U16, U32, U64, U8,
+    ProvingKey, Record, Request, Response, Scalar, Signature, Transition, Value, ValueType,
+    VerifyingKey, ViewKey, I128, I16, I32, I64, I8, U128, U16, U32, U64, U8,
 };
 use snarkvm::synthesizer::{Process, Trace};
 
@@ -83,6 +83,8 @@ pub type ProgramIDNative = ProgramID<CurrentNetwork>;
 pub type ProgramNative = Program<CurrentNetwork>;
 pub type ProvingKeyNative = ProvingKey<CurrentNetwork>;
 pub type QueryNative = Query<CurrentNetwork, CurrentBlockMemory>;
+pub type RequestNative = Request<CurrentNetwork>;
+pub type ValueTypeNative = ValueType<CurrentNetwork>;
 pub type ResponseNative = Response<CurrentNetwork>;
 pub type TraceNative = Trace<CurrentNetwork>;
 pub type TransactionNative = Transaction<CurrentNetwork>;

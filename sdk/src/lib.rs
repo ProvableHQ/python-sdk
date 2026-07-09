@@ -52,6 +52,7 @@ fn register(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Credits>()?;
     m.add_class::<DynamicRecord>()?;
     m.add_class::<Execution>()?;
+    m.add_class::<ExecutionRequest>()?;
     m.add_class::<Fee>()?;
     m.add_class::<Field>()?;
     m.add_class::<GraphKey>()?;
@@ -81,6 +82,7 @@ fn register(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Program>()?;
     m.add_class::<ProgramID>()?;
     m.add_class::<ProvingKey>()?;
+    m.add_class::<ProvingRequest>()?;
     m.add_class::<Query>()?;
     m.add_class::<RecordCiphertext>()?;
     m.add_class::<RecordPlaintext>()?;
