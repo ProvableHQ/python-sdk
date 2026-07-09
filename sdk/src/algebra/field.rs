@@ -14,17 +14,24 @@
 // You should have received a copy of the GNU General Public License
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
-use crate::{types::FieldNative, Group, Scalar};
+use crate::{
+    types::{
+        FieldNative, I128Native, I16Native, I32Native, I64Native, I8Native, LiteralNative,
+        PlaintextNative, ScalarNative, U128Native, U16Native, U32Native, U64Native, U8Native,
+    },
+    Address, Boolean, Group, Scalar,
+};
 
 use pyo3::{exceptions::PyZeroDivisionError, prelude::*};
 use rand::rngs::StdRng;
-use snarkvm::prelude::{Double, FromBits, One, Pow, ToBits, Uniform, Zero};
+use snarkvm::prelude::{CastLossy, Double, FromBits, One, Pow, ToBits, Uniform, Zero};
 
 use std::{
     collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
     ops::Deref,
     str::FromStr,
+    sync::OnceLock,
 };
 
 /// The Aleo field type.
@@ -130,16 +137,113 @@ impl Field {
 
     /// Converts the field to a scalar using lossy truncation.
     fn to_scalar_lossy(&self) -> Scalar {
-        use crate::types::ScalarNative;
         ScalarNative::from_field_lossy(&self.0).into()
     }
 
     /// Converts the field to a group element (x-coordinate recovery).
     fn to_group(&self) -> anyhow::Result<Group> {
-        use crate::types::GroupNative;
         use snarkvm::prelude::FromField;
-        GroupNative::from_field(&self.0).map(Group::from)
+        crate::types::GroupNative::from_field(&self.0).map(Group::from)
     }
+
+    /// Converts the field to a group element with lossy conversion (Elligator-2 fallback).
+    fn to_group_lossy(&self) -> Group {
+        let g: crate::types::GroupNative = self.0.cast_lossy();
+        Group::from(g)
+    }
+
+    /// Converts the field to an Address (strict, via group x-coordinate recovery).
+    fn to_address(&self) -> anyhow::Result<Address> {
+        use snarkvm::prelude::FromField;
+        let g = crate::types::GroupNative::from_field(&self.0)?;
+        Ok(Address::new(g))
+    }
+
+    /// Converts the field to an Address with lossy conversion.
+    fn to_address_lossy(&self) -> Address {
+        let g: crate::types::GroupNative = self.0.cast_lossy();
+        Address::new(g)
+    }
+
+    /// Converts the field to a Boolean (strict: must be 0 or 1).
+    fn to_boolean(&self) -> anyhow::Result<Boolean> {
+        if self.0.is_zero() {
+            Ok(Boolean::from(crate::types::BooleanNative::new(false)))
+        } else if self.0.is_one() {
+            Ok(Boolean::from(crate::types::BooleanNative::new(true)))
+        } else {
+            Err(anyhow::anyhow!(
+                "Failed to convert field to boolean: field is not zero or one"
+            ))
+        }
+    }
+
+    /// Converts the field to a Boolean with lossy truncation (LSB).
+    fn to_boolean_lossy(&self) -> Boolean {
+        Boolean::from(crate::types::BooleanNative::new(self.0.to_bits_le()[0]))
+    }
+
+    /// Converts the field to a Plaintext wrapper.
+    fn to_plaintext(&self) -> crate::Plaintext {
+        crate::Plaintext::from(PlaintextNative::Literal(
+            LiteralNative::Field(self.0),
+            OnceLock::new(),
+        ))
+    }
+
+    // Field → Integer lossy conversions
+
+    /// Cast to U8 with lossy truncation.
+    fn to_u8_lossy(&self) -> crate::U8 {
+        crate::U8::from(U8Native::from_field_lossy(&self.0))
+    }
+
+    /// Cast to U16 with lossy truncation.
+    fn to_u16_lossy(&self) -> crate::U16 {
+        crate::U16::from(U16Native::from_field_lossy(&self.0))
+    }
+
+    /// Cast to U32 with lossy truncation.
+    fn to_u32_lossy(&self) -> crate::U32 {
+        crate::U32::from(U32Native::from_field_lossy(&self.0))
+    }
+
+    /// Cast to U64 with lossy truncation.
+    fn to_u64_lossy(&self) -> crate::U64 {
+        crate::U64::from(U64Native::from_field_lossy(&self.0))
+    }
+
+    /// Cast to U128 with lossy truncation.
+    fn to_u128_lossy(&self) -> crate::U128 {
+        crate::U128::from(U128Native::from_field_lossy(&self.0))
+    }
+
+    /// Cast to I8 with lossy truncation.
+    fn to_i8_lossy(&self) -> crate::I8 {
+        crate::I8::from(I8Native::from_field_lossy(&self.0))
+    }
+
+    /// Cast to I16 with lossy truncation.
+    fn to_i16_lossy(&self) -> crate::I16 {
+        crate::I16::from(I16Native::from_field_lossy(&self.0))
+    }
+
+    /// Cast to I32 with lossy truncation.
+    fn to_i32_lossy(&self) -> crate::I32 {
+        crate::I32::from(I32Native::from_field_lossy(&self.0))
+    }
+
+    /// Cast to I64 with lossy truncation.
+    fn to_i64_lossy(&self) -> crate::I64 {
+        crate::I64::from(I64Native::from_field_lossy(&self.0))
+    }
+
+    /// Cast to I128 with lossy truncation.
+    fn to_i128_lossy(&self) -> crate::I128 {
+        crate::I128::from(I128Native::from_field_lossy(&self.0))
+    }
+
+    // ── dunders ────────────────────────────────────────────────────────────
 
     /// Returns the Field as a string.
     fn __str__(&self) -> String {
