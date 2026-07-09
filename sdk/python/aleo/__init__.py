@@ -15,3 +15,13 @@ from ._scanner_common import (
     RecordNotFoundError as RecordNotFoundError,
     UUIDError as UUIDError,
 )
+
+
+def __getattr__(name: str) -> object:
+    if name == "abi":
+        import importlib
+        mod = importlib.import_module(".abi", __name__)
+        # Cache it so subsequent accesses don't call __getattr__ again
+        globals()["abi"] = mod
+        return mod
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
