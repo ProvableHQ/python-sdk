@@ -93,23 +93,38 @@ class TestAddressParity:
         assert p.plaintext_type == "address"
 
     def test_lossy_casts(self):
+        # Concrete expected values pinned as regression anchors.
+        # These are deterministic derivations from VALID_ADDRESS — computed once
+        # and hardcoded so future refactors cannot silently change the output.
+        # Each lossy cast truncates the 256-bit address encoding to the target
+        # type's bit-width; the exact values were observed on 2026-07-09.
         addr = Address.from_string(VALID_ADDRESS)
-        # These just need to not raise.
         from aleo.mainnet import Scalar, Boolean
+
+        # to_field: address x-coordinate (full precision)
+        assert str(addr.to_field()) == "3501665755452795161867664882580888971213780722176652848275908626939553697821field"
+
+        # to_scalar_lossy: 252-bit truncation into the scalar field
         s = addr.to_scalar_lossy()
         assert isinstance(s, Scalar)
+        assert str(s) == "1692414361119729608374368241820140411006437211776019035159383876815911047197scalar"
+
+        # to_boolean_lossy: least significant bit of the encoding
         b = addr.to_boolean_lossy()
         assert isinstance(b, Boolean)
-        assert addr.to_u8_lossy() is not None
-        assert addr.to_u16_lossy() is not None
-        assert addr.to_u32_lossy() is not None
-        assert addr.to_u64_lossy() is not None
-        assert addr.to_u128_lossy() is not None
-        assert addr.to_i8_lossy() is not None
-        assert addr.to_i16_lossy() is not None
-        assert addr.to_i32_lossy() is not None
-        assert addr.to_i64_lossy() is not None
-        assert addr.to_i128_lossy() is not None
+        assert str(b) == "true"
+
+        # integer lossy casts: truncation to N-bit two's-complement / unsigned
+        assert str(addr.to_u8_lossy()) == "29u8"
+        assert str(addr.to_u16_lossy()) == "53277u16"
+        assert str(addr.to_u32_lossy()) == "2078199837u32"
+        assert str(addr.to_u64_lossy()) == "15564512705944408093u64"
+        assert str(addr.to_u128_lossy()) == "34922309281260474190457069241198628893u128"
+        assert str(addr.to_i8_lossy()) == "29i8"
+        assert str(addr.to_i16_lossy()) == "-12259i16"
+        assert str(addr.to_i32_lossy()) == "2078199837i32"
+        assert str(addr.to_i64_lossy()) == "-2882231367765143523i64"
+        assert str(addr.to_i128_lossy()) == "34922309281260474190457069241198628893i128"
 
 
 # ---------------------------------------------------------------------------
@@ -212,30 +227,44 @@ class TestPrivateKeyCiphertext:
         assert ct1 != ct2
 
     def test_interop_with_python_encryptor(self):
-        """Python Encryptor and Rust PrivateKeyCiphertext must interoperate.
+        """Cross-scheme decryption must work in BOTH directions.
 
-        The Python Encryptor uses symmetric field-based encryption (Poseidon2
-        over the seed field element).  PrivateKeyCiphertext uses the same
-        underlying scheme, so both sides should be able to round-trip through
-        the other.
+        The Python Encryptor and Rust PrivateKeyCiphertext implement the same
+        underlying scheme (Poseidon2 hash-based symmetric encryption over the
+        seed field element).  True scheme identity means each side can decrypt
+        what the other encrypted — string-format compatibility alone is not
+        sufficient.  Equality of the recovered PrivateKey is the only proof.
         """
-        from aleo.mainnet import PrivateKeyCiphertext
+        from aleo.mainnet import Ciphertext, PrivateKeyCiphertext
 
+        SECRET = CIPHERTEXT_SECRET
         pk = PrivateKey.random()
 
-        # Encrypt in Python, decrypt in Rust.
-        ct_py = Encryptor.encrypt_private_key_with_secret(pk, CIPHERTEXT_SECRET)
-        ct_rust = PrivateKeyCiphertext.from_string(str(ct_py))
-        pk_rust = ct_rust.decrypt_to_private_key(CIPHERTEXT_SECRET)
-        assert pk == pk_rust
+        # --- Direction A: encrypt with pure-Python Encryptor, decrypt with Rust ---
+        # The Python Encryptor derives its symmetric key independently from the
+        # seed field via Network.hash_psd2.  Parsing the ciphertext string into
+        # PrivateKeyCiphertext and calling decrypt_to_private_key with the same
+        # secret must recover the identical original key.
+        ct_py = Encryptor.encrypt_private_key_with_secret(pk, SECRET)
+        ct_rust_parsed = PrivateKeyCiphertext.from_string(str(ct_py))
+        pk_from_rust_decrypt = ct_rust_parsed.decrypt_to_private_key(SECRET)
+        assert pk_from_rust_decrypt == pk, (
+            "Direction A failed: Rust could not decrypt a Python-encrypted ciphertext. "
+            "This means the two implementations use different encryption schemes."
+        )
 
-        # Encrypt in Rust, decrypt in Python.
-        # The Python Encryptor uses aleo.Ciphertext, so convert via string.
-        from aleo.mainnet import Ciphertext
-        ct_rust2 = PrivateKeyCiphertext.encrypt_private_key(pk, CIPHERTEXT_SECRET)
-        ct_as_ciphertext = Ciphertext.from_string(str(ct_rust2))
-        pk_py = Encryptor.decrypt_private_key_with_secret(ct_as_ciphertext, CIPHERTEXT_SECRET)
-        assert pk == pk_py
+        # --- Direction B: encrypt with Rust PrivateKeyCiphertext, decrypt with Python ---
+        # The Rust PrivateKeyCiphertext.encrypt_private_key derives its symmetric
+        # key independently.  Converting to a Ciphertext via string round-trip and
+        # decrypting with Encryptor.decrypt_private_key_with_secret must recover
+        # the identical original key.
+        ct_rust = PrivateKeyCiphertext.encrypt_private_key(pk, SECRET)
+        ct_py_parsed = Ciphertext.from_string(str(ct_rust))
+        pk_from_py_decrypt = Encryptor.decrypt_private_key_with_secret(ct_py_parsed, SECRET)
+        assert pk_from_py_decrypt == pk, (
+            "Direction B failed: Python could not decrypt a Rust-encrypted ciphertext. "
+            "This means the two implementations use different encryption schemes."
+        )
 
 
 # ---------------------------------------------------------------------------
