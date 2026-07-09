@@ -5,10 +5,10 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Union
+from typing import Any, Union
 
 
-def generate_abi(program: object, network: str = "mainnet") -> dict:
+def generate_abi(program: object, network: str = "mainnet") -> dict[str, Any]:
     """Generate an ABI dict for an Aleo program.
 
     Args:
@@ -24,7 +24,7 @@ def generate_abi(program: object, network: str = "mainnet") -> dict:
         ValueError: If the program name cannot be determined.
     """
     try:
-        import aleo_abi as _aleo_abi
+        import aleo_abi as _aleo_abi  # pyright: ignore[reportMissingImports]
     except ImportError:
         raise ImportError(
             "The aleo-abi package is required for ABI generation. "
@@ -33,8 +33,8 @@ def generate_abi(program: object, network: str = "mainnet") -> dict:
 
     # Duck-type: if it has .source and .id, treat as Program object
     if hasattr(program, "source") and hasattr(program, "id"):
-        bytecode: str = program.source
-        name: str = str(program.id)
+        bytecode: str = getattr(program, "source")
+        name: str = str(getattr(program, "id"))
     elif isinstance(program, str):
         bytecode = program
         # Parse name from `program X.aleo;` line
@@ -55,9 +55,9 @@ def generate_abi(program: object, network: str = "mainnet") -> dict:
 
 
 def check_compatibility(
-    candidate: Union[dict, str],
-    standard: Union[dict, str],
-) -> list:
+    candidate: Union[dict[str, Any], str],
+    standard: Union[dict[str, Any], str],
+) -> list[str]:
     """Check whether a candidate ABI is compatible with a standard ABI.
 
     Args:
@@ -71,7 +71,7 @@ def check_compatibility(
         ImportError: If the aleo-abi package is not installed.
     """
     try:
-        import aleo_abi as _aleo_abi
+        import aleo_abi as _aleo_abi  # pyright: ignore[reportMissingImports]
     except ImportError:
         raise ImportError(
             "The aleo-abi package is required for compatibility checking. "
@@ -88,4 +88,5 @@ def check_compatibility(
     else:
         standard_json = standard
 
-    return _aleo_abi.check_compatibility(candidate_json, standard_json)
+    result: list[str] = _aleo_abi.check_compatibility(candidate_json, standard_json)
+    return result
