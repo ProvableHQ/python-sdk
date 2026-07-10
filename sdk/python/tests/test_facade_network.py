@@ -15,7 +15,11 @@ import responses as resp_lib
 
 from aleo import Aleo, HTTPProvider
 from aleo.facade.network import NetworkModule
-from aleo.facade.errors import TransactionConfirmationTimeout, AleoNetworkError
+from aleo.facade.errors import (
+    TransactionConfirmationTimeout,
+    TransactionNotFound,
+    AleoNetworkError,
+)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -269,6 +273,26 @@ def test_get_confirmed_transaction() -> None:
     result = a.network.get_confirmed_transaction(TX_ID)
     assert result["status"] == "accepted"
     assert f"/transaction/confirmed/{TX_ID}" in resp_lib.calls[0].request.url
+
+
+@resp_lib.activate
+def test_get_transaction_missing_raises_not_found() -> None:
+    resp_lib.add(resp_lib.GET, f"{HOST}/transaction/{TX_ID}", status=404)
+    a = make_client()
+    with pytest.raises(TransactionNotFound) as exc_info:
+        a.network.get_transaction(TX_ID)
+    assert exc_info.value.tx_id == TX_ID
+
+
+@resp_lib.activate
+def test_get_confirmed_transaction_missing_raises_not_found() -> None:
+    resp_lib.add(
+        resp_lib.GET, f"{HOST}/transaction/confirmed/{TX_ID}", status=404
+    )
+    a = make_client()
+    with pytest.raises(TransactionNotFound) as exc_info:
+        a.network.get_confirmed_transaction(TX_ID)
+    assert exc_info.value.tx_id == TX_ID
 
 
 @resp_lib.activate

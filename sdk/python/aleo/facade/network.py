@@ -10,7 +10,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from .errors import TransactionConfirmationTimeout
+from .._client_common import AleoNetworkError
+from .errors import TransactionConfirmationTimeout, TransactionNotFound
 
 
 class NetworkModule:
@@ -282,8 +283,18 @@ class NetworkModule:
         -------
         Any
             Transaction data dict.
+
+        Raises
+        ------
+        TransactionNotFound
+            If no transaction exists for *tx_id* (a 404 from the node).
         """
-        return self._nc().get_transaction(tx_id)
+        try:
+            return self._nc().get_transaction(tx_id)
+        except AleoNetworkError as exc:
+            if exc.status == 404:
+                raise TransactionNotFound(tx_id) from exc
+            raise
 
     def get_confirmed_transaction(self, tx_id: str) -> Any:
         """Return the confirmed transaction for *tx_id*.
@@ -297,8 +308,18 @@ class NetworkModule:
         -------
         Any
             Confirmed transaction data dict.
+
+        Raises
+        ------
+        TransactionNotFound
+            If no confirmed transaction exists for *tx_id* (a 404 from the node).
         """
-        return self._nc().get_confirmed_transaction(tx_id)
+        try:
+            return self._nc().get_confirmed_transaction(tx_id)
+        except AleoNetworkError as exc:
+            if exc.status == 404:
+                raise TransactionNotFound(tx_id) from exc
+            raise
 
     def get_transactions(self, block_height: int) -> list[Any]:
         """Return all transactions in the block at *block_height*.
