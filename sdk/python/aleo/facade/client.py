@@ -124,6 +124,8 @@ class Aleo:
             self._client.get_latest_height()
             return True
         except Exception:
+            # Reachability probe: any failure (network, socket, SSL, DNS, HTTP)
+            # means "not connected" — matches web3.py's is_connected semantics.
             return False
 
     # ── Balance ────────────────────────────────────────────────────────────

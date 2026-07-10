@@ -9,7 +9,16 @@ from urllib.parse import urlparse
 _T = TypeVar("_T")
 
 
-class AleoNetworkError(Exception):
+class AleoError(Exception):
+    """Base class for every error raised by the SDK.
+
+    Defined in this lowest-level shared module so the network/scanner error
+    types and the facade error types can all subclass it — a single
+    ``except AleoError`` catches everything.
+    """
+
+
+class AleoNetworkError(AleoError):
     """Raised when an Aleo network API call fails."""
 
     def __init__(self, message: str, status: int | None = None) -> None:
@@ -17,7 +26,7 @@ class AleoNetworkError(Exception):
         self.status = status
 
 
-class AleoProvingError(Exception):
+class AleoProvingError(AleoError):
     """Raised when DPS proving fails (non-retried errors)."""
 
     def __init__(self, message: str, status: int | None = None) -> None:

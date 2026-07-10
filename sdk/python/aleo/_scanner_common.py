@@ -3,12 +3,14 @@ from __future__ import annotations
 
 from typing import Any, TypedDict
 
+from ._client_common import AleoError
+
 
 # ---------------------------------------------------------------------------
-# Error types
+# Error types (all subclass AleoError so `except AleoError` catches them)
 # ---------------------------------------------------------------------------
 
-class RecordScannerRequestError(Exception):
+class RecordScannerRequestError(AleoError):
     """Raised when a RecordScanner HTTP request returns a non-2xx status."""
 
     def __init__(self, message: str, status: int) -> None:
@@ -16,11 +18,11 @@ class RecordScannerRequestError(Exception):
         self.status = status
 
 
-class DecryptionNotEnabledError(Exception):
+class DecryptionNotEnabledError(AleoError):
     """Raised when decryption is required but decrypt_enabled=False."""
 
 
-class ViewKeyNotStoredError(Exception):
+class ViewKeyNotStoredError(AleoError):
     """Raised when a view key is needed but not stored for a given UUID."""
 
     def __init__(self, message: str, uuid: str | None = None) -> None:
@@ -28,11 +30,11 @@ class ViewKeyNotStoredError(Exception):
         self.uuid = uuid
 
 
-class RecordNotFoundError(Exception):
+class RecordNotFoundError(AleoError):
     """Raised when no matching record is found."""
 
 
-class UUIDError(Exception):
+class UUIDError(AleoError):
     """Raised for UUID resolution or validation failures."""
 
     def __init__(

@@ -7,7 +7,7 @@ a single ``except AleoError``.
 """
 from __future__ import annotations
 
-from .._client_common import AleoNetworkError, AleoProvingError
+from .._client_common import AleoError, AleoNetworkError, AleoProvingError
 from .._scanner_common import (
     RecordScannerRequestError,
     DecryptionNotEnabledError,
@@ -15,10 +15,6 @@ from .._scanner_common import (
     RecordNotFoundError,
     UUIDError,
 )
-
-
-class AleoError(Exception):
-    """Base class for all Aleo facade errors."""
 
 
 class TransactionNotFound(AleoError):
@@ -65,8 +61,8 @@ __all__ = [
     "ProgramNotFound",
     "ExecutionError",
     "TransactionConfirmationTimeout",
-    # Re-exported internal errors — all catchable as AleoError via the
-    # facade's conversion helpers in _facade_common.
+    # Re-exported internal errors — they subclass AleoError (defined in
+    # _client_common), so `except AleoError` genuinely catches them.
     "AleoNetworkError",
     "AleoProvingError",
     "RecordScannerRequestError",

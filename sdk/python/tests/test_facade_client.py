@@ -400,13 +400,24 @@ def test_except_aleo_error_catches_all_subclasses() -> None:
             pytest.fail(f"{type(exc).__name__} was not caught by 'except AleoError'")
 
 
-def test_internal_errors_importable_from_facade() -> None:
-    """AleoNetworkError and AleoProvingError are importable via the facade."""
-    from aleo.facade.errors import AleoNetworkError as ANE, AleoProvingError as APE
-    # They are NOT subclasses of AleoError (they predate the facade), but
-    # they are importable from the facade's error module.
-    assert issubclass(ANE, Exception)
-    assert issubclass(APE, Exception)
+def test_internal_errors_are_aleo_errors() -> None:
+    """Network/proving/scanner errors subclass AleoError so one except catches all."""
+    from aleo.facade.errors import (
+        AleoError,
+        AleoNetworkError,
+        AleoProvingError,
+        RecordScannerRequestError,
+        UUIDError,
+    )
+    for err in (AleoNetworkError, AleoProvingError, RecordScannerRequestError, UUIDError):
+        assert issubclass(err, AleoError), f"{err.__name__} must subclass AleoError"
+    # A raised network error is caught by `except AleoError`.
+    try:
+        raise AleoNetworkError("boom", status=503)
+    except AleoError:
+        pass
+    else:
+        pytest.fail("AleoNetworkError not caught by 'except AleoError'")
 
 
 # ---------------------------------------------------------------------------
