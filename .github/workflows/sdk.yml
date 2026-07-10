@@ -60,10 +60,18 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Build wheel
+      # Build BOTH network extension modules so aleo.mainnet AND aleo.testnet
+      # resolve. maturin emits one cdylib per invocation (named by pyproject
+      # module-name), so we build mainnet, then build testnet with the
+      # module-name overridden and merge its .so into the aleo package.
+      - name: Build both-network wheel
         run: |
           pip install maturin
           maturin build --release --features mainnet --out dist
+          sed -i.bak 's/module-name = "aleo._aleolib_mainnet"/module-name = "aleo._aleolib_testnet"/' pyproject.toml
+          maturin build --release --no-default-features --features testnet --out dist-testnet
+          mv pyproject.toml.bak pyproject.toml
+          python ../.github/scripts/merge_testnet_so.py dist dist-testnet
       - name: Install wheel + test deps
         run: |
           pip install --find-links dist aleo

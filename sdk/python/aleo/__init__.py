@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from . import mainnet as mainnet
+from . import testnet as testnet
 from .encryptor import *
 from .network_client import AleoNetworkClient as AleoNetworkClient
 from .async_network_client import AsyncAleoNetworkClient as AsyncAleoNetworkClient

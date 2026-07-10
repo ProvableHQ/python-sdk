@@ -512,7 +512,10 @@ class AleoNetworkClient:
         # this is what delegate()/callers pass). Only a serialized string needs
         # parsing; import lazily so an object never forces the module load.
         if isinstance(proving_request, str):
-            from .mainnet import ProvingRequest  # type: ignore[attr-defined]
+            if self._network == "testnet":
+                from .testnet import ProvingRequest  # type: ignore[attr-defined]
+            else:
+                from .mainnet import ProvingRequest  # type: ignore[attr-defined]
             pr_obj = ProvingRequest.from_string(proving_request)
         else:
             pr_obj = proving_request
