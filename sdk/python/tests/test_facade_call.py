@@ -251,8 +251,10 @@ def test_private_fee_without_record_provider_errors() -> None:
     a = _client()
     acct = _account(a)
     bc = _bound(a, acct)
-    # record_provider is absent in F5.
-    assert getattr(a, "record_provider", None) is None
+    # As of F6 record_provider defaults to aleo.records; the "no provider"
+    # error path requires the user to have explicitly cleared it.
+    a.record_provider = None
+    assert a.record_provider is None
 
     # Reach the fee-sourcing directly (avoids proving): resolve a private fee
     # record with no provider set.

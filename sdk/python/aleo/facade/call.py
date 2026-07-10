@@ -260,8 +260,9 @@ class BoundCall(PreparedCall):
 
         Public by default (``authorize_fee_public``, base fee from
         ``process.execution_cost``).  Private when *fee_record* is supplied or
-        *private_fee* is requested — the record is fetched from
-        ``aleo.record_provider`` (F6), which may be absent in F5.
+        *private_fee* is requested — an explicit *fee_record* wins, otherwise the
+        record is auto-sourced from ``aleo.record_provider`` (which defaults to
+        ``aleo.records``) for at least ``base_fee + priority_fee`` microcredits.
         """
         pk = self._resolve_private_key(account)
         process = self._client.process
@@ -281,7 +282,9 @@ class BoundCall(PreparedCall):
                     detail=str(exc),
                 ) from exc
 
-        record = self._resolve_fee_record(fee_record)
+        record = self._resolve_fee_record(
+            fee_record, min_microcredits=base_fee + int(priority_fee)
+        )
         try:
             return process.authorize_fee_private(
                 pk, record, base_fee, int(priority_fee), execution_id
@@ -292,12 +295,16 @@ class BoundCall(PreparedCall):
                 detail=str(exc),
             ) from exc
 
-    def _resolve_fee_record(self, fee_record: Any) -> Any:
+    def _resolve_fee_record(
+        self, fee_record: Any, *, min_microcredits: int | None = None
+    ) -> Any:
         """Resolve an unspent credits :class:`RecordPlaintext` for a private fee.
 
         A supplied *fee_record* (string or object) wins; otherwise the client's
-        ``record_provider`` (F6) is consulted.  Raises a clear facade error when
-        a private fee is requested but no record/provider is available.
+        ``record_provider`` (``aleo.record_provider``, which defaults to
+        ``aleo.records``) is asked for an unspent ``credits.aleo``/``credits``
+        record covering *min_microcredits*.  Raises a clear facade error when a
+        private fee is requested but no record can be sourced.
         """
         net = self._net()
         if fee_record is not None:
@@ -309,18 +316,23 @@ class BoundCall(PreparedCall):
         if provider is None:
             raise ExecutionError(
                 "A private fee was requested but no record provider is "
-                "configured. Pass fee_record=<credits record> explicitly, or "
-                "register a record provider (aleo.record_provider) once F6 "
-                "lands, or omit private_fee to pay a public fee."
+                "configured. Pass fee_record=<credits record> explicitly, set "
+                "aleo.record_provider, or omit private_fee to pay a public fee."
             )
-        # F6's provider API: a callable/handle returning an unspent credits
-        # record.  We deliberately do not guess its exact shape here (F5 only
-        # consumes it); F6 will supply the concrete method.
-        raise ExecutionError(
-            "A record provider is configured but private-fee record selection "
-            "is not available until F6. Pass fee_record=<credits record> "
-            "explicitly for now."
+
+        record = provider.get_unspent(
+            program="credits.aleo",
+            record="credits",
+            min_microcredits=min_microcredits,
         )
+        if record is None:
+            amount = "the fee" if min_microcredits is None else f"{min_microcredits} microcredits"
+            raise ExecutionError(
+                f"No unspent credits record covering {amount} was found via "
+                "the record provider. Fund the account, register it for "
+                "scanning (aleo.records.register), or pass fee_record= explicitly."
+            )
+        return record
 
     # ── Verb: build_transaction / prove (full ladder, local prove) ──────────
 

@@ -54,6 +54,12 @@ class Aleo:
         self.network: NetworkModule = NetworkModule(self)
         from .programs import ProgramsModule
         self.programs: ProgramsModule = ProgramsModule(self)
+        from .records import RecordsModule
+        self.records: RecordsModule = RecordsModule(self)
+        # The record provider used to auto-source records (e.g. a private-fee
+        # credits record). Defaults to aleo.records; assign a custom
+        # RecordProvider (or None to disable auto-sourcing) at will.
+        self._record_provider: Any = self.records
 
     # ── Escape hatches ─────────────────────────────────────────────────────
 
@@ -94,6 +100,24 @@ class Aleo:
     @default_account.setter
     def default_account(self, account: Any) -> None:
         self._default_account = account
+
+    # ── Record provider ──────────────────────────────────────────────────────
+
+    @property
+    def record_provider(self) -> Any:
+        """The :class:`~aleo._facade_common.RecordProvider` used to auto-source records.
+
+        Defaults to :attr:`records` (``aleo.records``), which wraps a delegated
+        record scanner.  Assign a custom provider (e.g. a self-hosted scanner
+        wrapper) to keep your view key private, or set it to ``None`` to disable
+        automatic record sourcing (private fees then require an explicit
+        ``fee_record``).
+        """
+        return self._record_provider
+
+    @record_provider.setter
+    def record_provider(self, provider: Any) -> None:
+        self._record_provider = provider
 
     # ── Network identity ───────────────────────────────────────────────────
 
