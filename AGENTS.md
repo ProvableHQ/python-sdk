@@ -61,12 +61,30 @@ addopts if you invoke pytest from the repo root.
 
 ## Delegated services (DPS + record scanner)
 
-Delegated proving and the hosted record scanner authenticate with a consumer id
-+ API key from the Provable API (`POST /consumers`, then `POST /jwts/<id>` with
-`X-Provable-API-Key`; JWT returns in the `Authorization` header). Tests read
-`ALEO_CONSUMER_ID` and `ALEO_DPS_API_KEY` from the environment; the client mints
-and refreshes JWTs automatically. Prover host: `accelerate.provable.com`
-(sandbox: `accelerate-sandbox.provable.com`). API/JWT host: `api.provable.com`.
+**The JWT auth *and* the delegated-proving endpoints both live on the Provable
+explorer API** (`https://api.explorer.provable.com/v2`, per network under the
+`/v2` base) — NOT on a separate `accelerate.provable.com` host. Any origin
+derivation for auth/proving must keep the `/v2` base; stripping to
+`scheme://host` yields 404s (this was a real bug — the JWT refresh posted to
+`https://api.explorer.provable.com/jwts/<id>` and 404'd).
+
+Documented endpoints (source of truth — link before changing the client):
+- Register → API key: `POST /consumers` — https://docs.provable.com/docs/api/services/get-auth-register
+- Issue/refresh JWT: `POST /jwts/:consumerId` (send `X-Provable-API-Key`; JWT
+  returns in the `Authorization: Bearer …` header) — https://docs.provable.com/docs/api/services/issue-jwt
+- Ephemeral prover pubkey: `GET /pubkey` — returns an X25519 key + key id and a
+  `Set-Cookie` session; JWT required, single-use per proving request; non-browser
+  clients must echo `Set-Cookie` back as `Cookie`. https://docs.provable.com/docs/api/services/get-prove-pubkey
+- Submit proving (sealed box): `POST /prove/encrypted` — JWT + the `/pubkey`
+  session cookie; SDK retries 500/503. https://docs.provable.com/docs/api/services/post-prove-encrypted
+
+Tests read `ALEO_CONSUMER_ID` / `ALEO_DPS_API_KEY` from the env; the client mints
+and refreshes JWTs automatically.
+
+**Known SDK↔docs drift to reconcile:** the client currently posts to
+`/prove/authorization` / `/prove/request` (not the documented `GET /pubkey`
+handshake + `POST /prove/encrypted`), and its JWT origin drops the `/v2` base.
+Fix these against the docs above.
 
 ## Working process
 
