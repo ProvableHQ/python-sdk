@@ -11,6 +11,8 @@ from typing import Any
 from ..network_client import AleoNetworkClient
 from .._client_common import DEFAULT_HOST, DEFAULT_NETWORK
 
+# AsyncAleoNetworkClient imported lazily to avoid pulling httpx at import time.
+
 _VALID_NETWORKS = frozenset({"mainnet", "testnet"})
 
 
@@ -84,6 +86,18 @@ class HTTPProvider:
     def _build_client(self) -> AleoNetworkClient:
         """Construct and return an :class:`~aleo.network_client.AleoNetworkClient`."""
         return AleoNetworkClient(
+            self._url,
+            network=self._network,
+            api_key=self._api_key,
+            prover_uri=self._prover_uri,
+            headers=self._headers,
+            transport=self._transport,
+        )
+
+    def _build_async_client(self) -> "Any":
+        """Construct and return an :class:`~aleo.async_network_client.AsyncAleoNetworkClient`."""
+        from ..async_network_client import AsyncAleoNetworkClient
+        return AsyncAleoNetworkClient(
             self._url,
             network=self._network,
             api_key=self._api_key,

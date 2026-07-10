@@ -5,6 +5,7 @@ from .client import Aleo as Aleo
 from .provider import HTTPProvider as HTTPProvider
 from .account import AccountModule as AccountModule
 from .network import NetworkModule as NetworkModule
+from .async_client import AsyncAleo as AsyncAleo
 from .errors import (
     AleoError as AleoError,
     TransactionNotFound as TransactionNotFound,
@@ -23,6 +24,7 @@ from .errors import (
 
 __all__ = [
     "Aleo",
+    "AsyncAleo",
     "HTTPProvider",
     "AccountModule",
     "NetworkModule",

@@ -17,8 +17,9 @@ from ._scanner_common import (
     UUIDError as UUIDError,
 )
 
-# Facade exports (F1)
+# Facade exports (F1 + F7)
 from .facade import Aleo as Aleo
+from .facade import AsyncAleo as AsyncAleo
 from .facade import HTTPProvider as HTTPProvider
 from .facade.errors import (
     AleoError as AleoError,
