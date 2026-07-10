@@ -50,6 +50,8 @@ class Aleo:
         # Namespaced modules — constructed eagerly (they hold no state of their own)
         from .account import AccountModule
         self.account: AccountModule = AccountModule(self)
+        from .network import NetworkModule
+        self.network: NetworkModule = NetworkModule(self)
 
     # ── Escape hatches ─────────────────────────────────────────────────────
 
