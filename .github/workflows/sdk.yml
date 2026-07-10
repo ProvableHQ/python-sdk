@@ -103,10 +103,17 @@ jobs:
         with:
           path: ~/.aleo
           key: aleo-parameters-${{ runner.os }}-v1
-      - name: Build wheel
+      # Build BOTH network extensions so the testnet surface is exercised here
+      # too (not just in the OS-matrix lane). Deps are cached, so the second
+      # feature build is a warm recompile, not a cold one.
+      - name: Build both-network wheel
         run: |
           pip install maturin
           maturin build --release --features mainnet --out dist
+          sed -i.bak 's/module-name = "aleo._aleolib_mainnet"/module-name = "aleo._aleolib_testnet"/' pyproject.toml
+          maturin build --release --no-default-features --features testnet --out dist-testnet
+          mv pyproject.toml.bak pyproject.toml
+          python ../.github/scripts/merge_testnet_so.py dist dist-testnet
       - name: Install wheel + test deps
         run: |
           pip install --find-links dist aleo
@@ -115,6 +122,11 @@ jobs:
       # would prove twice, so they run in a single worker on purpose.
       - name: pytest (proving suite)
         run: python -m pytest python/tests -v -m slow
+      # test_testnet.py is not marked slow, so `-m slow` deselects it; run the
+      # testnet surface/ID/derivation tests explicitly against the two-network
+      # wheel built above.
+      - name: pytest (testnet surface + KATs)
+        run: python -m pytest python/tests/test_testnet.py -v
 
   test-abi:
     name: Test (aleo-abi package)
@@ -142,10 +154,18 @@ jobs:
             echo "::error::sdk/Cargo.lock references dev_skip_checks — leo build graph leaked into the main crate"
             exit 1
           fi
-      - name: Build both wheels
+      # Build the aleo two-network wheel (mainnet + testnet merged) plus the
+      # aleo-abi wheel. The testnet .so must be spliced into the aleo wheel
+      # BEFORE the aleo-abi wheel lands in dist, so the merge sees only the
+      # aleo wheel.
+      - name: Build wheels (aleo two-network + aleo-abi)
         run: |
           pip install maturin pytest requests
           maturin build --release --features mainnet --manifest-path sdk/Cargo.toml --out dist
+          sed -i.bak 's/module-name = "aleo._aleolib_mainnet"/module-name = "aleo._aleolib_testnet"/' sdk/pyproject.toml
+          maturin build --release --no-default-features --features testnet --manifest-path sdk/Cargo.toml --out dist-testnet
+          mv sdk/pyproject.toml.bak sdk/pyproject.toml
+          python .github/scripts/merge_testnet_so.py dist dist-testnet
           maturin build --release --manifest-path sdk-abi/Cargo.toml --out dist
       - name: Install wheels
         run: |
@@ -161,3 +181,8 @@ jobs:
         run: |
           cd sdk
           python -m pytest python/tests/test_abi_hook.py -v
+      # Exercise the testnet extension in this lane too (it's now built above).
+      - name: pytest (testnet surface + KATs)
+        run: |
+          cd sdk
+          python -m pytest python/tests/test_testnet.py -v
