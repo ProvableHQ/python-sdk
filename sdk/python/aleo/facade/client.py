@@ -47,6 +47,9 @@ class Aleo:
         self._client: Any = provider._build_client()  # pyright: ignore[reportPrivateUsage]
         self._process: Any = None  # lazy — loaded on first access
         self._default_account: Any = None
+        # Namespaced modules — constructed eagerly (they hold no state of their own)
+        from .account import AccountModule
+        self.account: AccountModule = AccountModule(self)
 
     # ── Escape hatches ─────────────────────────────────────────────────────
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from .client import Aleo as Aleo
 from .provider import HTTPProvider as HTTPProvider
+from .account import AccountModule as AccountModule
 from .errors import (
     AleoError as AleoError,
     TransactionNotFound as TransactionNotFound,
@@ -22,6 +23,7 @@ from .errors import (
 __all__ = [
     "Aleo",
     "HTTPProvider",
+    "AccountModule",
     "AleoError",
     "TransactionNotFound",
     "ProgramNotFound",
