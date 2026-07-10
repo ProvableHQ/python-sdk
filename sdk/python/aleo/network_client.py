@@ -520,7 +520,17 @@ class AleoNetworkClient:
         endpoint = "/prove/request" if kind == "request" else "/prove/authorization"
 
         def _send_once() -> dict[str, Any]:
-            # Fetch pubkey + session cookie
+            # Fetch the ephemeral pubkey + the prover's session/affinity cookie.
+            # The prover is load-balanced and holds the ephemeral X25519 private
+            # key ONLY on the backend that served this /pubkey, so the follow-up
+            # /prove POST MUST land on that same backend. The shared
+            # requests.Session persists the affinity cookie in its jar across
+            # both calls; we ALSO forward the parsed cookies explicitly via the
+            # ``cookies=`` kwarg so a custom transport (which may not share a jar)
+            # keeps affinity too. We do NOT hand-build a ``Cookie`` header from
+            # ``set-cookie`` — that string comma-joins multiple cookies and
+            # carries attributes (Path/Secure/…), and setting it manually makes
+            # requests SKIP the jar, silently dropping affinity.
             pk_resp = self._http("GET", f"{prover_uri}/pubkey", headers=hdrs)
             if not pk_resp.ok:
                 raise AleoNetworkError(
@@ -530,22 +540,19 @@ class AleoNetworkClient:
             pk_data = pk_resp.json()
             key_id = pk_data["key_id"]
             public_key = pk_data["public_key"]
-            cookie = pk_resp.headers.get("set-cookie")
 
             # Encrypt
             pr_bytes = bytes(pr_obj.bytes())
             ciphertext = encrypt_proving_request(public_key, pr_bytes)
 
             payload = json.dumps({"key_id": key_id, "ciphertext": ciphertext})
-            post_hdrs = dict(hdrs)
-            if cookie:
-                post_hdrs["Cookie"] = cookie
 
             resp = self._http(
                 "POST",
                 f"{prover_uri}{endpoint}",
                 data=payload.encode(),
-                headers=post_hdrs,
+                headers=hdrs,
+                cookies=pk_resp.cookies,
             )
 
             if resp.status_code == 200:

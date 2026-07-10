@@ -500,6 +500,15 @@ class AsyncAleoNetworkClient:
         endpoint = "/prove/request" if kind == "request" else "/prove/authorization"
 
         async def _send_once() -> dict[str, Any]:
+            # Prover affinity: the ephemeral X25519 private key lives ONLY on the
+            # backend that served this /pubkey, so /prove must hit the same one.
+            # The persistent httpx.AsyncClient owns a cookie jar that captures
+            # the affinity cookie from this GET and auto-attaches it to the POST
+            # below — including through a custom transport, which httpx wraps at
+            # the client level (the jar sits above the transport). So we rely on
+            # the jar rather than hand-building a Cookie header from set-cookie
+            # (which comma-joins cookies, carries attributes, and bypasses the
+            # jar — silently dropping affinity).
             pk_resp = await self._client.get(f"{prover_uri}/pubkey", headers=hdrs)
             if not pk_resp.is_success:
                 raise AleoNetworkError(
@@ -509,19 +518,15 @@ class AsyncAleoNetworkClient:
             pk_data = pk_resp.json()
             key_id = pk_data["key_id"]
             public_key = pk_data["public_key"]
-            cookie = pk_resp.headers.get("set-cookie")
 
             pr_bytes = bytes(pr_obj.bytes())
             ciphertext = encrypt_proving_request(public_key, pr_bytes)
             payload = json.dumps({"key_id": key_id, "ciphertext": ciphertext})
-            post_hdrs = dict(hdrs)
-            if cookie:
-                post_hdrs["Cookie"] = cookie
 
             resp = await self._client.post(
                 f"{prover_uri}{endpoint}",
                 content=payload.encode(),
-                headers=post_hdrs,
+                headers=hdrs,
             )
 
             if resp.status_code == 200:
