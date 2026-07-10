@@ -58,7 +58,7 @@ from aleo import (
 pytestmark = pytest.mark.live
 
 _ENDPOINT = os.environ.get(
-    "ALEO_E2E_ENDPOINT", "https://api.explorer.provable.com/v2"
+    "ALEO_E2E_ENDPOINT", "https://api.provable.com/v2"
 )
 _NETWORK = "testnet"
 

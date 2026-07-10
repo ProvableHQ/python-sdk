@@ -21,12 +21,16 @@ Env vars
     skipped when unset.
 ``ALEO_E2E_ENDPOINT``
     REST endpoint (versioned API root).  Default
-    ``https://api.explorer.provable.com/v2``.
+    ``https://api.provable.com/v2``.
 ``ALEO_E2E_API_KEY`` / ``ALEO_E2E_CONSUMER_ID``
     DPS / hosted-scanner credentials.  Tests needing them skip when unset.
 ``ALEO_E2E_PROVER_URI``
-    Optional explicit DPS prover base URI (without the network suffix).  When
-    unset the endpoint is used as the prover base.
+    DPS prover base URI (without the ``/{network}`` suffix — the client appends
+    it, mirroring the TS SDK's ``proverUri + "/{network}"``).  REQUIRED for the
+    delegated-proving tests: the prover is a *distinct service host* from the
+    read/JWT API (``api.provable.com``), so there is no sensible fallback — the
+    ``pubkey``/``prove`` handshake 404s against the read node.  Tests needing it
+    skip when unset.
 
 DPS credential wiring (mirrors ``AleoNetworkClient.submit_proving_request``):
 ``api_key`` and ``prover_uri`` are passed through the :class:`HTTPProvider`
@@ -57,7 +61,7 @@ pytestmark = pytest.mark.live
 
 _PRIVATE_KEY = os.environ.get("ALEO_E2E_PRIVATE_KEY")
 _ENDPOINT = os.environ.get(
-    "ALEO_E2E_ENDPOINT", "https://api.explorer.provable.com/v2"
+    "ALEO_E2E_ENDPOINT", "https://api.provable.com/v2"
 )
 _API_KEY = os.environ.get("ALEO_E2E_API_KEY")
 _CONSUMER_ID = os.environ.get("ALEO_E2E_CONSUMER_ID")
@@ -73,12 +77,6 @@ if _PRIVATE_KEY is None:
     )
 
 _NETWORK = "testnet"
-
-# A well-known burn/hole address on Aleo (all-zero group).  Sending 1
-# microcredit here keeps the test cheap and side-effect-free on our own balance
-# accounting; using self would also be fine.  transfer_public is public so no
-# record is consumed.
-_BURN_ADDRESS = "aleo1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqcguqrn"
 
 
 # ── Inline retry helper (mirrors _prepare_with_retry in test_proving.py) ─────
@@ -131,7 +129,7 @@ def _dps_client() -> Aleo:
         _ENDPOINT,
         network=_NETWORK,
         api_key=_API_KEY,
-        prover_uri=_PROVER_URI,  # None ⇒ prover base falls back to the endpoint
+        prover_uri=_PROVER_URI,  # distinct prover host; gated non-None by skipif
     )
     aleo = Aleo(provider)
     # consumer_id is not a provider field; wire it where the DPS path reads it.
@@ -143,8 +141,8 @@ def _dps_client() -> Aleo:
 
 
 @pytest.mark.skipif(
-    _API_KEY is None or _CONSUMER_ID is None,
-    reason="ALEO_E2E_API_KEY / ALEO_E2E_CONSUMER_ID not set — DPS creds required.",
+    _API_KEY is None or _CONSUMER_ID is None or _PROVER_URI is None,
+    reason="ALEO_E2E_API_KEY / ALEO_E2E_CONSUMER_ID / ALEO_E2E_PROVER_URI not set — DPS creds + prover host required.",
 )
 def test_delegate_transfer_public_live() -> None:
     """REAL delegated proving of a tiny ``credits.aleo/transfer_public``.
@@ -162,7 +160,9 @@ def test_delegate_transfer_public_live() -> None:
     # meaningful amount.  Fetch the deployed program so inputs are validated
     # against the real function signature.
     program = aleo.programs.get("credits.aleo")
-    bound = program.functions.transfer_public(_BURN_ADDRESS, 1)
+    # Transfer 1 microcredit to self — a valid recipient; the fee master pays,
+    # so this is effectively free and side-effect-free.
+    bound = program.functions.transfer_public(str(acct.address), 1)
 
     # Fee master pays by default: no pay_own_fee, no fee_record.
     result: Any = _with_retry(lambda: bound.delegate(acct))
@@ -229,8 +229,8 @@ def test_hosted_record_scanner_live() -> None:
 
 
 @pytest.mark.skipif(
-    _API_KEY is None or _CONSUMER_ID is None,
-    reason="ALEO_E2E_API_KEY / ALEO_E2E_CONSUMER_ID not set — DPS + scanner creds required.",
+    _API_KEY is None or _CONSUMER_ID is None or _PROVER_URI is None,
+    reason="ALEO_E2E_API_KEY / ALEO_E2E_CONSUMER_ID / ALEO_E2E_PROVER_URI not set — DPS + scanner creds + prover host required.",
 )
 def test_private_roundtrip_live() -> None:
     """End-to-end private roundtrip on live testnet.
