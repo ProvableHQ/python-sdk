@@ -13,10 +13,25 @@ authorize / execute / prove — F5's verb ladder extends :class:`PreparedCall`.
 """
 from __future__ import annotations
 
-from typing import Any, Iterator
+from contextlib import contextmanager
+from typing import Any, Generator, Iterator
 
 from .._client_common import AleoNetworkError
 from .errors import ProgramNotFound
+
+
+@contextmanager
+def _program_404(program_id: str) -> Generator[None, None, None]:
+    """Map a 404 ``AleoNetworkError`` from a program read to ``ProgramNotFound``.
+
+    Other network errors propagate unchanged.
+    """
+    try:
+        yield
+    except AleoNetworkError as exc:
+        if exc.status == 404:
+            raise ProgramNotFound(program_id) from exc
+        raise
 
 # ── Coercion tables ─────────────────────────────────────────────────────────
 
@@ -322,18 +337,32 @@ class Mapping:
         -------
         str
             The serialised mapping value as returned by the node.
+
+        Raises
+        ------
+        ProgramNotFound
+            If the network has no such program (a 404 from the node).
         """
-        return self._client.network.get_program_mapping_value(
-            self.program_id, self.name, str(key)
-        )
+        with _program_404(self.program_id):
+            return self._client.network.get_program_mapping_value(
+                self.program_id, self.name, str(key)
+            )
 
     def names(self) -> list[str]:
         """Return the mapping names defined by the program.
 
         Delegates to ``aleo.network.get_program_mapping_names``.  (This lists
         the program's mappings, matching the underlying network primitive.)
+
+        Raises
+        ------
+        ProgramNotFound
+            If the network has no such program (a 404 from the node).
         """
-        return list(self._client.network.get_program_mapping_names(self.program_id))
+        with _program_404(self.program_id):
+            return list(
+                self._client.network.get_program_mapping_names(self.program_id)
+            )
 
     def __repr__(self) -> str:
         return f"Mapping({self.program_id}/{self.name})"
@@ -473,12 +502,8 @@ class ProgramsModule:
         ProgramNotFound
             If the network has no such program (a 404 from the node).
         """
-        try:
+        with _program_404(program_id):
             source: str = self._client.network.get_program(program_id, edition)
-        except AleoNetworkError as exc:
-            if exc.status == 404:
-                raise ProgramNotFound(program_id) from exc
-            raise
         net = self._net()
         raw: Any = net.Program.from_source(source)
         return Program(self._client, raw)
@@ -506,12 +531,8 @@ class ProgramsModule:
         ImportError
             If the ``aleo-abi`` package is not installed.
         """
-        try:
+        with _program_404(program_id):
             source: str = self._client.network.get_program(program_id, edition)
-        except AleoNetworkError as exc:
-            if exc.status == 404:
-                raise ProgramNotFound(program_id) from exc
-            raise
         from .. import abi as _abi
         return _abi.generate_abi(source, self._client.network_name)
 

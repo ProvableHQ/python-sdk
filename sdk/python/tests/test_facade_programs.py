@@ -263,6 +263,17 @@ function flip:
     assert call2.args == ["false"]
 
 
+@resp_lib.activate
+def test_coercion_bool_rejected_for_integer_type() -> None:
+    # Python bool is an int subclass; a True/False must NOT slip into a u64.
+    _mock_credits()
+    a = make_client()
+    p = a.programs.get("credits.aleo")
+    with pytest.raises(ValueError) as exc_info:
+        p.functions.transfer_public(ADDR, True)  # bool where u64 expected
+    assert "u64" in str(exc_info.value)
+
+
 # ---------------------------------------------------------------------------
 # Mappings
 # ---------------------------------------------------------------------------
@@ -304,6 +315,20 @@ def test_program_mappings_list() -> None:
     names = p.mappings()
     assert "account" in names
     assert "committee" in names
+
+
+@resp_lib.activate
+def test_mapping_get_404_raises_program_not_found() -> None:
+    _mock_credits()
+    resp_lib.add(
+        resp_lib.GET,
+        f"{HOST}/program/credits.aleo/mapping/account/{ADDR}",
+        status=404,
+    )
+    a = make_client()
+    p = a.programs.get("credits.aleo")
+    with pytest.raises(ProgramNotFound):
+        p.mapping("account").get(ADDR)
 
 
 # ---------------------------------------------------------------------------
