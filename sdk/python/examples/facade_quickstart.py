@@ -82,8 +82,10 @@ ok = aleo.account.verify(str(account.address), message, signature)
 assert ok, "signature verification failed"
 print("  verify OK  :", ok)
 
-# sign_value / verify_value — Aleo typed-value signing
-sig2 = account.private_key.sign_value("100u64")
+# sign_value / verify_value — Aleo typed-value signing (facade methods)
+sig2 = aleo.account.sign_value("100u64", account)
+ok2 = aleo.account.verify_value(str(account.address), "100u64", sig2)
+assert ok2, "sign_value verification failed"
 print("  sign_value OK:", str(sig2)[:20], "…")
 
 # ---------------------------------------------------------------------------
