@@ -141,6 +141,29 @@ result = credits.functions.transfer_public(
 
 Want to pay your own fee instead? `delegate(account, pay_own_fee=True)` (public) or `delegate(account, fee_record=<credits record>)` (private). Both bind the fee to the real execution id, so they prove the execution locally first. `broadcast=False` returns the proven transaction without submitting it.
 
+### Private transfers — delegated proving + record discovery
+
+A full private transfer combines the two trust-minimising paths: **delegated proving** (the prover's fee master pays) and a **record provider** to discover the private records you own. The default record provider (`aleo.records`) uses Provable's hosted scanner — registering shares your view key with that service so it can index your records. If you'd rather not share a view key, assign your own `RecordProvider` instead (a fully client-side `LocalRecordScanner` ships in `aleo.testing`).
+
+```python
+# requires prover credentials + hosted-scanner registration
+credits = aleo.programs.get("credits.aleo")
+
+# 1) Move public credits into a private record (delegated — fee master pays)
+credits.functions.transfer_public_to_private(str(account.address), 100_000) \
+    .delegate(account)
+
+# 2) Register with the record provider and find the new private record
+aleo.records.register(account)                 # shares the view key with the scanner
+record = aleo.records.get_unspent(program="credits.aleo", record="credits")
+
+# 3) Spend the private record with a private transfer (delegated)
+credits.functions.transfer_private(record, str(recipient.address), 1) \
+    .delegate(account)
+```
+
+`aleo.record_provider` is swappable: set it to your own object implementing the `RecordProvider` protocol (`get_unspent` / `find`) — e.g. a self-hosted scanner or the client-side `LocalRecordScanner` — and the whole facade (including private-fee auto-sourcing) uses it, with no view-key sharing.
+
 ## Async (`AsyncAleo`)
 
 The async facade mirrors the sync surface. Construction and the local, CPU-bound steps stay synchronous; everything that touches the network is awaitable.
