@@ -202,10 +202,10 @@ def test_import_encrypted_wrong_secret_fails() -> None:
     ct = a.account.export_encrypted(acct, "correct")
     try:
         recovered = a.account.import_encrypted(ct, "wrong")
-        # If it did not raise, the key must differ
-        assert str(recovered.private_key) != str(acct.private_key)
-    except (ValueError, RuntimeError, AssertionError):
-        pass  # crypto layer rejected the wrong secret — expected
+    except (ValueError, RuntimeError):
+        return  # crypto layer rejected the wrong secret — expected
+    # If it did not raise, the recovered key must differ from the original.
+    assert str(recovered.private_key) != str(acct.private_key)
 
 
 # ---------------------------------------------------------------------------
@@ -365,7 +365,8 @@ def test_account_module_importable_from_facade() -> None:
 
 
 def test_account_module_repr() -> None:
-    """AccountModule has a sensible repr (does not raise)."""
+    """AccountModule repr names the class and the provider network."""
     a = make_client()
     r = repr(a.account)
     assert "AccountModule" in r
+    assert "mainnet" in r

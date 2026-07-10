@@ -34,6 +34,9 @@ class AccountModule:
     def __init__(self, client: Any) -> None:
         self._client = client
 
+    def __repr__(self) -> str:
+        return f"AccountModule(network={self._client._provider.network!r})"
+
     # ── Internal helper ────────────────────────────────────────────────────
 
     def _net(self) -> Any:
@@ -142,6 +145,13 @@ class AccountModule:
         PrivateKeyCiphertext
             An opaque ciphertext object.  ``str(ct)`` yields the serialised
             form suitable for storage.
+
+        Notes
+        -----
+        Aleo private keys are not network-parametrised, so the produced
+        ciphertext is network-agnostic and interoperates with
+        :meth:`import_encrypted` on either network.  The caller is
+        responsible for supplying an *account* they intend to encrypt.
         """
         return account.private_key.to_ciphertext(secret)
 
