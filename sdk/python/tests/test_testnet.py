@@ -9,6 +9,14 @@ into the environment (see sdk/build-both.sh). They confirm that:
   * `Network.id()` distinguishes the two (mainnet 0 / testnet 1).
 """
 
+import pytest
+
+# The testnet extension (_aleolib_testnet) is only present in a two-build
+# install (see sdk/build-both.sh). Mainnet-only builds (e.g. the proving/network
+# and aleo-abi CI lanes) don't compile it, so skip this whole module cleanly
+# rather than erroring at collection.
+pytest.importorskip("aleo._aleolib_testnet")
+
 import aleo.mainnet as mainnet
 import aleo.testnet as testnet
 from conftest import load_vectors
