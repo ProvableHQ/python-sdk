@@ -26,6 +26,7 @@ from aleo.mainnet import Program as RawProgram, PrivateKey
 from aleo.facade.async_client import (
     AsyncBoundCall,
     AsyncNetworkModule,
+    AsyncProgram,
     AsyncProgramsModule,
     AsyncRecordsModule,
 )
@@ -360,3 +361,182 @@ def test_async_aleo_exported_from_top_level_aleo() -> None:
     """AsyncAleo is importable from the top-level aleo package."""
     from aleo import AsyncAleo as AA  # noqa: F401
     assert AA is AsyncAleo
+
+
+# ---------------------------------------------------------------------------
+# AsyncAleo.generate_abi (sync/local — no await)
+# ---------------------------------------------------------------------------
+
+
+def test_async_aleo_generate_abi_from_source() -> None:
+    """AsyncAleo.generate_abi accepts a source string and returns a dict."""
+    pytest.importorskip("aleo_abi")
+    a = AsyncAleo(HTTPProvider(BASE, network=NET))
+    raw = RawProgram.credits()
+    result = a.generate_abi(str(raw.source))
+    assert isinstance(result, dict)
+    assert result["program"] == "credits.aleo"
+
+
+def test_async_aleo_generate_abi_from_async_program() -> None:
+    """AsyncAleo.generate_abi accepts an AsyncProgram (uses .raw)."""
+    pytest.importorskip("aleo_abi")
+    a = AsyncAleo(HTTPProvider(BASE, network=NET))
+    raw = RawProgram.credits()
+    prog = AsyncProgram(a, raw)
+    result = a.generate_abi(prog)
+    assert isinstance(result, dict)
+    assert result["program"] == "credits.aleo"
+
+
+# ---------------------------------------------------------------------------
+# AsyncProgramsModule.abi (web path — async)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_async_programs_module_abi_web_path() -> None:
+    """AsyncProgramsModule.abi fetches source then generates ABI."""
+    pytest.importorskip("aleo_abi")
+    credits_source = str(RawProgram.credits().source)
+    a = _make_aleo({f"{HOST}/program/credits.aleo": jr(credits_source)})
+    result = await a.programs.abi("credits.aleo")
+    assert isinstance(result, dict)
+    assert result["program"] == "credits.aleo"
+
+
+@pytest.mark.asyncio
+async def test_async_programs_module_abi_404_raises_not_found() -> None:
+    """AsyncProgramsModule.abi raises ProgramNotFound on a 404."""
+    from aleo.facade.errors import ProgramNotFound
+
+    a = _make_aleo({})  # all routes → 404
+    with pytest.raises(ProgramNotFound):
+        await a.programs.abi("nope.aleo")
+
+
+# ---------------------------------------------------------------------------
+# AsyncProgram.abi / .imports / .mappings (sync/local)
+# ---------------------------------------------------------------------------
+
+
+def test_async_program_abi_local() -> None:
+    """AsyncProgram.abi() calls generate_abi with the underlying raw program."""
+    pytest.importorskip("aleo_abi")
+    a = AsyncAleo(HTTPProvider(BASE, network=NET))
+    raw = RawProgram.credits()
+    prog = AsyncProgram(a, raw)
+    result = prog.abi()
+    assert isinstance(result, dict)
+    assert result["program"] == "credits.aleo"
+
+
+def test_async_program_imports_local() -> None:
+    """AsyncProgram.imports returns import id strings (local — no network)."""
+    a = AsyncAleo(HTTPProvider(BASE, network=NET))
+    raw = RawProgram.credits()
+    prog = AsyncProgram(a, raw)
+    imports = prog.imports
+    assert isinstance(imports, list)
+    # credits.aleo has no imports — list is empty or contains strings
+    for item in imports:
+        assert isinstance(item, str)
+
+
+def test_async_program_mappings_local() -> None:
+    """AsyncProgram.mappings() returns mapping name strings (local — no network)."""
+    a = AsyncAleo(HTTPProvider(BASE, network=NET))
+    raw = RawProgram.credits()
+    prog = AsyncProgram(a, raw)
+    result = prog.mappings()
+    assert isinstance(result, list)
+    assert "account" in result
+
+
+# ---------------------------------------------------------------------------
+# AsyncNetworkModule.get_transaction_object + 404
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_async_network_get_transaction_object_pass_through() -> None:
+    """AsyncNetworkModule.get_transaction_object delegates to the async network client."""
+    a = AsyncAleo(HTTPProvider(BASE, network=NET))
+    fake_tx_obj = MagicMock()
+    a._async_client.get_transaction_object = AsyncMock(return_value=fake_tx_obj)
+    result = await a.network.get_transaction_object("at1fake")
+    assert result is fake_tx_obj
+    a._async_client.get_transaction_object.assert_awaited_once_with("at1fake")
+
+
+@pytest.mark.asyncio
+async def test_async_network_get_transaction_object_404_raises_not_found() -> None:
+    """AsyncNetworkModule.get_transaction_object on 404 raises TransactionNotFound."""
+    from aleo._client_common import AleoNetworkError
+    from aleo.facade.errors import TransactionNotFound
+
+    a = AsyncAleo(HTTPProvider(BASE, network=NET))
+    a._async_client.get_transaction_object = AsyncMock(
+        side_effect=AleoNetworkError("not found", status=404)
+    )
+    with pytest.raises(TransactionNotFound) as exc_info:
+        await a.network.get_transaction_object("at1missing")
+    assert exc_info.value.tx_id == "at1missing"
+
+
+# ---------------------------------------------------------------------------
+# AsyncAleo.decode_transition — object path and by-id path
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_async_decode_transition_transition_object_path() -> None:
+    """decode_transition with a Transition object is sync (no await on the object path)."""
+    a = AsyncAleo(HTTPProvider(BASE, network=NET))
+    acct = _account(a)
+    raw = RawProgram.credits()
+    prog = AsyncProgram(a, raw)
+    bc = prog.functions.transfer_public(str(acct.address), 10)
+    # authorize is sync — produces a real Transition
+    auth_result = bc.authorize(acct)
+    transition = auth_result.transitions()[0]
+
+    result = await a.decode_transition(transition)
+    assert result["program"] == "credits.aleo"
+    assert result["function"] == "transfer_public"
+    assert isinstance(result["inputs"], list)
+    assert isinstance(result["outputs"], list)
+
+
+@pytest.mark.asyncio
+async def test_async_decode_transition_by_id_uses_network() -> None:
+    """decode_transition with a string id awaits network.get_transaction_object."""
+    a = AsyncAleo(HTTPProvider(BASE, network=NET))
+    acct = _account(a)
+    raw = RawProgram.credits()
+    prog = AsyncProgram(a, raw)
+    bc = prog.functions.transfer_public(str(acct.address), 10)
+    auth_result = bc.authorize(acct)
+    transition = auth_result.transitions()[0]
+    tid = str(transition.id)
+
+    fake_tx = MagicMock()
+    fake_tx.transitions.return_value = [transition]
+    a.network.get_transaction_object = AsyncMock(return_value=fake_tx)  # type: ignore[attr-defined]
+
+    result = await a.decode_transition(tid)
+    assert result["function"] == "transfer_public"
+    a.network.get_transaction_object.assert_awaited_once_with(tid)  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+async def test_async_decode_transition_by_id_404_raises_transaction_not_found() -> None:
+    """decode_transition with a string id that 404s raises TransactionNotFound."""
+    from aleo.facade.errors import TransactionNotFound
+
+    a = AsyncAleo(HTTPProvider(BASE, network=NET))
+    a.network.get_transaction_object = AsyncMock(  # type: ignore[attr-defined]
+        side_effect=TransactionNotFound("at1fake")
+    )
+    with pytest.raises(TransactionNotFound):
+        await a.decode_transition("at1fake")

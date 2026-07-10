@@ -376,6 +376,35 @@ class NetworkModule:
         """
         return str(self._nc().get_deployment_transaction_id_for_program(program_id))
 
+    def get_transaction_object(self, tx_id: str) -> Any:
+        """Return a ``Transaction`` object for *tx_id* (network object path).
+
+        Unlike :meth:`get_transaction` (which returns a raw dict), this returns
+        the network ``Transaction`` object constructed via
+        ``Transaction.from_json`` — used by :meth:`~aleo.facade.client.Aleo.decode_transition`.
+
+        Parameters
+        ----------
+        tx_id:
+            Transaction ID string.
+
+        Returns
+        -------
+        Any
+            A ``Transaction`` network object.
+
+        Raises
+        ------
+        TransactionNotFound
+            If no transaction exists for *tx_id* (a 404 from the node).
+        """
+        try:
+            return self._nc().get_transaction_object(tx_id)
+        except AleoNetworkError as exc:
+            if exc.status == 404:
+                raise TransactionNotFound(tx_id) from exc
+            raise
+
     def get_deployment_transaction_for_program(self, program_id: str) -> Any:
         """Return the deployment transaction for *program_id*.
 

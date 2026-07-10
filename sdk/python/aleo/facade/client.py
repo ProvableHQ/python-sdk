@@ -301,7 +301,7 @@ class Aleo:
             return decode_transition_object(transition_or_id)
 
         tid = transition_or_id
-        tx: Any = self._client.get_transaction_object(tid)
+        tx: Any = self.network.get_transaction_object(tid)
         transitions: list[Any] = list(tx.transitions())
         for t in transitions:
             if str(t.id) == tid:

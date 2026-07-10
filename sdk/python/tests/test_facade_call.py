@@ -282,7 +282,7 @@ def test_decode_transition_on_transition_object() -> None:
 
 
 def test_decode_transition_by_tx_id_uses_network() -> None:
-    """A string id fetches the tx via network_client and decodes a transition."""
+    """A string id fetches the tx via network.get_transaction_object and decodes a transition."""
     a = _client()
     acct = _account(a)
     bc = _bound(a, acct)
@@ -291,8 +291,21 @@ def test_decode_transition_by_tx_id_uses_network() -> None:
 
     fake_tx = MagicMock()
     fake_tx.transitions.return_value = [transition]
-    a._client.get_transaction_object = MagicMock(return_value=fake_tx)  # type: ignore[attr-defined]
+    # decode_transition now routes through the network module
+    a.network.get_transaction_object = MagicMock(return_value=fake_tx)  # type: ignore[attr-defined]
 
     decoded = a.decode_transition(tid)
     assert decoded["function"] == "transfer_public"
-    a._client.get_transaction_object.assert_called_once_with(tid)  # type: ignore[attr-defined]
+    a.network.get_transaction_object.assert_called_once_with(tid)  # type: ignore[attr-defined]
+
+
+def test_decode_transition_by_id_404_raises_transaction_not_found() -> None:
+    """A string id that resolves to a 404 raises TransactionNotFound."""
+    from aleo.facade.errors import TransactionNotFound
+
+    a = _client()
+    a.network.get_transaction_object = MagicMock(  # type: ignore[attr-defined]
+        side_effect=TransactionNotFound("at1fake")
+    )
+    with pytest.raises(TransactionNotFound):
+        a.decode_transition("at1fake")

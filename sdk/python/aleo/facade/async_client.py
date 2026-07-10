@@ -118,6 +118,27 @@ class AsyncProgram:
     def source(self) -> str:
         return str(self._raw.source)
 
+    @property
+    def imports(self) -> list[str]:
+        """The program's import identifiers as strings (local — no network call)."""
+        return [str(i) for i in self._raw.imports]
+
+    def mappings(self) -> list[str]:
+        """Return the mapping names declared by this program (local — no network call).
+
+        Reads from the program definition via ``program.get_mappings()``.
+        """
+        return [str(m["name"]) for m in self._raw.get_mappings()]
+
+    def abi(self) -> dict[str, Any]:
+        """Generate the ABI for this program (object path, sync — local).
+
+        Delegates to :func:`aleo.abi.generate_abi` with the underlying network
+        Program object.  Raises :exc:`ImportError` if ``aleo-abi`` is absent.
+        """
+        from .. import abi as _abi
+        return _abi.generate_abi(self._raw, self._client.network_name)
+
     def mapping(self, name: str) -> AsyncMapping:
         """Return an :class:`AsyncMapping` handle for *name*."""
         return AsyncMapping(self._client, self.id, name)
@@ -149,6 +170,33 @@ class AsyncProgramsModule:
         net = self._net()
         raw: Any = net.Program.from_source(source)
         return AsyncProgram(self._client, raw)
+
+    async def abi(self, program_id: str, edition: int | None = None) -> dict[str, Any]:
+        """Generate the ABI for *program_id* by fetching its source (web path, async).
+
+        Fetches the deployed source via ``aleo.network.get_program`` (awaited),
+        then funnels the string to :func:`aleo.abi.generate_abi` (sync/local).
+
+        Parameters
+        ----------
+        program_id:
+            Aleo program identifier.
+        edition:
+            Optional edition number.
+
+        Raises
+        ------
+        ProgramNotFound
+            If the network has no such program (a 404 from the node).
+        ImportError
+            If the ``aleo-abi`` package is not installed.
+        """
+        async with _async_program_404(program_id):
+            source: str = await self._client.network_client.get_program(
+                program_id, edition
+            )
+        from .. import abi as _abi
+        return _abi.generate_abi(source, self._client.network_name)
 
     def __repr__(self) -> str:
         return f"AsyncProgramsModule(network={self._client.provider.network!r})"
@@ -386,6 +434,18 @@ class AsyncNetworkModule:
     async def get_confirmed_transaction(self, tx_id: str) -> Any:
         try:
             return await self._nc().get_confirmed_transaction(tx_id)
+        except AleoNetworkError as exc:
+            if exc.status == 404:
+                raise TransactionNotFound(tx_id) from exc
+            raise
+
+    async def get_transaction_object(self, tx_id: str) -> Any:
+        """Return a ``Transaction`` object for *tx_id* (network object path, async).
+
+        Raises :exc:`~aleo.facade.errors.TransactionNotFound` on a 404.
+        """
+        try:
+            return await self._nc().get_transaction_object(tx_id)
         except AleoNetworkError as exc:
             if exc.status == 404:
                 raise TransactionNotFound(tx_id) from exc
@@ -748,9 +808,6 @@ class _AsyncProgramFunctions(ProgramFunctions):
         )
 
 
-# Patch AsyncProgram to use _AsyncProgramFunctions
-
-
 # ---------------------------------------------------------------------------
 # AsyncAleo — the main async facade client
 # ---------------------------------------------------------------------------
@@ -909,6 +966,79 @@ class AsyncAleo:
             return bool(Address.is_valid(s))  # pyright: ignore[reportAttributeAccessIssue]
         except Exception:
             return False
+
+    # ── ABI generation (local, sync) ────────────────────────────────────────
+
+    def generate_abi(
+        self, source_or_program: Any, *, network: str | None = None
+    ) -> dict[str, Any]:
+        """Generate an ABI dict from a source string or a Program (local — no await).
+
+        Accepts a raw ``.aleo`` source string, an :class:`AsyncProgram`, or a
+        raw network ``Program`` object, and funnels to
+        :func:`aleo.abi.generate_abi`.
+
+        Parameters
+        ----------
+        source_or_program:
+            An Aleo source string, an :class:`AsyncProgram`, or a raw ``Program``.
+        network:
+            Network name for ABI generation.  Defaults to this client's
+            provider network.
+
+        Raises
+        ------
+        ImportError
+            If the ``aleo-abi`` package is not installed.
+        """
+        from .. import abi as _abi
+
+        net = network if network is not None else self.network_name
+        target: Any = source_or_program
+        if isinstance(source_or_program, AsyncProgram):
+            target = source_or_program.raw
+        return _abi.generate_abi(target, net)
+
+    # ── Transition decoding ─────────────────────────────────────────────────
+
+    async def decode_transition(self, transition_or_id: Any) -> dict[str, Any]:
+        """Decode a ``Transition`` (or a transaction id) to a plain dict (async).
+
+        Accepts a raw network :class:`Transition` object directly (sync path),
+        or a transaction id string.  For an id, the transaction is fetched via
+        ``aleo.network.get_transaction_object`` (awaited) and the transition
+        matching *transition_or_id* (or the first one) is decoded.
+
+        Returns ``{program, function, inputs, outputs}``.
+
+        Parameters
+        ----------
+        transition_or_id:
+            A network ``Transition`` object, or a transaction/transition id
+            string.
+
+        Raises
+        ------
+        TransactionNotFound
+            If a string id resolves to no transaction (404 from the node).
+        ExecutionError
+            If no decodable transition is found.
+        """
+        from .call import decode_transition_object
+
+        # A Transition object exposes program_id/function_name/outputs().
+        if not isinstance(transition_or_id, str):
+            return decode_transition_object(transition_or_id)
+
+        tid = transition_or_id
+        tx: Any = await self.network.get_transaction_object(tid)
+        transitions: list[Any] = list(tx.transitions())
+        for t in transitions:
+            if str(t.id) == tid:
+                return decode_transition_object(t)
+        if transitions:
+            return decode_transition_object(transitions[0])
+        raise ExecutionError(f"No decodable transition found for {tid!r}.")
 
     # ── Repr ───────────────────────────────────────────────────────────────
 

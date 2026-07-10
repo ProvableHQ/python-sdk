@@ -296,6 +296,37 @@ def test_get_confirmed_transaction_missing_raises_not_found() -> None:
 
 
 @resp_lib.activate
+def test_get_transaction_object_pass_through() -> None:
+    """get_transaction_object returns a Transaction network object via NetworkModule."""
+    from unittest.mock import patch, MagicMock
+
+    a = make_client()
+    fake_tx_obj = MagicMock()
+    # Patch the underlying network client's method
+    with patch.object(a._client, "get_transaction_object", return_value=fake_tx_obj) as mock_method:
+        result = a.network.get_transaction_object(TX_ID)
+    assert result is fake_tx_obj
+    mock_method.assert_called_once_with(TX_ID)
+
+
+@resp_lib.activate
+def test_get_transaction_object_404_raises_not_found() -> None:
+    """get_transaction_object on a 404 raises TransactionNotFound."""
+    from aleo._client_common import AleoNetworkError
+    from unittest.mock import patch
+
+    a = make_client()
+    with patch.object(
+        a._client,
+        "get_transaction_object",
+        side_effect=AleoNetworkError("not found", status=404),
+    ):
+        with pytest.raises(TransactionNotFound) as exc_info:
+            a.network.get_transaction_object(TX_ID)
+    assert exc_info.value.tx_id == TX_ID
+
+
+@resp_lib.activate
 def test_get_transactions() -> None:
     resp_lib.add(
         resp_lib.GET,
