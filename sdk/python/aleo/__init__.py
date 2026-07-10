@@ -1,7 +1,16 @@
 from __future__ import annotations
 
 from . import mainnet as mainnet
-from . import testnet as testnet
+
+try:
+    from . import testnet as testnet
+except ModuleNotFoundError:  # pragma: no cover
+    # The testnet extension (_aleolib_testnet) is not compiled in this install
+    # (e.g. a mainnet-only source build). ``aleo.testnet`` is then unavailable,
+    # but ``import aleo`` and ``aleo.mainnet`` must still work — the two-build
+    # wheel ships both extensions; a single-build dev install ships only one.
+    pass
+
 from .encryptor import *
 from .network_client import AleoNetworkClient as AleoNetworkClient
 from .async_network_client import AsyncAleoNetworkClient as AsyncAleoNetworkClient

@@ -14,7 +14,10 @@ authorize / execute / prove — F5's verb ladder extends :class:`PreparedCall`.
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import Any, Generator, Iterator
+from typing import TYPE_CHECKING, Any, Generator, Iterator
+
+if TYPE_CHECKING:
+    from .call import BoundCall
 
 from .._client_common import AleoNetworkError
 from .errors import ProgramNotFound
@@ -299,7 +302,7 @@ class _FunctionCaller:
         parts = [input_type_name(i) for i in self.inputs]
         return f"{self.function_name}({', '.join(parts)})"
 
-    def __call__(self, *args: Any) -> "PreparedCall":
+    def __call__(self, *args: Any) -> "BoundCall":
         # F5: return the verb-ladder BoundCall (a PreparedCall subclass).
         # Imported lazily to avoid a call.py ↔ programs.py import cycle.
         from .call import BoundCall
