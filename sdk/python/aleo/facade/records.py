@@ -309,7 +309,15 @@ class RecordsModule:
 
         # Gather candidate OwnedRecords.
         if program == "credits.aleo" and record == "credits":
-            candidates = self.find_credits(at_least=min_microcredits)
+            if exclude_nonces:
+                # find_credits(at_least=...) returns only the first covering
+                # record; if that one is excluded we'd wrongly report None even
+                # when other covering records exist.  With exclusions in play,
+                # pull the full unspent set and let the loop below apply both
+                # the min-microcredits and exclude-nonce filters.
+                candidates = self.find_credits(at_least=None)
+            else:
+                candidates = self.find_credits(at_least=min_microcredits)
         else:
             candidates = self.find(program=program, record=record, unspent=True)
 

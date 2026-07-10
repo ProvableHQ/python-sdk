@@ -320,6 +320,9 @@ class BoundCall(PreparedCall):
                 "aleo.record_provider, or omit private_fee to pay a public fee."
             )
 
+        # A transaction sources exactly one fee record, so there is nothing to
+        # exclude here (exclude_nonces is for multi-record builds, which the
+        # verb ladder does not yet produce).
         record = provider.get_unspent(
             program="credits.aleo",
             record="credits",
