@@ -36,7 +36,7 @@ from typing import Any, AsyncGenerator
 
 from .._client_common import AleoNetworkError
 from .._facade_common import credits_to_microcredits, microcredits_to_credits
-from .._scanner_common import OwnedFilter, OwnedRecord, RecordNotFoundError
+from .._scanner_common import OwnedRecord, RecordNotFoundError
 from .errors import (
     ExecutionError,
     ProgramNotFound,
@@ -238,21 +238,12 @@ class AsyncRecordsModule:
             scanner.set_account(acct)
             scanner.set_decrypt_enabled(True)
 
-        from .._scanner_common import compute_uuid
+        from .._scanner_common import build_owned_filter, compute_uuid
 
-        record_filter: dict[str, Any] = {}
-        if program is not None:
-            record_filter["program"] = program
-        if record is not None:
-            record_filter["record"] = record
-
-        owned_filter: OwnedFilter = {"unspent": unspent}
-        if acct is not None:
-            owned_filter["uuid"] = str(compute_uuid(acct.view_key))
-        if record_filter:
-            owned_filter["filter"] = record_filter  # type: ignore[typeddict-item]
-        if nonces is not None:
-            owned_filter["nonces"] = nonces
+        uuid = str(compute_uuid(acct.view_key)) if acct is not None else None
+        owned_filter = build_owned_filter(
+            uuid, program=program, record=record, unspent=unspent, nonces=nonces
+        )
 
         if amounts is not None:
             return await scanner.find_credits_records(amounts, owned_filter)
@@ -268,23 +259,22 @@ class AsyncRecordsModule:
             scanner.set_account(acct)
             scanner.set_decrypt_enabled(True)
 
-        from .._scanner_common import compute_uuid
+        from .._scanner_common import build_owned_filter, compute_uuid
 
-        owned_filter: OwnedFilter = {"unspent": True}
-        if acct is not None:
-            owned_filter["uuid"] = str(compute_uuid(acct.view_key))
+        uuid = str(compute_uuid(acct.view_key)) if acct is not None else None
 
         if at_least is not None:
             try:
-                rec = await scanner.find_credits_record(int(at_least), owned_filter)
+                rec = await scanner.find_credits_record(
+                    int(at_least), build_owned_filter(uuid)
+                )
             except RecordNotFoundError:
                 return []
             return [rec]
 
-        owned_filter["filter"] = {  # type: ignore[typeddict-item]
-            "program": "credits.aleo",
-            "record": "credits",
-        }
+        owned_filter = build_owned_filter(
+            uuid, program="credits.aleo", record="credits"
+        )
         return await scanner.find_records(owned_filter)
 
     async def get_unspent(
@@ -738,13 +728,9 @@ class _AsyncFunctionCaller:
         )
 
     def __repr__(self) -> str:
-        # Mirror programs._input_type_name inline to avoid private cross-module access.
-        def _type_name(d: dict[str, Any]) -> str:
-            if d.get("type") == "record":
-                return str(d.get("record", "record"))
-            return str(d.get("type", "?"))
+        from .programs import input_type_name
 
-        parts = [_type_name(i) for i in self.inputs]
+        parts = [input_type_name(i) for i in self.inputs]
         sig = f"{self.function_name}({', '.join(parts)})"
         return f"<async function {self.program_id}/{sig}>"
 

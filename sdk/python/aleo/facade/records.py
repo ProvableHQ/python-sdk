@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .._scanner_common import OwnedFilter, OwnedRecord, RecordNotFoundError
+from .._scanner_common import OwnedRecord, RecordNotFoundError
 
 
 class RecordsModule:
@@ -207,21 +207,12 @@ class RecordsModule:
             scanner.set_account(acct)
             scanner.set_decrypt_enabled(True)
 
-        from .._scanner_common import compute_uuid
+        from .._scanner_common import build_owned_filter, compute_uuid
 
-        record_filter: dict[str, Any] = {}
-        if program is not None:
-            record_filter["program"] = program
-        if record is not None:
-            record_filter["record"] = record
-
-        owned_filter: OwnedFilter = {"unspent": unspent}
-        if acct is not None:
-            owned_filter["uuid"] = str(compute_uuid(acct.view_key))
-        if record_filter:
-            owned_filter["filter"] = record_filter  # type: ignore[typeddict-item]
-        if nonces is not None:
-            owned_filter["nonces"] = nonces
+        uuid = str(compute_uuid(acct.view_key)) if acct is not None else None
+        owned_filter = build_owned_filter(
+            uuid, program=program, record=record, unspent=unspent, nonces=nonces
+        )
 
         if amounts is not None:
             return scanner.find_credits_records(amounts, owned_filter)
@@ -255,23 +246,22 @@ class RecordsModule:
             scanner.set_account(acct)
             scanner.set_decrypt_enabled(True)
 
-        from .._scanner_common import compute_uuid
+        from .._scanner_common import build_owned_filter, compute_uuid
 
-        owned_filter: OwnedFilter = {"unspent": True}
-        if acct is not None:
-            owned_filter["uuid"] = str(compute_uuid(acct.view_key))
+        uuid = str(compute_uuid(acct.view_key)) if acct is not None else None
 
         if at_least is not None:
             try:
-                rec = scanner.find_credits_record(int(at_least), owned_filter)
+                rec = scanner.find_credits_record(
+                    int(at_least), build_owned_filter(uuid)
+                )
             except RecordNotFoundError:
                 return []
             return [rec]
 
-        owned_filter["filter"] = {  # type: ignore[typeddict-item]
-            "program": "credits.aleo",
-            "record": "credits",
-        }
+        owned_filter = build_owned_filter(
+            uuid, program="credits.aleo", record="credits"
+        )
         return scanner.find_records(owned_filter)
 
     # ── RecordProvider protocol ────────────────────────────────────────────────

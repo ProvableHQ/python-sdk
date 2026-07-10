@@ -89,7 +89,7 @@ class PreparedCall:
     @property
     def signature(self) -> str:
         """A human-readable declared signature, e.g. ``"transfer_public(address, u64)"``."""
-        parts = [_input_type_name(i) for i in self.inputs]
+        parts = [input_type_name(i) for i in self.inputs]
         return f"{self.function_name}({', '.join(parts)})"
 
     def __repr__(self) -> str:
@@ -99,7 +99,7 @@ class PreparedCall:
         )
 
 
-def _input_type_name(descriptor: dict[str, Any]) -> str:
+def input_type_name(descriptor: dict[str, Any]) -> str:
     """Return the declared Aleo type name for an input descriptor.
 
     Record inputs report their record name (``descriptor["record"]``); all
@@ -123,7 +123,7 @@ def _coerce_one(value: Any, descriptor: dict[str, Any]) -> str:
 
     Raises :exc:`ValueError` with an actionable message on an uncoercible type.
     """
-    type_name = _input_type_name(descriptor)
+    type_name = input_type_name(descriptor)
     register = str(descriptor.get("register", "?"))
     py_type_name = type(value).__name__
 
@@ -176,7 +176,7 @@ def _coerce_args(
     Raises :exc:`ValueError` on wrong arity or an uncoercible argument, citing
     the expected count / Aleo type and the full function signature.
     """
-    sig_parts = [_input_type_name(i) for i in inputs]
+    sig_parts = [input_type_name(i) for i in inputs]
     signature = f"{function_name}({', '.join(sig_parts)})"
     if len(raw_args) != len(inputs):
         raise ValueError(
@@ -296,7 +296,7 @@ class _FunctionCaller:
     @property
     def signature(self) -> str:
         """Declared signature, e.g. ``"transfer_public(address, u64)"``."""
-        parts = [_input_type_name(i) for i in self.inputs]
+        parts = [input_type_name(i) for i in self.inputs]
         return f"{self.function_name}({', '.join(parts)})"
 
     def __call__(self, *args: Any) -> "PreparedCall":

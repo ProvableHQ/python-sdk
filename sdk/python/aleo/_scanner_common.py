@@ -154,6 +154,35 @@ def compute_uuid(view_key: Any) -> Any:
     return hasher.hash([domain_sep, vk_field, one])
 
 
+def build_owned_filter(
+    uuid: str | None,
+    *,
+    program: str | None = None,
+    record: str | None = None,
+    unspent: bool = True,
+    nonces: list[str] | None = None,
+) -> OwnedFilter:
+    """Build an :class:`OwnedFilter` from the common record-query parameters.
+
+    Shared by the sync and async facade record modules so the filter shape is
+    defined in exactly one place.
+    """
+    record_filter: RecordsFilter = {}
+    if program is not None:
+        record_filter["program"] = program
+    if record is not None:
+        record_filter["record"] = record
+
+    owned: OwnedFilter = {"unspent": unspent}
+    if uuid is not None:
+        owned["uuid"] = uuid
+    if record_filter:
+        owned["filter"] = record_filter
+    if nonces is not None:
+        owned["nonces"] = nonces
+    return owned
+
+
 def uuid_is_valid(uuid: str) -> bool:
     """Return True if uuid is a valid Field string (e.g. '1234...field')."""
     try:
