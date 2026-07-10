@@ -1,0 +1,6 @@
+# PyO3 extension modules must leave Python symbols undefined at link time
+# (they resolve against the host interpreter at import). maturin injects
+# these flags itself; this config makes plain `cargo build`/`cargo test`
+# link successfully on macOS too (e.g. the --features testnet check).
+[target.'cfg(target_os = "macos")']
+rustflags = ["-C", "link-arg=-undefined", "-C", "link-arg=dynamic_lookup"]

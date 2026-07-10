@@ -1,0 +1,15 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "aleo-abi"
+version = "0.1.0"
+description = "Python bindings for ABI generation from Aleo bytecode"
+license = {text = "GPL-3.0-or-later"}
+requires-python = ">=3.7"
+dependencies = []
+
+[tool.maturin]
+python-source = "python"
+module-name = "aleo_abi._aleo_abi"

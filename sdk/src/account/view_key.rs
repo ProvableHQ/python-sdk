@@ -14,9 +14,10 @@
 // You should have received a copy of the GNU General Public License
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
-use crate::{types::ViewKeyNative, Address, RecordCiphertext, RecordPlaintext};
+use crate::{types::ViewKeyNative, Address, Field, RecordCiphertext, RecordPlaintext, Scalar};
 
 use pyo3::prelude::*;
+use snarkvm::prelude::{FromBytes, ToBytes, ToField};
 
 use std::{
     collections::hash_map::DefaultHasher,
@@ -49,8 +50,30 @@ impl ViewKey {
     }
 
     /// Returns the address corresponding to the view key.
-    fn to_address(&self) -> Address {
+    #[getter]
+    fn address(&self) -> Address {
         self.0.to_address().into()
+    }
+
+    /// Returns the view key as a scalar.
+    pub fn to_scalar(&self) -> Scalar {
+        (*self.0).into()
+    }
+
+    /// Returns the view key as a field element.
+    pub fn to_field(&self) -> anyhow::Result<Field> {
+        self.0.to_field().map(Into::into)
+    }
+
+    /// Returns the little-endian byte representation of the view key.
+    pub fn bytes(&self) -> anyhow::Result<Vec<u8>> {
+        self.0.to_bytes_le()
+    }
+
+    /// Recovers a view key from its little-endian byte representation.
+    #[staticmethod]
+    pub fn from_bytes(bytes: Vec<u8>) -> anyhow::Result<Self> {
+        Ok(Self(ViewKeyNative::read_le(&bytes[..])?))
     }
 
     /// Returns the view key as a base58 string.

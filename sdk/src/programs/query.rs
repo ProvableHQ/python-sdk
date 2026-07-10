@@ -27,8 +27,8 @@ pub struct Query(QueryNative);
 impl Query {
     /// The base URL of the node.
     #[staticmethod]
-    fn rest(url: String) -> Self {
-        QueryNative::REST(url).into()
+    fn rest(url: String) -> anyhow::Result<Self> {
+        Ok(QueryNative::try_from(url)?.into())
     }
 
     #[classattr]

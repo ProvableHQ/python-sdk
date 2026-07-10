@@ -14,13 +14,17 @@
 // You should have received a copy of the GNU General Public License
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
-use crate::types::AuthorizationNative;
+use crate::{
+    programs::Transition,
+    types::{AuthorizationNative, TransitionNative},
+    Field,
+};
 
 use pyo3::prelude::*;
 use snarkvm::prelude::{FromBytes, ToBytes};
 
 /// The Aleo authorization type.
-#[pyclass(frozen)]
+#[pyclass]
 #[derive(Clone)]
 pub struct Authorization(AuthorizationNative);
 
@@ -51,6 +55,60 @@ impl Authorization {
     /// Returns the Authorization as a JSON string.
     fn __str__(&self) -> anyhow::Result<String> {
         self.to_json()
+    }
+
+    // ---- new methods ----
+
+    /// Returns the execution ID for this authorization.
+    fn to_execution_id(&self) -> anyhow::Result<Field> {
+        self.0.to_execution_id().map(Into::into)
+    }
+
+    /// Returns the list of transitions in this authorization.
+    fn transitions(&self) -> Vec<Transition> {
+        self.0
+            .transitions()
+            .into_iter()
+            .map(|(_, t)| Transition::from(t))
+            .collect()
+    }
+
+    /// Returns the function name of the first request.
+    fn function_name(&self) -> anyhow::Result<String> {
+        Ok(self.0.get(0)?.function_name().to_string())
+    }
+
+    /// Returns true if the authorization is for `credits.aleo/fee_private`.
+    fn is_fee_private(&self) -> bool {
+        self.0.is_fee_private()
+    }
+
+    /// Returns true if the authorization is for `credits.aleo/fee_public`.
+    fn is_fee_public(&self) -> bool {
+        self.0.is_fee_public()
+    }
+
+    /// Returns true if the authorization is for `credits.aleo/split`.
+    fn is_split(&self) -> bool {
+        self.0.is_split()
+    }
+
+    /// Returns the number of requests in the authorization.
+    fn __len__(&self) -> usize {
+        self.0.len()
+    }
+
+    /// Returns a new and independent replica of the authorization.
+    fn replicate(&self) -> Authorization {
+        Authorization(self.0.replicate())
+    }
+
+    /// Inserts a transition into the authorization.
+    fn insert_transition(&self, transition: &Transition) -> anyhow::Result<()> {
+        let native = <TransitionNative as From<&Transition>>::from(transition);
+        self.0
+            .insert_transition(native)
+            .map_err(|e| anyhow::anyhow!("{e}"))
     }
 }
 

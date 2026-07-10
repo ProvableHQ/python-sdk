@@ -13,6 +13,12 @@ classifiers = [  # Optional
   "Programming Language :: Python :: 3",
 ]
 
+dependencies = ["requests>=2"]
+
+[project.optional-dependencies]
+async = ["httpx>=0.27"]
+dps = ["pynacl>=1.5"]
+
 [project.urls]
 "Homepage" = "https://github.com/AleoHQ/python-sdk"
 
@@ -22,9 +28,11 @@ build-backend = "maturin"
 
 [tool.maturin]
 python-source = "python"
-module-name = "aleo._aleolib"
+module-name = "aleo._aleolib_mainnet"
 
 [tool.pyright]
 reportMissingModuleSource = false # don't report missing aleo.so for CI purposes
-ignore = ['./docs']
-strict = ['./']
+# Tests are dynamically-typed pytest code and import deps (pytest) that the
+# bare pyright CI environment doesn't install — type-check the package only.
+exclude = ['docs', 'python/tests', '.env', 'target']
+strict = ['python/aleo']

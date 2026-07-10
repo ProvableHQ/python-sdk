@@ -15,14 +15,20 @@
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
 use crate::{
-    types::{CiphertextNative, LiteralNative, PlaintextNative},
+    types::{
+        CiphertextNative, CurrentNetwork, FieldNative, IdentifierNative, LiteralNative,
+        PlaintextNative, ProgramIDNative, U16Native,
+    },
     Address, Field, Group, Identifier, Literal, Scalar, ViewKey,
 };
 use std::ops::Deref;
 
-use once_cell::sync::OnceCell;
 use pyo3::{exceptions::PyTypeError, prelude::*};
 
+use snarkvm::prelude::{
+    compute_function_id, FromBits, FromBytes, FromFields, Network, ToBits, ToBitsRaw, ToBytes,
+    ToFields, ToFieldsRaw,
+};
 use std::{collections::HashMap, str::FromStr};
 
 /// The Aleo ciphertext type.
@@ -49,6 +55,63 @@ impl Ciphertext {
         self.0
             .decrypt_symmetric(plaintext_view_key.into())
             .map(Into::into)
+    }
+
+    /// Decrypt a ciphertext using the transition view key and (program, function, index).
+    ///
+    /// Computes: function_id = compute_function_id(network_id, program_id, function_name);
+    /// ivk = hash_psd4([function_id, tvk, Field::from_u16(index)]);
+    /// then decrypts symmetrically with ivk.
+    fn decrypt_with_transition_view_key(
+        &self,
+        tvk: &Field,
+        program: &str,
+        function_name: &str,
+        index: u16,
+    ) -> anyhow::Result<Plaintext> {
+        let program_id = ProgramIDNative::from_str(program)?;
+        let function_ident = IdentifierNative::from_str(function_name)?;
+        let function_id = compute_function_id(
+            &U16Native::new(CurrentNetwork::ID),
+            &program_id,
+            &function_ident,
+        )?;
+        let index_field = FieldNative::from_u16(index);
+        let input_view_key = CurrentNetwork::hash_psd4(&[function_id, **tvk, index_field])
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        self.0
+            .decrypt_symmetric(input_view_key)
+            .map(Plaintext::from)
+            .map_err(|e| anyhow::anyhow!("{e}"))
+    }
+
+    /// Decrypt a ciphertext using the view key, transition public key, and (program, function, index).
+    ///
+    /// Derives tvk = (tpk * view_key_scalar).to_x_coordinate(), then calls
+    /// decrypt_with_transition_view_key logic internally.
+    fn decrypt_with_transition_info(
+        &self,
+        view_key: &ViewKey,
+        tpk: &Group,
+        program: &str,
+        function_name: &str,
+        index: u16,
+    ) -> anyhow::Result<Plaintext> {
+        let program_id = ProgramIDNative::from_str(program)?;
+        let function_ident = IdentifierNative::from_str(function_name)?;
+        let function_id = compute_function_id(
+            &U16Native::new(CurrentNetwork::ID),
+            &program_id,
+            &function_ident,
+        )?;
+        let tvk = (**tpk * ***view_key).to_x_coordinate();
+        let index_field = FieldNative::from_u16(index);
+        let input_view_key = CurrentNetwork::hash_psd4(&[function_id, tvk, index_field])
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        self.0
+            .decrypt_symmetric(input_view_key)
+            .map(Plaintext::from)
+            .map_err(|e| anyhow::anyhow!("{e}"))
     }
 
     /// Returns the ciphertext as a string.
@@ -98,14 +161,18 @@ impl Plaintext {
     #[staticmethod]
     fn new_struct(kv: Vec<(Identifier, Plaintext)>) -> Self {
         let kv: Vec<_> = kv.into_iter().map(|(k, v)| (k.into(), v.into())).collect();
-        PlaintextNative::Struct(indexmap::IndexMap::from_iter(kv), OnceCell::new()).into()
+        PlaintextNative::Struct(
+            indexmap::IndexMap::from_iter(kv),
+            std::sync::OnceLock::new(),
+        )
+        .into()
     }
 
     /// Returns a new Plaintext::Array from a list of values.
     #[staticmethod]
     fn new_array(values: Vec<Plaintext>) -> Self {
         let values: Vec<_> = values.into_iter().map(Into::into).collect();
-        PlaintextNative::Array(values, OnceCell::new()).into()
+        PlaintextNative::Array(values, std::sync::OnceLock::new()).into()
     }
 
     /// Encrypts self to the given address under the given randomizer.
@@ -169,6 +236,113 @@ impl Plaintext {
         }
     }
 
+    /// Finds a member in a struct plaintext by name.
+    /// Returns an error if the plaintext is not a struct or the member doesn't exist.
+    pub fn find(&self, path: Vec<String>) -> anyhow::Result<Self> {
+        let identifiers: Vec<IdentifierNative> = path
+            .iter()
+            .map(|s| IdentifierNative::from_str(s))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self(self.0.find(&identifiers)?))
+    }
+
+    /// Returns the byte representation of the plaintext (little-endian).
+    pub fn bytes(&self) -> anyhow::Result<Vec<u8>> {
+        self.0.to_bytes_le()
+    }
+
+    /// Parses a plaintext from its little-endian byte representation.
+    #[staticmethod]
+    pub fn from_bytes(bytes: Vec<u8>) -> anyhow::Result<Self> {
+        PlaintextNative::from_bytes_le(&bytes).map(Self)
+    }
+
+    /// Returns the little-endian bit representation of the plaintext.
+    pub fn to_bits_le(&self) -> Vec<bool> {
+        self.0.to_bits_le()
+    }
+
+    /// Returns the raw little-endian bit representation (no length prefix).
+    pub fn to_bits_raw_le(&self) -> Vec<bool> {
+        self.0.to_bits_raw_le()
+    }
+
+    /// Returns the raw big-endian bit representation (no length prefix).
+    pub fn to_bits_raw_be(&self) -> Vec<bool> {
+        self.0.to_bits_raw_be()
+    }
+
+    /// Returns the raw little-endian byte representation (packed from raw LE bits).
+    pub fn to_bytes_raw_le(&self) -> anyhow::Result<Vec<u8>> {
+        let bits_le = self.0.to_bits_raw_le();
+        let bytes: Vec<u8> = bits_le
+            .chunks(8)
+            .map(|chunk| {
+                crate::types::U8Native::from_bits_le(chunk)
+                    .map(|u8_val| u8_val.to_bytes_le().unwrap()[0])
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(bytes)
+    }
+
+    /// Returns the raw big-endian byte representation (packed from raw BE bits).
+    pub fn to_bytes_raw_be(&self) -> anyhow::Result<Vec<u8>> {
+        let bits_be = self.0.to_bits_raw_be();
+        let mut bytes: Vec<u8> = bits_be
+            .chunks(8)
+            .map(|chunk| {
+                crate::types::U8Native::from_bits_be(chunk)
+                    .map(|u8_val| u8_val.to_bytes_le().unwrap()[0])
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        bytes.reverse();
+        Ok(bytes)
+    }
+
+    /// Returns the field element encoding of the plaintext.
+    pub fn to_fields(&self) -> anyhow::Result<Vec<Field>> {
+        Ok(self.0.to_fields()?.into_iter().map(Into::into).collect())
+    }
+
+    /// Recovers a plaintext from field elements.
+    #[staticmethod]
+    pub fn from_fields(fields: Vec<Field>) -> anyhow::Result<Self> {
+        let native: Vec<FieldNative> = fields.into_iter().map(Into::into).collect();
+        PlaintextNative::from_fields(&native).map(Self)
+    }
+
+    /// Returns the raw field element encoding of the plaintext (no metadata).
+    pub fn to_fields_raw(&self) -> anyhow::Result<Vec<Field>> {
+        Ok(self
+            .0
+            .to_fields_raw()?
+            .into_iter()
+            .map(Into::into)
+            .collect())
+    }
+
+    /// Returns the type of the plaintext: the literal type name, "struct", or "array".
+    #[getter]
+    pub fn plaintext_type(&self) -> String {
+        match &self.0 {
+            PlaintextNative::Literal(literal, _) => literal.to_type().type_name().to_string(),
+            PlaintextNative::Struct(..) => "struct".to_string(),
+            PlaintextNative::Array(..) => "array".to_string(),
+        }
+    }
+
+    /// Converts the plaintext to a native Python object.
+    ///
+    /// Mapping:
+    /// - Literal(boolean) → bool
+    /// - Literal(u8/u16/u32/u64/u128/i8/i16/i32/i64/i128) → int
+    /// - Literal(address/field/group/scalar/signature) → str
+    /// - Struct → dict[str, <recursive>]
+    /// - Array → list[<recursive>]
+    pub fn to_python(&self, py: Python<'_>) -> PyObject {
+        plaintext_to_pyobject(&self.0, py)
+    }
+
     /// Returns the plaintext as a string.
     fn __str__(&self) -> String {
         self.0.to_string()
@@ -196,5 +370,35 @@ impl From<PlaintextNative> for Plaintext {
 impl From<Plaintext> for PlaintextNative {
     fn from(value: Plaintext) -> Self {
         value.0
+    }
+}
+
+fn plaintext_to_pyobject(p: &PlaintextNative, py: Python<'_>) -> PyObject {
+    match p {
+        PlaintextNative::Literal(lit, _) => match lit {
+            LiteralNative::Boolean(b) => (**b).into_py(py),
+            LiteralNative::U8(n) => (**n).into_py(py),
+            LiteralNative::U16(n) => (**n).into_py(py),
+            LiteralNative::U32(n) => (**n).into_py(py),
+            LiteralNative::U64(n) => (**n).into_py(py),
+            LiteralNative::U128(n) => (**n).into_py(py),
+            LiteralNative::I8(n) => (**n).into_py(py),
+            LiteralNative::I16(n) => (**n).into_py(py),
+            LiteralNative::I32(n) => (**n).into_py(py),
+            LiteralNative::I64(n) => (**n).into_py(py),
+            LiteralNative::I128(n) => (**n).into_py(py),
+            _ => lit.to_string().into_py(py),
+        },
+        PlaintextNative::Struct(members, _) => {
+            let dict = pyo3::types::PyDict::new(py);
+            for (k, v) in members.iter() {
+                let _ = dict.set_item(k.to_string(), plaintext_to_pyobject(v, py));
+            }
+            dict.into_py(py)
+        }
+        PlaintextNative::Array(elems, _) => {
+            let list: Vec<PyObject> = elems.iter().map(|e| plaintext_to_pyobject(e, py)).collect();
+            list.into_py(py)
+        }
     }
 }

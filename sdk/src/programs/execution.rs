@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
-use crate::{types::ExecutionNative, Field};
+use crate::{programs::Transition, types::ExecutionNative, Field};
 
 use pyo3::prelude::*;
 use snarkvm::prelude::{FromBytes, ToBytes};
@@ -29,6 +29,7 @@ pub struct Execution(ExecutionNative);
 #[pymethods]
 impl Execution {
     /// Returns the Execution ID.
+    #[getter]
     fn execution_id(&self) -> anyhow::Result<Field> {
         self.0.to_execution_id().map(Into::into)
     }
@@ -58,6 +59,24 @@ impl Execution {
     /// Returns the Execution as a JSON string.
     fn __str__(&self) -> anyhow::Result<String> {
         self.to_json()
+    }
+
+    // ---- new methods ----
+
+    /// Returns the global state root as a string.
+    #[getter]
+    fn global_state_root(&self) -> String {
+        self.0.global_state_root().to_string()
+    }
+
+    /// Returns the proof as a string, or None if not present.
+    fn proof(&self) -> Option<String> {
+        self.0.proof().map(|p| p.to_string())
+    }
+
+    /// Returns the list of transitions in this execution.
+    fn transitions(&self) -> Vec<Transition> {
+        self.0.transitions().map(Transition::from).collect()
     }
 }
 

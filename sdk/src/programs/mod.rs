@@ -17,8 +17,14 @@
 mod authorization;
 pub use authorization::Authorization;
 
+mod dynamic_record;
+pub use dynamic_record::DynamicRecord;
+
 mod execution;
 pub use execution::Execution;
+
+mod execution_request;
+pub use execution_request::ExecutionRequest;
 
 mod fee;
 pub use fee::Fee;
@@ -32,6 +38,12 @@ pub use literal::Literal;
 mod locator;
 pub use locator::Locator;
 
+mod metadata;
+pub use metadata::Metadata;
+
+mod offline_query;
+pub use offline_query::OfflineQuery;
+
 mod process;
 pub use process::Process;
 
@@ -43,6 +55,9 @@ pub use program::Program;
 
 mod proving_key;
 pub use proving_key::ProvingKey;
+
+mod proving_request;
+pub use proving_request::ProvingRequest;
 
 mod response;
 pub use response::Response;
@@ -61,6 +76,9 @@ pub use transition::Transition;
 
 mod value;
 pub use value::Value;
+
+mod proof;
+pub use proof::Proof;
 
 mod verifying_key;
 pub use verifying_key::VerifyingKey;

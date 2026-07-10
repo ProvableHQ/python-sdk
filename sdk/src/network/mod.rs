@@ -39,12 +39,6 @@ impl Network {
         CurrentNetwork::ID
     }
 
-    /// The network version.
-    #[staticmethod]
-    fn edition() -> u16 {
-        CurrentNetwork::EDITION
-    }
-
     /// Returns the Poseidon hash with an input rate of 2.
     #[staticmethod]
     fn hash_psd2(input: Vec<Field>) -> anyhow::Result<Field> {

@@ -1,5 +1,5 @@
 .env/
 target/
 __pycache__/
-python/aleo/_aleolib.abi3.so
+python/aleo/*.abi3.so
 _readthedocs/

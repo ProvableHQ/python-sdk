@@ -15,12 +15,13 @@
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
 use crate::{
-    types::{CurrentAleo, LocatorNative, QueryNative, TraceNative},
-    Execution, Fee, Locator, Query, Transition,
+    types::{CurrentAleo, QueryNative, TraceNative},
+    Execution, Fee, Query, Transition,
 };
 
 use pyo3::prelude::*;
-use rand::{rngs::StdRng, SeedableRng};
+use rand::rngs::StdRng;
+use snarkvm::algorithms::snark::varuna::VarunaVersion;
 
 /// The Aleo trace type.
 #[pyclass]
@@ -54,23 +55,25 @@ impl Trace {
     }
 
     /// Returns a new execution with a proof, for the current inclusion assignments and global state root.
-    fn prove_execution(&self, locator: Locator) -> anyhow::Result<Execution> {
-        let locator: LocatorNative = locator.into();
-        let locator_s = locator.to_string();
+    fn prove_execution(&self, locator: &str) -> anyhow::Result<Execution> {
         self.0
-            .prove_execution::<CurrentAleo, _>(&locator_s, &mut StdRng::from_entropy())
+            .prove_execution::<CurrentAleo, _>(
+                locator,
+                VarunaVersion::V2,
+                &mut rand::make_rng::<StdRng>(),
+            )
             .map(Into::into)
     }
 
     /// Returns a new fee with a proof, for the current inclusion assignment and global state root.
     fn prove_fee(&self) -> anyhow::Result<Fee> {
         self.0
-            .prove_fee::<CurrentAleo, _>(&mut StdRng::from_entropy())
+            .prove_fee::<CurrentAleo, _>(VarunaVersion::V2, &mut rand::make_rng::<StdRng>())
             .map(Into::into)
     }
 
     fn prepare(&mut self, query: Query) -> anyhow::Result<()> {
-        self.0.prepare(QueryNative::from(query))
+        self.0.prepare(&QueryNative::from(query))
     }
 }
 

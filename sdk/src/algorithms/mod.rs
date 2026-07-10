@@ -14,27 +14,11 @@
 // You should have received a copy of the GNU General Public License
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
-use crate::{coinbase::CoinbaseVerifyingKey, types::CoinbasePuzzleNative};
+pub mod bhp;
+pub use bhp::{BHP1024, BHP256, BHP512, BHP768};
 
-use pyo3::prelude::*;
+pub mod pedersen;
+pub use pedersen::{Pedersen128, Pedersen64};
 
-/// The Aleo coinbase puzzle type.
-#[pyclass]
-pub struct CoinbasePuzzle(CoinbasePuzzleNative);
-
-#[pymethods]
-impl CoinbasePuzzle {
-    /// Load the coinbase puzzle proving and verifying keys.
-    #[staticmethod]
-    fn load() -> anyhow::Result<Self> {
-        CoinbasePuzzleNative::load().map(Self)
-    }
-
-    /// Returns the coinbase verifying key.
-    fn verifying_key(&self) -> CoinbaseVerifyingKey {
-        self.0.coinbase_verifying_key().clone().into()
-    }
-
-    #[classattr]
-    const __hash__: Option<PyObject> = None;
-}
+pub mod poseidon;
+pub use poseidon::{Poseidon2, Poseidon4, Poseidon8};

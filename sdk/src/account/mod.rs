@@ -20,8 +20,14 @@ pub use address::Address;
 mod compute_key;
 pub use compute_key::ComputeKey;
 
+mod graph_key;
+pub use graph_key::GraphKey;
+
 mod private_key;
 pub use private_key::PrivateKey;
+
+mod private_key_ciphertext;
+pub use private_key_ciphertext::PrivateKeyCiphertext;
 
 mod record;
 pub use record::{RecordCiphertext, RecordPlaintext};
@@ -55,9 +61,9 @@ pub struct Account {
 #[pymethods]
 impl Account {
     /// Generates a new account using a cryptographically secure random number generator
-    #[new]
-    fn new() -> Self {
-        Self::from(PrivateKey::new())
+    #[staticmethod]
+    fn random() -> Self {
+        Self::from(PrivateKey::random())
     }
 
     /// Creates a new account from the given private key.
@@ -73,16 +79,19 @@ impl Account {
     }
 
     /// Returns an account private key.
+    #[getter]
     fn private_key(&self) -> PrivateKey {
         self.private_key
     }
 
     /// Returns an account view key.
+    #[getter]
     fn view_key(&self) -> ViewKey {
         self.view_key.clone()
     }
 
     /// Returns an account address.
+    #[getter]
     fn address(&self) -> Address {
         self.address.clone()
     }

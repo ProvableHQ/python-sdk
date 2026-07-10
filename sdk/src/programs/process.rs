@@ -16,13 +16,16 @@
 
 use crate::{
     types::{CurrentAleo, ProcessNative},
-    Authorization, Execution, Fee, Field, Identifier, MicroCredits, PrivateKey, Program, ProgramID,
-    ProvingKey, RecordPlaintext, Response, Trace, Value, VerifyingKey,
+    Authorization, Execution, Fee, Field, Identifier, PrivateKey, Program, ProgramID, ProvingKey,
+    RecordPlaintext, Response, Trace, Value, VerifyingKey,
 };
 
+use indexmap::IndexMap;
 use pyo3::prelude::*;
-use rand::{rngs::StdRng, SeedableRng};
-use snarkvm::prelude::cost_in_microcredits;
+use rand::rngs::StdRng;
+use snarkvm::algorithms::snark::varuna::VarunaVersion;
+use snarkvm::console::network::ConsensusVersion;
+use snarkvm::synthesizer::process::{execution_cost, InclusionVersion};
 
 /// The Aleo process type.
 #[pyclass]
@@ -37,8 +40,8 @@ impl Process {
     }
 
     /// Adds a new program to the process
-    fn add_program(&mut self, program: &Program) -> anyhow::Result<()> {
-        self.0.add_program(program)
+    fn add_program(&self, program: &Program) -> anyhow::Result<()> {
+        self.0.lock().add_program(program)
     }
 
     /// Returns true if the process contains the program with the given ID.
@@ -59,7 +62,7 @@ impl Process {
 
     /// Inserts the given proving key, for the given program ID and function name.
     fn insert_proving_key(
-        &mut self,
+        &self,
         program_id: &ProgramID,
         function_name: &Identifier,
         proving_key: ProvingKey,
@@ -81,7 +84,7 @@ impl Process {
 
     /// Inserts the given verifying key, for the given program ID and function name.
     fn insert_verifying_key(
-        &mut self,
+        &self,
         program_id: &ProgramID,
         function_name: &Identifier,
         verifying_key: VerifyingKey,
@@ -104,105 +107,99 @@ impl Process {
                 program_id,
                 function_name,
                 inputs.into_iter(),
-                &mut StdRng::from_entropy(),
+                &mut rand::make_rng::<StdRng>(),
             )
             .map(Into::into)
+            .map_err(anyhow::Error::from)
     }
 
-    /// Authorizes the fee given the credits record, the fee amount (in microcredits), and the deployment or execution ID.
+    /// Authorizes the fee given the credits record, the base and priority fee amounts (in
+    /// microcredits), and the deployment or execution ID.
     fn authorize_fee_private(
         &self,
         private_key: &PrivateKey,
         credits: RecordPlaintext,
-        base_fee: MicroCredits,
+        base_fee: u64,
+        priority_fee: u64,
         deployment_or_execution_id: Field,
-        priority_fee: Option<MicroCredits>,
     ) -> anyhow::Result<Authorization> {
         self.0
             .authorize_fee_private::<CurrentAleo, _>(
                 private_key,
                 credits.into(),
-                base_fee.into(),
-                priority_fee.map(Into::into).unwrap_or(0),
+                base_fee,
+                priority_fee,
                 deployment_or_execution_id.into(),
-                &mut StdRng::from_entropy(),
+                &mut rand::make_rng::<StdRng>(),
             )
             .map(Into::into)
+            .map_err(anyhow::Error::from)
     }
 
-    /// Authorizes the fee given the the fee amount (in microcredits) and the deployment or execution ID.
+    /// Authorizes the fee given the base and priority fee amounts (in microcredits) and the
+    /// deployment or execution ID.
     fn authorize_fee_public(
         &self,
         private_key: &PrivateKey,
-        base_fee: MicroCredits,
+        base_fee: u64,
+        priority_fee: u64,
         deployment_or_execution_id: Field,
-        priority_fee: Option<MicroCredits>,
     ) -> anyhow::Result<Authorization> {
         self.0
             .authorize_fee_public::<CurrentAleo, _>(
                 private_key,
-                base_fee.into(),
-                priority_fee.map(Into::into).unwrap_or(0),
+                base_fee,
+                priority_fee,
                 deployment_or_execution_id.into(),
-                &mut StdRng::from_entropy(),
+                &mut rand::make_rng::<StdRng>(),
             )
             .map(Into::into)
+            .map_err(anyhow::Error::from)
     }
 
     /// Executes the given authorization.
     fn execute(&self, authorization: Authorization) -> anyhow::Result<(Response, Trace)> {
         self.0
-            .execute::<CurrentAleo, _>(authorization.into(), &mut StdRng::from_entropy())
+            .execute::<CurrentAleo, _>(authorization.into(), &mut rand::make_rng::<StdRng>())
             .map(|(r, t)| (Response::from(r), Trace::from(t)))
+            .map_err(anyhow::Error::from)
     }
 
     /// Verifies the given execution is valid. Note: This does not check that the global state root exists in the ledger.
     fn verify_execution(&self, execution: &Execution) -> anyhow::Result<()> {
-        self.0.verify_execution(execution)
+        let execution: crate::types::ExecutionNative = execution.clone().into();
+        // Build the map of program stacks referenced by the execution's transitions.
+        let execution_stacks = execution
+            .transitions()
+            .map(|transition| {
+                Ok((
+                    *transition.program_id(),
+                    self.0.get_stack(transition.program_id())?,
+                ))
+            })
+            .collect::<anyhow::Result<IndexMap<_, _>>>()?;
+        ProcessNative::verify_execution(
+            ConsensusVersion::V17,
+            VarunaVersion::V2,
+            InclusionVersion::V1,
+            &execution,
+            &execution_stacks,
+        )
     }
 
     /// Verifies the given fee is valid. Note: This does not check that the global state root exists in the ledger.
     fn verify_fee(&self, fee: &Fee, deployment_or_execution_id: Field) -> anyhow::Result<()> {
-        self.0.verify_fee(fee, deployment_or_execution_id.into())
+        self.0.verify_fee(
+            ConsensusVersion::V17,
+            VarunaVersion::V2,
+            InclusionVersion::V1,
+            fee,
+            deployment_or_execution_id.into(),
+        )
     }
 
     /// Returns the *minimum* cost in microcredits to publish the given execution (total cost, (storage cost, finalize cost)).
-    fn execution_cost(
-        &self,
-        execution: &Execution,
-    ) -> anyhow::Result<(MicroCredits, (MicroCredits, MicroCredits))> {
-        // Compute the storage cost in microcredits.
-        let storage_cost = execution.size_in_bytes()?;
-
-        // Compute the finalize cost in microcredits.
-        let mut finalize_cost = 0u64;
-
-        for transition in execution.transitions() {
-            let program = self.0.get_program(transition.program_id())?;
-            let function = program.get_function(transition.function_name())?;
-            let cost = match function.finalize_logic() {
-                Some(finalize) => cost_in_microcredits(finalize)?,
-                None => continue,
-            };
-            // Accumulate the finalize cost.
-            finalize_cost = finalize_cost.checked_add(cost).ok_or(anyhow::anyhow!(
-                "The finalize cost computation overflowed for an execution"
-            ))?;
-        }
-
-        // Compute the total cost in microcredits.
-        let total_cost = storage_cost
-            .checked_add(finalize_cost)
-            .ok_or(anyhow::anyhow!(
-                "The total cost computation overflowed for an execution"
-            ))?;
-
-        Ok((
-            MicroCredits::from(total_cost),
-            (
-                MicroCredits::from(storage_cost),
-                MicroCredits::from(finalize_cost),
-            ),
-        ))
+    fn execution_cost(&self, execution: &Execution) -> anyhow::Result<(u64, (u64, u64))> {
+        execution_cost(&self.0, &execution.clone().into(), ConsensusVersion::V17)
     }
 }

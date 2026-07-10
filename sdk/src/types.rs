@@ -14,24 +14,40 @@
 // You should have received a copy of the GNU General Public License
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
+#[cfg(feature = "testnet")]
+use snarkvm::circuit::network::AleoTestnetV0;
+#[cfg(not(feature = "testnet"))]
 use snarkvm::circuit::network::AleoV0;
-use snarkvm::console::network::Testnet3;
-use snarkvm::prelude::coinbase::{
-    CoinbasePuzzle, CoinbaseVerifyingKey, EpochChallenge, ProverSolution,
-};
-use snarkvm::prelude::query::Query;
-use snarkvm::prelude::store::helpers::memory::BlockMemory;
-use snarkvm::prelude::transaction::Transaction;
+#[cfg(not(feature = "testnet"))]
+use snarkvm::console::network::MainnetV0;
+#[cfg(feature = "testnet")]
+use snarkvm::console::network::TestnetV0;
+use snarkvm::ledger::block::transition::{Input, Output};
+use snarkvm::ledger::block::{Fee, Transaction};
+use snarkvm::ledger::query::Query;
+use snarkvm::ledger::store::helpers::memory::BlockMemory;
 use snarkvm::prelude::{
-    Address, Authorization, Boolean, Ciphertext, ComputeKey, Execution, Fee, Field, Group,
-    Identifier, Literal, Locator, Plaintext, PrivateKey, Process, Program, ProgramID, ProvingKey,
-    Record, Response, Scalar, Signature, Trace, Transition, Value, VerifyingKey, ViewKey, I128,
-    I16, I32, I64, I8, U128, U16, U32, U64, U8,
+    Address, Argument, Authorization, Boolean, Ciphertext, ComputeKey, Execution, Field, Future,
+    GraphKey, Group, Identifier, Literal, Locator, Plaintext, PrivateKey, Program, ProgramID,
+    ProvingKey, Record, Request, Response, Scalar, Signature, Transition, Value, ValueType,
+    VerifyingKey, ViewKey, I128, I16, I32, I64, I8, U128, U16, U32, U64, U8,
 };
+use snarkvm::synthesizer::{Process, Trace};
+
+// Network selection (feature-gated; MainnetV0 by default).
+#[cfg(not(feature = "testnet"))]
+pub type CurrentNetwork = MainnetV0;
+#[cfg(not(feature = "testnet"))]
+pub type CurrentAleo = AleoV0;
+#[cfg(feature = "testnet")]
+pub type CurrentNetwork = TestnetV0;
+#[cfg(feature = "testnet")]
+pub type CurrentAleo = AleoTestnetV0;
 
 // Account types
 pub type AddressNative = Address<CurrentNetwork>;
 pub type ComputeKeyNative = ComputeKey<CurrentNetwork>;
+pub type GraphKeyNative = GraphKey<CurrentNetwork>;
 pub type PrivateKeyNative = PrivateKey<CurrentNetwork>;
 pub type SignatureNative = Signature<CurrentNetwork>;
 pub type ViewKeyNative = ViewKey<CurrentNetwork>;
@@ -54,12 +70,8 @@ pub type U32Native = U32<CurrentNetwork>;
 pub type U64Native = U64<CurrentNetwork>;
 pub type U128Native = U128<CurrentNetwork>;
 
-// Network types
-pub type CurrentNetwork = Testnet3;
-pub type CurrentAleo = AleoV0;
-
-// Program Types
-type CurrentBlockMemory = BlockMemory<CurrentNetwork>;
+// Program types
+pub type CurrentBlockMemory = BlockMemory<CurrentNetwork>;
 pub type AuthorizationNative = Authorization<CurrentNetwork>;
 pub type ExecutionNative = Execution<CurrentNetwork>;
 pub type FeeNative = Fee<CurrentNetwork>;
@@ -71,6 +83,8 @@ pub type ProgramIDNative = ProgramID<CurrentNetwork>;
 pub type ProgramNative = Program<CurrentNetwork>;
 pub type ProvingKeyNative = ProvingKey<CurrentNetwork>;
 pub type QueryNative = Query<CurrentNetwork, CurrentBlockMemory>;
+pub type RequestNative = Request<CurrentNetwork>;
+pub type ValueTypeNative = ValueType<CurrentNetwork>;
 pub type ResponseNative = Response<CurrentNetwork>;
 pub type TraceNative = Trace<CurrentNetwork>;
 pub type TransactionNative = Transaction<CurrentNetwork>;
@@ -84,8 +98,17 @@ pub type PlaintextNative = Plaintext<CurrentNetwork>;
 pub type RecordCiphertextNative = Record<CurrentNetwork, CiphertextNative>;
 pub type RecordPlaintextNative = Record<CurrentNetwork, PlaintextNative>;
 
-// Coinbase types
-pub type CoinbasePuzzleNative = CoinbasePuzzle<CurrentNetwork>;
-pub type CoinbaseVerifyingKeyNative = CoinbaseVerifyingKey<CurrentNetwork>;
-pub type EpochChallengeNative = EpochChallenge<CurrentNetwork>;
-pub type ProverSolutionNative = ProverSolution<CurrentNetwork>;
+// Transition I/O types
+pub type InputNative = Input<CurrentNetwork>;
+pub type OutputNative = Output<CurrentNetwork>;
+pub type FutureNative = Future<CurrentNetwork>;
+pub type ArgumentNative = Argument<CurrentNetwork>;
+
+// Proof type
+pub type ProofNative = snarkvm::synthesizer::snark::Proof<CurrentNetwork>;
+
+// Dynamic record type
+pub type DynamicRecordNative = snarkvm::console::program::DynamicRecord<CurrentNetwork>;
+
+// State path type (for OfflineQuery)
+pub type StatePathNative = snarkvm::console::program::StatePath<CurrentNetwork>;

@@ -1,0 +1,10 @@
+target/
+.env/
+dist/
+__pycache__/
+*.pyc
+*.pyo
+*.so
+*.pyd
+*.whl
+.pytest_cache/

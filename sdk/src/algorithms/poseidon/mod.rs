@@ -14,14 +14,11 @@
 // You should have received a copy of the GNU General Public License
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
-mod epoch_challenge;
-pub use epoch_challenge::EpochChallenge;
+mod poseidon2;
+pub use poseidon2::Poseidon2;
 
-mod prover_solution;
-pub use prover_solution::ProverSolution;
+mod poseidon4;
+pub use poseidon4::Poseidon4;
 
-mod puzzle;
-pub use puzzle::CoinbasePuzzle;
-
-mod verifying_key;
-pub use verifying_key::CoinbaseVerifyingKey;
+mod poseidon8;
+pub use poseidon8::Poseidon8;

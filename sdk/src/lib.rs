@@ -1,3 +1,6 @@
+// pyo3 0.20 macro expansion triggers this lint on newer rustc; remove after pyo3 >= 0.21 upgrade
+#![allow(non_local_definitions)]
+
 // Copyright (C) 2019-2023 Aleo Systems Inc.
 // This file is part of the Aleo SDK library.
 
@@ -18,7 +21,7 @@ use pyo3::prelude::*;
 
 mod account;
 mod algebra;
-mod coinbase;
+mod algorithms;
 mod credits;
 mod network;
 mod programs;
@@ -26,7 +29,7 @@ mod types;
 
 use account::*;
 use algebra::*;
-use coinbase::*;
+use algorithms::*;
 use credits::*;
 use network::*;
 use programs::*;
@@ -34,22 +37,25 @@ use programs::*;
 /// The Aleo Python SDK provides a set of libraries aimed at empowering
 /// Python developers with zk (zero-knowledge) programming capabilities
 /// via the usage of Aleo's zkSnarks.
-#[pymodule]
-#[pyo3(name = "_aleolib")]
-fn register_module(_py: Python, m: &PyModule) -> PyResult<()> {
+/// Registers all classes into the module (shared by both network builds).
+fn register(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Account>()?;
     m.add_class::<Address>()?;
     m.add_class::<Authorization>()?;
+    m.add_class::<BHP256>()?;
+    m.add_class::<BHP512>()?;
+    m.add_class::<BHP768>()?;
+    m.add_class::<BHP1024>()?;
     m.add_class::<Boolean>()?;
     m.add_class::<Ciphertext>()?;
-    m.add_class::<CoinbasePuzzle>()?;
-    m.add_class::<CoinbaseVerifyingKey>()?;
     m.add_class::<ComputeKey>()?;
     m.add_class::<Credits>()?;
-    m.add_class::<EpochChallenge>()?;
+    m.add_class::<DynamicRecord>()?;
     m.add_class::<Execution>()?;
+    m.add_class::<ExecutionRequest>()?;
     m.add_class::<Fee>()?;
     m.add_class::<Field>()?;
+    m.add_class::<GraphKey>()?;
     m.add_class::<Group>()?;
     m.add_class::<Identifier>()?;
     m.add_class::<I8>()?;
@@ -60,14 +66,23 @@ fn register_module(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Literal>()?;
     m.add_class::<Locator>()?;
     m.add_class::<MicroCredits>()?;
+    m.add_class::<Metadata>()?;
     m.add_class::<Network>()?;
+    m.add_class::<OfflineQuery>()?;
+    m.add_class::<Pedersen64>()?;
+    m.add_class::<Pedersen128>()?;
     m.add_class::<Plaintext>()?;
+    m.add_class::<PrivateKeyCiphertext>()?;
+    m.add_class::<Poseidon2>()?;
+    m.add_class::<Poseidon4>()?;
+    m.add_class::<Poseidon8>()?;
     m.add_class::<PrivateKey>()?;
     m.add_class::<Process>()?;
+    m.add_class::<Proof>()?;
     m.add_class::<Program>()?;
     m.add_class::<ProgramID>()?;
-    m.add_class::<ProverSolution>()?;
     m.add_class::<ProvingKey>()?;
+    m.add_class::<ProvingRequest>()?;
     m.add_class::<Query>()?;
     m.add_class::<RecordCiphertext>()?;
     m.add_class::<RecordPlaintext>()?;
@@ -86,4 +101,18 @@ fn register_module(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<VerifyingKey>()?;
     m.add_class::<ViewKey>()?;
     Ok(())
+}
+
+#[cfg(not(feature = "testnet"))]
+#[pymodule]
+#[pyo3(name = "_aleolib_mainnet")]
+fn aleolib_mainnet(py: Python, m: &PyModule) -> PyResult<()> {
+    register(py, m)
+}
+
+#[cfg(feature = "testnet")]
+#[pymodule]
+#[pyo3(name = "_aleolib_testnet")]
+fn aleolib_testnet(py: Python, m: &PyModule) -> PyResult<()> {
+    register(py, m)
 }

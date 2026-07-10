@@ -7,17 +7,28 @@ edition = "2021"
 license = "GPL-3.0-or-later"
 
 [lib]
+# NOTE: internal crate name only. The importable module name is set by
+# pyproject.toml [tool.maturin] module-name + the cfg-gated #[pyo3(name)]
+# in src/lib.rs (_aleolib_mainnet / _aleolib_testnet).
 name = "_aleolib"
 crate-type = ["cdylib"]
 
+[features]
+default = ["mainnet"]
+mainnet = []
+testnet = []
+
 [dependencies]
 anyhow = "1"
+hex = "0.4"
 indexmap = "2.1.0"
 once_cell = "1.18.0"
-openssl = "0.10"
 pyo3 = { version = "0.20.0", features = ["extension-module", "abi3-py37", "anyhow"] }
-rand = { version = "^0.8" }
+rand = { version = "0.10" }
 serde = "1"
 serde_json = "1"
+sha2 = "0.10"
 
-snarkvm = { version = "0.16.6", features = ["console"] }
+snarkvm = { git = "https://github.com/ProvableHQ/snarkVM.git", tag = "v4.8.1", default-features = false, features = [
+    "console", "circuit", "synthesizer", "ledger", "utilities", "algorithms", "parameters",
+] }
