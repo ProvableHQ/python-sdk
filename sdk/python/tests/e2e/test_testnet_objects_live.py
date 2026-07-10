@@ -20,13 +20,12 @@ a wrong-network object.
 
 Markers / gating
 ----------------
-* Module-level ``pytestmark = [pytest.mark.live, pytest.mark.slow]``.
-
-  - ``live`` is the semantic marker (real-API network tests; run with
-    ``-m live``).  It is *distinct* from the proving ``slow`` marker.
-  - ``slow`` is *also* applied so the fast suite (``-m "not slow"``) deselects
-    the whole module — the fast suite must stay fully offline.  (``live`` alone
-    would NOT be excluded by ``not slow``.)
+* Module-level ``pytestmark = pytest.mark.live`` — real-API network tests, run
+  ONLY locally with ``-m live``.  CI never runs these: the fast lanes filter
+  ``-m "not slow and not live and not devnode"`` and the proving lane runs
+  ``-m slow`` (``live`` is not ``slow``), so ``live`` is excluded everywhere in
+  CI.  (They also need the testnet extension built + live network egress, which
+  the default offline jobs don't provide.)
 
 * Env-gated + offline-safe: ``ALEO_E2E_ENDPOINT`` (default the public explorer
   v2 root), ``network="testnet"``.  READ-ONLY — needs NO credentials and NO
@@ -54,12 +53,9 @@ from aleo import (
     HTTPProvider,
 )
 
-# ── Markers ───────────────────────────────────────────────────────────────
-# `live`  → semantic tag for real-API tests (run with -m live).
-# `slow`  → ALSO applied so `-m "not slow"` (the fast, offline suite) deselects
-#           this module.  `live` != `slow`, so without this the fast suite would
-#           try to run these against the network.
-pytestmark = [pytest.mark.live, pytest.mark.slow]
+# `live` → real-API tests, run only locally with `-m live`. CI excludes `live`
+# on every lane (fast lanes: `not ... and not live`; proving lane: `-m slow`).
+pytestmark = pytest.mark.live
 
 _ENDPOINT = os.environ.get(
     "ALEO_E2E_ENDPOINT", "https://api.explorer.provable.com/v2"

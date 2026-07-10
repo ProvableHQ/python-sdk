@@ -53,7 +53,7 @@ from aleo import Aleo, HTTPProvider
 
 # ── Module-level marker + env gate ───────────────────────────────────────────
 
-pytestmark = pytest.mark.slow
+pytestmark = pytest.mark.live
 
 _PRIVATE_KEY = os.environ.get("ALEO_E2E_PRIVATE_KEY")
 _ENDPOINT = os.environ.get(

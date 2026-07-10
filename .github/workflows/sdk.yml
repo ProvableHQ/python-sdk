@@ -78,7 +78,7 @@ jobs:
           pip install pytest pytest-xdist httpx pynacl responses pytest-asyncio
       # Fast, offline tests; -n auto parallelizes across cores.
       - name: pytest (fast suite)
-        run: python -m pytest python/tests -v -n auto -m "not slow"
+        run: python -m pytest python/tests -v -n auto -m "not slow and not live and not devnode"
 
   test-proving:
     name: Test (proving, network)
