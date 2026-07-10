@@ -106,6 +106,26 @@ class AleoNetworkClient:
 
         self._session: requests.Session = requests.Session()
 
+    # ── Network module selection ──────────────────────────────────────────
+
+    def _net(self) -> Any:
+        """Return the network extension module (``aleo.mainnet`` or ``aleo.testnet``).
+
+        Node responses must be parsed into types from the module matching
+        ``self._network``; mixing mainnet/testnet types raises cross-extension
+        ``TypeError``s.
+        """
+        try:
+            if self._network == "testnet":
+                from . import testnet as _mod  # type: ignore[attr-defined]
+            else:
+                from . import mainnet as _mod  # type: ignore[attr-defined]
+        except ImportError:
+            raise ImportError(
+                f"aleo {self._network} module not available"
+            ) from None
+        return _mod
+
     # ── Internal HTTP core ────────────────────────────────────────────────
 
     def _http(
@@ -301,10 +321,7 @@ class AleoNetworkClient:
         return json.loads(raw)
 
     def get_program_object(self, program_id: str, edition: int | None = None) -> Any:
-        try:
-            from .mainnet import Program  # type: ignore[attr-defined]
-        except ImportError:
-            raise ImportError("aleo mainnet module not available") from None
+        Program = self._net().Program
         source = self.get_program(program_id, edition)
         return Program.from_source(source)
 
@@ -315,11 +332,6 @@ class AleoNetworkClient:
     ) -> dict[str, str]:
         if imports is None:
             imports = {}
-        try:
-            from .mainnet import Program  # type: ignore[attr-defined]
-        except ImportError:
-            raise ImportError("aleo mainnet module not available") from None
-
         source = self.get_program(program_id)
         return self._collect_program_imports(source, imports)
 
@@ -329,10 +341,7 @@ class AleoNetworkClient:
         imports: dict[str, str],
     ) -> dict[str, str]:
         """DFS import collection — source already fetched, no re-fetch."""
-        try:
-            from .mainnet import Program  # type: ignore[attr-defined]
-        except ImportError:
-            raise ImportError("aleo mainnet module not available") from None
+        Program = self._net().Program
         prog = Program.from_source(source)
         for imp_id_obj in prog.imports:
             imp_id = str(imp_id_obj)
@@ -344,10 +353,7 @@ class AleoNetworkClient:
         return imports
 
     def get_program_import_names(self, program_id: str) -> list[str]:
-        try:
-            from .mainnet import Program  # type: ignore[attr-defined]
-        except ImportError:
-            raise ImportError("aleo mainnet module not available") from None
+        Program = self._net().Program
         source = self.get_program(program_id)
         prog = Program.from_source(source)
         return [str(imp) for imp in prog.imports]
@@ -366,10 +372,7 @@ class AleoNetworkClient:
     def get_program_mapping_plaintext(
         self, program_id: str, mapping_name: str, key: str
     ) -> Any:
-        try:
-            from .mainnet import Plaintext  # type: ignore[attr-defined]
-        except ImportError:
-            raise ImportError("aleo mainnet module not available") from None
+        Plaintext = self._net().Plaintext
         raw = self._get_raw(
             f"/program/{program_id}/mapping/{mapping_name}/{key}",
             "getProgramMappingPlaintext",
@@ -392,10 +395,7 @@ class AleoNetworkClient:
         return self._get(f"/transaction/confirmed/{tx_id}", "getConfirmedTransaction")
 
     def get_transaction_object(self, tx_id: str) -> Any:
-        try:
-            from .mainnet import Transaction  # type: ignore[attr-defined]
-        except ImportError:
-            raise ImportError("aleo mainnet module not available") from None
+        Transaction = self._net().Transaction
         raw = self._get_raw(f"/transaction/{tx_id}", "getTransactionObject")
         return Transaction.from_json(raw)
 
@@ -512,11 +512,7 @@ class AleoNetworkClient:
         # this is what delegate()/callers pass). Only a serialized string needs
         # parsing; import lazily so an object never forces the module load.
         if isinstance(proving_request, str):
-            if self._network == "testnet":
-                from .testnet import ProvingRequest  # type: ignore[attr-defined]
-            else:
-                from .mainnet import ProvingRequest  # type: ignore[attr-defined]
-            pr_obj = ProvingRequest.from_string(proving_request)
+            pr_obj = self._net().ProvingRequest.from_string(proving_request)
         else:
             pr_obj = proving_request
 
