@@ -52,6 +52,8 @@ class Aleo:
         self.account: AccountModule = AccountModule(self)
         from .network import NetworkModule
         self.network: NetworkModule = NetworkModule(self)
+        from .programs import ProgramsModule
+        self.programs: ProgramsModule = ProgramsModule(self)
 
     # ── Escape hatches ─────────────────────────────────────────────────────
 
@@ -210,6 +212,39 @@ class Aleo:
             return bool(Address.is_valid(s))  # pyright: ignore[reportAttributeAccessIssue]
         except Exception:
             return False
+
+    # ── ABI generation (local path) ─────────────────────────────────────────
+
+    def generate_abi(
+        self, source_or_program: Any, *, network: str | None = None
+    ) -> dict[str, Any]:
+        """Generate an ABI dict from a source string or a Program (local path).
+
+        Accepts a raw ``.aleo`` source string, a facade
+        :class:`~aleo.facade.programs.Program`, or a raw network ``Program``
+        object, and funnels to :func:`aleo.abi.generate_abi`.
+
+        Parameters
+        ----------
+        source_or_program:
+            An Aleo source string, a facade ``Program``, or a raw ``Program``.
+        network:
+            Network name for ABI generation.  Defaults to this client's
+            provider network.
+
+        Raises
+        ------
+        ImportError
+            If the ``aleo-abi`` package is not installed.
+        """
+        from .. import abi as _abi
+        from .programs import Program as _FacadeProgram
+
+        net = network if network is not None else self.network_name
+        target: Any = source_or_program
+        if isinstance(source_or_program, _FacadeProgram):
+            target = source_or_program.raw
+        return _abi.generate_abi(target, net)
 
     # ── Repr ───────────────────────────────────────────────────────────────
 
