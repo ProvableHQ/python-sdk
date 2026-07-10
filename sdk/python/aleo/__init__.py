@@ -17,6 +17,17 @@ from ._scanner_common import (
     UUIDError as UUIDError,
 )
 
+# Facade exports (F1)
+from .facade import Aleo as Aleo
+from .facade import HTTPProvider as HTTPProvider
+from .facade.errors import (
+    AleoError as AleoError,
+    TransactionNotFound as TransactionNotFound,
+    ProgramNotFound as ProgramNotFound,
+    ExecutionError as ExecutionError,
+    TransactionConfirmationTimeout as TransactionConfirmationTimeout,
+)
+
 
 def __getattr__(name: str) -> object:
     if name == "abi":
