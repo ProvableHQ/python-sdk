@@ -59,7 +59,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Build wheel
+      # Build the mainnet extension module wheel.
+      - name: Build mainnet wheel
         uses: PyO3/maturin-action@v1
         with:
           # Run from sdk/ so cargo picks up sdk/.cargo/config.toml (macOS
@@ -78,18 +79,53 @@ jobs:
             elif command -v yum &> /dev/null; then
               yum install -y git cmake3 clang && ln -sf "$(command -v cmake3)" /usr/local/bin/cmake
             fi
+      # maturin emits one cdylib per invocation (named by pyproject
+      # module-name). Build a second wheel for the testnet extension module with
+      # module-name overridden to aleo._aleolib_testnet.
+      - name: Override module-name for testnet build
+        shell: bash
+        run: |
+          cp sdk/pyproject.toml sdk/pyproject.toml.mainnet.bak
+          sed -i.bak 's/module-name = "aleo._aleolib_mainnet"/module-name = "aleo._aleolib_testnet"/' sdk/pyproject.toml
+      - name: Build testnet wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: ./sdk
+          target: ${{ matrix.platform.target }}
+          args: --release --out dist-testnet --no-default-features --features testnet
+          sccache: 'true'
+          manylinux: ${{ startsWith(matrix.platform.name, 'linux') && '2_28' || 'auto' }}
+          before-script-linux: |
+            if command -v dnf &> /dev/null; then
+              dnf install -y git cmake clang
+            elif command -v yum &> /dev/null; then
+              yum install -y git cmake3 clang && ln -sf "$(command -v cmake3)" /usr/local/bin/cmake
+            fi
+      # Splice the testnet .so into the mainnet wheel -> one two-network wheel.
+      - name: Merge testnet module into wheel
+        shell: bash
+        run: |
+          mv sdk/pyproject.toml.mainnet.bak sdk/pyproject.toml
+          python .github/scripts/merge_testnet_so.py sdk/dist sdk/dist-testnet
       # Every runner here matches its wheel's platform, so install and smoke
-      # test the actual artifact before it can ship.
+      # test the actual artifact — importing BOTH networks — before it ships.
       - name: Smoke test wheel
         shell: bash
         run: |
           pip install --find-links sdk/dist aleo
           python -c "
-          from aleo.mainnet import PrivateKey
-          pk = PrivateKey.random()
-          assert str(pk).startswith('APrivateKey1')
-          assert str(pk.address).startswith('aleo1')
-          print('wheel ok:', pk.address)
+          from aleo.mainnet import PrivateKey as MainnetPrivateKey
+          from aleo.testnet import PrivateKey as TestnetPrivateKey
+          import aleo.mainnet as mainnet
+          import aleo.testnet as testnet
+          mpk = MainnetPrivateKey.random()
+          tpk = TestnetPrivateKey.random()
+          assert str(mpk).startswith('APrivateKey1')
+          assert str(mpk.address).startswith('aleo1')
+          assert str(tpk.address).startswith('aleo1')
+          assert mainnet.Network.id() == 0
+          assert testnet.Network.id() == 1
+          print('two-network wheel ok:', mpk.address, tpk.address)
           "
       - name: Upload wheel
         uses: actions/upload-artifact@v4
