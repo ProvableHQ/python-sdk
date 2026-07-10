@@ -143,7 +143,7 @@ Want to pay your own fee instead? `delegate(account, pay_own_fee=True)` (public)
 
 ### Private transfers — delegated proving + record discovery
 
-A full private transfer combines the two trust-minimising paths: **delegated proving** (the prover's fee master pays) and a **record provider** to discover the private records you own. The default record provider (`aleo.records`) uses Provable's hosted scanner — registering shares your view key with that service so it can index your records. If you'd rather not share a view key, assign your own `RecordProvider` instead (a fully client-side `LocalRecordScanner` ships in `aleo.testing`).
+A full private transfer combines the two trust-minimising paths: **delegated proving** (the prover's fee master pays) and a **record provider** to discover the private records you own. The default record provider (`aleo.records`) uses Provable's hosted scanner — registering shares your view key with that service so it can index your records. If you'd rather not share a view key, assign your own `RecordProvider` instead.
 
 ```python
 # requires prover credentials + hosted-scanner registration
@@ -162,7 +162,7 @@ credits.functions.transfer_private(record, str(recipient.address), 1) \
     .delegate(account)
 ```
 
-`aleo.record_provider` is swappable: set it to your own object implementing the `RecordProvider` protocol (`get_unspent` / `find`) — e.g. a self-hosted scanner or the client-side `LocalRecordScanner` — and the whole facade (including private-fee auto-sourcing) uses it, with no view-key sharing.
+`aleo.record_provider` is swappable: set it to your own object implementing the `RecordProvider` protocol (`get_unspent` / `find`) — e.g. a self-hosted scanner — and the whole facade (including private-fee auto-sourcing) uses it, with no view-key sharing.
 
 ## Async (`AsyncAleo`)
 
@@ -234,22 +234,6 @@ with Devnode() as dn:
 - `dn.snapshot()` — capture the current chain state.
 
 Requires the `aleo-devnode` binary on your `PATH`, or set `$ALEO_DEVNODE_BIN` to its location.
-
-### `LocalRecordScanner` — client-side record finding
-
-`LocalRecordScanner` implements the `RecordProvider` protocol entirely on the client: it scans blocks and decrypts them with **your** view key. There is no hosted scanner and no view-key sharing.
-
-```python
-from aleo.testing import LocalRecordScanner
-
-scanner = LocalRecordScanner(aleo, account)
-rec = scanner.get_unspent(program="credits.aleo", record="credits")
-
-# Plug it into the facade so private-fee transactions auto-source records:
-aleo.record_provider = scanner
-```
-
-Any object satisfying the `RecordProvider` protocol can be assigned to `aleo.record_provider`, so you can keep your view key private instead of relying on a hosted scanning service.
 
 ### Live end-to-end tests
 

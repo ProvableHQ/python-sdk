@@ -10,10 +10,7 @@ Only the public ``transact`` flow runs against the devnode. The private
 ``transfer_public_to_private`` → scan → ``transfer_private`` roundtrip lives in
 ``test_testnet_e2e`` against live testnet (delegated proving + hosted scanner):
 the devnode has no delegated prover, so it would prove ``transfer_private``
-locally, which currently fails at the Varuna level. NOTE: this fixture must NOT
-call ``set_consensus_version_heights`` — that setter pins the testnet extension's
-consensus heights process-wide (set-once), which would corrupt real-testnet
-operations running in the same process.
+locally, which currently fails at the Varuna level.
 """
 from __future__ import annotations
 
