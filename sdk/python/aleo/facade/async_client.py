@@ -288,7 +288,11 @@ class AsyncRecordsModule:
 
         from .._scanner_common import build_owned_filter, compute_uuid
 
-        uuid = str(compute_uuid(acct.view_key)) if acct is not None else None
+        uuid = (
+            str(compute_uuid(acct.view_key, self._client.provider.network))
+            if acct is not None
+            else None
+        )
         owned_filter = build_owned_filter(
             uuid, program=program, record=record, unspent=unspent, nonces=nonces
         )
@@ -309,7 +313,11 @@ class AsyncRecordsModule:
 
         from .._scanner_common import build_owned_filter, compute_uuid
 
-        uuid = str(compute_uuid(acct.view_key)) if acct is not None else None
+        uuid = (
+            str(compute_uuid(acct.view_key, self._client.provider.network))
+            if acct is not None
+            else None
+        )
 
         if at_least is not None:
             try:

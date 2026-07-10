@@ -5,6 +5,15 @@ freshly-mined ledger on an auto-allocated port (safe under ``pytest-xdist``).
 When the ``aleo-devnode`` binary is absent, :meth:`Devnode.start` raises
 :class:`~aleo.testing.devnode.DevnodeError`; the fixture catches it and
 ``pytest.skip``s so the suite collects and skips cleanly in CI without a binary.
+
+Only the public ``transact`` flow runs against the devnode. The private
+``transfer_public_to_private`` → scan → ``transfer_private`` roundtrip lives in
+``test_testnet_e2e`` against live testnet (delegated proving + hosted scanner):
+the devnode has no delegated prover, so it would prove ``transfer_private``
+locally, which currently fails at the Varuna level. NOTE: this fixture must NOT
+call ``set_consensus_version_heights`` — that setter pins the testnet extension's
+consensus heights process-wide (set-once), which would corrupt real-testnet
+operations running in the same process.
 """
 from __future__ import annotations
 
@@ -23,21 +32,16 @@ from aleo.testing.devnode import DevnodeError
 # Remove once the devnode fee schedule and the SDK cost model agree.
 DEVNODE_OVERPAY_BASE_FEE: int = 1_000_000
 
-# Substrings that mark a *node-side incompatibility* rather than a bug in the
-# code under test: the installed ``aleo-devnode`` binary enforces a consensus
-# fee schedule / record version that the SDK's bundled snarkVM does not match
-# (version skew).  When a broadcast is rejected for one of these reasons the
-# test is skipped — the scanner / verb ladder is behaving correctly, the node is
-# simply from a different snarkVM era.
+# A broadcast rejected because the devnode requires a higher base fee than the
+# SDK's cost model produces is a node-side skew, not a bug in the code under
+# test — skip rather than fail.
 _SKEW_MARKERS: tuple[str, ...] = (
     "insufficient base fee",       # SDK execution_cost < node's required base fee
-    "must be Version 0",           # record version predates the node's consensus
-    "Consensus V",                 # any consensus-version gate
 )
 
 
 def skip_on_devnode_skew(exc: AleoNetworkError) -> None:
-    """``pytest.skip`` if *exc* is an SDK/devnode version-skew rejection; else re-raise."""
+    """``pytest.skip`` if *exc* is an SDK/devnode fee-schedule skew; else re-raise."""
     msg = str(exc)
     if any(marker in msg for marker in _SKEW_MARKERS):
         pytest.skip(f"installed aleo-devnode is incompatible with the SDK snarkVM: {msg}")

@@ -17,6 +17,7 @@ from ._scanner_common import (
     RecordsFilter,
     UUIDError,
     ViewKeyNotStoredError,
+    net_module,
     compute_uuid,
     normalize_api_key,
     uuid_is_valid,
@@ -182,7 +183,7 @@ class RecordScanner:
 
     def add_view_key(self, view_key: Any) -> None:
         """Store view_key keyed by its computed UUID string."""
-        uuid_field = compute_uuid(view_key)
+        uuid_field = compute_uuid(view_key, self._network)
         self._view_keys[str(uuid_field)] = view_key
 
     def remove_view_key(self, uuid: str) -> None:
@@ -194,19 +195,19 @@ class RecordScanner:
         If key_material is a ViewKey, compute the UUID via Poseidon4.
         If it's a Field, use it directly.
         """
-        from .mainnet import Field  # type: ignore[attr-defined]
+        Field = net_module(self._network).Field
         if isinstance(key_material, Field):
             self._uuid = key_material
         else:
             # Assume ViewKey
-            self._uuid = compute_uuid(key_material)
+            self._uuid = compute_uuid(key_material, self._network)
 
     def set_account(self, account: Any) -> None:
         """Set account: mirrors TS (set, setUuid, addViewKey, remove old uuid)."""
         old_uuid: str | None = None
         if self._account is not None:
             try:
-                old_uuid = str(compute_uuid(self._account.view_key))
+                old_uuid = str(compute_uuid(self._account.view_key, self._network))
             except Exception:
                 pass
 
@@ -221,7 +222,7 @@ class RecordScanner:
 
     def _resolve_uuid(self, uuid_param: str | None = None) -> str:
         """Resolve a UUID string, falling back to self._uuid."""
-        if uuid_param and uuid_is_valid(uuid_param):
+        if uuid_param and uuid_is_valid(uuid_param, self._network):
             return uuid_param
         if self._uuid is not None:
             return str(self._uuid)
@@ -235,7 +236,7 @@ class RecordScanner:
             candidate = str(self._uuid)
         if candidate is None:
             raise UUIDError("No UUID configured. Call register() or set_uuid() first.")
-        if not uuid_is_valid(candidate):
+        if not uuid_is_valid(candidate, self._network):
             raise UUIDError(
                 f"UUID '{candidate}' is invalid (not a valid field string).",
                 uuid=candidate,
@@ -270,7 +271,7 @@ class RecordScanner:
 
             # Step 4: Update state
             if self._uuid is None:
-                from .mainnet import Field  # type: ignore[attr-defined]
+                Field = net_module(self._network).Field
                 try:
                     self._uuid = Field.from_string(data["uuid"])
                 except Exception:
@@ -310,7 +311,7 @@ class RecordScanner:
         self._view_keys.pop(resolved, None)
         if self._account is not None:
             try:
-                if str(compute_uuid(self._account.view_key)) == resolved:
+                if str(compute_uuid(self._account.view_key, self._network)) == resolved:
                     self._account = None
             except Exception:
                 pass
@@ -339,7 +340,7 @@ class RecordScanner:
         """
         # UUID resolution
         filter_uuid = filter.get("uuid", "")
-        if filter_uuid and uuid_is_valid(filter_uuid):
+        if filter_uuid and uuid_is_valid(filter_uuid, self._network):
             resolved_uuid = filter_uuid
         elif self._uuid is not None:
             resolved_uuid = str(self._uuid)
@@ -462,7 +463,7 @@ class RecordScanner:
 
     def decrypt(self, view_key: Any, records: list[Any]) -> None:
         """Decrypt record_ciphertext fields in-place."""
-        from .mainnet import RecordCiphertext  # type: ignore[attr-defined]
+        RecordCiphertext = net_module(self._network).RecordCiphertext
         for record in records:
             ct = record.get("record_ciphertext", "").strip()
             if not ct:
@@ -500,7 +501,7 @@ class RecordScanner:
         """
         # Resolve UUID
         filter_uuid = filter.get("uuid", "")
-        if filter_uuid and uuid_is_valid(filter_uuid):
+        if filter_uuid and uuid_is_valid(filter_uuid, self._network):
             resolved_uuid = filter_uuid
         elif self._uuid is not None:
             resolved_uuid = str(self._uuid)
@@ -534,7 +535,7 @@ class RecordScanner:
 
         records = self.find_records(credits_filter)
 
-        from .mainnet import RecordPlaintext  # type: ignore[attr-defined]
+        RecordPlaintext = net_module(self._network).RecordPlaintext
         for record in records:
             pt_str = record.get("record_plaintext", "")
             if not pt_str:
@@ -559,7 +560,7 @@ class RecordScanner:
         """
         # Resolve UUID
         filter_uuid = filter.get("uuid", "")
-        if filter_uuid and uuid_is_valid(filter_uuid):
+        if filter_uuid and uuid_is_valid(filter_uuid, self._network):
             resolved_uuid = filter_uuid
         elif self._uuid is not None:
             resolved_uuid = str(self._uuid)
@@ -592,7 +593,7 @@ class RecordScanner:
 
         records = self.find_records(credits_filter)
 
-        from .mainnet import RecordPlaintext  # type: ignore[attr-defined]
+        RecordPlaintext = net_module(self._network).RecordPlaintext
         amounts_set = set(microcredit_amounts)
         result: list[OwnedRecord] = []
         for record in records:

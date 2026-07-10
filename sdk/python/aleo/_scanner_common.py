@@ -138,7 +138,22 @@ class OwnedRecord(TypedDict, total=False):
 # Pure helpers
 # ---------------------------------------------------------------------------
 
-def compute_uuid(view_key: Any) -> Any:
+def net_module(network: str = "mainnet") -> Any:
+    """Return the compiled network module ('mainnet' or 'testnet').
+
+    The type classes (Field, Poseidon4, RecordCiphertext, RecordPlaintext)
+    come from distinct compiled extensions per network and are NOT
+    interchangeable, so callers must select the module matching the
+    view-key/record network.
+    """
+    if network == "testnet":
+        from . import testnet as _mod  # type: ignore[attr-defined]
+    else:
+        from . import mainnet as _mod  # type: ignore[attr-defined]
+    return _mod
+
+
+def compute_uuid(view_key: Any, network: str = "mainnet") -> Any:
     """Compute the RecordScanner UUID from a ViewKey using Poseidon4.
 
     Returns a Field with domain separator "RecordScannerV0".
@@ -146,7 +161,8 @@ def compute_uuid(view_key: Any) -> Any:
         APrivateKey1zkp8CZNn3yeCseEtxuVPbDCwSyhGW6yZKUYKfgXmcpoGPWH
         -> 7884164224800444110633570141944665301008802280502652120359195870264061098703field
     """
-    from .mainnet import Field, Poseidon4  # type: ignore[attr-defined]
+    _mod = net_module(network)
+    Field, Poseidon4 = _mod.Field, _mod.Poseidon4
     domain_sep = Field.domain_separator("RecordScannerV0")
     vk_field = view_key.to_field()
     one = Field.one()
@@ -183,10 +199,10 @@ def build_owned_filter(
     return owned
 
 
-def uuid_is_valid(uuid: str) -> bool:
+def uuid_is_valid(uuid: str, network: str = "mainnet") -> bool:
     """Return True if uuid is a valid Field string (e.g. '1234...field')."""
     try:
-        from .mainnet import Field  # type: ignore[attr-defined]
+        Field = net_module(network).Field
         Field.from_string(uuid)
         return True
     except Exception:
