@@ -18,7 +18,7 @@ from aleo import Aleo, AsyncAleo
 from aleo._client_common import AleoNetworkError
 from aleo.testing import Devnode, LocalRecordScanner
 
-from .conftest import skip_on_devnode_skew
+from .conftest import DEVNODE_OVERPAY_BASE_FEE, skip_on_devnode_skew
 
 
 def _async_client(devnode: Devnode) -> AsyncAleo:
@@ -42,7 +42,7 @@ async def test_async_transact_transfer_public(devnode: Devnode) -> None:
     credits = await a.programs.get("credits.aleo")
     bound = credits.functions.transfer_public(str(recipient.address), 1)
     try:
-        tx = await bound.transact(sender)
+        tx = await bound.transact(sender, base_fee=DEVNODE_OVERPAY_BASE_FEE)
     except AleoNetworkError as exc:
         skip_on_devnode_skew(exc)
         raise  # unreachable
@@ -65,7 +65,7 @@ async def test_async_roundtrip(devnode: Devnode) -> None:
     # 1) Mint a private credits record owned by the sender (async verb ladder).
     mint = credits.functions.transfer_public_to_private(str(sender.address), 100_000)
     try:
-        mint_tx = await mint.transact(sender)
+        mint_tx = await mint.transact(sender, base_fee=DEVNODE_OVERPAY_BASE_FEE)
     except AleoNetworkError as exc:
         skip_on_devnode_skew(exc)
         raise  # unreachable
@@ -81,7 +81,7 @@ async def test_async_roundtrip(devnode: Devnode) -> None:
     # 3) Spend it with a private transfer back to self (async verb ladder).
     spend = credits.functions.transfer_private(rec, str(sender.address), 1)
     try:
-        spend_tx = await spend.transact(sender)
+        spend_tx = await spend.transact(sender, base_fee=DEVNODE_OVERPAY_BASE_FEE)
     except AleoNetworkError as exc:
         skip_on_devnode_skew(exc)
         raise  # unreachable

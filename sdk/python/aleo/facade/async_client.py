@@ -565,6 +565,7 @@ class AsyncBoundCall(PreparedCall):
         priority_fee: int = 0,
         fee_record: Any = None,
         private_fee: bool = False,
+        base_fee: int | None = None,
     ) -> TransactionResult:
         """Run the full prove ladder and return an assembled transaction (async).
 
@@ -596,6 +597,7 @@ class AsyncBoundCall(PreparedCall):
             priority_fee=priority_fee,
             fee_record=fee_record,
             private_fee=private_fee,
+            base_fee=base_fee,
         )
 
         def _prove_fee_and_assemble() -> TransactionResult:
@@ -622,6 +624,7 @@ class AsyncBoundCall(PreparedCall):
         priority_fee: int = 0,
         fee_record: Any = None,
         private_fee: bool = False,
+        base_fee: int | None = None,
     ) -> str:
         """Build and broadcast; return the transaction id (async)."""
         result = await self.build_transaction(
@@ -629,6 +632,7 @@ class AsyncBoundCall(PreparedCall):
             priority_fee=priority_fee,
             fee_record=fee_record,
             private_fee=private_fee,
+            base_fee=base_fee,
         )
         return await self._client.network.submit_transaction(result.raw)
 
@@ -639,11 +643,14 @@ class AsyncBoundCall(PreparedCall):
         broadcast: bool = True,
         pay_own_fee: bool = False,
         fee_record: Any = None,
+        priority_fee: int = 0,
     ) -> Any:
         """Delegate proving to a DPS (async).
 
         By default ``fee_authorization=None`` — the prover's fee master pays.
         Self-paid fees require proving locally (blocking, in ``asyncio.to_thread``).
+        The only self-paid fee knob is *priority_fee*; delegate never overrides
+        the base fee.
         """
         net = self._net()
         auth = self._build_authorization(account)
@@ -670,7 +677,7 @@ class AsyncBoundCall(PreparedCall):
             fee_authorization = await self._authorize_fee_async(
                 account,
                 execution,
-                priority_fee=0,
+                priority_fee=priority_fee,
                 fee_record=fee_record,
                 private_fee=fee_record is not None,
             )
@@ -688,12 +695,16 @@ class AsyncBoundCall(PreparedCall):
         priority_fee: int,
         fee_record: Any,
         private_fee: bool,
+        base_fee: int | None = None,
     ) -> Any:
         pk = self._resolve_private_key(account)
         process = self._client.process
         execution_id = execution.execution_id
-        total, _ = process.execution_cost(execution)
-        base_fee = int(total)
+        if base_fee is None:
+            total, _ = process.execution_cost(execution)
+            base_fee = int(total)
+        else:
+            base_fee = int(base_fee)
 
         use_private = private_fee or fee_record is not None
         if not use_private:

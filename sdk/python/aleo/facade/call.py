@@ -255,6 +255,7 @@ class BoundCall(PreparedCall):
         priority_fee: int,
         fee_record: Any,
         private_fee: bool,
+        base_fee: int | None = None,
     ) -> Any:
         """Build a fee :class:`Authorization` bound to *execution*'s id.
 
@@ -263,12 +264,19 @@ class BoundCall(PreparedCall):
         *private_fee* is requested — an explicit *fee_record* wins, otherwise the
         record is auto-sourced from ``aleo.record_provider`` (which defaults to
         ``aleo.records``) for at least ``base_fee + priority_fee`` microcredits.
+
+        *base_fee* overrides the auto-computed storage cost.  The SDK's
+        ``execution_cost`` can undershoot the fee a node's consensus actually
+        requires (version skew); pass an explicit *base_fee* to overpay.
         """
         pk = self._resolve_private_key(account)
         process = self._client.process
         execution_id = execution.execution_id
-        total, _ = process.execution_cost(execution)
-        base_fee = int(total)
+        if base_fee is None:
+            total, _ = process.execution_cost(execution)
+            base_fee = int(total)
+        else:
+            base_fee = int(base_fee)
 
         use_private = private_fee or fee_record is not None
         if not use_private:
@@ -346,6 +354,7 @@ class BoundCall(PreparedCall):
         priority_fee: int = 0,
         fee_record: Any = None,
         private_fee: bool = False,
+        base_fee: int | None = None,
     ) -> TransactionResult:
         """Run the full ladder and return a proven, assembled transaction.
 
@@ -392,6 +401,7 @@ class BoundCall(PreparedCall):
             priority_fee=priority_fee,
             fee_record=fee_record,
             private_fee=private_fee,
+            base_fee=base_fee,
         )
 
         try:
@@ -420,6 +430,7 @@ class BoundCall(PreparedCall):
         priority_fee: int = 0,
         fee_record: Any = None,
         private_fee: bool = False,
+        base_fee: int | None = None,
     ) -> str:
         """Build the transaction (:meth:`build_transaction`) and broadcast it.
 
@@ -433,6 +444,7 @@ class BoundCall(PreparedCall):
             priority_fee=priority_fee,
             fee_record=fee_record,
             private_fee=private_fee,
+            base_fee=base_fee,
         )
         return self._client.network.submit_transaction(result.raw)
 
@@ -445,6 +457,7 @@ class BoundCall(PreparedCall):
         broadcast: bool = True,
         pay_own_fee: bool = False,
         fee_record: Any = None,
+        priority_fee: int = 0,
     ) -> Any:
         """Delegate proving to a Delegated Proving Service (DPS) — the flagship.
 
@@ -494,10 +507,12 @@ class BoundCall(PreparedCall):
                     f"delegate fee: {exc}",
                     detail=str(exc),
                 ) from exc
+            # Delegate never overrides the base fee — only a priority fee is a
+            # valid delegate knob; base fee stays the auto-computed storage cost.
             fee_authorization = self._authorize_fee(
                 account,
                 execution,
-                priority_fee=0,
+                priority_fee=priority_fee,
                 fee_record=fee_record,
                 private_fee=fee_record is not None,
             )

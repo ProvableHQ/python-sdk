@@ -17,7 +17,7 @@ import pytest
 from aleo._client_common import AleoNetworkError
 from aleo.testing import Devnode, LocalRecordScanner
 
-from .conftest import skip_on_devnode_skew
+from .conftest import DEVNODE_OVERPAY_BASE_FEE, skip_on_devnode_skew
 
 
 @pytest.mark.devnode
@@ -32,7 +32,7 @@ def test_public_private_roundtrip(devnode: Devnode) -> None:
     try:
         mint_tx = (
             credits.functions.transfer_public_to_private(str(sender.address), 100_000)
-            .transact(sender)
+            .transact(sender, base_fee=DEVNODE_OVERPAY_BASE_FEE)
         )
     except AleoNetworkError as exc:
         skip_on_devnode_skew(exc)
@@ -50,7 +50,7 @@ def test_public_private_roundtrip(devnode: Devnode) -> None:
     try:
         spend_tx = (
             credits.functions.transfer_private(rec, str(sender.address), 1)
-            .transact(sender)
+            .transact(sender, base_fee=DEVNODE_OVERPAY_BASE_FEE)
         )
     except AleoNetworkError as exc:
         skip_on_devnode_skew(exc)

@@ -16,6 +16,13 @@ from aleo._client_common import AleoNetworkError
 from aleo.testing import Devnode
 from aleo.testing.devnode import DevnodeError
 
+# The installed aleo-devnode enforces a higher base (storage) fee than the SDK's
+# ``execution_cost`` computes — a devnode-side fee-schedule skew, not an SDK bug
+# to fix here. Overpay the base fee generously via the verb ladder's ``base_fee``
+# override so devnode transactions land; genesis accounts are richly funded.
+# Remove once the devnode fee schedule and the SDK cost model agree.
+DEVNODE_OVERPAY_BASE_FEE: int = 1_000_000
+
 # Substrings that mark a *node-side incompatibility* rather than a bug in the
 # code under test: the installed ``aleo-devnode`` binary enforces a consensus
 # fee schedule / record version that the SDK's bundled snarkVM does not match
