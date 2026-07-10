@@ -246,6 +246,46 @@ class Aleo:
             target = source_or_program.raw
         return _abi.generate_abi(target, net)
 
+    # ── Transition decoding ──────────────────────────────────────────────────
+
+    def decode_transition(self, transition_or_id: Any) -> dict[str, Any]:
+        """Decode a ``Transition`` (or a transaction id) to a plain dict.
+
+        Accepts a raw network :class:`Transition` object directly, or a
+        transaction id string.  For an id, the transaction is fetched via
+        ``aleo.network_client.get_transaction_object`` and the transition
+        matching *transition_or_id* (or the first one) is decoded.
+
+        Returns ``{program, function, inputs, outputs}``.
+
+        Parameters
+        ----------
+        transition_or_id:
+            A network ``Transition`` object, or a transaction/transition id
+            string.
+
+        Raises
+        ------
+        ExecutionError
+            If a string id resolves to no decodable transition.
+        """
+        from .call import decode_transition_object
+        from .errors import ExecutionError
+
+        # A Transition object exposes program_id/function_name/outputs().
+        if not isinstance(transition_or_id, str):
+            return decode_transition_object(transition_or_id)
+
+        tid = transition_or_id
+        tx: Any = self._client.get_transaction_object(tid)
+        transitions: list[Any] = list(tx.transitions())
+        for t in transitions:
+            if str(t.id) == tid:
+                return decode_transition_object(t)
+        if transitions:
+            return decode_transition_object(transitions[0])
+        raise ExecutionError(f"No decodable transition found for {tid!r}.")
+
     # ── Repr ───────────────────────────────────────────────────────────────
 
     def __repr__(self) -> str:

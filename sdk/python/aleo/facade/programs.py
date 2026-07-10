@@ -299,8 +299,11 @@ class _FunctionCaller:
         parts = [_input_type_name(i) for i in self.inputs]
         return f"{self.function_name}({', '.join(parts)})"
 
-    def __call__(self, *args: Any) -> PreparedCall:
-        return PreparedCall(
+    def __call__(self, *args: Any) -> "PreparedCall":
+        # F5: return the verb-ladder BoundCall (a PreparedCall subclass).
+        # Imported lazily to avoid a call.py ↔ programs.py import cycle.
+        from .call import BoundCall
+        return BoundCall(
             self.program_id,
             self.function_name,
             self.inputs,
