@@ -223,3 +223,63 @@ def test_hosted_record_scanner_live() -> None:
     if unspent is not None:
         # A RecordPlaintext stringifies to a "{ ... }" record literal.
         assert "{" in str(unspent)
+
+
+# ── Test 3: full private roundtrip (delegated prover + hosted scanner) ────────
+
+
+@pytest.mark.skipif(
+    _API_KEY is None or _CONSUMER_ID is None,
+    reason="ALEO_E2E_API_KEY / ALEO_E2E_CONSUMER_ID not set — DPS + scanner creds required.",
+)
+def test_private_roundtrip_live() -> None:
+    """End-to-end private roundtrip on live testnet.
+
+    Combines the two flagship trust-minimising paths: **delegated proving** (the
+    prover's fee master pays both proofs) and the **hosted record scanner**
+    (registration shares the view key so the service can index owned records):
+
+      1. ``delegate(transfer_public_to_private)`` — mint a private credits record.
+      2. hosted-scanner discovery — poll ``aleo.records`` until the minted record
+         is indexed (block time + scanner-sync latency, so retries are generous).
+      3. ``delegate(transfer_private)`` — spend that record back to self.
+
+    Requires a funded account with public credits to move into the private
+    record.  Long-running; ``@pytest.mark.slow`` + env-gated.
+    """
+    aleo = _dps_client()
+    assert _PRIVATE_KEY is not None
+    acct = aleo.account.from_private_key(_PRIVATE_KEY)
+    aleo.default_account = acct
+
+    # Register so the hosted scanner indexes this account's records.
+    _with_retry(lambda: aleo.records.register(acct))
+
+    program = aleo.programs.get("credits.aleo")
+
+    # 1) Mint a private credits record via delegated proving (fee master pays).
+    _with_retry(
+        lambda: program.functions.transfer_public_to_private(
+            str(acct.address), 100_000
+        ).delegate(acct)
+    )
+
+    # 2) Poll the hosted scanner until an unspent private credits record is
+    #    discoverable (the mint guarantees at least one exists once indexed).
+    def _find_record() -> Any:
+        rec = aleo.records.get_unspent(program="credits.aleo", record="credits")
+        if rec is None:
+            raise AssertionError("minted record not yet indexed by the scanner")
+        return rec
+
+    record = _with_retry(_find_record, attempts=10, delay=30.0)
+    assert "{" in str(record)
+
+    # 3) Spend that record with a private transfer back to self, delegated.
+    result: Any = _with_retry(
+        lambda: program.functions.transfer_private(
+            record, str(acct.address), 1
+        ).delegate(acct)
+    )
+    assert result is not None
+    assert isinstance(result, (dict, str))
