@@ -106,6 +106,13 @@ jobs:
         shell: bash
         run: |
           mv sdk/pyproject.toml.mainnet.bak sdk/pyproject.toml
+          # The manylinux build runs in a Docker container that writes sdk/dist
+          # and sdk/dist-testnet as root; this step runs on the host as the
+          # runner user, so reclaim ownership before repacking the wheel
+          # (Linux only — native macOS/Windows builds are already runner-owned).
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo chown -R "$(id -u):$(id -g)" sdk/dist sdk/dist-testnet
+          fi
           python .github/scripts/merge_testnet_so.py sdk/dist sdk/dist-testnet
       # Every runner here matches its wheel's platform, so install and smoke
       # test the actual artifact — importing BOTH networks — before it ships.
