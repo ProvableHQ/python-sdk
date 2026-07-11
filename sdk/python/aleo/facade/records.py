@@ -70,18 +70,18 @@ class RecordsModule:
         """Construct a :class:`~aleo.record_scanner.RecordScanner` from provider config.
 
         The scanner is a Provable service at the API origin under ``/scanner``
-        (see :func:`~aleo.facade.provider._scanner_base`); its base, creds
+        (see :func:`~aleo.facade.provider.scanner_base`); its base, creds
         (api key + consumer id, shared with the delegated prover), network and
         transport are all derived from the client's
         :class:`~aleo.facade.provider.HTTPProvider`.  Point :attr:`scanner`
         elsewhere to use a self-hosted scanning endpoint.
         """
         from ..record_scanner import RecordScanner
-        from .provider import _scanner_base
+        from .provider import scanner_base
 
         provider = self._client._provider
         return RecordScanner(
-            _scanner_base(provider),
+            scanner_base(provider),
             network=provider.network,
             api_key=provider.api_key,
             consumer_id=getattr(provider, "consumer_id", None),

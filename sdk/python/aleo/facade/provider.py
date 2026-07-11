@@ -17,7 +17,7 @@ from .._client_common import DEFAULT_HOST, DEFAULT_NETWORK
 _VALID_NETWORKS = frozenset({"mainnet", "testnet"})
 
 
-def _scanner_base(provider: "HTTPProvider") -> str:
+def scanner_base(provider: "HTTPProvider") -> str:
     """Derive the hosted record-scanner base from a provider's URL.
 
     The scanner is a Provable *service* at the API origin under the ``/scanner``

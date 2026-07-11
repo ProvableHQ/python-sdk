@@ -229,10 +229,10 @@ class AsyncRecordsModule:
 
     def _build_scanner(self) -> Any:
         from ..async_record_scanner import AsyncRecordScanner
-        from .provider import _scanner_base
+        from .provider import scanner_base
 
         return AsyncRecordScanner(
-            _scanner_base(self._client.provider),
+            scanner_base(self._client.provider),
             network=self._client.provider.network,
             api_key=self._client.provider.api_key,
             consumer_id=getattr(self._client.provider, "consumer_id", None),
