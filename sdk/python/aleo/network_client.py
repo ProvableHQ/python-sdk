@@ -493,8 +493,17 @@ class AleoNetworkClient:
         jwt_data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Submit a proving request, returning {ok, data|error, status}. Never raises on HTTP errors."""
-        # Determine the prover URI
-        prover_uri = url or self._prover_uri or self._host
+        # Determine the prover base. The DPS is a Provable *service* at the API
+        # origin under the ``/prove`` prefix, per network — e.g.
+        # ``https://api.provable.com/prove/testnet`` (sibling to ``/scanner``,
+        # NOT under the read node's ``/v2/{network}`` base). The handshake then
+        # hits ``{base}/pubkey`` and ``{base}/prove/authorization``. An explicit
+        # url/prover_uri override still wins.
+        prover_uri = (
+            url
+            or self._prover_uri
+            or f"{jwt_origin(self._base_url)}/prove/{self._network}"
+        )
 
         # Resolve JWT
         resolved_jwt = jwt_data or self.jwt_data

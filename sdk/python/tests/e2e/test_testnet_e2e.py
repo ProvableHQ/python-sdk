@@ -25,12 +25,11 @@ Env vars
 ``ALEO_E2E_API_KEY`` / ``ALEO_E2E_CONSUMER_ID``
     DPS / hosted-scanner credentials.  Tests needing them skip when unset.
 ``ALEO_E2E_PROVER_URI``
-    DPS prover base URI (without the ``/{network}`` suffix — the client appends
-    it, mirroring the TS SDK's ``proverUri + "/{network}"``).  REQUIRED for the
-    delegated-proving tests: the prover is a *distinct service host* from the
-    read/JWT API (``api.provable.com``), so there is no sensible fallback — the
-    ``pubkey``/``prove`` handshake 404s against the read node.  Tests needing it
-    skip when unset.
+    Optional override for the DPS prover base.  Unset is the normal case: the
+    prover endpoints (``/pubkey``, ``/prove/authorization``) are Provable
+    *services* hosted at the API origin (``https://api.provable.com``, alongside
+    ``/jwts`` and ``/scanner``), so the client derives the base from the endpoint
+    origin automatically.  Set this only to point at a non-default prover host.
 
 DPS credential wiring (mirrors ``AleoNetworkClient.submit_proving_request``):
 ``api_key`` and ``prover_uri`` are passed through the :class:`HTTPProvider`
@@ -141,8 +140,8 @@ def _dps_client() -> Aleo:
 
 
 @pytest.mark.skipif(
-    _API_KEY is None or _CONSUMER_ID is None or _PROVER_URI is None,
-    reason="ALEO_E2E_API_KEY / ALEO_E2E_CONSUMER_ID / ALEO_E2E_PROVER_URI not set — DPS creds + prover host required.",
+    _API_KEY is None or _CONSUMER_ID is None,
+    reason="ALEO_E2E_API_KEY / ALEO_E2E_CONSUMER_ID not set — DPS creds required.",
 )
 def test_delegate_transfer_public_live() -> None:
     """REAL delegated proving of a tiny ``credits.aleo/transfer_public``.
@@ -229,8 +228,8 @@ def test_hosted_record_scanner_live() -> None:
 
 
 @pytest.mark.skipif(
-    _API_KEY is None or _CONSUMER_ID is None or _PROVER_URI is None,
-    reason="ALEO_E2E_API_KEY / ALEO_E2E_CONSUMER_ID / ALEO_E2E_PROVER_URI not set — DPS + scanner creds + prover host required.",
+    _API_KEY is None or _CONSUMER_ID is None,
+    reason="ALEO_E2E_API_KEY / ALEO_E2E_CONSUMER_ID not set — DPS + scanner creds required.",
 )
 def test_private_roundtrip_live() -> None:
     """End-to-end private roundtrip on live testnet.

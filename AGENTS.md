@@ -61,30 +61,42 @@ addopts if you invoke pytest from the repo root.
 
 ## Delegated services (DPS + record scanner)
 
-**The JWT auth *and* the delegated-proving endpoints both live on the Provable
-explorer API** (`https://api.explorer.provable.com/v2`, per network under the
-`/v2` base) — NOT on a separate `accelerate.provable.com` host. Any origin
-derivation for auth/proving must keep the `/v2` base; stripping to
-`scheme://host` yields 404s (this was a real bug — the JWT refresh posted to
-`https://api.explorer.provable.com/jwts/<id>` and 404'd).
+**Auth, proving, and scanning are all Provable *services* on `api.provable.com`,
+hosted at the API ORIGIN — NOT under the read node's `/v2/{network}` base.** The
+read/RPC endpoints live at `https://api.provable.com/v2/{network}/…`; the
+services hang off the bare origin (`https://api.provable.com`) at their own path
+prefixes. Each is confirmed working against live testnet (see
+`tests/e2e/test_testnet_e2e.py`):
 
-Documented endpoints (source of truth — link before changing the client):
+- **JWT auth** — origin, no prefix: `POST {origin}/jwts/{consumerId}`. Derive the
+  origin with `jwt_origin(base_url)` (`scheme://host`, path stripped).
+- **Delegated proving** — `{origin}/prove/{network}` prefix:
+  - `GET {origin}/prove/{network}/pubkey` — ephemeral X25519 key + key id + a
+    `Set-Cookie` **affinity** session. The ephemeral private key lives only on
+    the backend that served this call, so the follow-up `/prove` MUST stick to
+    it: rely on the client cookie **jar** (requests.Session / httpx.AsyncClient)
+    to re-send the cookie — do NOT hand-build a `Cookie` header from
+    `set-cookie` (comma-joins multiple cookies, carries attributes, and bypasses
+    the jar).
+  - `POST {origin}/prove/{network}/prove/authorization` (or `/prove/request`) —
+    sealed-box `{key_id, ciphertext}`; JWT + the affinity cookie; SDK retries
+    500/503.
+- **Record scanner** — `{origin}/scanner/{network}` prefix (env
+  `RECORD_SCANNER_URL=https://api.provable.com/scanner`).
+
+Documented endpoints (docs describe paths *relative to the service base*; the
+base is the origin + service prefix above):
 - Register → API key: `POST /consumers` — https://docs.provable.com/docs/api/services/get-auth-register
 - Issue/refresh JWT: `POST /jwts/:consumerId` (send `X-Provable-API-Key`; JWT
   returns in the `Authorization: Bearer …` header) — https://docs.provable.com/docs/api/services/issue-jwt
-- Ephemeral prover pubkey: `GET /pubkey` — returns an X25519 key + key id and a
-  `Set-Cookie` session; JWT required, single-use per proving request; non-browser
-  clients must echo `Set-Cookie` back as `Cookie`. https://docs.provable.com/docs/api/services/get-prove-pubkey
-- Submit proving (sealed box): `POST /prove/encrypted` — JWT + the `/pubkey`
-  session cookie; SDK retries 500/503. https://docs.provable.com/docs/api/services/post-prove-encrypted
+- Ephemeral prover pubkey: `GET /pubkey` — https://docs.provable.com/docs/api/services/get-prove-pubkey
+- Submit proving: `POST /prove/authorization` (the authorization endpoint; the
+  docs also describe a `/prove/encrypted` variant). https://docs.provable.com/docs/api/services/post-prove-encrypted
 
 Tests read `ALEO_CONSUMER_ID` / `ALEO_DPS_API_KEY` from the env; the client mints
-and refreshes JWTs automatically.
-
-**Known SDK↔docs drift to reconcile:** the client currently posts to
-`/prove/authorization` / `/prove/request` (not the documented `GET /pubkey`
-handshake + `POST /prove/encrypted`), and its JWT origin drops the `/v2` base.
-Fix these against the docs above.
+and refreshes JWTs automatically. The prover base defaults to
+`{jwt_origin(base_url)}/prove/{network}` — override via `HTTPProvider(prover_uri=…)`
+only to point at a non-default prover host.
 
 ## Working process
 

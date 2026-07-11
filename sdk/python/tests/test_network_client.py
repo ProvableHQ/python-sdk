@@ -650,6 +650,35 @@ def test_dps_cookie_echoed(nacl_keypair: Any) -> None:
 
 
 @resp_lib.activate
+def test_dps_defaults_to_prove_service_base(nacl_keypair: Any) -> None:
+    """With no prover_uri, the DPS handshake targets the API origin under the
+    ``/prove/{network}`` prefix (a Provable service sibling to ``/scanner``),
+    NOT the read node's ``/v2/{network}`` base."""
+    _, pk_b64 = nacl_keypair
+    # BASE is https://api.provable.com/v2 → origin https://api.provable.com,
+    # so the prover base is https://api.provable.com/prove/mainnet.
+    resp_lib.add(
+        resp_lib.GET, "https://api.provable.com/prove/mainnet/pubkey",
+        json={"key_id": "k1", "public_key": pk_b64},
+        headers={"set-cookie": "session=x"},
+    )
+    resp_lib.add(
+        resp_lib.POST, "https://api.provable.com/prove/mainnet/prove/authorization",
+        json={"transaction": "at1ok", "broadcast_result": {"status": "accepted"}},
+    )
+
+    c = AleoNetworkClient(BASE, network=NET)  # no prover_uri
+    c.jwt_data = {"jwt": "Bearer testjwt", "expiration": 99999999999999}
+
+    result = c.submit_proving_request_safe(_load_proving_request())
+    assert result["ok"] is True
+    # pubkey hit /prove/{network}/pubkey, never the /v2 read base.
+    get_urls = [call.request.url for call in resp_lib.calls if call.request.method == "GET"]
+    assert any(u == "https://api.provable.com/prove/mainnet/pubkey" for u in get_urls)
+    assert not any("/v2" in u for u in get_urls)
+
+
+@resp_lib.activate
 def test_dps_authorization_header_sent(nacl_keypair: Any) -> None:
     """JWT is sent as Authorization header on prove POST."""
     _, pk_b64 = nacl_keypair

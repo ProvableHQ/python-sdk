@@ -480,7 +480,15 @@ class AsyncAleoNetworkClient:
         consumer_id: str | None = None,
         jwt_data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        prover_uri = url or self._prover_uri or self._host
+        # DPS is a Provable service at the API origin under the ``/prove``
+        # prefix, per network (e.g. https://api.provable.com/prove/testnet),
+        # sibling to /scanner — not the read node's /v2/{network} base. Handshake
+        # hits {base}/pubkey and {base}/prove/authorization. Explicit override wins.
+        prover_uri = (
+            url
+            or self._prover_uri
+            or f"{jwt_origin(self._base_url)}/prove/{self._network}"
+        )
         resolved_jwt = jwt_data or self.jwt_data
         resolved_jwt = await self._ensure_jwt(api_key, consumer_id, resolved_jwt)
 
