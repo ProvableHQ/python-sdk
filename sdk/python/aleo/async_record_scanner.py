@@ -195,16 +195,44 @@ class AsyncRecordScanner:
 
         return hdrs
 
+    @staticmethod
+    def _is_auth_failure(status: int, text: str) -> bool:
+        """True if a response means our JWT was rejected / invalidated.
+
+        The scanner and the delegated prover share one consumer, and the auth
+        server keeps a SINGLE active JWT per consumer — so a prover JWT mint
+        (every ``delegate``) invalidates the scanner's cached one out-of-band.
+        The server signals this as 401/403, or a body reading
+        ``No credentials found for given 'iss'``.
+        """
+        if status in (401, 403):
+            return True
+        t = text or ""
+        return "No credentials found" in t or "'iss'" in t
+
+    async def _send_authed(self, method: str, url: str, **kwargs: Any) -> Any:
+        """Send an authed request; on out-of-band JWT invalidation, mint a fresh
+        JWT and retry ONCE (see :meth:`_is_auth_failure`)."""
+        async def _do() -> Any:
+            hdrs = await self._build_headers()
+            if method == "GET":
+                return await self._client.get(url, headers=hdrs, **kwargs)
+            return await self._client.post(url, headers=hdrs, **kwargs)
+
+        resp = await _do()
+        if self._is_auth_failure(resp.status_code, getattr(resp, "text", "")):
+            self.jwt_data = None  # drop the invalidated JWT; _build_headers re-mints
+            resp = await _do()
+        return resp
+
     async def _get_json(self, url: str) -> Any:
-        hdrs = await self._build_headers()
-        resp = await self._client.get(url, headers=hdrs)
+        resp = await self._send_authed("GET", url)
         if not resp.is_success:
             raise RecordScannerRequestError(resp.text, resp.status_code)
         return resp.json()
 
     async def _post_json(self, url: str, body: str) -> Any:
-        hdrs = await self._build_headers()
-        resp = await self._client.post(url, content=body.encode(), headers=hdrs)
+        resp = await self._send_authed("POST", url, content=body.encode())
         if not resp.is_success:
             raise RecordScannerRequestError(resp.text, resp.status_code)
         return resp
@@ -313,18 +341,18 @@ class AsyncRecordScanner:
         filter["uuid"] = resolved_uuid
         body = json.dumps(filter)
 
-        hdrs = await self._build_headers()
-        resp = await self._client.post(
-            f"{self.url}/records/owned", content=body.encode(), headers=hdrs
+        # ``_send_authed`` transparently re-mints the JWT + retries on an
+        # out-of-band auth invalidation (shared-consumer JWT rotation).
+        resp = await self._send_authed(
+            "POST", f"{self.url}/records/owned", content=body.encode()
         )
 
         if resp.status_code == 422 and self.auto_re_register:
             vk = self._view_keys.get(resolved_uuid)
             if vk is not None:
                 await self.register_encrypted(vk, 0)
-                hdrs = await self._build_headers()
-                resp = await self._client.post(
-                    f"{self.url}/records/owned", content=body.encode(), headers=hdrs
+                resp = await self._send_authed(
+                    "POST", f"{self.url}/records/owned", content=body.encode()
                 )
 
         if not resp.is_success:

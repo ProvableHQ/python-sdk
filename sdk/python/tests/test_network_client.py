@@ -679,6 +679,43 @@ def test_dps_defaults_to_prove_service_base(nacl_keypair: Any) -> None:
 
 
 @resp_lib.activate
+def test_dps_refreshes_jwt_on_401(nacl_keypair: Any) -> None:
+    """A 401 (JWT invalidated out-of-band by the shared-consumer scanner) drops
+    the cached JWT, re-mints, and retries the handshake once."""
+    _, pk_b64 = nacl_keypair
+    prover = "https://prover.provable.prove"
+
+    # Two JWT mints: the initial one, then the forced refresh after the 401.
+    resp_lib.add(
+        resp_lib.POST, "https://api.provable.com/jwts/cid",
+        headers={"Authorization": "Bearer J1"}, json={"exp": 9999999999},
+    )
+    resp_lib.add(
+        resp_lib.POST, "https://api.provable.com/jwts/cid",
+        headers={"Authorization": "Bearer J2"}, json={"exp": 9999999999},
+    )
+    # pubkey: first call 401 (stale JWT), retry 200 (fresh JWT).
+    resp_lib.add(resp_lib.GET, f"{prover}/mainnet/pubkey", status=401, json={})
+    resp_lib.add(
+        resp_lib.GET, f"{prover}/mainnet/pubkey",
+        json={"key_id": "k1", "public_key": pk_b64},
+    )
+    resp_lib.add(
+        resp_lib.POST, f"{prover}/mainnet/prove/authorization",
+        json={"transaction": "at1ok", "broadcast_result": {"status": "accepted"}},
+    )
+
+    c = AleoNetworkClient(BASE, network=NET, prover_uri=prover, api_key="ak", consumer_id="cid")
+    result = c.submit_proving_request_safe(_load_proving_request())
+
+    assert result["ok"] is True
+    pubkey_calls = [x for x in resp_lib.calls if "/pubkey" in x.request.url]
+    assert len(pubkey_calls) == 2  # 401 then a fresh-JWT retry
+    assert pubkey_calls[0].request.headers.get("Authorization") == "Bearer J1"
+    assert pubkey_calls[1].request.headers.get("Authorization") == "Bearer J2"
+
+
+@resp_lib.activate
 def test_dps_authorization_header_sent(nacl_keypair: Any) -> None:
     """JWT is sent as Authorization header on prove POST."""
     _, pk_b64 = nacl_keypair

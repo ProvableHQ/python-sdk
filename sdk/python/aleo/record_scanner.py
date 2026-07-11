@@ -145,24 +145,51 @@ class RecordScanner:
 
         return hdrs
 
+    @staticmethod
+    def _is_auth_failure(status: int, text: str) -> bool:
+        """True if a response means our JWT was rejected / invalidated.
+
+        The scanner and the delegated prover share one consumer, and the auth
+        server keeps a SINGLE active JWT per consumer — so when the prover mints
+        a fresh JWT (every ``delegate``), it invalidates the scanner's cached one
+        out-of-band.  The next scanner call then fails; the server signals this
+        as a 401/403, or a body reading ``No credentials found for given 'iss'``.
+        """
+        if status in (401, 403):
+            return True
+        t = text or ""
+        return "No credentials found" in t or "'iss'" in t
+
+    def _send_authed(self, method: str, url: str, **kwargs: Any) -> requests.Response:
+        """Send an authed request; on out-of-band JWT invalidation, mint a fresh
+        JWT and retry ONCE (see :meth:`_is_auth_failure`)."""
+        extra: dict[str, str] = kwargs.pop("headers", None) or {}
+
+        def _do() -> requests.Response:
+            hdrs: dict[str, str] = {**self._build_headers(), **extra}
+            return self._http(method, url, headers=hdrs, **kwargs)
+
+        resp = _do()
+        if self._is_auth_failure(resp.status_code, getattr(resp, "text", "")):
+            self.jwt_data = None  # drop the invalidated JWT; _build_headers re-mints
+            resp = _do()
+        return resp
+
     def _get_json(self, url: str) -> Any:
-        hdrs = self._build_headers()
-        resp = self._http("GET", url, headers=hdrs)
+        resp = self._send_authed("GET", url)
         if not resp.ok:
             raise RecordScannerRequestError(resp.text, resp.status_code)
         return resp.json()
 
     def _post_json(self, url: str, body: str) -> requests.Response:
-        hdrs = self._build_headers()
-        resp = self._http("POST", url, headers=hdrs, data=body)
+        resp = self._send_authed("POST", url, data=body)
         if not resp.ok:
             raise RecordScannerRequestError(resp.text, resp.status_code)
         return resp
 
     def _post_raw(self, url: str, body: str) -> requests.Response:
         """POST without raising on non-2xx (caller inspects status)."""
-        hdrs = self._build_headers()
-        return self._http("POST", url, headers=hdrs, data=body)
+        return self._send_authed("POST", url, data=body)
 
     # ── Mutators ─────────────────────────────────────────────────────────
 
@@ -355,18 +382,17 @@ class RecordScanner:
 
         body = json.dumps(filter)
 
-        # Try once (with possible 422 retry)
-        hdrs = self._build_headers()
-        resp = self._http("POST", f"{self.url}/records/owned", headers=hdrs, data=body)
+        # Try once. ``_send_authed`` transparently re-mints the JWT + retries on
+        # an out-of-band auth invalidation (shared-consumer JWT rotation).
+        resp = self._send_authed("POST", f"{self.url}/records/owned", data=body)
 
         if resp.status_code == 422 and self.auto_re_register:
             # Re-register if we have a view key for this uuid
             vk = self._view_keys.get(resolved_uuid)
             if vk is not None:
                 self.register_encrypted(vk, 0)
-                hdrs = self._build_headers()
-                resp = self._http(
-                    "POST", f"{self.url}/records/owned", headers=hdrs, data=body
+                resp = self._send_authed(
+                    "POST", f"{self.url}/records/owned", data=body
                 )
 
         if not resp.ok:

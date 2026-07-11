@@ -246,8 +246,18 @@ def test_private_roundtrip_live(network: str) -> None:
     acct = aleo.account.from_private_key(_key_for(network))
     aleo.default_account = acct
 
-    # Register so the hosted scanner indexes this account's records.
-    _with_retry(lambda: aleo.records.register(acct))
+    # Register so the hosted scanner indexes this account's records.  register()
+    # returns a status dict (it does not raise), so assert ``ok`` and retry until
+    # it truly succeeds — a silently-failed registration would otherwise surface
+    # much later as a confusing "No credentials found for given 'iss'" at query
+    # time.
+    def _register() -> Any:
+        r = aleo.records.register(acct)
+        if not r.get("ok"):
+            raise AssertionError(f"scanner registration not ok: {r}")
+        return r
+
+    _with_retry(_register)
 
     program = aleo.programs.get("credits.aleo")
 
@@ -260,6 +270,9 @@ def test_private_roundtrip_live(network: str) -> None:
 
     # 2) Poll the hosted scanner until an unspent private credits record is
     #    discoverable (the mint guarantees at least one exists once indexed).
+    #    The delegated-proving JWT mint invalidates the scanner's shared-consumer
+    #    JWT out-of-band, but the scanner now self-heals (re-mints on 401), so the
+    #    poll only has to wait for indexing latency.
     def _find_record() -> Any:
         rec = aleo.records.get_unspent(program="credits.aleo", record="credits")
         if rec is None:

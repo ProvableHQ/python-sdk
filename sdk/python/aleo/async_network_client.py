@@ -489,15 +489,23 @@ class AsyncAleoNetworkClient:
             or self._prover_uri
             or f"{jwt_origin(self._base_url)}/prove/{self._network}"
         )
-        resolved_jwt = jwt_data or self.jwt_data
-        resolved_jwt = await self._ensure_jwt(api_key, consumer_id, resolved_jwt)
-
-        hdrs: dict[str, str] = {
-            **self._request_headers("submitProvingRequest"),
-            "Content-Type": "application/json",
-        }
-        if resolved_jwt and resolved_jwt.get("jwt"):
-            hdrs["Authorization"] = resolved_jwt["jwt"]
+        # Build auth headers, optionally forcing a fresh JWT mint. The prover and
+        # the hosted scanner share ONE consumer, and the auth server keeps a
+        # single active JWT per consumer — so a scanner JWT mint invalidates the
+        # prover's cached one out-of-band. On a 401 we drop the cached JWT and
+        # re-mint (force_refresh) before retrying, so the prover self-heals.
+        async def _build_hdrs(force_refresh: bool) -> dict[str, str]:
+            if force_refresh:
+                self.jwt_data = None
+            rj = None if force_refresh else (jwt_data or self.jwt_data)
+            rj = await self._ensure_jwt(api_key, consumer_id, rj)
+            h: dict[str, str] = {
+                **self._request_headers("submitProvingRequest"),
+                "Content-Type": "application/json",
+            }
+            if rj and rj.get("jwt"):
+                h["Authorization"] = rj["jwt"]
+            return h
 
         if isinstance(proving_request, str):
             pr_obj = self._net().ProvingRequest.from_string(proving_request)
@@ -507,7 +515,10 @@ class AsyncAleoNetworkClient:
         kind = pr_obj.kind()
         endpoint = "/prove/request" if kind == "request" else "/prove/authorization"
 
-        async def _send_once() -> dict[str, Any]:
+        class _AuthInvalidated(Exception):
+            """The JWT was rejected (401/403) — force a fresh mint and retry."""
+
+        async def _send_once(hdrs: dict[str, str]) -> dict[str, Any]:
             # Prover affinity: the ephemeral X25519 private key lives ONLY on the
             # backend that served this /pubkey, so /prove must hit the same one.
             # The persistent httpx.AsyncClient owns a cookie jar that captures
@@ -518,6 +529,8 @@ class AsyncAleoNetworkClient:
             # (which comma-joins cookies, carries attributes, and bypasses the
             # jar — silently dropping affinity).
             pk_resp = await self._client.get(f"{prover_uri}/pubkey", headers=hdrs)
+            if pk_resp.status_code in (401, 403):
+                raise _AuthInvalidated()
             if not pk_resp.is_success:
                 raise AleoNetworkError(
                     f"Failed to fetch pubkey: {pk_resp.status_code}",
@@ -539,6 +552,8 @@ class AsyncAleoNetworkClient:
 
             if resp.status_code == 200:
                 return {"ok": True, "data": resp.json()}
+            elif resp.status_code in (401, 403):
+                raise _AuthInvalidated()
             elif resp.status_code in (400, 500, 503):
                 try:
                     err_body = resp.json()
@@ -551,8 +566,18 @@ class AsyncAleoNetworkClient:
             else:
                 return {"ok": False, "status": resp.status_code, "error": {"message": resp.text}}
 
+        async def _send_with_auth_retry() -> dict[str, Any]:
+            try:
+                return await _send_once(await _build_hdrs(force_refresh=False))
+            except _AuthInvalidated:
+                # JWT invalidated out-of-band (shared-consumer rotation) — mint a
+                # fresh one and retry once.
+                return await _send_once(await _build_hdrs(force_refresh=True))
+
         try:
-            return await async_retry_with_backoff(_send_once)
+            return await async_retry_with_backoff(_send_with_auth_retry)
+        except _AuthInvalidated:
+            return {"ok": False, "status": 401, "error": {"message": "JWT rejected (401) after refresh"}}
         except AleoNetworkError as exc:
             return {"ok": False, "status": exc.status or 500, "error": {"message": str(exc)}}
 

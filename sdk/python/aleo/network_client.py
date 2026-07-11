@@ -505,17 +505,23 @@ class AleoNetworkClient:
             or f"{jwt_origin(self._base_url)}/prove/{self._network}"
         )
 
-        # Resolve JWT
-        resolved_jwt = jwt_data or self.jwt_data
-        resolved_jwt = self._ensure_jwt(api_key, consumer_id, resolved_jwt)
-
-        # Build headers
-        hdrs: dict[str, str] = {
-            **self._request_headers("submitProvingRequest"),
-            "Content-Type": "application/json",
-        }
-        if resolved_jwt and resolved_jwt.get("jwt"):
-            hdrs["Authorization"] = resolved_jwt["jwt"]
+        # Build auth headers, optionally forcing a fresh JWT mint. The prover and
+        # the hosted scanner share ONE consumer, and the auth server keeps a
+        # single active JWT per consumer — so a scanner JWT mint invalidates the
+        # prover's cached one out-of-band. On a 401 we drop the cached JWT and
+        # re-mint (force_refresh) before retrying, so the prover self-heals.
+        def _build_hdrs(force_refresh: bool) -> dict[str, str]:
+            if force_refresh:
+                self.jwt_data = None
+            rj = None if force_refresh else (jwt_data or self.jwt_data)
+            rj = self._ensure_jwt(api_key, consumer_id, rj)
+            h: dict[str, str] = {
+                **self._request_headers("submitProvingRequest"),
+                "Content-Type": "application/json",
+            }
+            if rj and rj.get("jwt"):
+                h["Authorization"] = rj["jwt"]
+            return h
 
         # Determine routing. A ProvingRequest object is used as-is (no import —
         # this is what delegate()/callers pass). Only a serialized string needs
@@ -528,7 +534,10 @@ class AleoNetworkClient:
         kind = pr_obj.kind()
         endpoint = "/prove/request" if kind == "request" else "/prove/authorization"
 
-        def _send_once() -> dict[str, Any]:
+        class _AuthInvalidated(Exception):
+            """The JWT was rejected (401/403) — force a fresh mint and retry."""
+
+        def _send_once(hdrs: dict[str, str]) -> dict[str, Any]:
             # Fetch the ephemeral pubkey + the prover's session/affinity cookie.
             # The prover is load-balanced and holds the ephemeral X25519 private
             # key ONLY on the backend that served this /pubkey, so the follow-up
@@ -541,6 +550,8 @@ class AleoNetworkClient:
             # carries attributes (Path/Secure/…), and setting it manually makes
             # requests SKIP the jar, silently dropping affinity.
             pk_resp = self._http("GET", f"{prover_uri}/pubkey", headers=hdrs)
+            if pk_resp.status_code in (401, 403):
+                raise _AuthInvalidated()
             if not pk_resp.ok:
                 raise AleoNetworkError(
                     f"Failed to fetch pubkey: {pk_resp.status_code}",
@@ -567,6 +578,8 @@ class AleoNetworkClient:
             if resp.status_code == 200:
                 body = resp.json()
                 return {"ok": True, "data": body}
+            elif resp.status_code in (401, 403):
+                raise _AuthInvalidated()
             elif resp.status_code in (400, 500, 503):
                 try:
                     err_body = resp.json()
@@ -579,8 +592,18 @@ class AleoNetworkClient:
             else:
                 return {"ok": False, "status": resp.status_code, "error": {"message": resp.text}}
 
+        def _send_with_auth_retry() -> dict[str, Any]:
+            try:
+                return _send_once(_build_hdrs(force_refresh=False))
+            except _AuthInvalidated:
+                # JWT invalidated out-of-band (shared-consumer rotation) — mint a
+                # fresh one and retry once.
+                return _send_once(_build_hdrs(force_refresh=True))
+
         try:
-            return retry_with_backoff(_send_once)
+            return retry_with_backoff(_send_with_auth_retry)
+        except _AuthInvalidated:
+            return {"ok": False, "status": 401, "error": {"message": "JWT rejected (401) after refresh"}}
         except AleoNetworkError as exc:
             return {"ok": False, "status": exc.status or 500, "error": {"message": str(exc)}}
 
