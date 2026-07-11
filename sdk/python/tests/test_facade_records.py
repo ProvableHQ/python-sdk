@@ -132,9 +132,21 @@ def test_record_provider_settable_and_clearable() -> None:
 def test_scanner_built_from_provider_config() -> None:
     a = _client()
     scanner = a.records.scanner
-    # Scanner base = provider url with trailing network suffix stripped, then
-    # the scanner appends /<network>.
-    assert scanner.url == f"{SCANNER_BASE}/mainnet"
+    # The scanner is a Provable service at the API origin under /scanner (NOT
+    # the read node's /v2 base); the scanner then appends /<network>. So a
+    # provider pointed at https://api.provable.com/v2 yields a scanner at
+    # https://api.provable.com/scanner/mainnet.
+    assert scanner.url == "https://api.provable.com/scanner/mainnet"
+
+
+def test_scanner_inherits_provider_creds() -> None:
+    # api_key + consumer_id set on the provider (shared with the delegated
+    # prover) must reach the scanner so it can mint/refresh its own JWT.
+    a = Aleo(HTTPProvider(BASE, api_key="secret-key", consumer_id="consumer-42"))
+    scanner = a.records.scanner
+    assert scanner.consumer_id == "consumer-42"
+    assert scanner._api_key is not None
+    assert scanner._api_key["value"] == "secret-key"
 
 
 # ---------------------------------------------------------------------------

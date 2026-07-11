@@ -229,18 +229,14 @@ class AsyncRecordsModule:
 
     def _build_scanner(self) -> Any:
         from ..async_record_scanner import AsyncRecordScanner
+        from .provider import _scanner_base
 
-        provider = self._client.provider
-        base = str(provider.url).rstrip("/")
-        for suffix in ("/mainnet", "/testnet"):
-            if base.endswith(suffix):
-                base = base[: -len(suffix)]
-                break
         return AsyncRecordScanner(
-            base,
-            network=provider.network,
-            api_key=provider.api_key,
-            transport=getattr(provider, "_transport", None),
+            _scanner_base(self._client.provider),
+            network=self._client.provider.network,
+            api_key=self._client.provider.api_key,
+            consumer_id=getattr(self._client.provider, "consumer_id", None),
+            transport=getattr(self._client.provider, "_transport", None),
         )
 
     @property

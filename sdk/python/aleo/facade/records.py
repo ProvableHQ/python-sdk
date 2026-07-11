@@ -69,25 +69,22 @@ class RecordsModule:
     def _build_scanner(self) -> Any:
         """Construct a :class:`~aleo.record_scanner.RecordScanner` from provider config.
 
-        The scanner base URL, api key, network and transport are read from the
-        client's :class:`~aleo.facade.provider.HTTPProvider`.  The provider does
-        not expose a dedicated scanner URI, so the versioned API root is used as
-        the scanner base (with any trailing network suffix stripped, which the
-        scanner constructor requires).  Point :attr:`scanner` elsewhere to use a
-        self-hosted scanning endpoint.
+        The scanner is a Provable service at the API origin under ``/scanner``
+        (see :func:`~aleo.facade.provider._scanner_base`); its base, creds
+        (api key + consumer id, shared with the delegated prover), network and
+        transport are all derived from the client's
+        :class:`~aleo.facade.provider.HTTPProvider`.  Point :attr:`scanner`
+        elsewhere to use a self-hosted scanning endpoint.
         """
         from ..record_scanner import RecordScanner
+        from .provider import _scanner_base
 
         provider = self._client._provider
-        base = str(provider.url).rstrip("/")
-        for suffix in ("/mainnet", "/testnet"):
-            if base.endswith(suffix):
-                base = base[: -len(suffix)]
-                break
         return RecordScanner(
-            base,
+            _scanner_base(provider),
             network=provider.network,
             api_key=provider.api_key,
+            consumer_id=getattr(provider, "consumer_id", None),
             transport=getattr(provider, "_transport", None),
         )
 

@@ -7,6 +7,7 @@ it is safe to construct without a live network.
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlparse
 
 from ..network_client import AleoNetworkClient
 from .._client_common import DEFAULT_HOST, DEFAULT_NETWORK
@@ -14,6 +15,21 @@ from .._client_common import DEFAULT_HOST, DEFAULT_NETWORK
 # AsyncAleoNetworkClient imported lazily to avoid pulling httpx at import time.
 
 _VALID_NETWORKS = frozenset({"mainnet", "testnet"})
+
+
+def _scanner_base(provider: "HTTPProvider") -> str:
+    """Derive the hosted record-scanner base from a provider's URL.
+
+    The scanner is a Provable *service* at the API origin under the ``/scanner``
+    prefix (sibling to ``/prove`` and ``/jwts``), so — like the prover — it is
+    derived from the endpoint origin, NOT the read node's ``/v2/{network}`` base.
+    The :class:`~aleo.record_scanner.RecordScanner` appends ``/{network}``, so we
+    return ``{scheme}://{host}/scanner`` (no network suffix). Users only ever
+    configure the one endpoint URL; reads, proving, and scanning all derive from
+    its origin.
+    """
+    parsed = urlparse(provider.url)
+    return f"{parsed.scheme}://{parsed.netloc}/scanner"
 
 
 class HTTPProvider:
@@ -27,9 +43,14 @@ class HTTPProvider:
         Network name — ``"mainnet"`` (default) or ``"testnet"``.
     api_key:
         Provable API key passed through to the underlying
-        :class:`~aleo.network_client.AleoNetworkClient`.
+        :class:`~aleo.network_client.AleoNetworkClient`.  Shared by the
+        delegated prover and the hosted record scanner.
+    consumer_id:
+        Provable consumer id, paired with *api_key* to mint/refresh JWTs for
+        the delegated prover and the hosted record scanner.
     prover_uri:
-        Base URI for the DPS prover (without network suffix).
+        Optional override for the DPS prover base (without network suffix).
+        Defaults to ``{origin}/prove`` derived from *url*.
     headers:
         Additional HTTP headers merged on top of the SDK defaults.
     transport:
@@ -43,6 +64,7 @@ class HTTPProvider:
         *,
         network: str = DEFAULT_NETWORK,
         api_key: str | None = None,
+        consumer_id: str | None = None,
         prover_uri: str | None = None,
         headers: dict[str, str] | None = None,
         transport: Any = None,
@@ -55,6 +77,7 @@ class HTTPProvider:
         self._url = url
         self._network = network
         self._api_key = api_key
+        self._consumer_id = consumer_id
         self._prover_uri = prover_uri
         self._headers = dict(headers) if headers else None
         self._transport = transport
@@ -77,6 +100,11 @@ class HTTPProvider:
         return self._api_key
 
     @property
+    def consumer_id(self) -> str | None:
+        """Provable consumer id, if set."""
+        return self._consumer_id
+
+    @property
     def prover_uri(self) -> str | None:
         """DPS prover URI, if set."""
         return self._prover_uri
@@ -89,6 +117,7 @@ class HTTPProvider:
             self._url,
             network=self._network,
             api_key=self._api_key,
+            consumer_id=self._consumer_id,
             prover_uri=self._prover_uri,
             headers=self._headers,
             transport=self._transport,
@@ -101,6 +130,7 @@ class HTTPProvider:
             self._url,
             network=self._network,
             api_key=self._api_key,
+            consumer_id=self._consumer_id,
             prover_uri=self._prover_uri,
             headers=self._headers,
             transport=self._transport,
