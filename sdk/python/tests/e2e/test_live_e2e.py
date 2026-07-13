@@ -35,8 +35,9 @@ Env vars
     ``ALEO_E2E_PRIVATE_KEY_MAINNET`` take precedence for that network when set
     (an Aleo address is identical across networks, but funding is per-network).
 ``ALEO_E2E_ENDPOINT``
-    API origin/root.  Default ``https://api.provable.com/v2`` (serves both
-    networks under ``/v2/{network}``).
+    API origin.  Default ``https://api.provable.com`` — the SDK adds ``/v2`` for
+    reads and ``/prove`` / ``/scanner`` for the services automatically. (A legacy
+    ``.../v2`` value is still accepted.)
 ``ALEO_E2E_API_KEY`` / ``ALEO_E2E_CONSUMER_ID``
     DPS + hosted-scanner credentials (shared).  Tests needing them skip when
     unset.
@@ -64,7 +65,7 @@ from aleo import Aleo, HTTPProvider
 pytestmark = pytest.mark.live
 
 _PRIVATE_KEY = os.environ.get("ALEO_E2E_PRIVATE_KEY")
-_ENDPOINT = os.environ.get("ALEO_E2E_ENDPOINT", "https://api.provable.com/v2")
+_ENDPOINT = os.environ.get("ALEO_E2E_ENDPOINT", "https://api.provable.com")
 _API_KEY = os.environ.get("ALEO_E2E_API_KEY")
 _CONSUMER_ID = os.environ.get("ALEO_E2E_CONSUMER_ID")
 _PROVER_URI = os.environ.get("ALEO_E2E_PROVER_URI")
@@ -80,6 +81,13 @@ if _PRIVATE_KEY is None:
 
 # Run every test on BOTH networks, one at a time.
 _NETWORKS = ("testnet", "mainnet")
+
+# Roundtrip amounts (microcredits). Keep the mint small so live runs barely dent
+# the funded account's balance; the private transfer spends a token amount back
+# to self. The scanner query filters on >= _MINT so we never pick up a spent /
+# zero-balance credits record (spending one produces invalid SNARK inputs).
+_MINT_MICROCREDITS = 10_000
+_SPEND_MICROCREDITS = 1
 
 
 def _key_for(network: str) -> str:
@@ -261,20 +269,26 @@ def test_private_roundtrip_live(network: str) -> None:
 
     program = aleo.programs.get("credits.aleo")
 
-    # 1) Mint a private credits record via delegated proving (fee master pays).
+    # 1) Mint a small private credits record via delegated proving (fee master
+    #    pays). Small on purpose — barely touches the account's balance.
     _with_retry(
         lambda: program.functions.transfer_public_to_private(
-            str(acct.address), 100_000
+            str(acct.address), _MINT_MICROCREDITS
         ).delegate(acct)
     )
 
-    # 2) Poll the hosted scanner until an unspent private credits record is
-    #    discoverable (the mint guarantees at least one exists once indexed).
-    #    The delegated-proving JWT mint invalidates the scanner's shared-consumer
-    #    JWT out-of-band, but the scanner now self-heals (re-mints on 401), so the
-    #    poll only has to wait for indexing latency.
+    # 2) Poll the hosted scanner until an unspent private credits record covering
+    #    the mint amount is discoverable. Passing ``min_microcredits`` is what
+    #    keeps us from picking up a spent / zero-balance credits record — spending
+    #    a 0-balance record yields invalid SNARK inputs. The delegated-proving JWT
+    #    mint invalidates the scanner's shared-consumer JWT out-of-band, but the
+    #    scanner self-heals (re-mints on 401), so the poll only waits on indexing.
     def _find_record() -> Any:
-        rec = aleo.records.get_unspent(program="credits.aleo", record="credits")
+        rec = aleo.records.get_unspent(
+            program="credits.aleo",
+            record="credits",
+            min_microcredits=_MINT_MICROCREDITS,
+        )
         if rec is None:
             raise AssertionError("minted record not yet indexed by the scanner")
         return rec
@@ -282,10 +296,10 @@ def test_private_roundtrip_live(network: str) -> None:
     record = _with_retry(_find_record, attempts=10, delay=30.0)
     assert "{" in str(record)
 
-    # 3) Spend that record with a private transfer back to self, delegated.
+    # 3) Spend that record with a tiny private transfer back to self, delegated.
     result: Any = _with_retry(
         lambda: program.functions.transfer_private(
-            record, str(acct.address), 1
+            record, str(acct.address), _SPEND_MICROCREDITS
         ).delegate(acct)
     )
     assert result is not None

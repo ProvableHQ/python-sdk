@@ -23,6 +23,7 @@ from ._client_common import (
     DEFAULT_NETWORK,
     AleoNetworkError,
     AleoProvingError,
+    is_provable_host,
     jwt_expired,
     jwt_origin,
     make_default_headers,
@@ -83,9 +84,14 @@ class AsyncAleoNetworkClient:
                 "Install with: pip install aleo[async]"
             ) from None
 
-        self._base_url: str = host
         self._network: str = network
-        self._host: str = f"{host}/{network}"
+        # See AleoNetworkClient._resolve_urls: hosted Provable API → /v2 reads +
+        # /prove + /scanner off the origin; any other host → literal read base
+        # with no hosted prover/scanner.
+        read_host, origin, prover_default, scanner_default = self._resolve_urls(host)
+        self._origin: str = origin
+        self._base_url: str = origin  # compat alias (now the origin)
+        self._host: str = read_host
         self._has_custom_transport: bool = transport is not None
         self._transport: Any = transport
         self._account: Any = None
@@ -93,9 +99,11 @@ class AsyncAleoNetworkClient:
         self.api_key: str | None = api_key
         self.consumer_id: str | None = consumer_id
         self.jwt_data: dict[str, Any] | None = jwt_data
-        self._prover_uri: str | None = f"{prover_uri}/{network}" if prover_uri else None
+        self._prover_uri: str | None = (
+            f"{prover_uri}/{network}" if prover_uri else prover_default
+        )
         self._record_scanner_uri: str | None = (
-            f"{record_scanner_uri}/{network}" if record_scanner_uri else None
+            f"{record_scanner_uri}/{network}" if record_scanner_uri else scanner_default
         )
 
         if self._has_custom_transport:
@@ -111,6 +119,28 @@ class AsyncAleoNetworkClient:
             self._client: Any = httpx.AsyncClient(transport=transport)
         else:
             self._client = httpx.AsyncClient()
+
+    def _resolve_urls(
+        self, host: str
+    ) -> tuple[str, str, str | None, str | None]:
+        """Resolve ``(read_host, origin, prover_default, scanner_default)`` for *host*.
+
+        Hosted Provable API → reads under ``/v2`` with the delegated prover
+        (``/prove``) and hosted scanner (``/scanner``) off the same origin; any
+        other host → literal read base with no hosted prover/scanner. (``/jwts``
+        and ``/consumers`` always live at the bare origin — handled in
+        :meth:`_refresh_jwt`, not here.) Mirrors ``AleoNetworkClient._resolve_urls``.
+        """
+        origin = jwt_origin(host)
+        network = self._network
+        if is_provable_host(host):
+            return (
+                f"{origin}/v2/{network}",
+                origin,
+                f"{origin}/prove/{network}",
+                f"{origin}/scanner/{network}",
+            )
+        return (f"{host.rstrip('/')}/{network}", origin, None, None)
 
     # ── Network module selection ──────────────────────────────────────────
 
@@ -135,8 +165,12 @@ class AsyncAleoNetworkClient:
     # ── Mutators ──────────────────────────────────────────────────────────
 
     def set_host(self, host: str) -> None:
-        self._base_url = host
-        self._host = f"{host}/{self._network}"
+        read_host, origin, prover_default, scanner_default = self._resolve_urls(host)
+        self._origin = origin
+        self._base_url = origin
+        self._host = read_host
+        self._prover_uri = prover_default
+        self._record_scanner_uri = scanner_default
 
     def set_prover_uri(self, prover_uri: str) -> None:
         self._prover_uri = f"{prover_uri}/{self._network}"
@@ -149,6 +183,21 @@ class AsyncAleoNetworkClient:
 
     def get_account(self) -> Any:
         return self._account
+
+    @property
+    def origin(self) -> str:
+        """The API origin (``scheme://host``) all services derive from."""
+        return self._origin
+
+    @property
+    def prover_uri(self) -> str | None:
+        """DPS prover base (``{origin}/prove/{network}`` on the hosted API), or None."""
+        return self._prover_uri
+
+    @property
+    def scanner_uri(self) -> str | None:
+        """Hosted-scanner base (``{origin}/scanner/{network}`` on the hosted API), or None."""
+        return self._record_scanner_uri
 
     def set_header(self, name: str, value: str) -> None:
         self.headers[name] = value
@@ -221,8 +270,7 @@ class AsyncAleoNetworkClient:
     # ── JWT refresh ───────────────────────────────────────────────────────
 
     async def _refresh_jwt(self, api_key: str, consumer_id: str) -> dict[str, Any]:
-        origin = jwt_origin(self._base_url)
-        url = f"{origin}/jwts/{consumer_id}"
+        url = f"{self._origin}/jwts/{consumer_id}"
         hdrs = {
             **self._request_headers("refreshJwt"),
             "X-Provable-API-Key": api_key,
@@ -480,15 +528,22 @@ class AsyncAleoNetworkClient:
         consumer_id: str | None = None,
         jwt_data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        # DPS is a Provable service at the API origin under the ``/prove``
-        # prefix, per network (e.g. https://api.provable.com/prove/testnet),
-        # sibling to /scanner — not the read node's /v2/{network} base. Handshake
-        # hits {base}/pubkey and {base}/prove/authorization. Explicit override wins.
-        prover_uri = (
-            url
-            or self._prover_uri
-            or f"{jwt_origin(self._base_url)}/prove/{self._network}"
-        )
+        # Prover base: {origin}/prove/{network} on the hosted API (set at
+        # construction). Off the hosted API there is no prover unless configured.
+        prover_uri = url or self._prover_uri
+        if not prover_uri:
+            return {
+                "ok": False,
+                "status": None,
+                "error": {
+                    "message": (
+                        "No delegated prover configured for host "
+                        f"{self._origin!r}. Delegated proving is available on the "
+                        "Provable API (api.provable.com); for another endpoint pass "
+                        "HTTPProvider(prover_uri=...)."
+                    )
+                },
+            }
         # Build auth headers, optionally forcing a fresh JWT mint. The prover and
         # the hosted scanner share ONE consumer, and the auth server keeps a
         # single active JWT per consumer — so a scanner JWT mint invalidates the

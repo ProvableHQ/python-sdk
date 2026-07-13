@@ -35,8 +35,20 @@ class AleoProvingError(AleoError):
 
 
 FIVE_MINUTES_MS: int = 5 * 60 * 1000
-DEFAULT_HOST: str = "https://api.provable.com/v2"
+DEFAULT_HOST: str = "https://api.provable.com"
 DEFAULT_NETWORK: str = "mainnet"
+
+# The hosted Provable API splits its services across path prefixes off a single
+# origin (reads at /v2, delegated proving at /prove, hosted scanner at /scanner,
+# JWT auth at /jwts). We detect it by host so that EVERY other endpoint (devnode,
+# local, or any custom node) is treated as a literal read base — no /v2 magic,
+# and no prover/scanner wired up (those services only exist on the hosted API).
+PROVABLE_API_HOSTS: frozenset[str] = frozenset({"api.provable.com"})
+
+
+def is_provable_host(url: str) -> bool:
+    """True if *url* points at the hosted Provable API (api.provable.com)."""
+    return (urlparse(url).hostname or "").lower() in PROVABLE_API_HOSTS
 SDK_HEADERS: set[str] = {"x-aleo-sdk-version", "x-aleo-environment", "x-aleo-method"}
 
 

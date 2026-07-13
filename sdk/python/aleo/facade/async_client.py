@@ -231,12 +231,21 @@ class AsyncRecordsModule:
         from ..async_record_scanner import AsyncRecordScanner
         from .provider import scanner_base
 
+        provider = self._client.provider
+        base = scanner_base(provider)
+        if base is None:
+            raise RuntimeError(
+                "The hosted record scanner is only available on the Provable API "
+                f"(api.provable.com); this client points at {provider.url!r}. "
+                "Assign your own scanner (aleo.records.scanner = AsyncRecordScanner(...)) "
+                "or a custom aleo.record_provider to scan against this endpoint."
+            )
         return AsyncRecordScanner(
-            scanner_base(self._client.provider),
-            network=self._client.provider.network,
-            api_key=self._client.provider.api_key,
-            consumer_id=getattr(self._client.provider, "consumer_id", None),
-            transport=getattr(self._client.provider, "_transport", None),
+            base,
+            network=provider.network,
+            api_key=provider.api_key,
+            consumer_id=getattr(provider, "consumer_id", None),
+            transport=getattr(provider, "_transport", None),
         )
 
     @property

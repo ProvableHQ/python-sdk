@@ -27,8 +27,9 @@ Markers / gating
   CI.  (They also need the testnet extension built + live network egress, which
   the default offline jobs don't provide.)
 
-* Env-gated + offline-safe: ``ALEO_E2E_ENDPOINT`` (default the public explorer
-  v2 root), ``network="testnet"``.  READ-ONLY — needs NO credentials and NO
+* Env-gated + offline-safe: ``ALEO_E2E_ENDPOINT`` (default the public Provable
+  API origin ``https://api.provable.com``; the SDK adds ``/v2`` for reads),
+  ``network="testnet"``.  READ-ONLY — needs NO credentials and NO
   funded key.  At import time we probe the endpoint once; if it is unreachable
   (offline CI) the whole module skips cleanly via
   ``pytest.skip(allow_module_level=True)``.
@@ -58,7 +59,7 @@ from aleo import (
 pytestmark = pytest.mark.live
 
 _ENDPOINT = os.environ.get(
-    "ALEO_E2E_ENDPOINT", "https://api.provable.com/v2"
+    "ALEO_E2E_ENDPOINT", "https://api.provable.com"
 )
 _NETWORK = "testnet"
 

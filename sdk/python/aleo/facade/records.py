@@ -80,8 +80,16 @@ class RecordsModule:
         from .provider import scanner_base
 
         provider = self._client._provider
+        base = scanner_base(provider)
+        if base is None:
+            raise RuntimeError(
+                "The hosted record scanner is only available on the Provable API "
+                f"(api.provable.com); this client points at {provider.url!r}. "
+                "Assign your own scanner (aleo.records.scanner = RecordScanner(...)) "
+                "or a custom aleo.record_provider to scan against this endpoint."
+            )
         return RecordScanner(
-            scanner_base(provider),
+            base,
             network=provider.network,
             api_key=provider.api_key,
             consumer_id=getattr(provider, "consumer_id", None),

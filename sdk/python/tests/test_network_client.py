@@ -782,9 +782,60 @@ def test_network_in_host() -> None:
     assert c._host == "https://api.provable.com/v2/testnet"
 
 
+def test_provable_host_detection() -> None:
+    from aleo._client_common import is_provable_host
+    assert is_provable_host("https://api.provable.com")
+    assert is_provable_host("https://api.provable.com/v2")
+    assert is_provable_host("https://API.PROVABLE.COM/v2/testnet")  # case-insensitive
+    assert not is_provable_host("http://127.0.0.1:3030")
+    assert not is_provable_host("https://my-node.example.com/v2")
+
+
+def test_bare_origin_adds_service_prefixes() -> None:
+    """Bare Provable origin → reads under /v2, prover/scanner off the origin."""
+    c = AleoNetworkClient("https://api.provable.com", network="testnet")
+    assert c.origin == "https://api.provable.com"
+    assert c._host == "https://api.provable.com/v2/testnet"
+    assert c.prover_uri == "https://api.provable.com/prove/testnet"
+    assert c.scanner_uri == "https://api.provable.com/scanner/testnet"
+
+
+def test_legacy_v2_input_still_provable() -> None:
+    """A legacy '.../v2' base is detected as Provable and rebuilt identically."""
+    c = AleoNetworkClient("https://api.provable.com/v2", network="mainnet")
+    assert c._host == "https://api.provable.com/v2/mainnet"
+    assert c.prover_uri == "https://api.provable.com/prove/mainnet"
+    assert c.scanner_uri == "https://api.provable.com/scanner/mainnet"
+
+
+def test_non_provable_host_is_literal_base_no_services() -> None:
+    """Non-Provable host → literal read base (no /v2) and NO prover/scanner."""
+    c = AleoNetworkClient("http://127.0.0.1:3030", network="testnet")
+    assert c._host == "http://127.0.0.1:3030/testnet"  # no /v2 added
+    assert c.prover_uri is None
+    assert c.scanner_uri is None
+
+
+def test_non_provable_prover_uri_override_still_works() -> None:
+    """An explicit prover_uri is honored on any host."""
+    c = AleoNetworkClient(
+        "http://127.0.0.1:3030", network="testnet",
+        prover_uri="http://my-prover:9000",
+    )
+    assert c.prover_uri == "http://my-prover:9000/testnet"
+
+
+def test_delegate_without_prover_errors_off_provable(nacl_keypair: Any) -> None:
+    """submit_proving_request_safe returns a clear error when no prover is set."""
+    c = AleoNetworkClient("http://127.0.0.1:3030", network="testnet")
+    result = c.submit_proving_request_safe(_load_proving_request())
+    assert result["ok"] is False
+    assert "No delegated prover configured" in result["error"]["message"]
+
+
 def test_set_host_updates_host() -> None:
     c = make_client()
-    c.set_host("https://other.example.com/v3")
+    c.set_host("https://other.example.com/v3")  # non-Provable → literal base honored
     assert c._host == f"https://other.example.com/v3/{NET}"
 
 

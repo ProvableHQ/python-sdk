@@ -10,24 +10,29 @@ from typing import Any
 from urllib.parse import urlparse
 
 from ..network_client import AleoNetworkClient
-from .._client_common import DEFAULT_HOST, DEFAULT_NETWORK
+from .._client_common import DEFAULT_HOST, DEFAULT_NETWORK, is_provable_host
 
 # AsyncAleoNetworkClient imported lazily to avoid pulling httpx at import time.
 
 _VALID_NETWORKS = frozenset({"mainnet", "testnet"})
 
 
-def scanner_base(provider: "HTTPProvider") -> str:
-    """Derive the hosted record-scanner base from a provider's URL.
+def scanner_base(provider: "HTTPProvider") -> str | None:
+    """Derive the hosted record-scanner base from a provider's URL, or ``None``.
 
-    The scanner is a Provable *service* at the API origin under the ``/scanner``
-    prefix (sibling to ``/prove`` and ``/jwts``), so — like the prover — it is
-    derived from the endpoint origin, NOT the read node's ``/v2/{network}`` base.
-    The :class:`~aleo.record_scanner.RecordScanner` appends ``/{network}``, so we
-    return ``{scheme}://{host}/scanner`` (no network suffix). Users only ever
-    configure the one endpoint URL; reads, proving, and scanning all derive from
-    its origin.
+    The hosted scanner is a Provable *service* at the API origin under the
+    ``/scanner`` prefix (sibling to ``/prove`` and ``/jwts``), derived from the
+    origin — NOT the read node's ``/v2/{network}`` base.  The
+    :class:`~aleo.record_scanner.RecordScanner` appends ``/{network}``, so we
+    return ``{scheme}://{host}/scanner`` (no network suffix).
+
+    Returns ``None`` off the hosted Provable API: the hosted scanner does not
+    exist on devnode / local / custom nodes, so there is nothing to point at.
+    Callers that need scanning against such an endpoint assign their own
+    :class:`~aleo.record_scanner.RecordScanner` or ``RecordProvider``.
     """
+    if not is_provable_host(provider.url):
+        return None
     parsed = urlparse(provider.url)
     return f"{parsed.scheme}://{parsed.netloc}/scanner"
 
@@ -38,7 +43,12 @@ class HTTPProvider:
     Parameters
     ----------
     url:
-        Versioned API root, e.g. ``"https://api.provable.com/v2"``.
+        API origin, e.g. ``"https://api.provable.com"`` (the default).  For the
+        hosted Provable API the SDK adds the service prefixes itself — reads at
+        ``/v2``, delegated proving at ``/prove``, hosted scanner at ``/scanner``,
+        JWT auth at ``/jwts`` — so you never spell them out.  Any other host
+        (devnode, a local or custom node) is used as a literal read base, with no
+        hosted prover/scanner wired up.  A legacy ``".../v2"`` value still works.
     network:
         Network name — ``"mainnet"`` (default) or ``"testnet"``.
     api_key:

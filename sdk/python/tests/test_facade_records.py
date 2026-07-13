@@ -139,6 +139,14 @@ def test_scanner_built_from_provider_config() -> None:
     assert scanner.url == "https://api.provable.com/scanner/mainnet"
 
 
+def test_scanner_refuses_off_provable_api() -> None:
+    # The hosted scanner only exists on api.provable.com; on any other host,
+    # accessing aleo.records.scanner raises a clear, actionable error.
+    a = Aleo(HTTPProvider("http://127.0.0.1:3030", network="testnet"))
+    with pytest.raises(RuntimeError, match="only available on the Provable API"):
+        _ = a.records.scanner
+
+
 def test_scanner_inherits_provider_creds() -> None:
     # api_key + consumer_id set on the provider (shared with the delegated
     # prover) must reach the scanner so it can mint/refresh its own JWT.
