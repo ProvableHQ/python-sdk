@@ -47,20 +47,64 @@ class PoolEntry:
 
 
 class ApiClient:
-    """Synchronous DEX REST client; every method returns generated models."""
+    """Synchronous DEX REST client; every method returns generated models.
 
-    def __init__(self, base_url: str = DEFAULT_API_URL, session: Any | None = None) -> None:
+    Some endpoints (route quoting, OHLCV, balances) are auth-gated: call
+    :meth:`authenticate` once with any Aleo account — the API authenticates
+    by signature (challenge/verify), no funds required — or adopt a
+    previously issued JWT via ``token=``/:meth:`set_token`.
+    """
+
+    def __init__(self, base_url: str = DEFAULT_API_URL, session: Any | None = None,
+                 token: str | None = None) -> None:
         self.base_url = base_url.rstrip("/")
         self._session = session or requests.Session()
+        self._token = token
 
     def __repr__(self) -> str:
         return f"ApiClient({self.base_url!r})"
 
+    def _headers(self) -> dict[str, str]:
+        headers = {"accept": "application/json"}
+        if self._token:
+            headers["authorization"] = f"Bearer {self._token}"
+        return headers
+
     def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
-        resp = self._session.get(f"{self.base_url}{path}", params=params, timeout=_TIMEOUT)
+        resp = self._session.get(f"{self.base_url}{path}", params=params,
+                                 headers=self._headers(), timeout=_TIMEOUT)
         if not 200 <= resp.status_code < 300:
             raise DexApiError(resp.status_code, resp.text)
         return resp.json()
+
+    def _post(self, path: str, body: dict[str, Any]) -> Any:
+        resp = self._session.post(f"{self.base_url}{path}", json=body,
+                                  headers=self._headers(), timeout=_TIMEOUT)
+        if not 200 <= resp.status_code < 300:
+            raise DexApiError(resp.status_code, resp.text)
+        return resp.json()
+
+    # ── Auth ───────────────────────────────────────────────────────────────
+
+    def authenticate(self, address: str, sign: Any) -> str:
+        """Challenge/verify handshake; stores and returns the JWT.
+
+        *sign* is a callable taking the challenge message string and
+        returning an Aleo signature literal (``sign1…``) — e.g.::
+
+            api.authenticate(str(acct.address),
+                             lambda msg: str(aleo.account.sign(msg.encode(), acct)))
+        """
+        challenge = self._post("/auth/challenge", {"address": address})
+        signature = sign(challenge["data"]["message"])
+        verified = self._post("/auth/verify",
+                              {"address": address, "signature": str(signature)})
+        self._token = verified["data"]["token"]
+        return self._token
+
+    def set_token(self, token: str) -> None:
+        """Adopt a previously issued JWT."""
+        self._token = token
 
     # ── Pools & tokens ─────────────────────────────────────────────────────
 
@@ -106,7 +150,8 @@ class ApiClient:
 class AsyncApiClient:
     """Async mirror of :class:`ApiClient` (httpx — the ``[async]`` extra)."""
 
-    def __init__(self, base_url: str = DEFAULT_API_URL, client: Any | None = None) -> None:
+    def __init__(self, base_url: str = DEFAULT_API_URL, client: Any | None = None,
+                 token: str | None = None) -> None:
         self.base_url = base_url.rstrip("/")
         if client is None:
             try:
@@ -118,15 +163,42 @@ class AsyncApiClient:
                 ) from exc
             client = httpx.AsyncClient(timeout=_TIMEOUT)
         self._client = client
+        self._token = token
 
     def __repr__(self) -> str:
         return f"AsyncApiClient({self.base_url!r})"
 
+    def _headers(self) -> dict[str, str]:
+        headers = {"accept": "application/json"}
+        if self._token:
+            headers["authorization"] = f"Bearer {self._token}"
+        return headers
+
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
-        resp = await self._client.get(f"{self.base_url}{path}", params=params)
+        resp = await self._client.get(f"{self.base_url}{path}", params=params,
+                                      headers=self._headers())
         if not 200 <= resp.status_code < 300:
             raise DexApiError(resp.status_code, resp.text)
         return resp.json()
+
+    async def _post(self, path: str, body: dict[str, Any]) -> Any:
+        resp = await self._client.post(f"{self.base_url}{path}", json=body,
+                                       headers=self._headers())
+        if not 200 <= resp.status_code < 300:
+            raise DexApiError(resp.status_code, resp.text)
+        return resp.json()
+
+    async def authenticate(self, address: str, sign: Any) -> str:
+        """Async challenge/verify handshake; stores and returns the JWT."""
+        challenge = await self._post("/auth/challenge", {"address": address})
+        signature = sign(challenge["data"]["message"])
+        verified = await self._post("/auth/verify",
+                                    {"address": address, "signature": str(signature)})
+        self._token = verified["data"]["token"]
+        return self._token
+
+    def set_token(self, token: str) -> None:
+        self._token = token
 
     async def get_pools(self) -> list[PoolEntry]:
         entries = (await self._get("/pools"))["data"]
