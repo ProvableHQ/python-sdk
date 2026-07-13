@@ -12,8 +12,9 @@ from typing import Any, Optional
 
 from . import _generated as g
 from ._core import (
-    get_deadline,
+    generate_field_nonce,
     generate_swap_nonce,
+    get_deadline,
     resolve_imports,
     resolve_swap_params,
     select_token_record,
@@ -576,9 +577,9 @@ class ShieldSwap:
         return DexCall(self._aleo, bound, self._position_result(TxResult))
 
     @staticmethod
-    def _position_result(cls: Any) -> Any:
+    def _position_result(result_cls: Any) -> Any:
         """Result builder: first public ``field`` output is the position id."""
         def build(tx_id: str, outputs: list[Any]) -> Any:
             pid = next((o for o in outputs if isinstance(o, str) and o.endswith("field")), None)
-            return cls(pid, tx_id)
+            return result_cls(pid, tx_id)
         return build

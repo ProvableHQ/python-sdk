@@ -1,0 +1,8 @@
+{
+  "include": ["python/aleo_shield_swap"],
+  "exclude": ["python/aleo_shield_swap/_generated.py", "python/aleo_shield_swap/_api_models.py"],
+  "extraPaths": ["../sdk/python"],
+  "venvPath": "../sdk",
+  "venv": ".env",
+  "reportMissingModuleSource": false
+}

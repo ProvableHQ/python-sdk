@@ -77,6 +77,15 @@ def test_mint_inputs_rounding_and_request():
     assert args[5] == "1field" and args[6] == "2field"
 
 
+def test_mint_default_nonce_is_generated():
+    stub = _stub()
+    ShieldSwap(stub).mint(pool_key="5field", tick_lower=-4080, tick_upper=4080,
+                          amount0_desired=10**9, amount1_desired=100,
+                          token0_program="tok0.aleo", token1_program="tok1.aleo")
+    _, args = stub.last_call
+    assert args[0].endswith("field") and args[0] != "9field"   # random field nonce
+
+
 def test_mint_empty_range_raises():
     dex = ShieldSwap(_stub())
     with pytest.raises(ValueError, match="Empty tick range"):
