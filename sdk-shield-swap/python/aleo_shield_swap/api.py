@@ -100,3 +100,63 @@ class ApiClient:
     def get_public_balances(self, user: str) -> list[models.TokenBalanceDoc]:
         return [_build(models.TokenBalanceDoc, b)
                 for b in self._get("/balances", {"user": user})["data"]]
+
+
+class AsyncApiClient:
+    """Async mirror of :class:`ApiClient` (httpx — the ``[async]`` extra)."""
+
+    def __init__(self, base_url: str = DEFAULT_API_URL, client: Any | None = None) -> None:
+        self.base_url = base_url.rstrip("/")
+        if client is None:
+            try:
+                import httpx
+            except ImportError as exc:  # pragma: no cover - env-dependent
+                raise ImportError(
+                    "AsyncApiClient requires httpx — install the async extra: "
+                    "pip install 'aleo-shield-swap[async]'"
+                ) from exc
+            client = httpx.AsyncClient(timeout=_TIMEOUT)
+        self._client = client
+
+    def __repr__(self) -> str:
+        return f"AsyncApiClient({self.base_url!r})"
+
+    async def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
+        resp = await self._client.get(f"{self.base_url}{path}", params=params)
+        if not 200 <= resp.status_code < 300:
+            raise DexApiError(resp.status_code, resp.text)
+        return resp.json()
+
+    async def get_pools(self) -> list[PoolEntry]:
+        entries = (await self._get("/pools"))["data"]
+        return [
+            PoolEntry(
+                pool=_build(models.PoolStateDoc, e),
+                token0_info=_build(models.TokenDoc, e["token0_info"]) if e.get("token0_info") else None,
+                token1_info=_build(models.TokenDoc, e["token1_info"]) if e.get("token1_info") else None,
+            )
+            for e in entries
+        ]
+
+    async def get_tokens(self) -> list[models.TokenDoc]:
+        return [_build(models.TokenDoc, t) for t in (await self._get("/tokens"))["data"]]
+
+    async def get_route(self, *, token_in: str, token_out: str,
+                        amount_in: int | None = None) -> models.RouteResultDoc:
+        params: dict[str, Any] = {"token_in": token_in, "token_out": token_out}
+        if amount_in is not None:
+            params["amount_in"] = str(amount_in)
+        return _build(models.RouteResultDoc, (await self._get("/route", params))["data"])
+
+    async def get_swap(self, swap_id: str) -> models.SwapDoc:
+        return _build(models.SwapDoc, (await self._get(f"/swaps/{swap_id}"))["data"])
+
+    async def get_ohlcv(self, pool_key: str, *, granularity: str,
+                        from_ts: str, to_ts: str) -> Any:
+        return (await self._get(f"/pools/{pool_key}/ohlcv",
+                                {"granularity": granularity, "from": from_ts,
+                                 "to": to_ts}))["data"]
+
+    async def get_public_balances(self, user: str) -> list[models.TokenBalanceDoc]:
+        return [_build(models.TokenBalanceDoc, b)
+                for b in (await self._get("/balances", {"user": user}))["data"]]
