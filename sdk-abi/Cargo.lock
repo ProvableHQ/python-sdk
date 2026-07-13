@@ -24,8 +24,11 @@ dependencies = [
  "anyhow",
  "leo-abi",
  "leo-ast",
+ "leo-disassembler",
+ "leo-span",
  "pyo3",
  "serde_json",
+ "snarkvm",
 ]
 
 [[package]]

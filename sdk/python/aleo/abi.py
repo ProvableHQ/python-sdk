@@ -9,13 +9,21 @@ import re
 from typing import Any, Union
 
 
-def generate_abi(program: object, network: str = "mainnet") -> dict[str, Any]:
+def generate_abi(
+    program: object,
+    network: str = "mainnet",
+    imports: "list[tuple[str, str]] | None" = None,
+) -> dict[str, Any]:
     """Generate an ABI dict for an Aleo program.
 
     Args:
         program: Either an aleo Program object (with .source and .id attributes)
                  or a raw bytecode string.
         network: Network name: "mainnet", "testnet", or "canary".
+        imports: Optional ``(program_id, bytecode)`` dependencies in
+                 topological order (dependencies before dependents).  snarkVM
+                 validation is contextual, so a program that declares imports
+                 is rejected unless they are supplied here.
 
     Returns:
         A dict containing the ABI for the program.
@@ -51,7 +59,7 @@ def generate_abi(program: object, network: str = "mainnet") -> dict[str, Any]:
             f"Expected a Program object or str, got {type(program).__name__}"
         )
 
-    json_str = _aleo_abi.generate_abi(name, bytecode, network)
+    json_str = _aleo_abi.generate_abi(name, bytecode, network, imports)
     return json.loads(json_str)
 
 
