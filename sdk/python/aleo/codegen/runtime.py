@@ -99,7 +99,7 @@ _INT_BOUNDS = {
 }
 
 
-def fmt_int(v: int, suffix: str) -> str:
+def fmt_int(v: object, suffix: str) -> str:
     """Format an int as a suffixed Aleo integer literal, validating range."""
     if isinstance(v, bool) or not isinstance(v, int):
         raise ValueError(f"Expected int for {suffix}, got {type(v).__name__}")
@@ -109,14 +109,14 @@ def fmt_int(v: int, suffix: str) -> str:
     return f"{v}{suffix}"
 
 
-def fmt_bool(v: bool) -> str:
+def fmt_bool(v: object) -> str:
     """Format a bool as an Aleo boolean literal."""
     if not isinstance(v, bool):
         raise ValueError(f"Expected bool, got {type(v).__name__}")
     return "true" if v else "false"
 
 
-def fmt_fieldlike(v: int | str, suffix: str) -> str:
+def fmt_fieldlike(v: object, suffix: str) -> str:
     """Format an int or pre-suffixed literal as a field/group/scalar literal."""
     if isinstance(v, int) and not isinstance(v, bool):
         return f"{v}{suffix}"
@@ -125,7 +125,7 @@ def fmt_fieldlike(v: int | str, suffix: str) -> str:
     raise ValueError(f"Expected int or '<digits>{suffix}' literal, got {v!r}")
 
 
-def fmt_address(v: str) -> str:
+def fmt_address(v: object) -> str:
     """Validate an aleo1… address literal (passes through unchanged)."""
     if not (isinstance(v, str) and v.startswith("aleo1")):
         raise ValueError(f"Expected an aleo1… address literal, got {v!r}")

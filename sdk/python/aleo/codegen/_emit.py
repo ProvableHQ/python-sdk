@@ -1,3 +1,4 @@
+# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false, reportUnknownLambdaType=false
 """ABI JSON → Python source emitter.
 
 Build-time only; the emitted code imports :mod:`aleo.codegen.runtime` for
