@@ -25,10 +25,12 @@ from .derivations import (
     next_blinded_identity,
 )
 from .errors import (
+    InsufficientRecordsError,
+    InvalidFeeTierError,
     PoolNotFoundError,
     SwapOutputNotFinalizedError,
 )
-from .types import ClaimResult, SlotView, SwapHandle
+from .types import ClaimResult, MintResult, SlotView, SwapHandle, TxResult
 from ._calls import DexCall
 
 _ABSENT = (None, "", "null")
@@ -319,3 +321,264 @@ class ShieldSwap:
             f"Cannot resolve the wrapper program for {token_id} — pass "
             "token_in_program= (or token_record=) explicitly."
         )
+
+    # ── Liquidity ────────────────────────────────────────────────────────────
+
+    def create_pool(
+        self,
+        *,
+        token0_id: str,
+        token1_id: str,
+        fee: int,
+        initial_tick: int,
+        tick_spacing: Optional[int] = None,
+        initial_sqrt_price: Optional[int] = None,
+        imports: Optional[dict[str, str]] = None,
+        account: Any = None,
+    ) -> DexCall[TxResult]:
+        """Create a pool — a single public transaction, no records involved.
+
+        The fee tier must be registered with the program (validated before
+        submission); tick spacing defaults to the tier's on-chain binding and
+        the opening price to the tick's sqrt price.
+        """
+        from .tick_math import MAX_TICK, MIN_TICK, get_sqrt_price_at_tick
+
+        self._account(account)
+        if not MIN_TICK <= initial_tick < MAX_TICK:
+            raise ValueError(f"initial_tick {initial_tick} outside [{MIN_TICK}, {MAX_TICK})")
+        if self._mapping_value("fee_tiers", f"{fee}u16") is None:
+            raise InvalidFeeTierError(f"Fee tier {fee} is not registered with {self.program}")
+        spacing = tick_spacing
+        if spacing is None:
+            raw = self._mapping_value("fee_to_tick_spacing", f"{fee}u16")
+            if raw is None:
+                raise InvalidFeeTierError(
+                    f"Fee {fee} has no tick spacing bound on chain — pass tick_spacing="
+                )
+            spacing = int(raw.removesuffix("u32"))
+        sqrt_price = (initial_sqrt_price if initial_sqrt_price is not None
+                      else get_sqrt_price_at_tick(initial_tick))
+        resolve_imports(self._aleo, [], imports)
+
+        inputs = [
+            token0_id,
+            token1_id,
+            f"{fee}u16",
+            f"{sqrt_price}u128",
+            f"{spacing}u32",
+            f"{initial_tick}i32",
+        ]
+        bound = self._aleo.programs.get(self.program).functions.create_pool(*inputs)
+
+        def build_result(tx_id: str, outputs: list[Any]) -> TxResult:
+            key = next((o for o in outputs if isinstance(o, str) and o.endswith("field")), None)
+            return TxResult(position_token_id=key, transaction_id=tx_id)
+
+        return DexCall(self._aleo, bound, build_result)
+
+    def _select_position_record(self, pool_key: str, account: Any) -> str:
+        """Unspent PositionNFT plaintext for *pool_key* from the shield_swap
+        program's own records."""
+        from aleo.codegen.runtime import parse_plaintext
+
+        provider = self._aleo.record_provider
+        for rec in provider.find(account, program=self.program, unspent=True):
+            plaintext = (rec.get("record_plaintext") if isinstance(rec, dict)
+                         else getattr(rec, "record_plaintext", None))
+            if not plaintext:
+                continue
+            try:
+                decoded = parse_plaintext(plaintext)
+            except (ValueError, TypeError):
+                continue
+            if isinstance(decoded, dict) and decoded.get("pool") == pool_key:
+                return plaintext
+        raise InsufficientRecordsError(
+            f"No unspent PositionNFT record for pool {pool_key} — mint first "
+            "or pass position_record=."
+        )
+
+    def mint(
+        self,
+        *,
+        pool_key: str,
+        tick_lower: int,
+        tick_upper: int,
+        amount0_desired: int,
+        amount1_desired: int,
+        amount0_min: int = 0,
+        amount1_min: int = 0,
+        token0_program: Optional[str] = None,
+        token1_program: Optional[str] = None,
+        token0_record: Optional[str] = None,
+        token1_record: Optional[str] = None,
+        tick_lower_hint: Optional[int] = None,
+        tick_upper_hint: Optional[int] = None,
+        recipient: Optional[str] = None,
+        nonce: Optional[str] = None,
+        imports: Optional[dict[str, str]] = None,
+        account: Any = None,
+    ) -> DexCall[MintResult]:
+        """Mint a concentrated-liquidity position as a private PositionNFT.
+
+        Tick bounds are rounded to the pool's spacing; insert hints derive
+        from the slot's neighbors unless given explicitly.
+        """
+        from .tick_hints import pick_insert_hint
+        from .tick_math import round_tick_to_spacing
+
+        acct = self._account(account)
+        pool = self.get_pool(pool_key)
+        slot = self.get_slot(pool_key)
+
+        lo = round_tick_to_spacing(tick_lower, slot.tick_spacing)
+        hi = round_tick_to_spacing(tick_upper, slot.tick_spacing)
+        if lo >= hi:
+            raise ValueError(f"Empty tick range after spacing alignment: [{lo}, {hi})")
+
+        lo_hint = tick_lower_hint if tick_lower_hint is not None else pick_insert_hint(slot, lo)
+        upper_pred = tick_upper_hint if tick_upper_hint is not None else pick_insert_hint(slot, hi)
+        # The finalize inserts tick_lower before validating the upper hint, so
+        # when nothing initialized sits between the bounds, the upper tick's
+        # predecessor is the just-inserted lower tick.
+        hi_hint = lo if (tick_upper_hint is None and lo > upper_pred) else upper_pred
+
+        request = g.MintPositionRequest(
+            pool=pool_key, tick_lower=lo, tick_upper=hi,
+            amount0_desired=amount0_desired, amount1_desired=amount1_desired,
+            amount0_min=amount0_min, amount1_min=amount1_min,
+            tick_lower_hint=lo_hint, tick_upper_hint=hi_hint,
+        ).to_plaintext()
+
+        record0 = token0_record or select_token_record(
+            self._aleo, program=token0_program or self._token_program(pool.token0),
+            min_amount=amount0_desired, token_id=pool.token0, account=acct)
+        record1 = token1_record or select_token_record(
+            self._aleo, program=token1_program or self._token_program(pool.token1),
+            min_amount=amount1_desired, token_id=pool.token1, account=acct)
+        resolve_imports(self._aleo, [p for p in (token0_program, token1_program) if p], imports)
+
+        field_nonce = nonce if nonce is not None else generate_field_nonce()
+        to = recipient or str(acct.address)
+
+        inputs = [field_nonce, record0, record1, to, request, pool.token0, pool.token1]
+        bound = self._aleo.programs.get(self.program).functions.mint(*inputs)
+        return DexCall(self._aleo, bound, self._position_result(MintResult))
+
+    def increase_liquidity(
+        self,
+        *,
+        pool_key: str,
+        amount0_desired: int,
+        amount1_desired: int,
+        amount0_min: int = 0,
+        amount1_min: int = 0,
+        token0_program: Optional[str] = None,
+        token1_program: Optional[str] = None,
+        token0_record: Optional[str] = None,
+        token1_record: Optional[str] = None,
+        position_record: Optional[str] = None,
+        tick_lower_hint: Optional[int] = None,
+        tick_upper_hint: Optional[int] = None,
+        imports: Optional[dict[str, str]] = None,
+        account: Any = None,
+    ) -> DexCall[TxResult]:
+        """Add funds to an existing position (range fixed at mint)."""
+        from .tick_hints import pick_insert_hint
+
+        acct = self._account(account)
+        pool = self.get_pool(pool_key)
+        slot = self.get_slot(pool_key)
+        position = position_record or self._select_position_record(pool_key, acct)
+
+        from aleo.codegen.runtime import parse_plaintext
+        decoded = parse_plaintext(position)
+        lo_hint = (tick_lower_hint if tick_lower_hint is not None
+                   else pick_insert_hint(slot, int(decoded["tick_lower"])))
+        hi_hint = (tick_upper_hint if tick_upper_hint is not None
+                   else pick_insert_hint(slot, int(decoded["tick_upper"])))
+
+        record0 = token0_record or select_token_record(
+            self._aleo, program=token0_program or self._token_program(pool.token0),
+            min_amount=amount0_desired, token_id=pool.token0, account=acct)
+        record1 = token1_record or select_token_record(
+            self._aleo, program=token1_program or self._token_program(pool.token1),
+            min_amount=amount1_desired, token_id=pool.token1, account=acct)
+        resolve_imports(self._aleo, [p for p in (token0_program, token1_program) if p], imports)
+
+        inputs = [
+            position, record0, record1,
+            f"{amount0_desired}u128", f"{amount1_desired}u128",
+            f"{amount0_min}u128", f"{amount1_min}u128",
+            pool.token0, pool.token1,
+            f"{lo_hint}i32", f"{hi_hint}i32",
+        ]
+        bound = self._aleo.programs.get(self.program).functions.increase_liquidity(*inputs)
+        return DexCall(self._aleo, bound, self._position_result(TxResult))
+
+    def decrease_liquidity(
+        self,
+        *,
+        pool_key: str,
+        liquidity_to_remove: int,
+        amount0_min: int = 0,
+        amount1_min: int = 0,
+        position_record: Optional[str] = None,
+        imports: Optional[dict[str, str]] = None,
+        account: Any = None,
+    ) -> DexCall[TxResult]:
+        """Remove liquidity from a position; owed amounts become collectable."""
+        acct = self._account(account)
+        position = position_record or self._select_position_record(pool_key, acct)
+        resolve_imports(self._aleo, [], imports)
+        inputs = [position, f"{liquidity_to_remove}u128",
+                  f"{amount0_min}u128", f"{amount1_min}u128"]
+        bound = self._aleo.programs.get(self.program).functions.decrease_liquidity(*inputs)
+        return DexCall(self._aleo, bound, self._position_result(TxResult))
+
+    def collect(
+        self,
+        *,
+        pool_key: str,
+        amount0_requested: int,
+        amount1_requested: int,
+        recipient: Optional[str] = None,
+        position_record: Optional[str] = None,
+        imports: Optional[dict[str, str]] = None,
+        account: Any = None,
+    ) -> DexCall[TxResult]:
+        """Collect owed token amounts from a position."""
+        acct = self._account(account)
+        pool = self.get_pool(pool_key)
+        position = position_record or self._select_position_record(pool_key, acct)
+        resolve_imports(self._aleo, [], imports)
+        to = recipient or str(acct.address)
+        inputs = [position, f"{amount0_requested}u128", f"{amount1_requested}u128",
+                  pool.token0, pool.token1, to]
+        bound = self._aleo.programs.get(self.program).functions.collect(*inputs)
+        # collect's first output is the re-issued PositionNFT record, not a
+        # public field — there is no positional id to read back.
+        return DexCall(self._aleo, bound,
+                       lambda tx_id, outputs: TxResult(None, tx_id))
+
+    def burn(
+        self,
+        *,
+        pool_key: str,
+        position_record: Optional[str] = None,
+        account: Any = None,
+    ) -> DexCall[TxResult]:
+        """Burn an empty position NFT."""
+        acct = self._account(account)
+        position = position_record or self._select_position_record(pool_key, acct)
+        bound = self._aleo.programs.get(self.program).functions.burn(position)
+        return DexCall(self._aleo, bound, self._position_result(TxResult))
+
+    @staticmethod
+    def _position_result(cls: Any) -> Any:
+        """Result builder: first public ``field`` output is the position id."""
+        def build(tx_id: str, outputs: list[Any]) -> Any:
+            pid = next((o for o in outputs if isinstance(o, str) and o.endswith("field")), None)
+            return cls(pid, tx_id)
+        return build
