@@ -1,5 +1,13 @@
 """Tests for aleo.codegen.runtime — plaintext parsing and literal formatting."""
-from aleo.codegen.runtime import parse_plaintext
+import pytest
+
+from aleo.codegen.runtime import (
+    fmt_address,
+    fmt_bool,
+    fmt_fieldlike,
+    fmt_int,
+    parse_plaintext,
+)
 
 
 def test_parse_scalar_literals():
@@ -38,3 +46,28 @@ def test_parse_record_strips_modes_keeps_nonce():
         "token_id": "99field",
         "_nonce": "123group",
     }
+
+
+def test_fmt_int_ranges():
+    assert fmt_int(5, "u128") == "5u128"
+    assert fmt_int(-1, "i32") == "-1i32"
+    with pytest.raises(ValueError):
+        fmt_int(-1, "u64")            # negative unsigned
+    with pytest.raises(ValueError):
+        fmt_int(2**32, "u32")         # overflow
+    with pytest.raises(ValueError):
+        fmt_int(2**31, "i32")         # signed overflow
+    with pytest.raises(ValueError):
+        fmt_int(True, "u8")           # bool is not an int here
+
+
+def test_fmt_fieldlike_and_address():
+    assert fmt_fieldlike(123, "field") == "123field"
+    assert fmt_fieldlike("123field", "field") == "123field"
+    with pytest.raises(ValueError):
+        fmt_fieldlike("123group", "field")   # wrong suffix
+    assert fmt_bool(True) == "true"
+    assert fmt_bool(False) == "false"
+    assert fmt_address("aleo1abc") == "aleo1abc"
+    with pytest.raises(ValueError):
+        fmt_address("0xdeadbeef")

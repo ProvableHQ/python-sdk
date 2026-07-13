@@ -86,3 +86,47 @@ def _parse_atom(s: str) -> tuple[Any, str]:
         return int(im.group(1)), rest
     # field/group/scalar literals, addresses, signatures — verbatim strings
     return token, rest
+
+
+# ── Literal formatters (encode direction, used by generated to_plaintext) ────
+
+_INT_BOUNDS = {
+    "u8": (0, 2**8 - 1), "u16": (0, 2**16 - 1), "u32": (0, 2**32 - 1),
+    "u64": (0, 2**64 - 1), "u128": (0, 2**128 - 1),
+    "i8": (-(2**7), 2**7 - 1), "i16": (-(2**15), 2**15 - 1),
+    "i32": (-(2**31), 2**31 - 1), "i64": (-(2**63), 2**63 - 1),
+    "i128": (-(2**127), 2**127 - 1),
+}
+
+
+def fmt_int(v: int, suffix: str) -> str:
+    """Format an int as a suffixed Aleo integer literal, validating range."""
+    if isinstance(v, bool) or not isinstance(v, int):
+        raise ValueError(f"Expected int for {suffix}, got {type(v).__name__}")
+    lo, hi = _INT_BOUNDS[suffix]
+    if not lo <= v <= hi:
+        raise ValueError(f"{v} out of range for {suffix} [{lo}, {hi}]")
+    return f"{v}{suffix}"
+
+
+def fmt_bool(v: bool) -> str:
+    """Format a bool as an Aleo boolean literal."""
+    if not isinstance(v, bool):
+        raise ValueError(f"Expected bool, got {type(v).__name__}")
+    return "true" if v else "false"
+
+
+def fmt_fieldlike(v: int | str, suffix: str) -> str:
+    """Format an int or pre-suffixed literal as a field/group/scalar literal."""
+    if isinstance(v, int) and not isinstance(v, bool):
+        return f"{v}{suffix}"
+    if isinstance(v, str) and re.fullmatch(rf"\d+{suffix}", v):
+        return v
+    raise ValueError(f"Expected int or '<digits>{suffix}' literal, got {v!r}")
+
+
+def fmt_address(v: str) -> str:
+    """Validate an aleo1… address literal (passes through unchanged)."""
+    if not (isinstance(v, str) and v.startswith("aleo1")):
+        raise ValueError(f"Expected an aleo1… address literal, got {v!r}")
+    return v
