@@ -662,3 +662,43 @@ def test_find_record_returns_first() -> None:
 
     record = scanner.find_record({"uuid": GOLDEN_UUID})  # type: ignore[arg-type]
     assert record == OWNED_RECORDS[0]
+
+
+# ---------------------------------------------------------------------------
+# User-Agent header
+# ---------------------------------------------------------------------------
+
+@resp_lib.activate
+def test_scanner_sends_user_agent() -> None:
+    """Every scanner call carries the SDK User-Agent."""
+    from aleo.mainnet import Field
+    from aleo._client_common import package_version
+
+    resp_lib.add(resp_lib.POST, f"{HOST}/records/owned", json=[])
+    scanner = _make_scanner()
+    scanner._uuid = Field.from_string(GOLDEN_UUID)
+    scanner.owned({"uuid": GOLDEN_UUID, "unspent": True})  # type: ignore[arg-type]
+
+    hdrs = resp_lib.calls[0].request.headers
+    assert hdrs["User-Agent"] == f"aleo-python-sdk/{package_version()}"
+
+
+def test_scanner_custom_transport_suppresses_user_agent() -> None:
+    """A custom transport owns the HTTP layer — the SDK sets no User-Agent."""
+    import requests as _requests
+    from aleo.mainnet import Field
+
+    captured: dict[str, Any] = {}
+
+    def transport(method: str, url: str, **kwargs: Any) -> _requests.Response:
+        captured["headers"] = dict(kwargs.get("headers") or {})
+        r = _requests.Response()
+        r.status_code = 200
+        r._content = b"[]"
+        return r
+
+    scanner = _make_scanner(transport=transport)
+    scanner._uuid = Field.from_string(GOLDEN_UUID)
+    scanner.owned({"uuid": GOLDEN_UUID, "unspent": True})  # type: ignore[arg-type]
+
+    assert "User-Agent" not in captured["headers"]

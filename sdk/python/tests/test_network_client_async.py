@@ -249,6 +249,8 @@ async def test_async_default_sdk_headers_present() -> None:
     await c.get_latest_block()
     assert "X-Aleo-SDK-Version" in captured[0].headers
     assert captured[0].headers.get("X-Aleo-environment") == "python"
+    from aleo._client_common import package_version
+    assert captured[0].headers.get("User-Agent") == f"aleo-python-sdk/{package_version()}"
 
 
 @pytest.mark.asyncio

@@ -60,6 +60,18 @@ def package_version() -> str:
         return "0.0.0"
 
 
+def user_agent() -> str:
+    """The SDK's ``User-Agent`` string, sent on every call.
+
+    Identifies the Python SDK (and its version) in the standard, always-logged
+    header, overriding the underlying ``python-requests`` / ``python-httpx``
+    default.  Only injected on the default transport (see :func:`method_headers`
+    and the scanners' header builders); when the caller supplies their own
+    transport they own the headers, so the SDK does not set it.
+    """
+    return f"aleo-python-sdk/{package_version()}"
+
+
 def make_default_headers() -> dict[str, str]:
     return {
         "X-Aleo-SDK-Version": package_version(),
@@ -79,7 +91,7 @@ def method_headers(
 ) -> dict[str, str]:
     if has_custom_transport:
         return user_headers(headers)
-    return {**headers, "X-ALEO-METHOD": method}
+    return {**headers, "X-ALEO-METHOD": method, "User-Agent": user_agent()}
 
 
 def jwt_origin(host: str) -> str:
