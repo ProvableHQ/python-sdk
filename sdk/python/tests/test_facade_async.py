@@ -10,7 +10,7 @@ Coverage (parity proof set, ~12 tests):
 - programs.get + dir(functions) includes transfer_public + coercion assert.
 - authorize returns AuthorizationResult (local, sync call on async facade).
 - delegate with mocked async DPS: fee_authorization=None by default + submit awaited.
-- async records: find passes the filter through; get_unspent covering/None.
+- async records: find passes the filter through; get_unspent_credits_record covering/None.
 - one awaited mapping read.
 - account.create / account.sign (sync) on AsyncAleo.
 """
@@ -250,7 +250,7 @@ async def test_delegate_broadcast_false() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Async records: find filter pass-through + get_unspent covering / None
+# Async records: find filter pass-through + get_unspent_credits_record covering / None
 # ---------------------------------------------------------------------------
 
 
@@ -280,8 +280,8 @@ async def test_async_records_find_passes_filter() -> None:
 
 
 @pytest.mark.asyncio
-async def test_async_records_get_unspent_covering() -> None:
-    """get_unspent returns a parsed RecordPlaintext when a covering record exists."""
+async def test_async_records_get_unspent_credits_record_covering() -> None:
+    """get_unspent_credits_record returns a parsed RecordPlaintext when a covering record exists."""
     a = AsyncAleo(HTTPProvider(BASE))
     acct = _account(a)
 
@@ -301,17 +301,15 @@ async def test_async_records_get_unspent_covering() -> None:
 
     with patch.object(AsyncRecordsModule, "find_credits", fake_find_credits):
         with patch.object(a.records, "_net", return_value=fake_net):
-            result = await a.records.get_unspent(
-                program="credits.aleo",
-                record="credits",
+            result = await a.records.get_unspent_credits_record(
                 min_microcredits=1_000_000,
             )
     assert result is fake_plaintext
 
 
 @pytest.mark.asyncio
-async def test_async_records_get_unspent_none_when_no_candidates() -> None:
-    """get_unspent returns None when find_credits returns empty list."""
+async def test_async_records_get_unspent_credits_record_none_when_no_candidates() -> None:
+    """get_unspent_credits_record returns None when find_credits returns empty list."""
     a = AsyncAleo(HTTPProvider(BASE))
 
     async def fake_find_credits(
@@ -320,9 +318,7 @@ async def test_async_records_get_unspent_none_when_no_candidates() -> None:
         return []
 
     with patch.object(AsyncRecordsModule, "find_credits", fake_find_credits):
-        result = await a.records.get_unspent(
-            program="credits.aleo",
-            record="credits",
+        result = await a.records.get_unspent_credits_record(
             min_microcredits=1_000_000,
         )
     assert result is None

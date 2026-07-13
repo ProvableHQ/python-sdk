@@ -219,10 +219,10 @@ def test_hosted_record_scanner_live(network: str) -> None:
     for rec in records:
         assert isinstance(rec, dict)
 
-    # get_unspent(...) → a network RecordPlaintext, or None when nothing covers
-    # the ask.  Either is a valid outcome on a live account.
+    # get_unspent_credits_record(...) → a network RecordPlaintext, or None when
+    # nothing qualifies.  Either is a valid outcome on a live account.
     unspent: Any = _with_retry(
-        lambda: aleo.records.get_unspent(program="credits.aleo", record="credits")
+        lambda: aleo.records.get_unspent_credits_record()
     )
     if unspent is not None:
         assert "{" in str(unspent)
@@ -284,9 +284,7 @@ def test_private_roundtrip_live(network: str) -> None:
     #    mint invalidates the scanner's shared-consumer JWT out-of-band, but the
     #    scanner self-heals (re-mints on 401), so the poll only waits on indexing.
     def _find_record() -> Any:
-        rec = aleo.records.get_unspent(
-            program="credits.aleo",
-            record="credits",
+        rec = aleo.records.get_unspent_credits_record(
             min_microcredits=_MINT_MICROCREDITS,
         )
         if rec is None:

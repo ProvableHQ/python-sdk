@@ -331,9 +331,7 @@ class BoundCall(PreparedCall):
         # A transaction sources exactly one fee record, so there is nothing to
         # exclude here (exclude_nonces is for multi-record builds, which the
         # verb ladder does not yet produce).
-        record = provider.get_unspent(
-            program="credits.aleo",
-            record="credits",
+        record = provider.get_unspent_credits_record(
             min_microcredits=min_microcredits,
         )
         if record is None:

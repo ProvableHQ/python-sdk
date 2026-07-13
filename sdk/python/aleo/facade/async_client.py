@@ -23,7 +23,7 @@ block the event loop; all network calls are ``await``-ed directly through
 - ``network.*`` — all reads and submit.
 - ``programs.get`` — fetches source from the network.
 - ``programs.mapping(name).get(key)`` — mapping read.
-- ``records.register`` / ``revoke`` / ``status`` / ``find`` / ``find_credits`` / ``get_unspent``
+- ``records.register`` / ``revoke`` / ``status`` / ``find`` / ``find_credits`` / ``get_unspent_credits_record``
   — all delegate to :class:`~aleo.async_record_scanner.AsyncRecordScanner`.
 - ``program.functions.<name>(...).build_transaction`` / ``transact`` / ``delegate``
   — Process ops run in ``asyncio.to_thread``; submit / DPS calls are awaited.
@@ -211,7 +211,7 @@ class AsyncRecordsModule:
     """Async namespaced record operations (``aleo.records``).
 
     Implements the async :class:`RecordProvider` contract:
-    ``get_unspent`` is ``async def`` and ``await``s the scanner.
+    ``get_unspent_credits_record`` is ``async def`` and ``await``s the scanner.
     """
 
     def __init__(self, client: Any) -> None:
@@ -338,27 +338,23 @@ class AsyncRecordsModule:
         )
         return await scanner.find_records(owned_filter)
 
-    async def get_unspent(
+    async def get_unspent_credits_record(
         self,
         *,
-        program: str,
-        record: str,
         min_microcredits: int | None = None,
         exclude_nonces: tuple[str, ...] = (),
     ) -> Any | None:
-        """Return one unspent record as a network ``RecordPlaintext`` (or ``None``).
+        """Return one unspent ``credits.aleo``/``credits`` record, or ``None``.
 
-        Async version of the ``RecordProvider`` protocol.
+        Async version of the ``RecordProvider`` protocol method.  For non-credits
+        records use :meth:`find` (which returns the full matching list).
         """
         net = self._net()
 
-        if program == "credits.aleo" and record == "credits":
-            if exclude_nonces:
-                candidates = await self.find_credits(at_least=None)
-            else:
-                candidates = await self.find_credits(at_least=min_microcredits)
+        if exclude_nonces:
+            candidates = await self.find_credits(at_least=None)
         else:
-            candidates = await self.find(program=program, record=record, unspent=True)
+            candidates = await self.find_credits(at_least=min_microcredits)
 
         excluded = set(exclude_nonces)
         for owned in candidates:
@@ -373,8 +369,6 @@ class AsyncRecordsModule:
                 continue
             if (
                 min_microcredits is not None
-                and program == "credits.aleo"
-                and record == "credits"
                 and int(plaintext.microcredits) < int(min_microcredits)
             ):
                 continue
@@ -761,9 +755,7 @@ class AsyncBoundCall(PreparedCall):
                 "aleo.record_provider, or omit private_fee to pay a public fee."
             )
 
-        record = await provider.get_unspent(
-            program="credits.aleo",
-            record="credits",
+        record = await provider.get_unspent_credits_record(
             min_microcredits=min_microcredits,
         )
         if record is None:
@@ -876,7 +868,7 @@ class AsyncAleo:
         self.programs: AsyncProgramsModule = AsyncProgramsModule(self)
         self.records: AsyncRecordsModule = AsyncRecordsModule(self)
 
-        # The async record provider (default = self.records; get_unspent is async)
+        # The async record provider (default = self.records; get_unspent_credits_record is async)
         self._record_provider: Any = self.records
 
     # ── Escape hatches ─────────────────────────────────────────────────────
@@ -916,7 +908,7 @@ class AsyncAleo:
 
     @property
     def record_provider(self) -> Any:
-        """The async record provider (``get_unspent`` is ``async def`` here)."""
+        """The async record provider (``get_unspent_credits_record`` is ``async def`` here)."""
         return self._record_provider
 
     @record_provider.setter

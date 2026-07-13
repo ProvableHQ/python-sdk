@@ -29,7 +29,7 @@ class RecordsModule:
     """Namespaced record operations attached to an :class:`~aleo.facade.client.Aleo` client.
 
     Access via ``aleo.records``, not by direct construction.  Implements the
-    :class:`~aleo._facade_common.RecordProvider` protocol (``get_unspent`` +
+    :class:`~aleo._facade_common.RecordProvider` protocol (``get_unspent_credits_record`` +
     ``find``) over a lazily-built :class:`~aleo.record_scanner.RecordScanner`.
 
     .. warning::
@@ -279,50 +279,41 @@ class RecordsModule:
 
     # ── RecordProvider protocol ────────────────────────────────────────────────
 
-    def get_unspent(
+    def get_unspent_credits_record(
         self,
         *,
-        program: str,
-        record: str,
         min_microcredits: int | None = None,
         exclude_nonces: tuple[str, ...] = (),
     ) -> Any | None:
-        """Return one unspent record as a network ``RecordPlaintext`` (or ``None``).
+        """Return one unspent ``credits.aleo``/``credits`` record, or ``None``.
 
         This is the :class:`~aleo._facade_common.RecordProvider` method the F5 fee
         ladder calls to auto-source a private fee record.  It finds the first
-        unspent ``program``/``record`` covering *min_microcredits* (for credits
-        records), skips any whose ``_nonce`` is in *exclude_nonces*, parses the
-        scanner's ``record_plaintext`` string into a network ``RecordPlaintext``
-        and returns it — or ``None`` when nothing qualifies.
+        unspent credits record covering *min_microcredits*, skips any whose
+        ``_nonce`` is in *exclude_nonces*, parses the scanner's
+        ``record_plaintext`` string into a network ``RecordPlaintext`` and returns
+        it — or ``None`` when nothing qualifies.  For non-credits records use
+        :meth:`find` (which returns the full matching list).
 
         Parameters
         ----------
-        program:
-            The record's program (e.g. ``"credits.aleo"``).
-        record:
-            The record type (e.g. ``"credits"``).
         min_microcredits:
-            Minimum microcredits the record must cover (credits records only).
+            Minimum microcredits the record must cover.
         exclude_nonces:
             Record ``_nonce`` strings to skip (e.g. records already spent in this
             transaction batch).
         """
         net = self._net()
 
-        # Gather candidate OwnedRecords.
-        if program == "credits.aleo" and record == "credits":
-            if exclude_nonces:
-                # find_credits(at_least=...) returns only the first covering
-                # record; if that one is excluded we'd wrongly report None even
-                # when other covering records exist.  With exclusions in play,
-                # pull the full unspent set and let the loop below apply both
-                # the min-microcredits and exclude-nonce filters.
-                candidates = self.find_credits(at_least=None)
-            else:
-                candidates = self.find_credits(at_least=min_microcredits)
+        # Gather candidate credits records.
+        if exclude_nonces:
+            # find_credits(at_least=...) returns only the first covering record;
+            # if that one is excluded we'd wrongly report None even when other
+            # covering records exist.  With exclusions in play, pull the full
+            # unspent set and let the loop below apply both filters.
+            candidates = self.find_credits(at_least=None)
         else:
-            candidates = self.find(program=program, record=record, unspent=True)
+            candidates = self.find_credits(at_least=min_microcredits)
 
         excluded = set(exclude_nonces)
         for owned in candidates:
@@ -337,8 +328,6 @@ class RecordsModule:
                 continue
             if (
                 min_microcredits is not None
-                and program == "credits.aleo"
-                and record == "credits"
                 and int(plaintext.microcredits) < int(min_microcredits)
             ):
                 continue

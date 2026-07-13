@@ -261,7 +261,7 @@ def test_find_credits_at_least_none_when_too_large() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 5. get_unspent — covering / None / exclude_nonces
+# 5. get_unspent_credits_record — covering / None / exclude_nonces
 # ---------------------------------------------------------------------------
 
 
@@ -275,9 +275,7 @@ def test_get_unspent_returns_covering_plaintext() -> None:
     a.records._account = _golden_account()
     a.records.scanner.set_account(a.records._account)
 
-    pt = a.records.get_unspent(
-        program="credits.aleo", record="credits", min_microcredits=1_000_000
-    )
+    pt = a.records.get_unspent_credits_record(min_microcredits=1_000_000)
     assert isinstance(pt, RecordPlaintext)
     assert int(pt.microcredits) == RECORD_MICROCREDITS
 
@@ -291,9 +289,7 @@ def test_get_unspent_none_when_uncovered() -> None:
     a.records._account = _golden_account()
     a.records.scanner.set_account(a.records._account)
 
-    pt = a.records.get_unspent(
-        program="credits.aleo", record="credits", min_microcredits=10 ** 18
-    )
+    pt = a.records.get_unspent_credits_record(min_microcredits=10 ** 18)
     assert pt is None
 
 
@@ -307,9 +303,7 @@ def test_get_unspent_skips_excluded_nonce() -> None:
     a.records.scanner.set_account(a.records._account)
 
     # The only candidate's nonce is excluded → None.
-    pt = a.records.get_unspent(
-        program="credits.aleo",
-        record="credits",
+    pt = a.records.get_unspent_credits_record(
         min_microcredits=1_000_000,
         exclude_nonces=(RECORD_NONCE,),
     )
@@ -344,18 +338,14 @@ class _FakeProvider:
         self._record = record
         self.calls: list[dict[str, Any]] = []
 
-    def get_unspent(
+    def get_unspent_credits_record(
         self,
         *,
-        program: str,
-        record: str,
         min_microcredits: int | None = None,
         exclude_nonces: tuple[str, ...] = (),
     ) -> Any:
         self.calls.append(
             {
-                "program": program,
-                "record": record,
                 "min_microcredits": min_microcredits,
                 "exclude_nonces": exclude_nonces,
             }
@@ -396,8 +386,6 @@ def test_resolve_fee_record_consumes_provider() -> None:
     assert got is known
     assert fake.calls == [
         {
-            "program": "credits.aleo",
-            "record": "credits",
             "min_microcredits": 5000,
             "exclude_nonces": (),
         }

@@ -26,20 +26,18 @@ class RecordProvider(Protocol):
     private fee when the caller does not pass ``fee_record`` explicitly.
     """
 
-    def get_unspent(
+    def get_unspent_credits_record(
         self,
         *,
-        program: str,
-        record: str,
         min_microcredits: int | None = None,
         exclude_nonces: tuple[str, ...] = (),
     ) -> Any | None:
-        """Return one unspent record ready to hand to ``process.authorize_fee_private``.
+        """Return one unspent credits record ready for ``process.authorize_fee_private``.
 
         Returns a *network* ``RecordPlaintext`` (parsed from the scanner's
-        ``record_plaintext`` string) for the first unspent ``program``/``record``
-        that covers *min_microcredits* (for credits records) and whose ``_nonce``
-        is not in *exclude_nonces* — or ``None`` when nothing qualifies.
+        ``record_plaintext`` string) for the first unspent ``credits.aleo``/
+        ``credits`` record that covers *min_microcredits* and whose ``_nonce`` is
+        not in *exclude_nonces* — or ``None`` when nothing qualifies.
         """
         ...
 

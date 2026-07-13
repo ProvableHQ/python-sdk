@@ -155,14 +155,14 @@ credits.functions.transfer_public_to_private(str(account.address), 100_000) \
 
 # 2) Register with the record provider and find the new private record
 aleo.records.register(account)                 # shares the view key with the scanner
-record = aleo.records.get_unspent(program="credits.aleo", record="credits")
+record = aleo.records.get_unspent_credits_record()
 
 # 3) Spend the private record with a private transfer (delegated)
 credits.functions.transfer_private(record, str(recipient.address), 1) \
     .delegate(account)
 ```
 
-`aleo.record_provider` is swappable: set it to your own object implementing the `RecordProvider` protocol (`get_unspent` / `find`) — e.g. a self-hosted scanner — and the whole facade (including private-fee auto-sourcing) uses it, with no view-key sharing.
+`aleo.record_provider` is swappable: set it to your own object implementing the `RecordProvider` protocol (`get_unspent_credits_record` / `find`) — e.g. a self-hosted scanner — and the whole facade (including private-fee auto-sourcing) uses it, with no view-key sharing.
 
 ## Async (`AsyncAleo`)
 
