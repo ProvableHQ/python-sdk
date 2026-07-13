@@ -61,9 +61,24 @@ def test_fmt_int_ranges():
         fmt_int(True, "u8")           # bool is not an int here
 
 
+def test_parse_rejects_malformed_and_absent():
+    with pytest.raises(ValueError):
+        parse_plaintext("{ a: 1u8 2u8 }")      # missing comma between members
+    with pytest.raises(ValueError):
+        parse_plaintext("[1u8 2u8]")            # missing comma between elements
+    with pytest.raises(ValueError):
+        parse_plaintext("null")                 # absent mapping entry
+    with pytest.raises(ValueError):
+        parse_plaintext("")
+    with pytest.raises(TypeError):
+        parse_plaintext(None)                   # absent value from the node
+
+
 def test_fmt_fieldlike_and_address():
     assert fmt_fieldlike(123, "field") == "123field"
     assert fmt_fieldlike("123field", "field") == "123field"
+    assert fmt_fieldlike("-1field", "field") == "-1field"   # mod-p negative
+    assert fmt_fieldlike(-1, "field") == "-1field"
     with pytest.raises(ValueError):
         fmt_fieldlike("123group", "field")   # wrong suffix
     assert fmt_bool(True) == "true"

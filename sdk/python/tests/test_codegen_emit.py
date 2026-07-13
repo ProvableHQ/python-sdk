@@ -102,3 +102,39 @@ def test_emit_module_sorts_nested_structs_first():
     ns: dict = {}
     exec(compile(emit_module(flipped), "generated", "exec"), ns)
     assert ns["Outer"].from_plaintext("{ inner: { a: 7u8 }, pool: 5field }").inner.a == 7
+
+
+def test_emit_module_carries_abi_constant():
+    ns: dict = {}
+    exec(compile(emit_module(MINI_ABI), "generated", "exec"), ns)
+    assert ns["ABI"]["program"] == "mini.aleo"
+    assert ns["ABI"]["mappings"][1]["key"] == {"Primitive": "Field"}
+
+
+def test_emit_rejects_bad_identifiers():
+    import pytest
+    bad_field = {"path": ["S"], "fields": [{"name": "from", "ty": {"Primitive": "Field"}}]}
+    with pytest.raises(ValueError, match="from"):
+        emit_struct(bad_field)
+    injected = {"path": ["S"], "fields": [
+        {"name": "a: int = __import__('os') #", "ty": {"Primitive": "Field"}}]}
+    with pytest.raises(ValueError):
+        emit_struct(injected)
+    with pytest.raises(ValueError, match="_nonce"):
+        emit_module(dict(MINI_ABI, records=[{"path": ["R"], "fields": [
+            {"name": "_nonce", "ty": {"Primitive": "Field"}, "mode": "Private"}]}]))
+
+
+def test_emit_module_rejects_unresolvable_struct_refs():
+    import pytest
+    # Cross-program reference: the class would never be generated.
+    foreign = dict(MINI_ABI, structs=MINI_ABI["structs"] + [
+        {"path": ["Uses"], "fields": [
+            {"name": "x", "ty": {"Struct": {"path": ["Ext"], "program": "other.aleo"}}}]}])
+    with pytest.raises(ValueError, match="Ext"):
+        emit_module(foreign)
+    # Duplicate terminal names: last-one-wins would silently drop a struct.
+    duped = dict(MINI_ABI, structs=MINI_ABI["structs"] + [
+        {"path": ["Inner"], "fields": [{"name": "b", "ty": {"Primitive": "Boolean"}}]}])
+    with pytest.raises(ValueError, match="Inner"):
+        emit_module(duped)

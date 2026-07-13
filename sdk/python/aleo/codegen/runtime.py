@@ -1,7 +1,10 @@
 """Runtime helpers imported by aleo.codegen-generated modules.
 
-Pure Python, no PyO3 — generated modules must import cheaply and work in any
-environment where the ``aleo`` package is installed.
+Stdlib-only by design: generated modules depend on nothing beyond this module,
+and this module's own imports are trivially cheap.  (Importing it still pulls
+in the ``aleo`` package ``__init__``, which loads the compiled extension — the
+PyO3 ``Plaintext`` type is not used here because it does not expose values as
+plain Python dicts.)
 
 ``parse_plaintext`` parses an Aleo plaintext literal into Python values:
 structs/records become dicts (record visibility suffixes ``.private`` /
@@ -20,12 +23,27 @@ from typing import Any
 
 _INT_RE = re.compile(r"^(-?\d+)(u8|u16|u32|u64|u128|i8|i16|i32|i64|i128)$")
 _MODE_RE = re.compile(r"\.(private|public|constant)$")
-_ATOM_RE = re.compile(r"[^,}\]]+")
+# Atoms are single tokens: no whitespace, separators, or ':' — malformed
+# plaintext must fail loudly, not be silently glued into one string value.
+_ATOM_RE = re.compile(r"[^,{}\[\]\s:]+")
 
 
-def parse_plaintext(text: str) -> Any:
-    """Parse an Aleo plaintext literal into Python values."""
-    value, rest = _parse_value(text.strip())
+def parse_plaintext(text: object) -> Any:
+    """Parse an Aleo plaintext literal into Python values.
+
+    Raises ``TypeError`` for non-strings (an absent mapping value arrives as
+    ``None`` from the node — handle absence before decoding) and
+    ``ValueError`` for empty/``null`` bodies and malformed plaintext.
+    """
+    if not isinstance(text, str):
+        raise TypeError(
+            f"Expected a plaintext str, got {type(text).__name__} — absent "
+            "mapping values arrive as None; handle absence before decoding."
+        )
+    stripped = text.strip()
+    if stripped in ("", "null"):
+        raise ValueError("Plaintext is empty or 'null' — the mapping entry is absent.")
+    value, rest = _parse_value(stripped)
     if rest.strip():
         raise ValueError(f"Trailing content after plaintext value: {rest!r}")
     return value
@@ -47,13 +65,18 @@ def _parse_struct(s: str) -> tuple[dict[str, Any], str]:
         if not s:
             raise ValueError("Unterminated struct in plaintext")
         name, sep, s = s.partition(":")
+        key = name.strip()
         if not sep:
             raise ValueError(f"Expected 'name:' in struct, got {name!r}")
+        if not key.isidentifier():
+            raise ValueError(f"Invalid struct member name {key!r} in plaintext")
         value, s = _parse_value(s)
-        out[name.strip()] = value
+        out[key] = value
         s = s.lstrip()
         if s.startswith(","):
             s = s[1:].lstrip()
+        elif not s.startswith("}"):
+            raise ValueError(f"Expected ',' or '}}' in struct, got {s[:20]!r}")
     return out, s[1:]
 
 
@@ -68,6 +91,8 @@ def _parse_array(s: str) -> tuple[list[Any], str]:
         s = s.lstrip()
         if s.startswith(","):
             s = s[1:].lstrip()
+        elif not s.startswith("]"):
+            raise ValueError(f"Expected ',' or ']' in array, got {s[:20]!r}")
     return out, s[1:]
 
 
@@ -120,7 +145,8 @@ def fmt_fieldlike(v: object, suffix: str) -> str:
     """Format an int or pre-suffixed literal as a field/group/scalar literal."""
     if isinstance(v, int) and not isinstance(v, bool):
         return f"{v}{suffix}"
-    if isinstance(v, str) and re.fullmatch(rf"\d+{suffix}", v):
+    # Signed literals are valid for mod-p types ("-1field" == p-1).
+    if isinstance(v, str) and re.fullmatch(rf"-?\d+{suffix}", v):
         return v
     raise ValueError(f"Expected int or '<digits>{suffix}' literal, got {v!r}")
 

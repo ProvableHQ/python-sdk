@@ -1,2654 +1,2655 @@
 {
-  "program": "shield_swap_v3.aleo",
-  "structs": [
+ "_source": "aleo-viem@625fa05 packages/shield-swap/codegen/abi/shield_swap_v3.json (aleo-abi output for shield_swap_v3.aleo, testnet)",
+ "program": "shield_swap_v3.aleo",
+ "structs": [
+  {
+   "path": [
+    "SwapRequest"
+   ],
+   "fields": [
     {
-      "path": [
-        "SwapRequest"
-      ],
-      "fields": [
-        {
-          "name": "pool",
-          "ty": {
-            "Primitive": "Field"
-          }
-        },
-        {
-          "name": "zero_for_one",
-          "ty": {
-            "Primitive": "Boolean"
-          }
-        },
-        {
-          "name": "amount_in",
-          "ty": {
-            "Primitive": {
-              "UInt": "U128"
-            }
-          }
-        },
-        {
-          "name": "amount_out_min",
-          "ty": {
-            "Primitive": {
-              "UInt": "U128"
-            }
-          }
-        },
-        {
-          "name": "sqrt_price_limit",
-          "ty": {
-            "Primitive": {
-              "UInt": "U128"
-            }
-          }
-        },
-        {
-          "name": "recipient",
-          "ty": {
-            "Primitive": "Address"
-          }
-        },
-        {
-          "name": "nonce",
-          "ty": {
-            "Primitive": {
-              "UInt": "U64"
-            }
-          }
-        },
-        {
-          "name": "deadline",
-          "ty": {
-            "Primitive": {
-              "UInt": "U32"
-            }
-          }
-        }
-      ]
+     "name": "pool",
+     "ty": {
+      "Primitive": "Field"
+     }
     },
     {
-      "path": [
+     "name": "zero_for_one",
+     "ty": {
+      "Primitive": "Boolean"
+     }
+    },
+    {
+     "name": "amount_in",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "amount_out_min",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "sqrt_price_limit",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "recipient",
+     "ty": {
+      "Primitive": "Address"
+     }
+    },
+    {
+     "name": "nonce",
+     "ty": {
+      "Primitive": {
+       "UInt": "U64"
+      }
+     }
+    },
+    {
+     "name": "deadline",
+     "ty": {
+      "Primitive": {
+       "UInt": "U32"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "path": [
+    "SwapHop"
+   ],
+   "fields": [
+    {
+     "name": "pool",
+     "ty": {
+      "Primitive": "Field"
+     }
+    },
+    {
+     "name": "zero_for_one",
+     "ty": {
+      "Primitive": "Boolean"
+     }
+    },
+    {
+     "name": "sqrt_price_limit",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "path": [
+    "SwapMultiHopRequest"
+   ],
+   "fields": [
+    {
+     "name": "token_in",
+     "ty": {
+      "Primitive": "Field"
+     }
+    },
+    {
+     "name": "token_out",
+     "ty": {
+      "Primitive": "Field"
+     }
+    },
+    {
+     "name": "amount_in",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "amount_out_min",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "recipient",
+     "ty": {
+      "Primitive": "Address"
+     }
+    },
+    {
+     "name": "hop0",
+     "ty": {
+      "Struct": {
+       "path": [
         "SwapHop"
-      ],
-      "fields": [
-        {
-          "name": "pool",
-          "ty": {
-            "Primitive": "Field"
-          }
-        },
-        {
-          "name": "zero_for_one",
-          "ty": {
-            "Primitive": "Boolean"
-          }
-        },
-        {
-          "name": "sqrt_price_limit",
-          "ty": {
-            "Primitive": {
-              "UInt": "U128"
-            }
-          }
-        }
-      ]
+       ],
+       "program": "shield_swap_v3.aleo"
+      }
+     }
     },
     {
-      "path": [
+     "name": "hop1",
+     "ty": {
+      "Struct": {
+       "path": [
+        "SwapHop"
+       ],
+       "program": "shield_swap_v3.aleo"
+      }
+     }
+    },
+    {
+     "name": "hop2",
+     "ty": {
+      "Struct": {
+       "path": [
+        "SwapHop"
+       ],
+       "program": "shield_swap_v3.aleo"
+      }
+     }
+    },
+    {
+     "name": "hop_count",
+     "ty": {
+      "Primitive": {
+       "UInt": "U8"
+      }
+     }
+    },
+    {
+     "name": "nonce",
+     "ty": {
+      "Primitive": {
+       "UInt": "U64"
+      }
+     }
+    },
+    {
+     "name": "deadline",
+     "ty": {
+      "Primitive": {
+       "UInt": "U32"
+      }
+     }
+    },
+    {
+     "name": "caller",
+     "ty": {
+      "Primitive": "Address"
+     }
+    }
+   ]
+  },
+  {
+   "path": [
+    "MintPositionRequest"
+   ],
+   "fields": [
+    {
+     "name": "pool",
+     "ty": {
+      "Primitive": "Field"
+     }
+    },
+    {
+     "name": "tick_lower",
+     "ty": {
+      "Primitive": {
+       "Int": "I32"
+      }
+     }
+    },
+    {
+     "name": "tick_upper",
+     "ty": {
+      "Primitive": {
+       "Int": "I32"
+      }
+     }
+    },
+    {
+     "name": "amount0_desired",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "amount1_desired",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "amount0_min",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "amount1_min",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "tick_lower_hint",
+     "ty": {
+      "Primitive": {
+       "Int": "I32"
+      }
+     }
+    },
+    {
+     "name": "tick_upper_hint",
+     "ty": {
+      "Primitive": {
+       "Int": "I32"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "path": [
+    "PoolState"
+   ],
+   "fields": [
+    {
+     "name": "token0",
+     "ty": {
+      "Primitive": "Field"
+     }
+    },
+    {
+     "name": "token1",
+     "ty": {
+      "Primitive": "Field"
+     }
+    },
+    {
+     "name": "fee",
+     "ty": {
+      "Primitive": {
+       "UInt": "U16"
+      }
+     }
+    },
+    {
+     "name": "enabled",
+     "ty": {
+      "Primitive": "Boolean"
+     }
+    },
+    {
+     "name": "scale0",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "scale1",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "path": [
+    "Slot"
+   ],
+   "fields": [
+    {
+     "name": "tick",
+     "ty": {
+      "Primitive": {
+       "Int": "I32"
+      }
+     }
+    },
+    {
+     "name": "tick_spacing",
+     "ty": {
+      "Primitive": {
+       "UInt": "U32"
+      }
+     }
+    },
+    {
+     "name": "sqrt_price",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "fee_protocol",
+     "ty": {
+      "Primitive": {
+       "UInt": "U8"
+      }
+     }
+    },
+    {
+     "name": "liquidity",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "fee_growth_global0_x_64",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "fee_growth_global1_x_64",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "fee_residual0_x_64",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "fee_residual1_x_64",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "max_liquidity_per_tick",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "protocol_fees0",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "protocol_fees1",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "next_init_below",
+     "ty": {
+      "Primitive": {
+       "Int": "I32"
+      }
+     }
+    },
+    {
+     "name": "next_init_above",
+     "ty": {
+      "Primitive": {
+       "Int": "I32"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "path": [
+    "Tick"
+   ],
+   "fields": [
+    {
+     "name": "pool",
+     "ty": {
+      "Primitive": "Field"
+     }
+    },
+    {
+     "name": "liquidity_net",
+     "ty": {
+      "Primitive": {
+       "Int": "I128"
+      }
+     }
+    },
+    {
+     "name": "liquidity_gross",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "tick",
+     "ty": {
+      "Primitive": {
+       "Int": "I32"
+      }
+     }
+    },
+    {
+     "name": "fee_growth_outside0_64",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "fee_growth_outside1_64",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "prev",
+     "ty": {
+      "Primitive": {
+       "Int": "I32"
+      }
+     }
+    },
+    {
+     "name": "next",
+     "ty": {
+      "Primitive": {
+       "Int": "I32"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "path": [
+    "Position"
+   ],
+   "fields": [
+    {
+     "name": "token_id",
+     "ty": {
+      "Primitive": "Field"
+     }
+    },
+    {
+     "name": "pool",
+     "ty": {
+      "Primitive": "Field"
+     }
+    },
+    {
+     "name": "tick_lower",
+     "ty": {
+      "Primitive": {
+       "Int": "I32"
+      }
+     }
+    },
+    {
+     "name": "tick_upper",
+     "ty": {
+      "Primitive": {
+       "Int": "I32"
+      }
+     }
+    },
+    {
+     "name": "liquidity",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "fee_growth_inside0_last_64",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "fee_growth_inside1_last_64",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "tokens_owed0",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "tokens_owed1",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "path": [
+    "PairKey"
+   ],
+   "fields": [
+    {
+     "name": "token0",
+     "ty": {
+      "Primitive": "Field"
+     }
+    },
+    {
+     "name": "token1",
+     "ty": {
+      "Primitive": "Field"
+     }
+    }
+   ]
+  },
+  {
+   "path": [
+    "SwapOutput"
+   ],
+   "fields": [
+    {
+     "name": "recipient",
+     "ty": {
+      "Primitive": "Address"
+     }
+    },
+    {
+     "name": "caller",
+     "ty": {
+      "Primitive": "Address"
+     }
+    },
+    {
+     "name": "token_in",
+     "ty": {
+      "Primitive": "Field"
+     }
+    },
+    {
+     "name": "token_out",
+     "ty": {
+      "Primitive": "Field"
+     }
+    },
+    {
+     "name": "amount_out",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "amount_remaining",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "token_in_1",
+     "ty": {
+      "Primitive": "Field"
+     }
+    },
+    {
+     "name": "amount_remaining_1",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "token_in_2",
+     "ty": {
+      "Primitive": "Field"
+     }
+    },
+    {
+     "name": "amount_remaining_2",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    }
+   ]
+  }
+ ],
+ "records": [
+  {
+   "path": [
+    "PositionNFT"
+   ],
+   "fields": [
+    {
+     "name": "owner",
+     "ty": {
+      "Primitive": "Address"
+     },
+     "mode": "Private"
+    },
+    {
+     "name": "token_id",
+     "ty": {
+      "Primitive": "Field"
+     },
+     "mode": "Private"
+    },
+    {
+     "name": "token0_id",
+     "ty": {
+      "Primitive": "Field"
+     },
+     "mode": "Private"
+    },
+    {
+     "name": "token1_id",
+     "ty": {
+      "Primitive": "Field"
+     },
+     "mode": "Private"
+    },
+    {
+     "name": "pool",
+     "ty": {
+      "Primitive": "Field"
+     },
+     "mode": "Private"
+    },
+    {
+     "name": "tick_lower",
+     "ty": {
+      "Primitive": {
+       "Int": "I32"
+      }
+     },
+     "mode": "Private"
+    },
+    {
+     "name": "tick_upper",
+     "ty": {
+      "Primitive": {
+       "Int": "I32"
+      }
+     },
+     "mode": "Private"
+    }
+   ]
+  },
+  {
+   "path": [
+    "SwapComplianceRecord"
+   ],
+   "fields": [
+    {
+     "name": "owner",
+     "ty": {
+      "Primitive": "Address"
+     },
+     "mode": "Private"
+    },
+    {
+     "name": "swap_id",
+     "ty": {
+      "Primitive": "Field"
+     },
+     "mode": "Private"
+    },
+    {
+     "name": "token_in",
+     "ty": {
+      "Primitive": "Field"
+     },
+     "mode": "Private"
+    },
+    {
+     "name": "token_out",
+     "ty": {
+      "Primitive": "Field"
+     },
+     "mode": "Private"
+    },
+    {
+     "name": "request",
+     "ty": {
+      "Struct": {
+       "path": [
+        "SwapRequest"
+       ],
+       "program": "shield_swap_v3.aleo"
+      }
+     },
+     "mode": "Private"
+    },
+    {
+     "name": "caller",
+     "ty": {
+      "Primitive": "Address"
+     },
+     "mode": "Private"
+    },
+    {
+     "name": "blinded_address",
+     "ty": {
+      "Primitive": "Address"
+     },
+     "mode": "Private"
+    }
+   ]
+  },
+  {
+   "path": [
+    "MultiHopSwapComplianceRecord"
+   ],
+   "fields": [
+    {
+     "name": "owner",
+     "ty": {
+      "Primitive": "Address"
+     },
+     "mode": "Private"
+    },
+    {
+     "name": "swap_id",
+     "ty": {
+      "Primitive": "Field"
+     },
+     "mode": "Private"
+    },
+    {
+     "name": "request",
+     "ty": {
+      "Struct": {
+       "path": [
         "SwapMultiHopRequest"
-      ],
-      "fields": [
-        {
-          "name": "token_in",
-          "ty": {
-            "Primitive": "Field"
-          }
-        },
-        {
-          "name": "token_out",
-          "ty": {
-            "Primitive": "Field"
-          }
-        },
-        {
-          "name": "amount_in",
-          "ty": {
-            "Primitive": {
-              "UInt": "U128"
-            }
-          }
-        },
-        {
-          "name": "amount_out_min",
-          "ty": {
-            "Primitive": {
-              "UInt": "U128"
-            }
-          }
-        },
-        {
-          "name": "recipient",
-          "ty": {
-            "Primitive": "Address"
-          }
-        },
-        {
-          "name": "hop0",
-          "ty": {
-            "Struct": {
-              "path": [
-                "SwapHop"
-              ],
-              "program": "shield_swap_v3.aleo"
-            }
-          }
-        },
-        {
-          "name": "hop1",
-          "ty": {
-            "Struct": {
-              "path": [
-                "SwapHop"
-              ],
-              "program": "shield_swap_v3.aleo"
-            }
-          }
-        },
-        {
-          "name": "hop2",
-          "ty": {
-            "Struct": {
-              "path": [
-                "SwapHop"
-              ],
-              "program": "shield_swap_v3.aleo"
-            }
-          }
-        },
-        {
-          "name": "hop_count",
-          "ty": {
-            "Primitive": {
-              "UInt": "U8"
-            }
-          }
-        },
-        {
-          "name": "nonce",
-          "ty": {
-            "Primitive": {
-              "UInt": "U64"
-            }
-          }
-        },
-        {
-          "name": "deadline",
-          "ty": {
-            "Primitive": {
-              "UInt": "U32"
-            }
-          }
-        },
-        {
-          "name": "caller",
-          "ty": {
-            "Primitive": "Address"
-          }
-        }
-      ]
+       ],
+       "program": "shield_swap_v3.aleo"
+      }
+     },
+     "mode": "Private"
     },
     {
-      "path": [
+     "name": "caller",
+     "ty": {
+      "Primitive": "Address"
+     },
+     "mode": "Private"
+    },
+    {
+     "name": "blinded_address",
+     "ty": {
+      "Primitive": "Address"
+     },
+     "mode": "Private"
+    }
+   ]
+  },
+  {
+   "path": [
+    "MintComplianceRecord"
+   ],
+   "fields": [
+    {
+     "name": "owner",
+     "ty": {
+      "Primitive": "Address"
+     },
+     "mode": "Private"
+    },
+    {
+     "name": "token_id",
+     "ty": {
+      "Primitive": "Field"
+     },
+     "mode": "Private"
+    },
+    {
+     "name": "token0_id",
+     "ty": {
+      "Primitive": "Field"
+     },
+     "mode": "Private"
+    },
+    {
+     "name": "token1_id",
+     "ty": {
+      "Primitive": "Field"
+     },
+     "mode": "Private"
+    },
+    {
+     "name": "request",
+     "ty": {
+      "Struct": {
+       "path": [
         "MintPositionRequest"
-      ],
-      "fields": [
-        {
-          "name": "pool",
-          "ty": {
-            "Primitive": "Field"
-          }
-        },
-        {
-          "name": "tick_lower",
-          "ty": {
-            "Primitive": {
-              "Int": "I32"
-            }
-          }
-        },
-        {
-          "name": "tick_upper",
-          "ty": {
-            "Primitive": {
-              "Int": "I32"
-            }
-          }
-        },
-        {
-          "name": "amount0_desired",
-          "ty": {
-            "Primitive": {
-              "UInt": "U128"
-            }
-          }
-        },
-        {
-          "name": "amount1_desired",
-          "ty": {
-            "Primitive": {
-              "UInt": "U128"
-            }
-          }
-        },
-        {
-          "name": "amount0_min",
-          "ty": {
-            "Primitive": {
-              "UInt": "U128"
-            }
-          }
-        },
-        {
-          "name": "amount1_min",
-          "ty": {
-            "Primitive": {
-              "UInt": "U128"
-            }
-          }
-        },
-        {
-          "name": "tick_lower_hint",
-          "ty": {
-            "Primitive": {
-              "Int": "I32"
-            }
-          }
-        },
-        {
-          "name": "tick_upper_hint",
-          "ty": {
-            "Primitive": {
-              "Int": "I32"
-            }
-          }
-        }
-      ]
+       ],
+       "program": "shield_swap_v3.aleo"
+      }
+     },
+     "mode": "Private"
     },
     {
-      "path": [
-        "PoolState"
-      ],
-      "fields": [
-        {
-          "name": "token0",
-          "ty": {
-            "Primitive": "Field"
-          }
-        },
-        {
-          "name": "token1",
-          "ty": {
-            "Primitive": "Field"
-          }
-        },
-        {
-          "name": "fee",
-          "ty": {
-            "Primitive": {
-              "UInt": "U16"
-            }
-          }
-        },
-        {
-          "name": "enabled",
-          "ty": {
-            "Primitive": "Boolean"
-          }
-        },
-        {
-          "name": "scale0",
-          "ty": {
-            "Primitive": {
-              "UInt": "U128"
-            }
-          }
-        },
-        {
-          "name": "scale1",
-          "ty": {
-            "Primitive": {
-              "UInt": "U128"
-            }
-          }
-        }
-      ]
+     "name": "caller",
+     "ty": {
+      "Primitive": "Address"
+     },
+     "mode": "Private"
     },
     {
-      "path": [
-        "Slot"
-      ],
-      "fields": [
-        {
-          "name": "tick",
-          "ty": {
-            "Primitive": {
-              "Int": "I32"
-            }
-          }
-        },
-        {
-          "name": "tick_spacing",
-          "ty": {
-            "Primitive": {
-              "UInt": "U32"
-            }
-          }
-        },
-        {
-          "name": "sqrt_price",
-          "ty": {
-            "Primitive": {
-              "UInt": "U128"
-            }
-          }
-        },
-        {
-          "name": "fee_protocol",
-          "ty": {
-            "Primitive": {
-              "UInt": "U8"
-            }
-          }
-        },
-        {
-          "name": "liquidity",
-          "ty": {
-            "Primitive": {
-              "UInt": "U128"
-            }
-          }
-        },
-        {
-          "name": "fee_growth_global0_x_64",
-          "ty": {
-            "Primitive": {
-              "UInt": "U128"
-            }
-          }
-        },
-        {
-          "name": "fee_growth_global1_x_64",
-          "ty": {
-            "Primitive": {
-              "UInt": "U128"
-            }
-          }
-        },
-        {
-          "name": "fee_residual0_x_64",
-          "ty": {
-            "Primitive": {
-              "UInt": "U128"
-            }
-          }
-        },
-        {
-          "name": "fee_residual1_x_64",
-          "ty": {
-            "Primitive": {
-              "UInt": "U128"
-            }
-          }
-        },
-        {
-          "name": "max_liquidity_per_tick",
-          "ty": {
-            "Primitive": {
-              "UInt": "U128"
-            }
-          }
-        },
-        {
-          "name": "protocol_fees0",
-          "ty": {
-            "Primitive": {
-              "UInt": "U128"
-            }
-          }
-        },
-        {
-          "name": "protocol_fees1",
-          "ty": {
-            "Primitive": {
-              "UInt": "U128"
-            }
-          }
-        },
-        {
-          "name": "next_init_below",
-          "ty": {
-            "Primitive": {
-              "Int": "I32"
-            }
-          }
-        },
-        {
-          "name": "next_init_above",
-          "ty": {
-            "Primitive": {
-              "Int": "I32"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "path": [
-        "Tick"
-      ],
-      "fields": [
-        {
-          "name": "pool",
-          "ty": {
-            "Primitive": "Field"
-          }
-        },
-        {
-          "name": "liquidity_net",
-          "ty": {
-            "Primitive": {
-              "Int": "I128"
-            }
-          }
-        },
-        {
-          "name": "liquidity_gross",
-          "ty": {
-            "Primitive": {
-              "UInt": "U128"
-            }
-          }
-        },
-        {
-          "name": "tick",
-          "ty": {
-            "Primitive": {
-              "Int": "I32"
-            }
-          }
-        },
-        {
-          "name": "fee_growth_outside0_64",
-          "ty": {
-            "Primitive": {
-              "UInt": "U128"
-            }
-          }
-        },
-        {
-          "name": "fee_growth_outside1_64",
-          "ty": {
-            "Primitive": {
-              "UInt": "U128"
-            }
-          }
-        },
-        {
-          "name": "prev",
-          "ty": {
-            "Primitive": {
-              "Int": "I32"
-            }
-          }
-        },
-        {
-          "name": "next",
-          "ty": {
-            "Primitive": {
-              "Int": "I32"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "path": [
-        "Position"
-      ],
-      "fields": [
-        {
-          "name": "token_id",
-          "ty": {
-            "Primitive": "Field"
-          }
-        },
-        {
-          "name": "pool",
-          "ty": {
-            "Primitive": "Field"
-          }
-        },
-        {
-          "name": "tick_lower",
-          "ty": {
-            "Primitive": {
-              "Int": "I32"
-            }
-          }
-        },
-        {
-          "name": "tick_upper",
-          "ty": {
-            "Primitive": {
-              "Int": "I32"
-            }
-          }
-        },
-        {
-          "name": "liquidity",
-          "ty": {
-            "Primitive": {
-              "UInt": "U128"
-            }
-          }
-        },
-        {
-          "name": "fee_growth_inside0_last_64",
-          "ty": {
-            "Primitive": {
-              "UInt": "U128"
-            }
-          }
-        },
-        {
-          "name": "fee_growth_inside1_last_64",
-          "ty": {
-            "Primitive": {
-              "UInt": "U128"
-            }
-          }
-        },
-        {
-          "name": "tokens_owed0",
-          "ty": {
-            "Primitive": {
-              "UInt": "U128"
-            }
-          }
-        },
-        {
-          "name": "tokens_owed1",
-          "ty": {
-            "Primitive": {
-              "UInt": "U128"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "path": [
-        "PairKey"
-      ],
-      "fields": [
-        {
-          "name": "token0",
-          "ty": {
-            "Primitive": "Field"
-          }
-        },
-        {
-          "name": "token1",
-          "ty": {
-            "Primitive": "Field"
-          }
-        }
-      ]
-    },
-    {
-      "path": [
-        "SwapOutput"
-      ],
-      "fields": [
-        {
-          "name": "recipient",
-          "ty": {
-            "Primitive": "Address"
-          }
-        },
-        {
-          "name": "caller",
-          "ty": {
-            "Primitive": "Address"
-          }
-        },
-        {
-          "name": "token_in",
-          "ty": {
-            "Primitive": "Field"
-          }
-        },
-        {
-          "name": "token_out",
-          "ty": {
-            "Primitive": "Field"
-          }
-        },
-        {
-          "name": "amount_out",
-          "ty": {
-            "Primitive": {
-              "UInt": "U128"
-            }
-          }
-        },
-        {
-          "name": "amount_remaining",
-          "ty": {
-            "Primitive": {
-              "UInt": "U128"
-            }
-          }
-        },
-        {
-          "name": "token_in_1",
-          "ty": {
-            "Primitive": "Field"
-          }
-        },
-        {
-          "name": "amount_remaining_1",
-          "ty": {
-            "Primitive": {
-              "UInt": "U128"
-            }
-          }
-        },
-        {
-          "name": "token_in_2",
-          "ty": {
-            "Primitive": "Field"
-          }
-        },
-        {
-          "name": "amount_remaining_2",
-          "ty": {
-            "Primitive": {
-              "UInt": "U128"
-            }
-          }
-        }
-      ]
+     "name": "recipient",
+     "ty": {
+      "Primitive": "Address"
+     },
+     "mode": "Private"
     }
-  ],
-  "records": [
-    {
-      "path": [
-        "PositionNFT"
-      ],
-      "fields": [
-        {
-          "name": "owner",
-          "ty": {
-            "Primitive": "Address"
-          },
-          "mode": "Private"
-        },
-        {
-          "name": "token_id",
-          "ty": {
-            "Primitive": "Field"
-          },
-          "mode": "Private"
-        },
-        {
-          "name": "token0_id",
-          "ty": {
-            "Primitive": "Field"
-          },
-          "mode": "Private"
-        },
-        {
-          "name": "token1_id",
-          "ty": {
-            "Primitive": "Field"
-          },
-          "mode": "Private"
-        },
-        {
-          "name": "pool",
-          "ty": {
-            "Primitive": "Field"
-          },
-          "mode": "Private"
-        },
-        {
-          "name": "tick_lower",
-          "ty": {
-            "Primitive": {
-              "Int": "I32"
-            }
-          },
-          "mode": "Private"
-        },
-        {
-          "name": "tick_upper",
-          "ty": {
-            "Primitive": {
-              "Int": "I32"
-            }
-          },
-          "mode": "Private"
-        }
-      ]
-    },
-    {
-      "path": [
-        "SwapComplianceRecord"
-      ],
-      "fields": [
-        {
-          "name": "owner",
-          "ty": {
-            "Primitive": "Address"
-          },
-          "mode": "Private"
-        },
-        {
-          "name": "swap_id",
-          "ty": {
-            "Primitive": "Field"
-          },
-          "mode": "Private"
-        },
-        {
-          "name": "token_in",
-          "ty": {
-            "Primitive": "Field"
-          },
-          "mode": "Private"
-        },
-        {
-          "name": "token_out",
-          "ty": {
-            "Primitive": "Field"
-          },
-          "mode": "Private"
-        },
-        {
-          "name": "request",
-          "ty": {
-            "Struct": {
-              "path": [
-                "SwapRequest"
-              ],
-              "program": "shield_swap_v3.aleo"
-            }
-          },
-          "mode": "Private"
-        },
-        {
-          "name": "caller",
-          "ty": {
-            "Primitive": "Address"
-          },
-          "mode": "Private"
-        },
-        {
-          "name": "blinded_address",
-          "ty": {
-            "Primitive": "Address"
-          },
-          "mode": "Private"
-        }
-      ]
-    },
-    {
-      "path": [
-        "MultiHopSwapComplianceRecord"
-      ],
-      "fields": [
-        {
-          "name": "owner",
-          "ty": {
-            "Primitive": "Address"
-          },
-          "mode": "Private"
-        },
-        {
-          "name": "swap_id",
-          "ty": {
-            "Primitive": "Field"
-          },
-          "mode": "Private"
-        },
-        {
-          "name": "request",
-          "ty": {
-            "Struct": {
-              "path": [
-                "SwapMultiHopRequest"
-              ],
-              "program": "shield_swap_v3.aleo"
-            }
-          },
-          "mode": "Private"
-        },
-        {
-          "name": "caller",
-          "ty": {
-            "Primitive": "Address"
-          },
-          "mode": "Private"
-        },
-        {
-          "name": "blinded_address",
-          "ty": {
-            "Primitive": "Address"
-          },
-          "mode": "Private"
-        }
-      ]
-    },
-    {
-      "path": [
-        "MintComplianceRecord"
-      ],
-      "fields": [
-        {
-          "name": "owner",
-          "ty": {
-            "Primitive": "Address"
-          },
-          "mode": "Private"
-        },
-        {
-          "name": "token_id",
-          "ty": {
-            "Primitive": "Field"
-          },
-          "mode": "Private"
-        },
-        {
-          "name": "token0_id",
-          "ty": {
-            "Primitive": "Field"
-          },
-          "mode": "Private"
-        },
-        {
-          "name": "token1_id",
-          "ty": {
-            "Primitive": "Field"
-          },
-          "mode": "Private"
-        },
-        {
-          "name": "request",
-          "ty": {
-            "Struct": {
-              "path": [
-                "MintPositionRequest"
-              ],
-              "program": "shield_swap_v3.aleo"
-            }
-          },
-          "mode": "Private"
-        },
-        {
-          "name": "caller",
-          "ty": {
-            "Primitive": "Address"
-          },
-          "mode": "Private"
-        },
-        {
-          "name": "recipient",
-          "ty": {
-            "Primitive": "Address"
-          },
-          "mode": "Private"
-        }
-      ]
+   ]
+  }
+ ],
+ "mappings": [
+  {
+   "name": "pools",
+   "key": {
+    "Primitive": "Field"
+   },
+   "value": {
+    "Struct": {
+     "path": [
+      "PoolState"
+     ],
+     "program": "shield_swap_v3.aleo"
     }
-  ],
-  "mappings": [
-    {
-      "name": "pools",
-      "key": {
-        "Primitive": "Field"
-      },
-      "value": {
-        "Struct": {
-          "path": [
-            "PoolState"
-          ],
-          "program": "shield_swap_v3.aleo"
-        }
-      }
-    },
-    {
-      "name": "slots",
-      "key": {
-        "Primitive": "Field"
-      },
-      "value": {
-        "Struct": {
-          "path": [
-            "Slot"
-          ],
-          "program": "shield_swap_v3.aleo"
-        }
-      }
-    },
-    {
-      "name": "ticks",
-      "key": {
-        "Primitive": "Field"
-      },
-      "value": {
-        "Struct": {
-          "path": [
-            "Tick"
-          ],
-          "program": "shield_swap_v3.aleo"
-        }
-      }
-    },
-    {
-      "name": "initialized_pools",
-      "key": {
-        "Primitive": "Field"
-      },
-      "value": {
-        "Primitive": "Boolean"
-      }
-    },
-    {
-      "name": "tick_spacings",
-      "key": {
-        "Primitive": {
-          "UInt": "U32"
-        }
-      },
-      "value": {
-        "Primitive": "Boolean"
-      }
-    },
-    {
-      "name": "fee_tiers",
-      "key": {
-        "Primitive": {
-          "UInt": "U16"
-        }
-      },
-      "value": {
-        "Primitive": "Boolean"
-      }
-    },
-    {
-      "name": "fee_to_tick_spacing",
-      "key": {
-        "Primitive": {
-          "UInt": "U16"
-        }
-      },
-      "value": {
-        "Primitive": {
-          "UInt": "U32"
-        }
-      }
-    },
-    {
-      "name": "positions",
-      "key": {
-        "Primitive": "Field"
-      },
-      "value": {
-        "Struct": {
-          "path": [
-            "Position"
-          ],
-          "program": "shield_swap_v3.aleo"
-        }
-      }
-    },
-    {
-      "name": "swap_outputs",
-      "key": {
-        "Primitive": "Field"
-      },
-      "value": {
-        "Struct": {
-          "path": [
-            "SwapOutput"
-          ],
-          "program": "shield_swap_v3.aleo"
-        }
-      }
-    },
-    {
-      "name": "admin",
-      "key": {
-        "Primitive": "Boolean"
-      },
-      "value": {
-        "Primitive": "Address"
-      }
-    },
-    {
-      "name": "pending_admin",
-      "key": {
-        "Primitive": "Boolean"
-      },
-      "value": {
-        "Primitive": "Address"
-      }
-    },
-    {
-      "name": "used_blinded_addresses",
-      "key": {
-        "Primitive": "Address"
-      },
-      "value": {
-        "Primitive": "Boolean"
-      }
-    },
-    {
-      "name": "token_decimals",
-      "key": {
-        "Primitive": "Field"
-      },
-      "value": {
-        "Primitive": {
-          "UInt": "U8"
-        }
-      }
-    },
-    {
-      "name": "pool_creation_is_open",
-      "key": {
-        "Primitive": "Boolean"
-      },
-      "value": {
-        "Primitive": "Boolean"
-      }
-    },
-    {
-      "name": "global_paused",
-      "key": {
-        "Primitive": "Boolean"
-      },
-      "value": {
-        "Primitive": "Boolean"
-      }
-    },
-    {
-      "name": "token_allowed",
-      "key": {
-        "Primitive": "Field"
-      },
-      "value": {
-        "Primitive": "Boolean"
-      }
-    },
-    {
-      "name": "token_paused",
-      "key": {
-        "Primitive": "Field"
-      },
-      "value": {
-        "Primitive": "Boolean"
-      }
-    },
-    {
-      "name": "pair_paused",
-      "key": {
-        "Struct": {
-          "path": [
-            "PairKey"
-          ],
-          "program": "shield_swap_v3.aleo"
-        }
-      },
-      "value": {
-        "Primitive": "Boolean"
-      }
-    },
-    {
-      "name": "frozen_position",
-      "key": {
-        "Primitive": "Field"
-      },
-      "value": {
-        "Primitive": {
-          "UInt": "U32"
-        }
-      }
+   }
+  },
+  {
+   "name": "slots",
+   "key": {
+    "Primitive": "Field"
+   },
+   "value": {
+    "Struct": {
+     "path": [
+      "Slot"
+     ],
+     "program": "shield_swap_v3.aleo"
     }
-  ],
-  "storage_variables": [],
-  "functions": [
-    {
-      "name": "transfer_admin",
-      "inputs": [
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Address"
-            },
-            "mode": "Public"
-          }
-        }
-      ],
-      "outputs": [
-        "Final"
-      ]
-    },
-    {
-      "name": "accept_admin",
-      "inputs": [],
-      "outputs": [
-        "Final"
-      ]
-    },
-    {
-      "name": "add_tick_spacing",
-      "inputs": [
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U32"
-              }
-            },
-            "mode": "Public"
-          }
-        }
-      ],
-      "outputs": [
-        "Final"
-      ]
-    },
-    {
-      "name": "add_fee_tier",
-      "inputs": [
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U16"
-              }
-            },
-            "mode": "Public"
-          }
-        }
-      ],
-      "outputs": [
-        "Final"
-      ]
-    },
-    {
-      "name": "bind_fee_to_tick_spacing",
-      "inputs": [
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U16"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U32"
-              }
-            },
-            "mode": "Public"
-          }
-        }
-      ],
-      "outputs": [
-        "Final"
-      ]
-    },
-    {
-      "name": "set_token_decimals",
-      "inputs": [
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U8"
-              }
-            },
-            "mode": "Public"
-          }
-        }
-      ],
-      "outputs": [
-        "Final"
-      ]
-    },
-    {
-      "name": "set_pool_enabled",
-      "inputs": [
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Boolean"
-            },
-            "mode": "Public"
-          }
-        }
-      ],
-      "outputs": [
-        "Final"
-      ]
-    },
-    {
-      "name": "set_pool_creation_is_open",
-      "inputs": [
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Boolean"
-            },
-            "mode": "Public"
-          }
-        }
-      ],
-      "outputs": [
-        "Final"
-      ]
-    },
-    {
-      "name": "set_global_paused",
-      "inputs": [
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Boolean"
-            },
-            "mode": "Public"
-          }
-        }
-      ],
-      "outputs": [
-        "Final"
-      ]
-    },
-    {
-      "name": "allow_token",
-      "inputs": [
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Public"
-          }
-        }
-      ],
-      "outputs": [
-        "Final"
-      ]
-    },
-    {
-      "name": "set_token_paused",
-      "inputs": [
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Boolean"
-            },
-            "mode": "Public"
-          }
-        }
-      ],
-      "outputs": [
-        "Final"
-      ]
-    },
-    {
-      "name": "set_pair_paused",
-      "inputs": [
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Boolean"
-            },
-            "mode": "Public"
-          }
-        }
-      ],
-      "outputs": [
-        "Final"
-      ]
-    },
-    {
-      "name": "freeze_position",
-      "inputs": [
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Public"
-          }
-        }
-      ],
-      "outputs": [
-        "Final"
-      ]
-    },
-    {
-      "name": "unfreeze_position",
-      "inputs": [
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Public"
-          }
-        }
-      ],
-      "outputs": [
-        "Final"
-      ]
-    },
-    {
-      "name": "set_fee_protocol",
-      "inputs": [
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U8"
-              }
-            },
-            "mode": "Public"
-          }
-        }
-      ],
-      "outputs": [
-        "Final"
-      ]
-    },
-    {
-      "name": "collect_protocol",
-      "inputs": [
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Address"
-            },
-            "mode": "Public"
-          }
-        }
-      ],
-      "outputs": [
-        "Final"
-      ]
-    },
-    {
-      "name": "create_pool",
-      "inputs": [
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U16"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U32"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "Int": "I32"
-              }
-            },
-            "mode": "Public"
-          }
-        }
-      ],
-      "outputs": [
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Address"
-            },
-            "mode": "Public"
-          }
-        },
-        "Final"
-      ]
-    },
-    {
-      "name": "mint",
-      "inputs": [
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Private"
-          }
-        },
-        "DynamicRecord",
-        "DynamicRecord",
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Address"
-            },
-            "mode": "Private"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Struct": {
-                "path": [
-                  "MintPositionRequest"
-                ],
-                "program": "shield_swap_v3.aleo"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Public"
-          }
-        }
-      ],
-      "outputs": [
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Record": {
-            "path": [
-              "PositionNFT"
-            ],
-            "program": "shield_swap_v3.aleo"
-          }
-        },
-        "DynamicRecord",
-        "DynamicRecord",
-        {
-          "Record": {
-            "path": [
-              "MintComplianceRecord"
-            ],
-            "program": "shield_swap_v3.aleo"
-          }
-        },
-        "Final"
-      ]
-    },
-    {
-      "name": "decrease_liquidity",
-      "inputs": [
-        {
-          "Record": {
-            "path": [
-              "PositionNFT"
-            ],
-            "program": "shield_swap_v3.aleo"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        }
-      ],
-      "outputs": [
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Record": {
-            "path": [
-              "PositionNFT"
-            ],
-            "program": "shield_swap_v3.aleo"
-          }
-        },
-        "Final"
-      ]
-    },
-    {
-      "name": "increase_liquidity",
-      "inputs": [
-        {
-          "Record": {
-            "path": [
-              "PositionNFT"
-            ],
-            "program": "shield_swap_v3.aleo"
-          }
-        },
-        "DynamicRecord",
-        "DynamicRecord",
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "Int": "I32"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "Int": "I32"
-              }
-            },
-            "mode": "Public"
-          }
-        }
-      ],
-      "outputs": [
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Record": {
-            "path": [
-              "PositionNFT"
-            ],
-            "program": "shield_swap_v3.aleo"
-          }
-        },
-        "DynamicRecord",
-        "DynamicRecord",
-        "Final"
-      ]
-    },
-    {
-      "name": "collect",
-      "inputs": [
-        {
-          "Record": {
-            "path": [
-              "PositionNFT"
-            ],
-            "program": "shield_swap_v3.aleo"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Address"
-            },
-            "mode": "Private"
-          }
-        }
-      ],
-      "outputs": [
-        {
-          "Record": {
-            "path": [
-              "PositionNFT"
-            ],
-            "program": "shield_swap_v3.aleo"
-          }
-        },
-        "DynamicRecord",
-        "DynamicRecord",
-        "Final"
-      ]
-    },
-    {
-      "name": "burn",
-      "inputs": [
-        {
-          "Record": {
-            "path": [
-              "PositionNFT"
-            ],
-            "program": "shield_swap_v3.aleo"
-          }
-        }
-      ],
-      "outputs": [
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Address"
-            },
-            "mode": "Public"
-          }
-        },
-        "Final"
-      ]
-    },
-    {
-      "name": "swap",
-      "inputs": [
-        "DynamicRecord",
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Private"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Address"
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Boolean"
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U64"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U32"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Public"
-          }
-        }
-      ],
-      "outputs": [
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Public"
-          }
-        },
-        "DynamicRecord",
-        {
-          "Record": {
-            "path": [
-              "SwapComplianceRecord"
-            ],
-            "program": "shield_swap_v3.aleo"
-          }
-        },
-        "Final"
-      ]
-    },
-    {
-      "name": "claim_swap_output",
-      "inputs": [
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Private"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Address"
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        }
-      ],
-      "outputs": [
-        "DynamicRecord",
-        "DynamicRecord",
-        "Final"
-      ]
-    },
-    {
-      "name": "swap_multi_hop",
-      "inputs": [
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Private"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Address"
-            },
-            "mode": "Public"
-          }
-        },
-        "DynamicRecord",
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Struct": {
-                "path": [
-                  "SwapHop"
-                ],
-                "program": "shield_swap_v3.aleo"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Struct": {
-                "path": [
-                  "SwapHop"
-                ],
-                "program": "shield_swap_v3.aleo"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Struct": {
-                "path": [
-                  "SwapHop"
-                ],
-                "program": "shield_swap_v3.aleo"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U8"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U64"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U32"
-              }
-            },
-            "mode": "Public"
-          }
-        }
-      ],
-      "outputs": [
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Public"
-          }
-        },
-        "DynamicRecord",
-        {
-          "Record": {
-            "path": [
-              "MultiHopSwapComplianceRecord"
-            ],
-            "program": "shield_swap_v3.aleo"
-          }
-        },
-        "Final"
-      ]
-    },
-    {
-      "name": "claim_multi_hop_output",
-      "inputs": [
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Private"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Address"
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Field"
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        }
-      ],
-      "outputs": [
-        "DynamicRecord",
-        "DynamicRecord",
-        "DynamicRecord",
-        "DynamicRecord",
-        "Final"
-      ]
+   }
+  },
+  {
+   "name": "ticks",
+   "key": {
+    "Primitive": "Field"
+   },
+   "value": {
+    "Struct": {
+     "path": [
+      "Tick"
+     ],
+     "program": "shield_swap_v3.aleo"
     }
-  ],
-  "views": [
-    {
-      "name": "view_sqrt_price_at_tick",
-      "inputs": [
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "Int": "I32"
-              }
-            },
-            "mode": "Public"
-          }
-        }
-      ],
-      "outputs": [
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        }
-      ]
-    },
-    {
-      "name": "view_amounts_for_liquidity",
-      "inputs": [
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Boolean"
-            },
-            "mode": "Public"
-          }
-        }
-      ],
-      "outputs": [
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        }
-      ]
-    },
-    {
-      "name": "view_liquidity_for_amounts",
-      "inputs": [
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        }
-      ],
-      "outputs": [
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        }
-      ]
-    },
-    {
-      "name": "view_compute_swap_step",
-      "inputs": [
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U32"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": "Boolean"
-            },
-            "mode": "Public"
-          }
-        }
-      ],
-      "outputs": [
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        },
-        {
-          "Plaintext": {
-            "ty": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            },
-            "mode": "Public"
-          }
-        }
-      ]
+   }
+  },
+  {
+   "name": "initialized_pools",
+   "key": {
+    "Primitive": "Field"
+   },
+   "value": {
+    "Primitive": "Boolean"
+   }
+  },
+  {
+   "name": "tick_spacings",
+   "key": {
+    "Primitive": {
+     "UInt": "U32"
     }
-  ]
+   },
+   "value": {
+    "Primitive": "Boolean"
+   }
+  },
+  {
+   "name": "fee_tiers",
+   "key": {
+    "Primitive": {
+     "UInt": "U16"
+    }
+   },
+   "value": {
+    "Primitive": "Boolean"
+   }
+  },
+  {
+   "name": "fee_to_tick_spacing",
+   "key": {
+    "Primitive": {
+     "UInt": "U16"
+    }
+   },
+   "value": {
+    "Primitive": {
+     "UInt": "U32"
+    }
+   }
+  },
+  {
+   "name": "positions",
+   "key": {
+    "Primitive": "Field"
+   },
+   "value": {
+    "Struct": {
+     "path": [
+      "Position"
+     ],
+     "program": "shield_swap_v3.aleo"
+    }
+   }
+  },
+  {
+   "name": "swap_outputs",
+   "key": {
+    "Primitive": "Field"
+   },
+   "value": {
+    "Struct": {
+     "path": [
+      "SwapOutput"
+     ],
+     "program": "shield_swap_v3.aleo"
+    }
+   }
+  },
+  {
+   "name": "admin",
+   "key": {
+    "Primitive": "Boolean"
+   },
+   "value": {
+    "Primitive": "Address"
+   }
+  },
+  {
+   "name": "pending_admin",
+   "key": {
+    "Primitive": "Boolean"
+   },
+   "value": {
+    "Primitive": "Address"
+   }
+  },
+  {
+   "name": "used_blinded_addresses",
+   "key": {
+    "Primitive": "Address"
+   },
+   "value": {
+    "Primitive": "Boolean"
+   }
+  },
+  {
+   "name": "token_decimals",
+   "key": {
+    "Primitive": "Field"
+   },
+   "value": {
+    "Primitive": {
+     "UInt": "U8"
+    }
+   }
+  },
+  {
+   "name": "pool_creation_is_open",
+   "key": {
+    "Primitive": "Boolean"
+   },
+   "value": {
+    "Primitive": "Boolean"
+   }
+  },
+  {
+   "name": "global_paused",
+   "key": {
+    "Primitive": "Boolean"
+   },
+   "value": {
+    "Primitive": "Boolean"
+   }
+  },
+  {
+   "name": "token_allowed",
+   "key": {
+    "Primitive": "Field"
+   },
+   "value": {
+    "Primitive": "Boolean"
+   }
+  },
+  {
+   "name": "token_paused",
+   "key": {
+    "Primitive": "Field"
+   },
+   "value": {
+    "Primitive": "Boolean"
+   }
+  },
+  {
+   "name": "pair_paused",
+   "key": {
+    "Struct": {
+     "path": [
+      "PairKey"
+     ],
+     "program": "shield_swap_v3.aleo"
+    }
+   },
+   "value": {
+    "Primitive": "Boolean"
+   }
+  },
+  {
+   "name": "frozen_position",
+   "key": {
+    "Primitive": "Field"
+   },
+   "value": {
+    "Primitive": {
+     "UInt": "U32"
+    }
+   }
+  }
+ ],
+ "storage_variables": [],
+ "functions": [
+  {
+   "name": "transfer_admin",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Address"
+      },
+      "mode": "Public"
+     }
+    }
+   ],
+   "outputs": [
+    "Final"
+   ]
+  },
+  {
+   "name": "accept_admin",
+   "inputs": [],
+   "outputs": [
+    "Final"
+   ]
+  },
+  {
+   "name": "add_tick_spacing",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U32"
+       }
+      },
+      "mode": "Public"
+     }
+    }
+   ],
+   "outputs": [
+    "Final"
+   ]
+  },
+  {
+   "name": "add_fee_tier",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U16"
+       }
+      },
+      "mode": "Public"
+     }
+    }
+   ],
+   "outputs": [
+    "Final"
+   ]
+  },
+  {
+   "name": "bind_fee_to_tick_spacing",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U16"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U32"
+       }
+      },
+      "mode": "Public"
+     }
+    }
+   ],
+   "outputs": [
+    "Final"
+   ]
+  },
+  {
+   "name": "set_token_decimals",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U8"
+       }
+      },
+      "mode": "Public"
+     }
+    }
+   ],
+   "outputs": [
+    "Final"
+   ]
+  },
+  {
+   "name": "set_pool_enabled",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Boolean"
+      },
+      "mode": "Public"
+     }
+    }
+   ],
+   "outputs": [
+    "Final"
+   ]
+  },
+  {
+   "name": "set_pool_creation_is_open",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Boolean"
+      },
+      "mode": "Public"
+     }
+    }
+   ],
+   "outputs": [
+    "Final"
+   ]
+  },
+  {
+   "name": "set_global_paused",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Boolean"
+      },
+      "mode": "Public"
+     }
+    }
+   ],
+   "outputs": [
+    "Final"
+   ]
+  },
+  {
+   "name": "allow_token",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    }
+   ],
+   "outputs": [
+    "Final"
+   ]
+  },
+  {
+   "name": "set_token_paused",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Boolean"
+      },
+      "mode": "Public"
+     }
+    }
+   ],
+   "outputs": [
+    "Final"
+   ]
+  },
+  {
+   "name": "set_pair_paused",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Boolean"
+      },
+      "mode": "Public"
+     }
+    }
+   ],
+   "outputs": [
+    "Final"
+   ]
+  },
+  {
+   "name": "freeze_position",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    }
+   ],
+   "outputs": [
+    "Final"
+   ]
+  },
+  {
+   "name": "unfreeze_position",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    }
+   ],
+   "outputs": [
+    "Final"
+   ]
+  },
+  {
+   "name": "set_fee_protocol",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U8"
+       }
+      },
+      "mode": "Public"
+     }
+    }
+   ],
+   "outputs": [
+    "Final"
+   ]
+  },
+  {
+   "name": "collect_protocol",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Address"
+      },
+      "mode": "Public"
+     }
+    }
+   ],
+   "outputs": [
+    "Final"
+   ]
+  },
+  {
+   "name": "create_pool",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U16"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U32"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "Int": "I32"
+       }
+      },
+      "mode": "Public"
+     }
+    }
+   ],
+   "outputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Address"
+      },
+      "mode": "Public"
+     }
+    },
+    "Final"
+   ]
+  },
+  {
+   "name": "mint",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Private"
+     }
+    },
+    "DynamicRecord",
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Address"
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "MintPositionRequest"
+        ],
+        "program": "shield_swap_v3.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    }
+   ],
+   "outputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Record": {
+      "path": [
+       "PositionNFT"
+      ],
+      "program": "shield_swap_v3.aleo"
+     }
+    },
+    "DynamicRecord",
+    "DynamicRecord",
+    {
+     "Record": {
+      "path": [
+       "MintComplianceRecord"
+      ],
+      "program": "shield_swap_v3.aleo"
+     }
+    },
+    "Final"
+   ]
+  },
+  {
+   "name": "decrease_liquidity",
+   "inputs": [
+    {
+     "Record": {
+      "path": [
+       "PositionNFT"
+      ],
+      "program": "shield_swap_v3.aleo"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    }
+   ],
+   "outputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Record": {
+      "path": [
+       "PositionNFT"
+      ],
+      "program": "shield_swap_v3.aleo"
+     }
+    },
+    "Final"
+   ]
+  },
+  {
+   "name": "increase_liquidity",
+   "inputs": [
+    {
+     "Record": {
+      "path": [
+       "PositionNFT"
+      ],
+      "program": "shield_swap_v3.aleo"
+     }
+    },
+    "DynamicRecord",
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "Int": "I32"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "Int": "I32"
+       }
+      },
+      "mode": "Public"
+     }
+    }
+   ],
+   "outputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Record": {
+      "path": [
+       "PositionNFT"
+      ],
+      "program": "shield_swap_v3.aleo"
+     }
+    },
+    "DynamicRecord",
+    "DynamicRecord",
+    "Final"
+   ]
+  },
+  {
+   "name": "collect",
+   "inputs": [
+    {
+     "Record": {
+      "path": [
+       "PositionNFT"
+      ],
+      "program": "shield_swap_v3.aleo"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Address"
+      },
+      "mode": "Private"
+     }
+    }
+   ],
+   "outputs": [
+    {
+     "Record": {
+      "path": [
+       "PositionNFT"
+      ],
+      "program": "shield_swap_v3.aleo"
+     }
+    },
+    "DynamicRecord",
+    "DynamicRecord",
+    "Final"
+   ]
+  },
+  {
+   "name": "burn",
+   "inputs": [
+    {
+     "Record": {
+      "path": [
+       "PositionNFT"
+      ],
+      "program": "shield_swap_v3.aleo"
+     }
+    }
+   ],
+   "outputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Address"
+      },
+      "mode": "Public"
+     }
+    },
+    "Final"
+   ]
+  },
+  {
+   "name": "swap",
+   "inputs": [
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Address"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Boolean"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U64"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U32"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    }
+   ],
+   "outputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    "DynamicRecord",
+    {
+     "Record": {
+      "path": [
+       "SwapComplianceRecord"
+      ],
+      "program": "shield_swap_v3.aleo"
+     }
+    },
+    "Final"
+   ]
+  },
+  {
+   "name": "claim_swap_output",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Address"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    }
+   ],
+   "outputs": [
+    "DynamicRecord",
+    "DynamicRecord",
+    "Final"
+   ]
+  },
+  {
+   "name": "swap_multi_hop",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Address"
+      },
+      "mode": "Public"
+     }
+    },
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "SwapHop"
+        ],
+        "program": "shield_swap_v3.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "SwapHop"
+        ],
+        "program": "shield_swap_v3.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "SwapHop"
+        ],
+        "program": "shield_swap_v3.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U8"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U64"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U32"
+       }
+      },
+      "mode": "Public"
+     }
+    }
+   ],
+   "outputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    "DynamicRecord",
+    {
+     "Record": {
+      "path": [
+       "MultiHopSwapComplianceRecord"
+      ],
+      "program": "shield_swap_v3.aleo"
+     }
+    },
+    "Final"
+   ]
+  },
+  {
+   "name": "claim_multi_hop_output",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Address"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    }
+   ],
+   "outputs": [
+    "DynamicRecord",
+    "DynamicRecord",
+    "DynamicRecord",
+    "DynamicRecord",
+    "Final"
+   ]
+  }
+ ],
+ "views": [
+  {
+   "name": "view_sqrt_price_at_tick",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "Int": "I32"
+       }
+      },
+      "mode": "Public"
+     }
+    }
+   ],
+   "outputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    }
+   ]
+  },
+  {
+   "name": "view_amounts_for_liquidity",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Boolean"
+      },
+      "mode": "Public"
+     }
+    }
+   ],
+   "outputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    }
+   ]
+  },
+  {
+   "name": "view_liquidity_for_amounts",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    }
+   ],
+   "outputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    }
+   ]
+  },
+  {
+   "name": "view_compute_swap_step",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U32"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Boolean"
+      },
+      "mode": "Public"
+     }
+    }
+   ],
+   "outputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    }
+   ]
+  }
+ ]
 }

@@ -9,8 +9,30 @@ output: struct = ``{path: [Name], fields: [{name, ty}]}``, record fields add
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+import keyword
+import re
+from dataclasses import dataclass, field
 from typing import Any, Callable
+
+_PROGRAM_ID_RE = re.compile(r"[a-zA-Z0-9_.]+")
+
+
+def _ident(name: Any, context: str) -> str:
+    """Validate an ABI name before interpolating it into emitted source.
+
+    ABI JSON is external input; a name that is not a plain Python identifier
+    (or that shadows a keyword or the synthetic ``_nonce`` record field) must
+    fail at generation time with a pointer to the offender, never become a
+    SyntaxError — or executable code — in the generated module.
+    """
+    if (
+        not isinstance(name, str)
+        or not name.isidentifier()
+        or keyword.iskeyword(name)
+        or name == "_nonce"
+    ):
+        raise ValueError(f"Invalid identifier in ABI {context}: {name!r}")
+    return name
 
 
 @dataclass(frozen=True)
@@ -24,7 +46,8 @@ class PyType:
 
     annotation: str
     encode_expr: Callable[[str], str]
-    decode_expr: Callable[[str], str]
+    # Only nested structs decode; primitives pass through as parsed.
+    decode_expr: Callable[[str], str] = field(default=lambda e: e)
 
 
 def resolve_ty(ty: Any) -> PyType:
@@ -36,17 +59,17 @@ def resolve_ty(ty: Any) -> PyType:
             if width is None:
                 raise ValueError(f"Unsupported primitive: {prim!r}")
             suffix = width.lower()
-            return PyType("int", lambda e, s=suffix: f"fmt_int({e}, '{s}')", lambda e: e)
+            return PyType("int", lambda e, s=suffix: f"fmt_int({e}, '{s}')")
         if prim == "Boolean":
-            return PyType("bool", lambda e: f"fmt_bool({e})", lambda e: e)
+            return PyType("bool", lambda e: f"fmt_bool({e})")
         if prim == "Address":
-            return PyType("str", lambda e: f"fmt_address({e})", lambda e: e)
+            return PyType("str", lambda e: f"fmt_address({e})")
         if prim in ("Field", "Group", "Scalar"):
             suffix = prim.lower()
-            return PyType("str", lambda e, s=suffix: f"fmt_fieldlike({e}, '{s}')", lambda e: e)
+            return PyType("str", lambda e, s=suffix: f"fmt_fieldlike({e}, '{s}')")
         raise ValueError(f"Unsupported primitive: {prim!r}")
     if isinstance(ty, dict) and "Struct" in ty:
-        name = ty["Struct"]["path"][-1]
+        name = _ident(ty["Struct"]["path"][-1], "struct reference")
         return PyType(
             name,
             lambda e: f"{e}.to_plaintext()",
@@ -57,17 +80,18 @@ def resolve_ty(ty: Any) -> PyType:
 
 def emit_struct(struct: dict[str, Any]) -> str:
     """Emit one struct as a frozen dataclass with encode/decode methods."""
-    name = struct["path"][-1]
-    fields = struct["fields"]
+    name = _ident(struct["path"][-1], "struct name")
+    fields = [(_ident(f["name"], f"field of {name}"), resolve_ty(f["ty"]))
+              for f in struct["fields"]]
     lines: list[str] = ["@dataclass(frozen=True)", f"class {name}:"]
-    for f in fields:
-        lines.append(f"    {f['name']}: {resolve_ty(f['ty']).annotation}")
+    for fname, pt in fields:
+        lines.append(f"    {fname}: {pt.annotation}")
 
     # to_plaintext — emitted as a parts list + join (readable generated code).
     lines += ["", "    def to_plaintext(self) -> str:", "        parts = ["]
-    for f in fields:
-        enc = resolve_ty(f["ty"]).encode_expr("self." + f["name"])
-        lines.append(f"            \"{f['name']}: \" + {enc},")
+    for fname, pt in fields:
+        enc = pt.encode_expr("self." + fname)
+        lines.append(f"            \"{fname}: \" + {enc},")
     lines += [
         "        ]",
         "        return \"{ \" + \", \".join(parts) + \" }\"",
@@ -76,9 +100,9 @@ def emit_struct(struct: dict[str, Any]) -> str:
     # from_decoded / from_plaintext.  Subscript expressions are precomputed
     # outside the f-string (no backslashes in f-string expressions on 3.10).
     kwarg_parts: list[str] = []
-    for f in fields:
-        subscript = "d['" + f["name"] + "']"
-        kwarg_parts.append(f"{f['name']}={resolve_ty(f['ty']).decode_expr(subscript)}")
+    for fname, pt in fields:
+        subscript = "d['" + fname + "']"
+        kwarg_parts.append(f"{fname}={pt.decode_expr(subscript)}")
     kwargs = ", ".join(kwarg_parts)
     lines += [
         "",
@@ -140,15 +164,17 @@ def emit_record(record: dict[str, Any]) -> str:
     ``to_plaintext`` is emitted.  The scanner's ``_nonce`` rides along as an
     optional extra field.
     """
-    name = record["path"][-1]
+    name = _ident(record["path"][-1], "record name")
+    fields = [(_ident(f["name"], f"field of {name}"), resolve_ty(f["ty"]))
+              for f in record["fields"]]
     lines = ["@dataclass(frozen=True)", f"class {name}:"]
-    for f in record["fields"]:
-        lines.append(f"    {f['name']}: {resolve_ty(f['ty']).annotation}")
+    for fname, pt in fields:
+        lines.append(f"    {fname}: {pt.annotation}")
     lines.append("    _nonce: Optional[str] = None")
     kwarg_parts: list[str] = []
-    for f in record["fields"]:
-        subscript = "d['" + f["name"] + "']"
-        kwarg_parts.append(f"{f['name']}={resolve_ty(f['ty']).decode_expr(subscript)}")
+    for fname, pt in fields:
+        subscript = "d['" + fname + "']"
+        kwarg_parts.append(f"{fname}={pt.decode_expr(subscript)}")
     kwargs = ", ".join(kwarg_parts)
     lines += [
         "",
@@ -164,9 +190,49 @@ def emit_record(record: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _check_struct_refs(abi: dict[str, Any]) -> None:
+    """Every struct reference must resolve to a struct defined in THIS ABI.
+
+    A cross-program or missing reference would otherwise emit a call to a
+    class that is never generated (NameError at import/decode time), and two
+    structs sharing a terminal name would silently collapse to one class.
+    """
+    program = abi["program"]
+    structs = abi.get("structs", [])
+    names = [s["path"][-1] for s in structs]
+    dupes = {n for n in names if names.count(n) > 1}
+    if dupes:
+        raise ValueError(f"Duplicate struct names in ABI: {sorted(dupes)}")
+    local = set(names)
+
+    def check(ty: Any, context: str) -> None:
+        if isinstance(ty, dict) and "Struct" in ty:
+            ref = ty["Struct"]
+            name, prog = ref["path"][-1], ref.get("program", program)
+            if name not in local or prog != program:
+                raise ValueError(
+                    f"Unresolvable struct reference {name!r} (program {prog!r}) "
+                    f"in {context}: cross-program and undefined structs are not "
+                    "supported — the generated class would not exist."
+                )
+
+    for s in structs:
+        for f in s["fields"]:
+            check(f["ty"], f"struct {s['path'][-1]}")
+    for r in abi.get("records", []):
+        for f in r["fields"]:
+            check(f["ty"], f"record {r['path'][-1]}")
+    for m in abi.get("mappings", []):
+        check(m["value"], f"mapping {m['name']}")
+
+
 def emit_module(abi: dict[str, Any]) -> str:
     """Emit a complete generated module for one program's ABI."""
-    parts = [_HEADER, _IMPORTS, f"PROGRAM_ID = \"{abi['program']}\"\n\n"]
+    program = abi["program"]
+    if not isinstance(program, str) or not _PROGRAM_ID_RE.fullmatch(program):
+        raise ValueError(f"Invalid program id in ABI: {program!r}")
+    _check_struct_refs(abi)
+    parts = [_HEADER, _IMPORTS, f"PROGRAM_ID = \"{program}\"\n\n"]
     for s in _toposort(abi.get("structs", [])):
         parts.append(emit_struct(s))
         parts.append("\n")
@@ -182,4 +248,8 @@ def emit_module(abi: dict[str, Any]) -> str:
             dec_entries.append(f"    \"{m['name']}\": parse_plaintext,")
     parts.append("MAPPING_VALUE_DECODERS: dict[str, Callable[[str], Any]] = {\n"
                  + "\n".join(dec_entries) + "\n}\n")
+    # The full ABI rides along (like the TS bindings' PROGRAM_ABI) so callers
+    # can recover what the classes drop — e.g. mapping KEY types for
+    # formatting read keys — without re-reading the pinned JSON at runtime.
+    parts.append(f"\nABI: dict = {abi!r}\n")
     return "".join(parts)
