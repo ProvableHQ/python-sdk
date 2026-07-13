@@ -28,7 +28,7 @@ from .errors import (
     PoolNotFoundError,
     SwapOutputNotFinalizedError,
 )
-from .types import SlotView, SwapHandle
+from .types import ClaimResult, SlotView, SwapHandle
 from ._calls import DexCall
 
 _ABSENT = (None, "", "null")
@@ -256,6 +256,57 @@ class ShieldSwap:
                 transaction_id=tx_id,
                 program=self.program,
             )
+
+        return DexCall(self._aleo, bound, build_result)
+
+    def claim_swap_output(
+        self,
+        handle: SwapHandle,
+        *,
+        imports: Optional[dict[str, str]] = None,
+        account: Any = None,
+    ) -> DexCall[ClaimResult]:
+        """Claim a private swap's output — phase two of the lifecycle.
+
+        Reads the chain-computed result from ``swap_outputs`` (never an
+        off-chain service — these amounts gate money movement), proves
+        ownership of the blinded identity, and prepares ``claim_swap_output``.
+        The output and any refund arrive as private records owned by the
+        signer; the mapping entry is consumed.
+
+        Raises :class:`SwapOutputNotFinalizedError` **at prepare time** when
+        the output is not readable yet (retry after a few blocks) or was
+        already claimed.
+        """
+        self._account(account)
+        if not handle.swap_id:
+            raise ValueError(
+                "handle.swap_id is not set — recover it from the confirmed "
+                "request transaction (first public output of the swap "
+                "transition) before claiming."
+            )
+        if not handle.blinding_factor or not handle.blinded_address:
+            raise ValueError(
+                "Claims need handle.blinding_factor and handle.blinded_address "
+                "(set by swap())."
+            )
+        # Trust-critical read: the amounts the claim moves come from the chain.
+        out = self.get_swap_output(handle.swap_id)
+        resolve_imports(self._aleo, [], imports)
+
+        inputs = [
+            handle.blinding_factor,
+            handle.blinded_address,
+            handle.swap_id,
+            out.token_in,
+            out.token_out,
+            f"{out.amount_out}u128",
+            f"{out.amount_remaining}u128",
+        ]
+        bound = self._aleo.programs.get(self.program).functions.claim_swap_output(*inputs)
+
+        def build_result(tx_id: str, outputs: list[Any]) -> ClaimResult:
+            return ClaimResult(tx_id, out.amount_out, out.amount_remaining)
 
         return DexCall(self._aleo, bound, build_result)
 
