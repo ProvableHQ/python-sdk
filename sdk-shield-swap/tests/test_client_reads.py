@@ -1,7 +1,12 @@
 import pytest
 
 from aleo_shield_swap.client import ShieldSwap
-from aleo_shield_swap.errors import PoolNotFoundError, SwapOutputNotFinalizedError
+from aleo_shield_swap.errors import (
+    PoolNotFoundError,
+    PoolNotInitializedError,
+    SwapOutputNotFinalizedError,
+)
+from aleo_shield_swap.types import SwapHandle
 
 from .conftest import StubAleo
 
@@ -26,6 +31,28 @@ def test_missing_pool_raises(stub_aleo):
 def test_get_swap_output_absent_raises(stub_aleo):
     with pytest.raises(SwapOutputNotFinalizedError):
         ShieldSwap(stub_aleo).get_swap_output("9field")
+
+
+def test_get_swap_output_accepts_handle(stub_aleo):
+    handle = SwapHandle(swap_id="9field", blinding_factor=None, blinded_address=None,
+                        token_in_id="1field", token_out_id="2field", pool_key="5field",
+                        amount_in=1, transaction_id="at1x", program="shield_swap_v3.aleo")
+    with pytest.raises(SwapOutputNotFinalizedError):   # resolved to the id
+        ShieldSwap(stub_aleo).get_swap_output(handle)
+    with pytest.raises(ValueError, match="no swap_id"):
+        ShieldSwap(stub_aleo).get_swap_output(
+            SwapHandle(swap_id=None, blinding_factor=None, blinded_address=None,
+                       token_in_id="1field", token_out_id="2field", pool_key="5field",
+                       amount_in=1, transaction_id="at1x", program="shield_swap_v3.aleo"))
+
+
+def test_uninitialized_pool_distinct_from_missing(stub_aleo):
+    from .conftest import POOL_TEXT, StubAleo
+    aleo = StubAleo(mappings={"pools": {"5field": POOL_TEXT}, "slots": {}})
+    with pytest.raises(PoolNotInitializedError):
+        ShieldSwap(aleo).get_slot("5field")
+    with pytest.raises(PoolNotFoundError):
+        ShieldSwap(aleo).get_slot("6field")
 
 
 def test_quoted_mapping_values_are_unwrapped():

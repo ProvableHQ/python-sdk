@@ -1,20 +1,24 @@
 """AsyncShieldSwap — the shield_swap client over an ``AsyncAleo`` facade.
 
-Same surface as :class:`~aleo_shield_swap.client.ShieldSwap`, with every
-I/O method ``async``.  Pure logic (param resolution, derivations, tick math,
-types) is shared from ``_core``/``derivations`` — only the I/O differs.
+Reads, balances, and the two-transaction private-swap flow of
+:class:`~aleo_shield_swap.client.ShieldSwap`, with every I/O method
+``async``.  Liquidity verbs are sync-client-only for now.  Pure logic is
+shared from ``_core``/``derivations`` — only the I/O differs.
 """
 from __future__ import annotations
 
 from typing import Any, Callable, Generic, Optional, TypeVar
 
-from aleo.codegen.runtime import parse_plaintext
-
 from . import _generated as g
+from ._calls import extract_tx_id, root_outputs
 from ._core import (
-    generate_field_nonce,
+    find_position_plaintext,
+    normalize_mapping_value,
     generate_swap_nonce,
     parse_token_record_info,
+    pick_covering_record,
+    program_imports,
+    register_program_sources,
     resolve_swap_params,
 )
 from .api import AsyncApiClient, DEFAULT_API_URL
@@ -27,15 +31,11 @@ from .derivations import (
 )
 from .errors import (
     InsufficientRecordsError,
-    InvalidFeeTierError,
     PoolNotFoundError,
+    PoolNotInitializedError,
     SwapOutputNotFinalizedError,
 )
-from .tick_hints import pick_insert_hint
-from .tick_math import MAX_TICK, MIN_TICK, get_sqrt_price_at_tick, round_tick_to_spacing
-from .types import ClaimResult, MintResult, SlotView, SwapHandle, TxResult
-
-_ABSENT = (None, "", "null")
+from .types import ClaimResult, SlotView, SwapHandle
 
 R = TypeVar("R")
 
@@ -55,18 +55,23 @@ class AsyncDexCall(Generic[R]):
 
     async def transact(self, account: Any = None, **fee_kwargs: Any) -> R:
         tx = await self._bound.build_transaction(account, **fee_kwargs)
-        outputs = [o.get("value") for group in tx.outputs() for o in group]
+        outputs = root_outputs(tx.decoded(), self._bound.program_id,
+                               self._bound.function_name)
         await self._aleo.network.submit_transaction(tx.raw)
         return self._build(tx.id, outputs)
 
     async def delegate(self, account: Any = None, **fee_kwargs: Any) -> R:
         payload = await self._bound.delegate(account, **fee_kwargs)
-        from ._calls import DexCall
-        tx_id = DexCall._extract_tx_id(payload)
+        tx_id = extract_tx_id(payload)
         await self._aleo.network.wait_for_transaction(tx_id)
-        decoded = await self._aleo.decode_transition(tx_id)
-        outputs = [o.get("value") if isinstance(o, dict) else o
-                   for o in decoded.get("outputs", [])]
+        tx = await self._aleo.network.get_transaction_object(tx_id)
+        decoded = [
+            {"program": str(t.program_id), "function": str(t.function_name),
+             "outputs": list(t.outputs())}
+            for t in tx.transitions()
+        ]
+        outputs = root_outputs(decoded, self._bound.program_id,
+                               self._bound.function_name)
         return self._build(tx_id, outputs)
 
 
@@ -87,12 +92,7 @@ class AsyncShieldSwap:
     async def _mapping_value(self, mapping: str, key: str) -> Optional[str]:
         prog = await self._aleo.programs.get(self.program)
         raw = await prog.mapping(mapping).get(key)
-        if raw in _ABSENT:
-            return None
-        text = str(raw).strip()
-        if text.startswith('"') and text.endswith('"'):
-            text = text[1:-1]
-        return None if text in ("", "null") else text
+        return normalize_mapping_value(raw)
 
     # ── Chain reads ──────────────────────────────────────────────────────────
 
@@ -105,10 +105,16 @@ class AsyncShieldSwap:
     async def get_slot(self, pool_key: str) -> SlotView:
         raw = await self._mapping_value("slots", pool_key)
         if raw is None:
+            if await self._mapping_value("pools", pool_key) is not None:
+                raise PoolNotInitializedError(pool_key)
             raise PoolNotFoundError(pool_key)
         return SlotView(g.Slot.from_plaintext(raw))
 
-    async def get_swap_output(self, swap_id: str) -> g.SwapOutput:
+    async def get_swap_output(self, swap: "SwapHandle | str") -> g.SwapOutput:
+        swap_id = swap.swap_id if isinstance(swap, SwapHandle) else swap
+        if not swap_id:
+            raise ValueError("SwapHandle has no swap_id yet — wait for the "
+                             "request transaction and recover it first.")
         raw = await self._mapping_value("swap_outputs", swap_id)
         if raw is None:
             raise SwapOutputNotFinalizedError(swap_id)
@@ -148,38 +154,37 @@ class AsyncShieldSwap:
             raise InsufficientRecordsError(
                 "No record provider configured — pass token_record= explicitly.")
         records = await provider.find(account, program=program, unspent=True)
-        candidates: list[tuple[int, str]] = []
-        for rec in records:
-            plaintext = (rec.get("record_plaintext") if isinstance(rec, dict)
-                         else getattr(rec, "record_plaintext", None))
-            if not plaintext:
-                continue
-            info = parse_token_record_info(plaintext)
-            if info is None or info["amount"] < min_amount:
-                continue
-            if token_id is not None and "token_id" in info and info["token_id"] != token_id:
-                continue
-            candidates.append((info["amount"], plaintext))
-        if not candidates:
+        chosen = pick_covering_record(records, min_amount=min_amount, token_id=token_id)
+        if chosen is None:
             raise InsufficientRecordsError(
-                f"No unspent {program} record covers {min_amount}.")
-        return min(candidates)[1]
+                f"No unspent {program} record covers {min_amount} "
+                f"(token_id={token_id or 'any'}) — privatize funds or pass token_record=.")
+        return chosen
 
     async def _select_position_record(self, pool_key: str, account: Any) -> str:
-        provider = self._aleo.record_provider
-        for rec in await provider.find(account, program=self.program, unspent=True):
-            plaintext = (rec.get("record_plaintext") if isinstance(rec, dict)
-                         else getattr(rec, "record_plaintext", None))
-            if not plaintext:
+        records = await self._aleo.record_provider.find(
+            account, program=self.program, unspent=True)
+        plaintext = find_position_plaintext(records, pool_key)
+        if plaintext is None:
+            raise InsufficientRecordsError(
+                f"No unspent PositionNFT record for pool {pool_key}.")
+        return plaintext
+
+    async def _ensure(self, token_programs: list, imports=None) -> None:
+        """Fetch the import closure (async) and register it with the process."""
+        sources: dict = dict(imports or {})
+        stack = [self.program, *token_programs, *sources]
+        seen: set = set()
+        while stack:
+            pid = stack.pop()
+            if pid in seen or pid == "credits.aleo":
                 continue
-            try:
-                decoded = parse_plaintext(plaintext)
-            except (ValueError, TypeError):
-                continue
-            if isinstance(decoded, dict) and decoded.get("pool") == pool_key:
-                return plaintext
-        raise InsufficientRecordsError(
-            f"No unspent PositionNFT record for pool {pool_key}.")
+            seen.add(pid)
+            if pid not in sources:
+                prog = await self._aleo.programs.get(pid)
+                sources[pid] = str(prog.source)
+            stack.extend(program_imports(sources[pid]))
+        register_program_sources(self._aleo, sources)
 
     async def _token_program(self, token_id: str) -> str:
         for tok in await self.api.get_tokens():
@@ -248,6 +253,7 @@ class AsyncShieldSwap:
                    nonce: Optional[int] = None,
                    token_in_program: Optional[str] = None,
                    token_record: Optional[str] = None,
+                   imports: Optional[dict[str, str]] = None,
                    account: Any = None) -> AsyncDexCall[SwapHandle]:
         acct = self._account(account)
         pool = await self.get_pool(pool_key)
@@ -266,6 +272,10 @@ class AsyncShieldSwap:
             record = await self._select_token_record(
                 program=program, min_amount=amount_in,
                 token_id=token_in_id, account=acct)
+            token_programs = [program]
+        else:
+            token_programs = [token_in_program] if token_in_program else []
+        await self._ensure(token_programs, imports)
 
         inputs = [
             record, identity.blinding_factor, identity.blinded_address,
@@ -292,6 +302,7 @@ class AsyncShieldSwap:
         return AsyncDexCall(self._aleo, bound, build_result)
 
     async def claim_swap_output(self, handle: SwapHandle, *,
+                                imports: Optional[dict[str, str]] = None,
                                 account: Any = None) -> AsyncDexCall[ClaimResult]:
         self._account(account)
         if not handle.swap_id:
@@ -301,6 +312,7 @@ class AsyncShieldSwap:
             raise ValueError("Claims need handle.blinding_factor and "
                              "handle.blinded_address (set by swap()).")
         out = await self.get_swap_output(handle.swap_id)
+        await self._ensure([], imports)
         inputs = [handle.blinding_factor, handle.blinded_address, handle.swap_id,
                   out.token_in, out.token_out,
                   f"{out.amount_out}u128", f"{out.amount_remaining}u128"]

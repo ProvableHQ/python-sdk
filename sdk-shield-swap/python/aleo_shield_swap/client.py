@@ -10,12 +10,17 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from aleo.codegen.runtime import parse_plaintext
+
 from . import _generated as g
 from ._core import (
+    ensure_programs,
+    find_position_plaintext,
     generate_field_nonce,
     generate_swap_nonce,
     get_deadline,
-    resolve_imports,
+    normalize_mapping_value,
+    parse_token_record_info,
     resolve_swap_params,
     select_token_record,
 )
@@ -29,12 +34,18 @@ from .errors import (
     InsufficientRecordsError,
     InvalidFeeTierError,
     PoolNotFoundError,
+    PoolNotInitializedError,
     SwapOutputNotFinalizedError,
 )
 from .types import ClaimResult, MintResult, SlotView, SwapHandle, TxResult
 from ._calls import DexCall
-
-_ABSENT = (None, "", "null")
+from .tick_hints import pick_insert_hint
+from .tick_math import (
+    MAX_TICK,
+    MIN_TICK,
+    get_sqrt_price_at_tick,
+    round_tick_to_spacing,
+)
 
 
 class ShieldSwap:
@@ -60,13 +71,7 @@ class ShieldSwap:
 
     def _mapping_value(self, mapping: str, key: str) -> Optional[str]:
         raw = self._aleo.programs.get(self.program).mapping(mapping).get(key)
-        if raw in _ABSENT:
-            return None
-        text = str(raw).strip()
-        # Node deployments may return the value JSON-quoted.
-        if text.startswith('"') and text.endswith('"'):
-            text = text[1:-1]
-        return None if text in ("", "null") else text
+        return normalize_mapping_value(raw)
 
     # ── Chain reads ──────────────────────────────────────────────────────────
 
@@ -78,18 +83,29 @@ class ShieldSwap:
         return g.PoolState.from_plaintext(raw)
 
     def get_slot(self, pool_key: str) -> SlotView:
-        """Live trading state (sqrt price, tick, in-range liquidity)."""
+        """Live trading state (sqrt price, tick, in-range liquidity).
+
+        Raises :class:`PoolNotFoundError` when the pool does not exist, or
+        :class:`PoolNotInitializedError` when it exists but has no slot yet.
+        """
         raw = self._mapping_value("slots", pool_key)
         if raw is None:
+            if self._mapping_value("pools", pool_key) is not None:
+                raise PoolNotInitializedError(pool_key)
             raise PoolNotFoundError(pool_key)
         return SlotView(g.Slot.from_plaintext(raw))
 
-    def get_swap_output(self, swap_id: str) -> g.SwapOutput:
+    def get_swap_output(self, swap: "SwapHandle | str") -> g.SwapOutput:
         """Chain-computed output of a finalized swap request.
 
+        Accepts the :class:`SwapHandle` from ``swap()`` or a bare swap id.
         Raises :class:`SwapOutputNotFinalizedError` when the entry is absent —
         not finalized yet (retry after a few blocks) or already claimed.
         """
+        swap_id = swap.swap_id if isinstance(swap, SwapHandle) else swap
+        if not swap_id:
+            raise ValueError("SwapHandle has no swap_id yet — wait for the "
+                             "request transaction and recover it first.")
         raw = self._mapping_value("swap_outputs", swap_id)
         if raw is None:
             raise SwapOutputNotFinalizedError(swap_id)
@@ -114,8 +130,6 @@ class ShieldSwap:
                              account: Any = None) -> dict[str, int]:
         """Sum of unspent record amounts per wrapper program (spendable
         privately).  Requires a configured record provider."""
-        from ._core import parse_token_record_info
-
         provider = self._aleo.record_provider
         out: dict[str, int] = {}
         for program in programs:
@@ -133,7 +147,13 @@ class ShieldSwap:
                      account: Any = None) -> dict[str, dict[str, Any]]:
         """Public + private + total per token id, joined via the API's
         token registry.  Defaults to the bound account's address; returns
-        only tokens actually held."""
+        only tokens actually held.
+
+        Private balances can only be scanned for the bound account's view
+        key — when *address* names someone else, ``private`` is 0 for every
+        token (their records are not scannable) rather than silently mixing
+        in the caller's own private holdings.
+        """
         acct = account if account is not None else self._aleo.default_account
         addr = address or (str(acct.address) if acct is not None else None)
         if addr is None:
@@ -141,7 +161,9 @@ class ShieldSwap:
 
         tokens = self.api.get_tokens()
         by_program = {t.wrapper_program: t for t in tokens if t.wrapper_program}
-        private = self.get_private_balances(list(by_program), account=acct)
+        own_address = str(acct.address) if acct is not None else None
+        private = (self.get_private_balances(list(by_program), account=acct)
+                   if addr == own_address else {p: 0 for p in by_program})
 
         out: dict[str, dict[str, Any]] = {}
         for bal in self.api.get_public_balances(addr):
@@ -170,6 +192,13 @@ class ShieldSwap:
         if acct is None:
             raise ValueError("No signer: pass account= or set aleo.default_account")
         return acct
+
+    def _ensure(self, token_programs: list[str],
+                imports: Optional[dict[str, str]]) -> None:
+        """Register the DEX program, its static imports, the involved token
+        programs, and any *imports* overrides with the snarkVM process."""
+        pids = [self.program, *token_programs, *(imports or {})]
+        ensure_programs(self._aleo, pids, imports)
 
     def swap(
         self,
@@ -222,8 +251,9 @@ class ShieldSwap:
         else:
             token_programs = [token_in_program] if token_in_program else []
         # Dynamic dispatch: the prover cannot discover token callees
-        # statically; resolve their sources (cached) unless overridden.
-        resolve_imports(self._aleo, token_programs, imports)
+        # statically — register the DEX program and the involved token
+        # programs with the process before authorization.
+        self._ensure(token_programs, imports)
 
         # Input order per the contract's swap entrypoint (mirrors the TS SDK):
         # record, blinding slots, then pool/direction/amounts/bounds/timing/tokens.
@@ -295,7 +325,7 @@ class ShieldSwap:
             )
         # Trust-critical read: the amounts the claim moves come from the chain.
         out = self.get_swap_output(handle.swap_id)
-        resolve_imports(self._aleo, [], imports)
+        self._ensure([], imports)
 
         inputs = [
             handle.blinding_factor,
@@ -343,12 +373,13 @@ class ShieldSwap:
         submission); tick spacing defaults to the tier's on-chain binding and
         the opening price to the tick's sqrt price.
         """
-        from .tick_math import MAX_TICK, MIN_TICK, get_sqrt_price_at_tick
 
         self._account(account)
         if not MIN_TICK <= initial_tick < MAX_TICK:
             raise ValueError(f"initial_tick {initial_tick} outside [{MIN_TICK}, {MAX_TICK})")
-        if self._mapping_value("fee_tiers", f"{fee}u16") is None:
+        # The tier must be registered AND enabled (value exactly true) —
+        # a disabled tier is present in the mapping with value false.
+        if self._mapping_value("fee_tiers", f"{fee}u16") != "true":
             raise InvalidFeeTierError(f"Fee tier {fee} is not registered with {self.program}")
         spacing = tick_spacing
         if spacing is None:
@@ -360,7 +391,7 @@ class ShieldSwap:
             spacing = int(raw.removesuffix("u32"))
         sqrt_price = (initial_sqrt_price if initial_sqrt_price is not None
                       else get_sqrt_price_at_tick(initial_tick))
-        resolve_imports(self._aleo, [], imports)
+        self._ensure([], imports)
 
         inputs = [
             token0_id,
@@ -381,24 +412,15 @@ class ShieldSwap:
     def _select_position_record(self, pool_key: str, account: Any) -> str:
         """Unspent PositionNFT plaintext for *pool_key* from the shield_swap
         program's own records."""
-        from aleo.codegen.runtime import parse_plaintext
-
-        provider = self._aleo.record_provider
-        for rec in provider.find(account, program=self.program, unspent=True):
-            plaintext = (rec.get("record_plaintext") if isinstance(rec, dict)
-                         else getattr(rec, "record_plaintext", None))
-            if not plaintext:
-                continue
-            try:
-                decoded = parse_plaintext(plaintext)
-            except (ValueError, TypeError):
-                continue
-            if isinstance(decoded, dict) and decoded.get("pool") == pool_key:
-                return plaintext
-        raise InsufficientRecordsError(
-            f"No unspent PositionNFT record for pool {pool_key} — mint first "
-            "or pass position_record=."
-        )
+        records = self._aleo.record_provider.find(
+            account, program=self.program, unspent=True)
+        plaintext = find_position_plaintext(records, pool_key)
+        if plaintext is None:
+            raise InsufficientRecordsError(
+                f"No unspent PositionNFT record for pool {pool_key} — mint "
+                "first or pass position_record=."
+            )
+        return plaintext
 
     def mint(
         self,
@@ -426,8 +448,6 @@ class ShieldSwap:
         Tick bounds are rounded to the pool's spacing; insert hints derive
         from the slot's neighbors unless given explicitly.
         """
-        from .tick_hints import pick_insert_hint
-        from .tick_math import round_tick_to_spacing
 
         acct = self._account(account)
         pool = self.get_pool(pool_key)
@@ -458,7 +478,7 @@ class ShieldSwap:
         record1 = token1_record or select_token_record(
             self._aleo, program=token1_program or self._token_program(pool.token1),
             min_amount=amount1_desired, token_id=pool.token1, account=acct)
-        resolve_imports(self._aleo, [p for p in (token0_program, token1_program) if p], imports)
+        self._ensure([p for p in (token0_program, token1_program) if p], imports)
 
         field_nonce = nonce if nonce is not None else generate_field_nonce()
         to = recipient or str(acct.address)
@@ -486,14 +506,12 @@ class ShieldSwap:
         account: Any = None,
     ) -> DexCall[TxResult]:
         """Add funds to an existing position (range fixed at mint)."""
-        from .tick_hints import pick_insert_hint
 
         acct = self._account(account)
         pool = self.get_pool(pool_key)
         slot = self.get_slot(pool_key)
         position = position_record or self._select_position_record(pool_key, acct)
 
-        from aleo.codegen.runtime import parse_plaintext
         decoded = parse_plaintext(position)
         lo_hint = (tick_lower_hint if tick_lower_hint is not None
                    else pick_insert_hint(slot, int(decoded["tick_lower"])))
@@ -506,7 +524,7 @@ class ShieldSwap:
         record1 = token1_record or select_token_record(
             self._aleo, program=token1_program or self._token_program(pool.token1),
             min_amount=amount1_desired, token_id=pool.token1, account=acct)
-        resolve_imports(self._aleo, [p for p in (token0_program, token1_program) if p], imports)
+        self._ensure([p for p in (token0_program, token1_program) if p], imports)
 
         inputs = [
             position, record0, record1,
@@ -532,7 +550,7 @@ class ShieldSwap:
         """Remove liquidity from a position; owed amounts become collectable."""
         acct = self._account(account)
         position = position_record or self._select_position_record(pool_key, acct)
-        resolve_imports(self._aleo, [], imports)
+        self._ensure([], imports)
         inputs = [position, f"{liquidity_to_remove}u128",
                   f"{amount0_min}u128", f"{amount1_min}u128"]
         bound = self._aleo.programs.get(self.program).functions.decrease_liquidity(*inputs)
@@ -553,7 +571,7 @@ class ShieldSwap:
         acct = self._account(account)
         pool = self.get_pool(pool_key)
         position = position_record or self._select_position_record(pool_key, acct)
-        resolve_imports(self._aleo, [], imports)
+        self._ensure([], imports)
         to = recipient or str(acct.address)
         inputs = [position, f"{amount0_requested}u128", f"{amount1_requested}u128",
                   pool.token0, pool.token1, to]

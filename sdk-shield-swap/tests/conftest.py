@@ -1,4 +1,11 @@
-"""Shared stubs: a fully-stubbed facade client for verb tests."""
+"""Shared stubs: a facade client stub whose shapes mirror the REAL facade.
+
+Shape fidelity matters — ``TransactionResult.outputs`` is a property,
+``decoded()``/``transitions()`` are methods, executions order transitions
+child-first with the root LAST, and writes require programs registered with
+the process.  The stubs model all of that so shape bugs fail here instead
+of on testnet.
+"""
 from __future__ import annotations
 
 import pytest
@@ -24,6 +31,23 @@ SIGNER = "aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px"
 BLINDING_FACTOR_0 = "4588552248780721950435785476596782217652350429588181106944985529417784595808field"
 BLINDED_ADDRESS_0 = "aleo1tucdl48jvu54emu9atq3vf0rslwtdpze83zcc2jrc8zxema0r5gq3zd76l"
 
+PROGRAM_ID = "shield_swap_v3.aleo"
+
+# A decoy child transition emitting a field output — root-scoped harvesting
+# must NEVER pick this up.
+CHILD_TRANSITION = {"program": "tok.aleo", "function": "transfer",
+                    "outputs": [{"value": "999field"}]}
+
+
+def _valid_source(pid: str) -> str:
+    """Minimal REAL parseable program source (register_program_sources parses
+    it with the actual snarkVM Program type)."""
+    name = pid.removesuffix(".aleo").replace(".", "_")
+    return (f"program {name}.aleo;\n"
+            "function main:\n"
+            "    input r0 as u64.public;\n"
+            "    output r0 as u64.public;\n")
+
 
 class StubAccount:
     class _VK:
@@ -42,16 +66,44 @@ class _Mapping:
         return self.values.get(key)
 
 
+class _StubTransition:
+    def __init__(self, program, function, output_values):
+        self.program_id = program
+        self.function_name = function
+        self._outputs = output_values
+
+    def outputs(self):
+        return list(self._outputs)
+
+
 class _Tx:
+    """Shape-faithful TransactionResult stub: outputs is a PROPERTY,
+    decoded()/transitions() are methods, root transition LAST."""
+
     id = "at1stubtx"
     raw = object()
 
+    def __init__(self, fn):
+        self._fn = fn
+
+    @property
     def outputs(self):
-        return [[{"value": "77field"}]]
+        return [[{"value": "999field"}], [{"value": "77field"}]]
+
+    def decoded(self):
+        return [dict(CHILD_TRANSITION),
+                {"program": PROGRAM_ID, "function": self._fn,
+                 "outputs": [{"value": "77field"}]}]
+
+    def transitions(self):
+        return [_StubTransition("tok.aleo", "transfer", ["999field"]),
+                _StubTransition(PROGRAM_ID, self._fn, ["77field"])]
 
 
 class _BoundCall:
     def __init__(self, recorder, fn, args):
+        self.program_id = PROGRAM_ID
+        self.function_name = fn
         self._recorder = recorder
         self._recorder.last_call = (fn, list(args))
 
@@ -59,9 +111,10 @@ class _BoundCall:
         return "simulated"
 
     def build_transaction(self, account=None, **kw):
-        return _Tx()
+        return _Tx(self.function_name)
 
     def delegate(self, account=None, **kw):
+        self._recorder.delegated_fn = self.function_name
         return {"transaction_id": "at1delegated"}
 
 
@@ -76,11 +129,11 @@ class _Functions:
 
 
 class _Program:
-    def __init__(self, recorder, mappings):
+    def __init__(self, recorder, mappings, pid):
         self._recorder = recorder
         self._mappings = mappings
         self.functions = _Functions(recorder)
-        self.source = "program stub.aleo;"
+        self.source = _valid_source(pid)
 
     def mapping(self, name):
         return _Mapping(self._mappings.get(name, {}))
@@ -92,7 +145,19 @@ class _Programs:
         self._mappings = mappings
 
     def get(self, pid):
-        return _Program(self._recorder, self._mappings)
+        self._recorder.fetched_programs.append(pid)
+        return _Program(self._recorder, self._mappings, pid)
+
+
+class _Process:
+    def __init__(self, recorder):
+        self._recorder = recorder
+
+    def contains_program(self, program_id):
+        return False
+
+    def add_program(self, program):
+        self._recorder.registered_programs.append(str(program.id))
 
 
 class _NetworkClient:
@@ -112,6 +177,9 @@ class _Network:
         self._recorder.waited.append(tx_id)
         return {"status": "confirmed"}
 
+    def get_transaction_object(self, tx_id):
+        return _Tx(self._recorder.delegated_fn)
+
 
 class _Provider:
     def __init__(self, records):
@@ -122,24 +190,24 @@ class _Provider:
 
 
 class StubAleo:
-    """Stubbed facade Aleo: mappings, functions, records, network — recorded."""
+    """Stubbed facade Aleo: mappings, functions, records, network, process."""
 
     network_name = "testnet"
 
     def __init__(self, mappings=None, records=None):
         self.last_call = None
+        self.delegated_fn = None
         self.submitted = []
         self.waited = []
+        self.fetched_programs = []
+        self.registered_programs = []
         self.programs = _Programs(self, mappings or {})
         self.record_provider = _Provider(records if records is not None
                                          else [{"record_plaintext": RECORD_TEXT}])
         self.network = _Network(self)
         self.network_client = _NetworkClient()
+        self.process = _Process(self)
         self.default_account = StubAccount()
-
-    def decode_transition(self, tx_id):
-        return {"program": "shield_swap_v3.aleo", "function": "swap",
-                "inputs": [], "outputs": [{"value": "77field"}]}
 
 
 @pytest.fixture

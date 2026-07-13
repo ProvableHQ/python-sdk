@@ -91,9 +91,10 @@ class ApiClient:
         return _build(models.SwapDoc, self._get(f"/swaps/{swap_id}")["data"])
 
     def get_ohlcv(self, pool_key: str, *, granularity: str,
-                  from_ts: str, to_ts: str) -> Any:
-        return self._get(f"/pools/{pool_key}/ohlcv",
+                  from_ts: str, to_ts: str) -> list[models.OhlcvDoc]:
+        data = self._get(f"/pools/{pool_key}/ohlcv",
                          {"granularity": granularity, "from": from_ts, "to": to_ts})["data"]
+        return [_build(models.OhlcvDoc, o) for o in data]
 
     # ── Balances ───────────────────────────────────────────────────────────
 
@@ -152,10 +153,11 @@ class AsyncApiClient:
         return _build(models.SwapDoc, (await self._get(f"/swaps/{swap_id}"))["data"])
 
     async def get_ohlcv(self, pool_key: str, *, granularity: str,
-                        from_ts: str, to_ts: str) -> Any:
-        return (await self._get(f"/pools/{pool_key}/ohlcv",
+                        from_ts: str, to_ts: str) -> list[models.OhlcvDoc]:
+        data = (await self._get(f"/pools/{pool_key}/ohlcv",
                                 {"granularity": granularity, "from": from_ts,
                                  "to": to_ts}))["data"]
+        return [_build(models.OhlcvDoc, o) for o in data]
 
     async def get_public_balances(self, user: str) -> list[models.TokenBalanceDoc]:
         return [_build(models.TokenBalanceDoc, b)

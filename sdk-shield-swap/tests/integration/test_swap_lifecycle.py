@@ -15,7 +15,7 @@ from aleo_shield_swap.types import SwapHandle
 
 from .conftest import ENDPOINT, write_tier
 
-pytestmark = pytest.mark.live
+pytestmark = [pytest.mark.live, pytest.mark.slow]
 
 
 def _with_retry(fn, attempts=3, delay=5.0):

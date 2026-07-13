@@ -45,6 +45,10 @@ def test_swap_builds_exact_inputs(stub_aleo):
     assert args[9] == "1100u32"                       # height 1000 + 100
     assert args[10] == "1field" and args[11] == "2field"
     assert len(args) == 12
+    # Dynamic dispatch: the DEX program and the token wrapper program must be
+    # registered with the process before authorization.
+    assert "shield_swap_v3.aleo" in stub_aleo.registered_programs
+    assert "tok.aleo" in stub_aleo.registered_programs
 
 
 def test_swap_transact_returns_complete_handle(stub_aleo):

@@ -2,6 +2,13 @@
 
 Run: ``python -m aleo_shield_swap.mcp``
 
+Uses the low-level ``mcp.server.Server`` (not FastMCP) so each tool
+advertises the exact JSON schema from :func:`~aleo_shield_swap.agent
+.shield_swap_tools` — FastMCP infers schemas from handler signatures, which
+would collapse every tool to one opaque ``args`` object.  Tools run against
+the synchronous :class:`~aleo_shield_swap.client.ShieldSwap` (the full verb
+surface) in a worker thread, keeping the event loop free.
+
 Environment:
     ALEO_ENDPOINT     API origin (default ``https://api.provable.com`` —
                       the provider derives ``/v2`` reads, ``/prove``, and
@@ -13,11 +20,13 @@ Environment:
 """
 from __future__ import annotations
 
+import json
 import os
 from typing import Any
 
 try:
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server import Server
+    from mcp.types import TextContent, Tool
 except ImportError as exc:  # pragma: no cover - env-dependent
     raise ImportError(
         "The MCP server requires the mcp package — install the extra: "
@@ -27,28 +36,33 @@ except ImportError as exc:  # pragma: no cover - env-dependent
 from .agent import dispatch_tool, shield_swap_tools
 
 
-def build_server(dex: Any, *, name: str = "shield-swap") -> "FastMCP":
-    """A FastMCP server with every agent tool registered against *dex*.
+def tool_definitions() -> list[Tool]:
+    """The agent tools as MCP ``Tool`` objects with their exact schemas."""
+    return [Tool(name=t["name"], description=t["description"],
+                 inputSchema=t["input_schema"])
+            for t in shield_swap_tools()]
 
-    Tools run in a worker thread (the ShieldSwap client is synchronous), so
-    the event loop stays free.
-    """
+
+async def call_tool(dex: Any, name: str, arguments: dict[str, Any]) -> list[TextContent]:
+    """Execute one tool in a worker thread; result as JSON text content."""
     from anyio import to_thread
 
-    server = FastMCP(name)
-    for tool in shield_swap_tools():
-        def make_handler(tool_name: str):
-            async def handler(args: dict[str, Any]) -> Any:
-                return await to_thread.run_sync(
-                    lambda: dispatch_tool(dex, tool_name, args)
-                )
-            return handler
+    result = await to_thread.run_sync(lambda: dispatch_tool(dex, name, arguments))
+    return [TextContent(type="text", text=json.dumps(result))]
 
-        server.add_tool(
-            make_handler(tool["name"]),
-            name=tool["name"],
-            description=tool["description"],
-        )
+
+def build_server(dex: Any, *, name: str = "shield-swap") -> Server:
+    """An MCP server with every agent tool registered against *dex*."""
+    server: Server = Server(name)
+
+    @server.list_tools()
+    async def _list_tools() -> list[Tool]:
+        return tool_definitions()
+
+    @server.call_tool()
+    async def _call_tool(tool_name: str, arguments: dict[str, Any]) -> list[TextContent]:
+        return await call_tool(dex, tool_name, arguments)
+
     return server
 
 
@@ -71,7 +85,16 @@ def _build_dex() -> Any:
 
 
 def main() -> None:
-    build_server(_build_dex()).run()
+    import anyio
+    from mcp.server.stdio import stdio_server
+
+    server = build_server(_build_dex())
+
+    async def _run() -> None:
+        async with stdio_server() as (read, write):
+            await server.run(read, write, server.create_initialization_options())
+
+    anyio.run(_run)
 
 
 if __name__ == "__main__":

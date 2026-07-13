@@ -54,6 +54,14 @@ def test_create_pool_inputs_and_validation():
     assert stub.last_call[0] == "create_pool"     # no new call was prepared
 
 
+def test_create_pool_rejects_disabled_fee_tier():
+    # Registered-then-disabled tier: present in the mapping with value false.
+    stub = _stub(mappings={"fee_tiers": {"3000u16": "false"}})
+    with pytest.raises(InvalidFeeTierError):
+        ShieldSwap(stub).create_pool(token0_id="1field", token1_id="2field",
+                                     fee=3000, initial_tick=0)
+
+
 def test_mint_inputs_rounding_and_request():
     stub = _stub()
     dex = ShieldSwap(stub)

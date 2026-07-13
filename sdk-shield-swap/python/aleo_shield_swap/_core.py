@@ -8,6 +8,7 @@ token-record selection — everything both ``client.py`` and
 """
 from __future__ import annotations
 
+import re
 import secrets
 from dataclasses import dataclass
 from typing import Any, Optional
@@ -114,6 +115,60 @@ def generate_field_nonce() -> str:
     return f"{secrets.randbits(248)}field"
 
 
+# ── Shared pure helpers (sync + async clients) ───────────────────────────────
+
+def normalize_mapping_value(raw: Any) -> Optional[str]:
+    """A mapping read normalized to plaintext, or ``None`` when absent.
+
+    Node deployments variously return ``None``, ``"null"``, the empty string,
+    or a JSON-quoted value — one place decides what "absent" means.
+    """
+    if raw in (None, "", "null"):
+        return None
+    text = str(raw).strip()
+    if text.startswith('"') and text.endswith('"'):
+        text = text[1:-1]
+    return None if text in ("", "null") else text
+
+
+def pick_covering_record(records: Any, *, min_amount: int,
+                         token_id: Optional[str]) -> Optional[str]:
+    """Smallest unspent token-record plaintext covering *min_amount*, or None.
+
+    *token_id* filters registry-style records; wrapper-program records carry
+    no ``token_id`` and match any.
+    """
+    candidates: list[tuple[int, str]] = []
+    for rec in records:
+        plaintext = (rec.get("record_plaintext") if isinstance(rec, dict)
+                     else getattr(rec, "record_plaintext", None))
+        if not plaintext:
+            continue
+        info = parse_token_record_info(plaintext)
+        if info is None or info["amount"] < min_amount:
+            continue
+        if token_id is not None and "token_id" in info and info["token_id"] != token_id:
+            continue
+        candidates.append((info["amount"], plaintext))
+    return min(candidates)[1] if candidates else None
+
+
+def find_position_plaintext(records: Any, pool_key: str) -> Optional[str]:
+    """First unspent PositionNFT plaintext whose ``pool`` matches, or None."""
+    for rec in records:
+        plaintext = (rec.get("record_plaintext") if isinstance(rec, dict)
+                     else getattr(rec, "record_plaintext", None))
+        if not plaintext:
+            continue
+        try:
+            decoded = parse_plaintext(plaintext)
+        except (ValueError, TypeError):
+            continue
+        if isinstance(decoded, dict) and decoded.get("pool") == pool_key:
+            return plaintext
+    return None
+
+
 # ── Dynamic-dispatch imports ─────────────────────────────────────────────────
 
 _IMPORTS_CACHE: dict[tuple[str, str], str] = {}
@@ -145,6 +200,63 @@ def resolve_imports(
             _IMPORTS_CACHE[key] = str(aleo.programs.get(pid).source)
         out[pid] = _IMPORTS_CACHE[key]
     return out
+
+
+_IMPORT_LINE = re.compile(r"^import\s+(\S+?);\s*$", re.MULTILINE)
+
+
+def program_imports(source: str) -> list[str]:
+    """Program ids named by ``import X.aleo;`` lines in *source*."""
+    return _IMPORT_LINE.findall(source)
+
+
+def register_program_sources(aleo: Any, sources: dict[str, str]) -> None:
+    """Add *sources* to the bound client's snarkVM process, dependencies
+    first (by declared ``import`` lines, within the provided closure).
+
+    ``Process.load()`` seeds only ``credits.aleo``; every other program a
+    write touches — the DEX program itself and the dynamically-dispatched
+    token wrapper programs — must be added before ``authorize`` can resolve
+    the call.  Idempotent: already-registered programs are skipped.
+    """
+    process = aleo.process
+    if aleo.network_name == "testnet":
+        from aleo import testnet as net
+    else:
+        from aleo import mainnet as net
+
+    added: set[str] = set()
+
+    def add(pid: str) -> None:
+        if pid == "credits.aleo" or pid in added or pid not in sources:
+            return
+        added.add(pid)
+        if process.contains_program(net.ProgramID.from_string(pid)):
+            return
+        for dep in program_imports(sources[pid]):
+            add(dep)                     # dependencies before dependents
+        process.add_program(net.Program.from_source(sources[pid]))
+
+    for pid in sources:
+        add(pid)
+
+
+def ensure_programs(aleo: Any, program_ids: list[str],
+                    overrides: Optional[dict[str, str]] = None) -> None:
+    """Fetch the import closure of *program_ids* (sync) and register it.
+
+    Sources come from *overrides* first, else via ``aleo.programs.get``
+    (memoized by :func:`resolve_imports`).
+    """
+    sources: dict[str, str] = {}
+    stack = [pid for pid in dict.fromkeys(program_ids) if pid != "credits.aleo"]
+    while stack:
+        pid = stack.pop()
+        if pid in sources or pid == "credits.aleo":
+            continue
+        sources[pid] = resolve_imports(aleo, [pid], overrides)[pid]
+        stack.extend(program_imports(sources[pid]))
+    register_program_sources(aleo, sources)
 
 
 # ── Token record selection ───────────────────────────────────────────────────
@@ -190,20 +302,10 @@ def select_token_record(
             "pass token_record= explicitly or configure a scanner."
         )
     records = provider.find(account, program=program, unspent=True)
-    candidates: list[tuple[int, str]] = []
-    for rec in records:
-        plaintext = rec.get("record_plaintext") if isinstance(rec, dict) else getattr(rec, "record_plaintext", None)
-        if not plaintext:
-            continue
-        info = parse_token_record_info(plaintext)
-        if info is None or info["amount"] < min_amount:
-            continue
-        if token_id is not None and "token_id" in info and info["token_id"] != token_id:
-            continue
-        candidates.append((info["amount"], plaintext))
-    if not candidates:
+    chosen = pick_covering_record(records, min_amount=min_amount, token_id=token_id)
+    if chosen is None:
         raise InsufficientRecordsError(
             f"No unspent {program} record covers {min_amount} "
             f"(token_id={token_id or 'any'}) — privatize funds or pass token_record=."
         )
-    return min(candidates)[1]
+    return chosen

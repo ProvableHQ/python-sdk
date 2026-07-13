@@ -18,6 +18,9 @@ from .conftest import (
 pytestmark = pytest.mark.asyncio
 
 
+from .conftest import PROGRAM_ID, _Process, _StubTransition, _valid_source
+
+
 class _AsyncMapping:
     def __init__(self, values):
         self.values = values
@@ -27,24 +30,44 @@ class _AsyncMapping:
 
 
 class _Tx:
+    """Shape-faithful async TransactionResult stub (root transition LAST)."""
+
     id = "at1asynctx"
     raw = object()
 
+    def __init__(self, fn):
+        self._fn = fn
+
+    @property
     def outputs(self):
-        return [[{"value": "88field"}]]
+        return [[{"value": "999field"}], [{"value": "88field"}]]
+
+    def decoded(self):
+        return [{"program": "tok.aleo", "function": "transfer",
+                 "outputs": [{"value": "999field"}]},
+                {"program": PROGRAM_ID, "function": self._fn,
+                 "outputs": [{"value": "88field"}]}]
+
+    def transitions(self):
+        return [_StubTransition("tok.aleo", "transfer", ["999field"]),
+                _StubTransition(PROGRAM_ID, self._fn, ["88field"])]
 
 
 class _AsyncBoundCall:
     def __init__(self, recorder, fn, args):
+        self.program_id = PROGRAM_ID
+        self.function_name = fn
+        self._recorder = recorder
         recorder.last_call = (fn, list(args))
 
     def simulate(self, account=None):
         return "simulated"
 
     async def build_transaction(self, account=None, **kw):
-        return _Tx()
+        return _Tx(self.function_name)
 
     async def delegate(self, account=None, **kw):
+        self._recorder.delegated_fn = self.function_name
         return {"transaction_id": "at1delegated"}
 
 
@@ -59,9 +82,10 @@ class _AsyncFunctions:
 
 
 class _AsyncProgram:
-    def __init__(self, recorder, mappings):
+    def __init__(self, recorder, mappings, pid):
         self._mappings = mappings
         self.functions = _AsyncFunctions(recorder)
+        self.source = _valid_source(pid)
 
     def mapping(self, name):
         return _AsyncMapping(self._mappings.get(name, {}))
@@ -73,7 +97,7 @@ class _AsyncPrograms:
         self._mappings = mappings
 
     async def get(self, pid):
-        return _AsyncProgram(self._recorder, self._mappings)
+        return _AsyncProgram(self._recorder, self._mappings, pid)
 
 
 class _AsyncNetwork:
@@ -90,6 +114,9 @@ class _AsyncNetwork:
     async def wait_for_transaction(self, tx_id, **kw):
         self._recorder.waited.append(tx_id)
 
+    async def get_transaction_object(self, tx_id):
+        return _Tx(self._recorder.delegated_fn)
+
 
 class _AsyncProvider:
     def __init__(self, records):
@@ -104,16 +131,16 @@ class AsyncStubAleo:
 
     def __init__(self, mappings=None, records=None):
         self.last_call = None
+        self.delegated_fn = None
         self.submitted = []
         self.waited = []
+        self.registered_programs = []
         self.programs = _AsyncPrograms(self, mappings or {})
         self.record_provider = _AsyncProvider(
             records if records is not None else [{"record_plaintext": RECORD_TEXT}])
         self.network = _AsyncNetwork(self)
+        self.process = _Process(self)
         self.default_account = StubAccount()
-
-    async def decode_transition(self, tx_id):
-        return {"outputs": [{"value": "88field"}]}
 
 
 @pytest.fixture
