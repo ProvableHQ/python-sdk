@@ -8,6 +8,7 @@ from the TS implementation.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 
@@ -59,3 +60,120 @@ def derive_tick_key(pool: str, tick: int, *, network: str = "testnet") -> str:
         raise ValueError(f"tick must be an i32, got {tick}")
     p = _strip_suffix(pool, "field")
     return _hash_struct(f"{{ pool: {p}field, tick: {tick}i32 }}", network)
+
+
+# ── Blinded identity ─────────────────────────────────────────────────────────
+#
+# Port of amm-v3-tests src/client/amm-client.ts (feat/q128) via the TS SDK's
+# utils/blinding/identity.ts.  The domain separators are pinned from the
+# reference client; CLAIM_OR_SWAP_DOMAIN must match the literal the program
+# hashes in verify_blinded_address.
+
+BLINDING_FACTOR_DOMAIN = "42815354924796718559205719970686750292466968495484257field"
+CLAIM_OR_SWAP_DOMAIN = "11835072102227764468342786961086432175093421716844963782363567713633field"
+
+DEFAULT_PROGRAM = "shield_swap_v3.aleo"
+
+
+@dataclass(frozen=True)
+class BlindedIdentity:
+    """A single-use blinded identity for one private swap or claim.
+
+    ``blinding_factor`` is secret — whoever holds it can claim the swap's
+    output; treat it like a key.  ``blinded_address`` is public.
+    """
+
+    counter: int
+    blinding_factor: str
+    blinded_address: str
+
+
+def _program_address_field(net: Any, program: str) -> Any:
+    """``self.address as field`` — x-coordinate of the program address."""
+    return net.Address.from_program_id(program).to_group().to_x_coordinate()
+
+
+def derive_blinding_factor(
+    view_key_scalar: str,
+    counter: int,
+    program: str = DEFAULT_PROGRAM,
+    *,
+    network: str = "testnet",
+) -> str:
+    """Blinding factor for one swap/claim, from the view key and a counter.
+
+    ``Poseidon8::hash([program_address, DOMAIN, view_key as field,
+    counter as field])`` — deterministic, so identities are re-derivable
+    without storing them.  Pure and local; the view key never leaves the
+    process.
+    """
+    net = _net(network)
+    addr_field = _program_address_field(net, program)
+    vk_field = net.Scalar.from_string(view_key_scalar).to_field()
+    counter_field = net.U32.from_string(f"{counter}u32").to_scalar().to_field()
+    preimage = [addr_field, net.Field.from_string(BLINDING_FACTOR_DOMAIN),
+                vk_field, counter_field]
+    return str(net.Poseidon8().hash(preimage))
+
+
+def derive_blinded_address(
+    blinding_factor: str,
+    signer_address: str,
+    program: str = DEFAULT_PROGRAM,
+    *,
+    network: str = "testnet",
+) -> str:
+    """Public blinded address for a blinding factor and signer.
+
+    ``Poseidon8::hash_to_address_raw([program_address, CLAIM_OR_SWAP_DOMAIN,
+    signer, blinding_factor])``.  The 252-bit little-endian repacking below
+    emulates snarkVM's ``Plaintext::Array::to_fields_raw`` and is
+    load-bearing — a one-bit deviation yields an address the program rejects.
+    """
+    net = _net(network)
+    size_in_data_bits = 252
+
+    contract_field = _program_address_field(net, program)
+    signer_field = net.Address.from_string(signer_address).to_group().to_x_coordinate()
+
+    input_bits: list[bool] = []
+    for f in (contract_field, net.Field.from_string(CLAIM_OR_SWAP_DOMAIN),
+              signer_field, net.Field.from_string(blinding_factor)):
+        input_bits.extend(f.to_bits_le())
+
+    preimage = [
+        net.Field.from_bits_le(input_bits[i:i + size_in_data_bits])
+        for i in range(0, len(input_bits), size_in_data_bits)
+    ]
+    blinded_group = net.Poseidon8().hash_to_group(preimage)
+    return str(net.Address.from_group(blinded_group))
+
+
+def next_blinded_identity(
+    aleo: Any,
+    account: Any,
+    program: str = DEFAULT_PROGRAM,
+    *,
+    start_counter: int = 0,
+    max_scan: int = 64,
+) -> BlindedIdentity:
+    """First unused single-use identity for *account*.
+
+    Derives at ``start_counter, +1, …`` and probes the program's
+    ``used_blinded_addresses`` mapping until one is free.  ``max_scan`` fails
+    fast when something is systematically wrong (e.g. wrong program).
+    """
+    network = aleo.network_name
+    scalar = str(account.view_key.to_scalar())
+    signer = str(account.address)
+    mapping = aleo.programs.get(program).mapping("used_blinded_addresses")
+    for counter in range(start_counter, start_counter + max_scan):
+        bf = derive_blinding_factor(scalar, counter, program, network=network)
+        ba = derive_blinded_address(bf, signer, program, network=network)
+        used = mapping.get(ba)
+        if used in (None, "", "null", "false"):
+            return BlindedIdentity(counter, bf, ba)
+    raise ValueError(
+        f"No unused blinded address in counters [{start_counter}, "
+        f"{start_counter + max_scan}) for {program} — wrong program or scan range?"
+    )
