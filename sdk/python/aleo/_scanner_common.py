@@ -3,12 +3,14 @@ from __future__ import annotations
 
 from typing import Any, TypedDict
 
+from ._client_common import AleoError
+
 
 # ---------------------------------------------------------------------------
-# Error types
+# Error types (all subclass AleoError so `except AleoError` catches them)
 # ---------------------------------------------------------------------------
 
-class RecordScannerRequestError(Exception):
+class RecordScannerRequestError(AleoError):
     """Raised when a RecordScanner HTTP request returns a non-2xx status."""
 
     def __init__(self, message: str, status: int) -> None:
@@ -16,11 +18,11 @@ class RecordScannerRequestError(Exception):
         self.status = status
 
 
-class DecryptionNotEnabledError(Exception):
+class DecryptionNotEnabledError(AleoError):
     """Raised when decryption is required but decrypt_enabled=False."""
 
 
-class ViewKeyNotStoredError(Exception):
+class ViewKeyNotStoredError(AleoError):
     """Raised when a view key is needed but not stored for a given UUID."""
 
     def __init__(self, message: str, uuid: str | None = None) -> None:
@@ -28,11 +30,11 @@ class ViewKeyNotStoredError(Exception):
         self.uuid = uuid
 
 
-class RecordNotFoundError(Exception):
+class RecordNotFoundError(AleoError):
     """Raised when no matching record is found."""
 
 
-class UUIDError(Exception):
+class UUIDError(AleoError):
     """Raised for UUID resolution or validation failures."""
 
     def __init__(
@@ -136,7 +138,22 @@ class OwnedRecord(TypedDict, total=False):
 # Pure helpers
 # ---------------------------------------------------------------------------
 
-def compute_uuid(view_key: Any) -> Any:
+def net_module(network: str = "mainnet") -> Any:
+    """Return the compiled network module ('mainnet' or 'testnet').
+
+    The type classes (Field, Poseidon4, RecordCiphertext, RecordPlaintext)
+    come from distinct compiled extensions per network and are NOT
+    interchangeable, so callers must select the module matching the
+    view-key/record network.
+    """
+    if network == "testnet":
+        from . import testnet as _mod  # type: ignore[attr-defined]
+    else:
+        from . import mainnet as _mod  # type: ignore[attr-defined]
+    return _mod
+
+
+def compute_uuid(view_key: Any, network: str = "mainnet") -> Any:
     """Compute the RecordScanner UUID from a ViewKey using Poseidon4.
 
     Returns a Field with domain separator "RecordScannerV0".
@@ -144,7 +161,8 @@ def compute_uuid(view_key: Any) -> Any:
         APrivateKey1zkp8CZNn3yeCseEtxuVPbDCwSyhGW6yZKUYKfgXmcpoGPWH
         -> 7884164224800444110633570141944665301008802280502652120359195870264061098703field
     """
-    from .mainnet import Field, Poseidon4  # type: ignore[attr-defined]
+    _mod = net_module(network)
+    Field, Poseidon4 = _mod.Field, _mod.Poseidon4
     domain_sep = Field.domain_separator("RecordScannerV0")
     vk_field = view_key.to_field()
     one = Field.one()
@@ -152,10 +170,39 @@ def compute_uuid(view_key: Any) -> Any:
     return hasher.hash([domain_sep, vk_field, one])
 
 
-def uuid_is_valid(uuid: str) -> bool:
+def build_owned_filter(
+    uuid: str | None,
+    *,
+    program: str | None = None,
+    record: str | None = None,
+    unspent: bool = True,
+    nonces: list[str] | None = None,
+) -> OwnedFilter:
+    """Build an :class:`OwnedFilter` from the common record-query parameters.
+
+    Shared by the sync and async facade record modules so the filter shape is
+    defined in exactly one place.
+    """
+    record_filter: RecordsFilter = {}
+    if program is not None:
+        record_filter["program"] = program
+    if record is not None:
+        record_filter["record"] = record
+
+    owned: OwnedFilter = {"unspent": unspent}
+    if uuid is not None:
+        owned["uuid"] = uuid
+    if record_filter:
+        owned["filter"] = record_filter
+    if nonces is not None:
+        owned["nonces"] = nonces
+    return owned
+
+
+def uuid_is_valid(uuid: str, network: str = "mainnet") -> bool:
     """Return True if uuid is a valid Field string (e.g. '1234...field')."""
     try:
-        from .mainnet import Field  # type: ignore[attr-defined]
+        Field = net_module(network).Field
         Field.from_string(uuid)
         return True
     except Exception:

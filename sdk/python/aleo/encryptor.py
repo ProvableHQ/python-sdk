@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# Intentionally network-agnostic: private-key encryption (keys/ciphertext) does
+# not depend on the network, so importing these types from ``mainnet`` is fine.
 from .mainnet import PrivateKey, Ciphertext, Field, Network, Identifier, Plaintext, Literal
 
 

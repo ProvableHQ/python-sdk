@@ -1,6 +1,34 @@
 from __future__ import annotations
 from typing import Any, Dict, List, Mapping, Tuple
 
+# Re-exports mirroring aleo/__init__.py's public runtime surface, so type
+# checkers resolve ``from aleo import ...`` for the network/scanner/facade API.
+from . import mainnet as mainnet
+from . import testnet as testnet
+from .network_client import AleoNetworkClient as AleoNetworkClient
+from .async_network_client import AsyncAleoNetworkClient as AsyncAleoNetworkClient
+from ._client_common import AleoNetworkError as AleoNetworkError
+from ._client_common import AleoProvingError as AleoProvingError
+from .record_scanner import RecordScanner as RecordScanner
+from .async_record_scanner import AsyncRecordScanner as AsyncRecordScanner
+from ._scanner_common import (
+    RecordScannerRequestError as RecordScannerRequestError,
+    DecryptionNotEnabledError as DecryptionNotEnabledError,
+    ViewKeyNotStoredError as ViewKeyNotStoredError,
+    RecordNotFoundError as RecordNotFoundError,
+    UUIDError as UUIDError,
+)
+from .facade import Aleo as Aleo
+from .facade import AsyncAleo as AsyncAleo
+from .facade import HTTPProvider as HTTPProvider
+from .facade.errors import (
+    AleoError as AleoError,
+    TransactionNotFound as TransactionNotFound,
+    ProgramNotFound as ProgramNotFound,
+    ExecutionError as ExecutionError,
+    TransactionConfirmationTimeout as TransactionConfirmationTimeout,
+)
+
 
 class Account:
     @staticmethod

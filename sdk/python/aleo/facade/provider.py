@@ -1,0 +1,152 @@
+"""HTTPProvider — configuration object that constructs an AleoNetworkClient.
+
+Mirrors ``web3.HTTPProvider``: pass it to ``Aleo(provider)`` and the client
+wires itself up from it.  A provider is a *config object*, not a connection;
+it is safe to construct without a live network.
+"""
+from __future__ import annotations
+
+from typing import Any
+from urllib.parse import urlparse
+
+from ..network_client import AleoNetworkClient
+from .._client_common import DEFAULT_HOST, DEFAULT_NETWORK, is_provable_host
+
+# AsyncAleoNetworkClient imported lazily to avoid pulling httpx at import time.
+
+_VALID_NETWORKS = frozenset({"mainnet", "testnet"})
+
+
+def scanner_base(provider: "HTTPProvider") -> str | None:
+    """Derive the hosted record-scanner base from a provider's URL, or ``None``.
+
+    The hosted scanner is a Provable *service* at the API origin under the
+    ``/scanner`` prefix (sibling to ``/prove`` and ``/jwts``), derived from the
+    origin — NOT the read node's ``/v2/{network}`` base.  The
+    :class:`~aleo.record_scanner.RecordScanner` appends ``/{network}``, so we
+    return ``{scheme}://{host}/scanner`` (no network suffix).
+
+    Returns ``None`` off the hosted Provable API: the hosted scanner does not
+    exist on devnode / local / custom nodes, so there is nothing to point at.
+    Callers that need scanning against such an endpoint assign their own
+    :class:`~aleo.record_scanner.RecordScanner` or ``RecordProvider``.
+    """
+    if not is_provable_host(provider.url):
+        return None
+    parsed = urlparse(provider.url)
+    return f"{parsed.scheme}://{parsed.netloc}/scanner"
+
+
+class HTTPProvider:
+    """Configuration object for the Aleo client.
+
+    Parameters
+    ----------
+    url:
+        API origin, e.g. ``"https://api.provable.com"`` (the default).  For the
+        hosted Provable API the SDK adds the service prefixes itself — reads at
+        ``/v2``, delegated proving at ``/prove``, hosted scanner at ``/scanner``,
+        JWT auth at ``/jwts`` — so you never spell them out.  Any other host
+        (devnode, a local or custom node) is used as a literal read base, with no
+        hosted prover/scanner wired up.  A legacy ``".../v2"`` value still works.
+    network:
+        Network name — ``"mainnet"`` (default) or ``"testnet"``.
+    api_key:
+        Provable API key passed through to the underlying
+        :class:`~aleo.network_client.AleoNetworkClient`.  Shared by the
+        delegated prover and the hosted record scanner.
+    consumer_id:
+        Provable consumer id, paired with *api_key* to mint/refresh JWTs for
+        the delegated prover and the hosted record scanner.
+    prover_uri:
+        Optional override for the DPS prover base (without network suffix).
+        Defaults to ``{origin}/prove`` derived from *url*.
+    headers:
+        Additional HTTP headers merged on top of the SDK defaults.
+    transport:
+        Optional callable ``(method, url, **kwargs) -> requests.Response``.
+        Forwarded verbatim to :class:`~aleo.network_client.AleoNetworkClient`.
+    """
+
+    def __init__(
+        self,
+        url: str = DEFAULT_HOST,
+        *,
+        network: str = DEFAULT_NETWORK,
+        api_key: str | None = None,
+        consumer_id: str | None = None,
+        prover_uri: str | None = None,
+        headers: dict[str, str] | None = None,
+        transport: Any = None,
+    ) -> None:
+        if network not in _VALID_NETWORKS:
+            raise ValueError(
+                f"Invalid network {network!r}. Must be one of: "
+                + ", ".join(sorted(_VALID_NETWORKS))
+            )
+        self._url = url
+        self._network = network
+        self._api_key = api_key
+        self._consumer_id = consumer_id
+        self._prover_uri = prover_uri
+        self._headers = dict(headers) if headers else None
+        self._transport = transport
+
+    # ── Public read-only properties ────────────────────────────────────────
+
+    @property
+    def url(self) -> str:
+        """The versioned API root URL."""
+        return self._url
+
+    @property
+    def network(self) -> str:
+        """Network name (``"mainnet"`` or ``"testnet"``)."""
+        return self._network
+
+    @property
+    def api_key(self) -> str | None:
+        """Provable API key, if set."""
+        return self._api_key
+
+    @property
+    def consumer_id(self) -> str | None:
+        """Provable consumer id, if set."""
+        return self._consumer_id
+
+    @property
+    def prover_uri(self) -> str | None:
+        """DPS prover URI, if set."""
+        return self._prover_uri
+
+    # ── Internal factory ───────────────────────────────────────────────────
+
+    def _build_client(self) -> AleoNetworkClient:
+        """Construct and return an :class:`~aleo.network_client.AleoNetworkClient`."""
+        return AleoNetworkClient(
+            self._url,
+            network=self._network,
+            api_key=self._api_key,
+            consumer_id=self._consumer_id,
+            prover_uri=self._prover_uri,
+            headers=self._headers,
+            transport=self._transport,
+        )
+
+    def _build_async_client(self) -> "Any":
+        """Construct and return an :class:`~aleo.async_network_client.AsyncAleoNetworkClient`."""
+        from ..async_network_client import AsyncAleoNetworkClient
+        return AsyncAleoNetworkClient(
+            self._url,
+            network=self._network,
+            api_key=self._api_key,
+            consumer_id=self._consumer_id,
+            prover_uri=self._prover_uri,
+            headers=self._headers,
+            transport=self._transport,
+        )
+
+    def __repr__(self) -> str:
+        return (
+            f"HTTPProvider(url={self._url!r}, network={self._network!r})"
+        )

@@ -345,6 +345,41 @@ def test_owned_uuid_resolution_and_mutation() -> None:
     assert json.loads(body) == filter_dict
 
 
+@resp_lib.activate
+def test_owned_refreshes_jwt_on_auth_failure() -> None:
+    """owned() re-mints the JWT and retries once when the scanner reports the
+    JWT invalidated out-of-band (shared-consumer rotation: prover mint kills the
+    scanner's JWT → 'No credentials found for given iss')."""
+    from aleo.mainnet import Field
+
+    # Two JWT mints: the initial one, then the forced refresh after the 401.
+    resp_lib.add(
+        resp_lib.POST, f"{BASE_URL}/jwts/cid",
+        headers={"Authorization": "Bearer J1"}, json={"exp": 9999999999},
+    )
+    resp_lib.add(
+        resp_lib.POST, f"{BASE_URL}/jwts/cid",
+        headers={"Authorization": "Bearer J2"}, json={"exp": 9999999999},
+    )
+    # owned: first 401 with the iss error body, then 200.
+    resp_lib.add(
+        resp_lib.POST, f"{HOST}/records/owned", status=401,
+        json={"message": "No credentials found for given 'iss'"},
+    )
+    resp_lib.add(resp_lib.POST, f"{HOST}/records/owned", json=[])
+
+    scanner = RecordScanner(BASE_URL, network="mainnet", api_key="ak", consumer_id="cid")
+    scanner._uuid = Field.from_string(GOLDEN_UUID)
+
+    result = scanner.owned({"uuid": GOLDEN_UUID, "unspent": True})  # type: ignore[arg-type]
+
+    assert result["ok"] is True
+    owned_calls = [x for x in resp_lib.calls if "/records/owned" in x.request.url]
+    assert len(owned_calls) == 2  # 401 then a fresh-JWT retry
+    assert owned_calls[0].request.headers.get("Authorization") == "Bearer J1"
+    assert owned_calls[1].request.headers.get("Authorization") == "Bearer J2"
+
+
 # ---------------------------------------------------------------------------
 # 11. owned — verbatim body with complex OwnedFilter
 # ---------------------------------------------------------------------------

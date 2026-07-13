@@ -23,6 +23,7 @@ from ._client_common import (
     DEFAULT_NETWORK,
     AleoNetworkError,
     AleoProvingError,
+    is_provable_host,
     jwt_expired,
     jwt_origin,
     make_default_headers,
@@ -83,9 +84,14 @@ class AsyncAleoNetworkClient:
                 "Install with: pip install aleo[async]"
             ) from None
 
-        self._base_url: str = host
         self._network: str = network
-        self._host: str = f"{host}/{network}"
+        # See AleoNetworkClient._resolve_urls: hosted Provable API → /v2 reads +
+        # /prove + /scanner off the origin; any other host → literal read base
+        # with no hosted prover/scanner.
+        read_host, origin, prover_default, scanner_default = self._resolve_urls(host)
+        self._origin: str = origin
+        self._base_url: str = origin  # compat alias (now the origin)
+        self._host: str = read_host
         self._has_custom_transport: bool = transport is not None
         self._transport: Any = transport
         self._account: Any = None
@@ -93,9 +99,11 @@ class AsyncAleoNetworkClient:
         self.api_key: str | None = api_key
         self.consumer_id: str | None = consumer_id
         self.jwt_data: dict[str, Any] | None = jwt_data
-        self._prover_uri: str | None = f"{prover_uri}/{network}" if prover_uri else None
+        self._prover_uri: str | None = (
+            f"{prover_uri}/{network}" if prover_uri else prover_default
+        )
         self._record_scanner_uri: str | None = (
-            f"{record_scanner_uri}/{network}" if record_scanner_uri else None
+            f"{record_scanner_uri}/{network}" if record_scanner_uri else scanner_default
         )
 
         if self._has_custom_transport:
@@ -112,11 +120,57 @@ class AsyncAleoNetworkClient:
         else:
             self._client = httpx.AsyncClient()
 
+    def _resolve_urls(
+        self, host: str
+    ) -> tuple[str, str, str | None, str | None]:
+        """Resolve ``(read_host, origin, prover_default, scanner_default)`` for *host*.
+
+        Hosted Provable API → reads under ``/v2`` with the delegated prover
+        (``/prove``) and hosted scanner (``/scanner``) off the same origin; any
+        other host → literal read base with no hosted prover/scanner. (``/jwts``
+        and ``/consumers`` always live at the bare origin — handled in
+        :meth:`_refresh_jwt`, not here.) Mirrors ``AleoNetworkClient._resolve_urls``.
+        """
+        origin = jwt_origin(host)
+        network = self._network
+        if is_provable_host(host):
+            return (
+                f"{origin}/v2/{network}",
+                origin,
+                f"{origin}/prove/{network}",
+                f"{origin}/scanner/{network}",
+            )
+        return (f"{host.rstrip('/')}/{network}", origin, None, None)
+
+    # ── Network module selection ──────────────────────────────────────────
+
+    def _net(self) -> Any:
+        """Return the network extension module (``aleo.mainnet`` or ``aleo.testnet``).
+
+        Node responses must be parsed into types from the module matching
+        ``self._network``; mixing mainnet/testnet types raises cross-extension
+        ``TypeError``s.
+        """
+        try:
+            if self._network == "testnet":
+                from . import testnet as _mod  # type: ignore[attr-defined]
+            else:
+                from . import mainnet as _mod  # type: ignore[attr-defined]
+        except ImportError:
+            raise ImportError(
+                f"aleo {self._network} module not available"
+            ) from None
+        return _mod
+
     # ── Mutators ──────────────────────────────────────────────────────────
 
     def set_host(self, host: str) -> None:
-        self._base_url = host
-        self._host = f"{host}/{self._network}"
+        read_host, origin, prover_default, scanner_default = self._resolve_urls(host)
+        self._origin = origin
+        self._base_url = origin
+        self._host = read_host
+        self._prover_uri = prover_default
+        self._record_scanner_uri = scanner_default
 
     def set_prover_uri(self, prover_uri: str) -> None:
         self._prover_uri = f"{prover_uri}/{self._network}"
@@ -129,6 +183,21 @@ class AsyncAleoNetworkClient:
 
     def get_account(self) -> Any:
         return self._account
+
+    @property
+    def origin(self) -> str:
+        """The API origin (``scheme://host``) all services derive from."""
+        return self._origin
+
+    @property
+    def prover_uri(self) -> str | None:
+        """DPS prover base (``{origin}/prove/{network}`` on the hosted API), or None."""
+        return self._prover_uri
+
+    @property
+    def scanner_uri(self) -> str | None:
+        """Hosted-scanner base (``{origin}/scanner/{network}`` on the hosted API), or None."""
+        return self._record_scanner_uri
 
     def set_header(self, name: str, value: str) -> None:
         self.headers[name] = value
@@ -201,8 +270,7 @@ class AsyncAleoNetworkClient:
     # ── JWT refresh ───────────────────────────────────────────────────────
 
     async def _refresh_jwt(self, api_key: str, consumer_id: str) -> dict[str, Any]:
-        origin = jwt_origin(self._base_url)
-        url = f"{origin}/jwts/{consumer_id}"
+        url = f"{self._origin}/jwts/{consumer_id}"
         hdrs = {
             **self._request_headers("refreshJwt"),
             "X-Provable-API-Key": api_key,
@@ -285,10 +353,7 @@ class AsyncAleoNetworkClient:
         return json.loads(raw)
 
     async def get_program_object(self, program_id: str, edition: int | None = None) -> Any:
-        try:
-            from .mainnet import Program  # type: ignore[attr-defined]
-        except ImportError:
-            raise ImportError("aleo mainnet module not available") from None
+        Program = self._net().Program
         source = await self.get_program(program_id, edition)
         return Program.from_source(source)
 
@@ -299,11 +364,6 @@ class AsyncAleoNetworkClient:
     ) -> dict[str, str]:
         if imports is None:
             imports = {}
-        try:
-            from .mainnet import Program  # type: ignore[attr-defined]
-        except ImportError:
-            raise ImportError("aleo mainnet module not available") from None
-
         source = await self.get_program(program_id)
         return await self._collect_program_imports(source, imports)
 
@@ -313,10 +373,7 @@ class AsyncAleoNetworkClient:
         imports: dict[str, str],
     ) -> dict[str, str]:
         """Async DFS import collection — source already fetched, no re-fetch."""
-        try:
-            from .mainnet import Program  # type: ignore[attr-defined]
-        except ImportError:
-            raise ImportError("aleo mainnet module not available") from None
+        Program = self._net().Program
         prog = Program.from_source(source)
         for imp_id_obj in prog.imports:
             imp_id = str(imp_id_obj)
@@ -328,10 +385,7 @@ class AsyncAleoNetworkClient:
         return imports
 
     async def get_program_import_names(self, program_id: str) -> list[str]:
-        try:
-            from .mainnet import Program  # type: ignore[attr-defined]
-        except ImportError:
-            raise ImportError("aleo mainnet module not available") from None
+        Program = self._net().Program
         source = await self.get_program(program_id)
         prog = Program.from_source(source)
         return [str(imp) for imp in prog.imports]
@@ -339,10 +393,7 @@ class AsyncAleoNetworkClient:
     async def get_program_mapping_plaintext(
         self, program_id: str, mapping_name: str, key: str
     ) -> Any:
-        try:
-            from .mainnet import Plaintext  # type: ignore[attr-defined]
-        except ImportError:
-            raise ImportError("aleo mainnet module not available") from None
+        Plaintext = self._net().Plaintext
         raw = await self._get_raw(
             f"/program/{program_id}/mapping/{mapping_name}/{key}",
             "getProgramMappingPlaintext",
@@ -351,10 +402,7 @@ class AsyncAleoNetworkClient:
         return Plaintext.from_string(_json.loads(raw))
 
     async def get_transaction_object(self, tx_id: str) -> Any:
-        try:
-            from .mainnet import Transaction  # type: ignore[attr-defined]
-        except ImportError:
-            raise ImportError("aleo mainnet module not available") from None
+        Transaction = self._net().Transaction
         raw = await self._get_raw(f"/transaction/{tx_id}", "getTransactionObject")
         return Transaction.from_json(raw)
 
@@ -480,32 +528,64 @@ class AsyncAleoNetworkClient:
         consumer_id: str | None = None,
         jwt_data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        prover_uri = url or self._prover_uri or self._host
-        resolved_jwt = jwt_data or self.jwt_data
-        resolved_jwt = await self._ensure_jwt(api_key, consumer_id, resolved_jwt)
-
-        hdrs: dict[str, str] = {
-            **self._request_headers("submitProvingRequest"),
-            "Content-Type": "application/json",
-        }
-        if resolved_jwt and resolved_jwt.get("jwt"):
-            hdrs["Authorization"] = resolved_jwt["jwt"]
-
-        try:
-            from .mainnet import ProvingRequest  # type: ignore[attr-defined]
-        except ImportError:
-            raise ImportError("aleo mainnet module not available") from None
+        # Prover base: {origin}/prove/{network} on the hosted API (set at
+        # construction). Off the hosted API there is no prover unless configured.
+        prover_uri = url or self._prover_uri
+        if not prover_uri:
+            return {
+                "ok": False,
+                "status": None,
+                "error": {
+                    "message": (
+                        "No delegated prover configured for host "
+                        f"{self._origin!r}. Delegated proving is available on the "
+                        "Provable API (api.provable.com); for another endpoint pass "
+                        "HTTPProvider(prover_uri=...)."
+                    )
+                },
+            }
+        # Build auth headers, optionally forcing a fresh JWT mint. The prover and
+        # the hosted scanner share ONE consumer, and the auth server keeps a
+        # single active JWT per consumer — so a scanner JWT mint invalidates the
+        # prover's cached one out-of-band. On a 401 we drop the cached JWT and
+        # re-mint (force_refresh) before retrying, so the prover self-heals.
+        async def _build_hdrs(force_refresh: bool) -> dict[str, str]:
+            if force_refresh:
+                self.jwt_data = None
+            rj = None if force_refresh else (jwt_data or self.jwt_data)
+            rj = await self._ensure_jwt(api_key, consumer_id, rj)
+            h: dict[str, str] = {
+                **self._request_headers("submitProvingRequest"),
+                "Content-Type": "application/json",
+            }
+            if rj and rj.get("jwt"):
+                h["Authorization"] = rj["jwt"]
+            return h
 
         if isinstance(proving_request, str):
-            pr_obj = ProvingRequest.from_string(proving_request)
+            pr_obj = self._net().ProvingRequest.from_string(proving_request)
         else:
             pr_obj = proving_request
 
         kind = pr_obj.kind()
         endpoint = "/prove/request" if kind == "request" else "/prove/authorization"
 
-        async def _send_once() -> dict[str, Any]:
+        class _AuthInvalidated(Exception):
+            """The JWT was rejected (401/403) — force a fresh mint and retry."""
+
+        async def _send_once(hdrs: dict[str, str]) -> dict[str, Any]:
+            # Prover affinity: the ephemeral X25519 private key lives ONLY on the
+            # backend that served this /pubkey, so /prove must hit the same one.
+            # The persistent httpx.AsyncClient owns a cookie jar that captures
+            # the affinity cookie from this GET and auto-attaches it to the POST
+            # below — including through a custom transport, which httpx wraps at
+            # the client level (the jar sits above the transport). So we rely on
+            # the jar rather than hand-building a Cookie header from set-cookie
+            # (which comma-joins cookies, carries attributes, and bypasses the
+            # jar — silently dropping affinity).
             pk_resp = await self._client.get(f"{prover_uri}/pubkey", headers=hdrs)
+            if pk_resp.status_code in (401, 403):
+                raise _AuthInvalidated()
             if not pk_resp.is_success:
                 raise AleoNetworkError(
                     f"Failed to fetch pubkey: {pk_resp.status_code}",
@@ -514,23 +594,21 @@ class AsyncAleoNetworkClient:
             pk_data = pk_resp.json()
             key_id = pk_data["key_id"]
             public_key = pk_data["public_key"]
-            cookie = pk_resp.headers.get("set-cookie")
 
             pr_bytes = bytes(pr_obj.bytes())
             ciphertext = encrypt_proving_request(public_key, pr_bytes)
             payload = json.dumps({"key_id": key_id, "ciphertext": ciphertext})
-            post_hdrs = dict(hdrs)
-            if cookie:
-                post_hdrs["Cookie"] = cookie
 
             resp = await self._client.post(
                 f"{prover_uri}{endpoint}",
                 content=payload.encode(),
-                headers=post_hdrs,
+                headers=hdrs,
             )
 
             if resp.status_code == 200:
                 return {"ok": True, "data": resp.json()}
+            elif resp.status_code in (401, 403):
+                raise _AuthInvalidated()
             elif resp.status_code in (400, 500, 503):
                 try:
                     err_body = resp.json()
@@ -543,8 +621,18 @@ class AsyncAleoNetworkClient:
             else:
                 return {"ok": False, "status": resp.status_code, "error": {"message": resp.text}}
 
+        async def _send_with_auth_retry() -> dict[str, Any]:
+            try:
+                return await _send_once(await _build_hdrs(force_refresh=False))
+            except _AuthInvalidated:
+                # JWT invalidated out-of-band (shared-consumer rotation) — mint a
+                # fresh one and retry once.
+                return await _send_once(await _build_hdrs(force_refresh=True))
+
         try:
-            return await async_retry_with_backoff(_send_once)
+            return await async_retry_with_backoff(_send_with_auth_retry)
+        except _AuthInvalidated:
+            return {"ok": False, "status": 401, "error": {"message": "JWT rejected (401) after refresh"}}
         except AleoNetworkError as exc:
             return {"ok": False, "status": exc.status or 500, "error": {"message": str(exc)}}
 

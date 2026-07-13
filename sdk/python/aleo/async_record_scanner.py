@@ -16,6 +16,7 @@ from ._scanner_common import (
     RecordsFilter,
     UUIDError,
     ViewKeyNotStoredError,
+    net_module,
     compute_uuid,
     normalize_api_key,
     uuid_is_valid,
@@ -138,7 +139,7 @@ class AsyncRecordScanner:
 
     def add_view_key(self, view_key: Any) -> None:
         """Store view_key keyed by its computed UUID string."""
-        uuid_field = compute_uuid(view_key)
+        uuid_field = compute_uuid(view_key, self._network)
         self._view_keys[str(uuid_field)] = view_key
 
     def remove_view_key(self, uuid: str) -> None:
@@ -146,18 +147,18 @@ class AsyncRecordScanner:
 
     def set_uuid(self, key_material: Any) -> None:
         """Set UUID from a Field or ViewKey."""
-        from .mainnet import Field  # type: ignore[attr-defined]
+        Field = net_module(self._network).Field
         if isinstance(key_material, Field):
             self._uuid = key_material
         else:
-            self._uuid = compute_uuid(key_material)
+            self._uuid = compute_uuid(key_material, self._network)
 
     def set_account(self, account: Any) -> None:
         """Set account: mirrors TS (set, setUuid, addViewKey, remove old uuid)."""
         old_uuid: str | None = None
         if self._account is not None:
             try:
-                old_uuid = str(compute_uuid(self._account.view_key))
+                old_uuid = str(compute_uuid(self._account.view_key, self._network))
             except Exception:
                 pass
 
@@ -194,16 +195,44 @@ class AsyncRecordScanner:
 
         return hdrs
 
+    @staticmethod
+    def _is_auth_failure(status: int, text: str) -> bool:
+        """True if a response means our JWT was rejected / invalidated.
+
+        The scanner and the delegated prover share one consumer, and the auth
+        server keeps a SINGLE active JWT per consumer — so a prover JWT mint
+        (every ``delegate``) invalidates the scanner's cached one out-of-band.
+        The server signals this as 401/403, or a body reading
+        ``No credentials found for given 'iss'``.
+        """
+        if status in (401, 403):
+            return True
+        t = text or ""
+        return "No credentials found" in t or "'iss'" in t
+
+    async def _send_authed(self, method: str, url: str, **kwargs: Any) -> Any:
+        """Send an authed request; on out-of-band JWT invalidation, mint a fresh
+        JWT and retry ONCE (see :meth:`_is_auth_failure`)."""
+        async def _do() -> Any:
+            hdrs = await self._build_headers()
+            if method == "GET":
+                return await self._client.get(url, headers=hdrs, **kwargs)
+            return await self._client.post(url, headers=hdrs, **kwargs)
+
+        resp = await _do()
+        if self._is_auth_failure(resp.status_code, getattr(resp, "text", "")):
+            self.jwt_data = None  # drop the invalidated JWT; _build_headers re-mints
+            resp = await _do()
+        return resp
+
     async def _get_json(self, url: str) -> Any:
-        hdrs = await self._build_headers()
-        resp = await self._client.get(url, headers=hdrs)
+        resp = await self._send_authed("GET", url)
         if not resp.is_success:
             raise RecordScannerRequestError(resp.text, resp.status_code)
         return resp.json()
 
     async def _post_json(self, url: str, body: str) -> Any:
-        hdrs = await self._build_headers()
-        resp = await self._client.post(url, content=body.encode(), headers=hdrs)
+        resp = await self._send_authed("POST", url, content=body.encode())
         if not resp.is_success:
             raise RecordScannerRequestError(resp.text, resp.status_code)
         return resp
@@ -216,7 +245,7 @@ class AsyncRecordScanner:
             candidate = str(self._uuid)
         if candidate is None:
             raise UUIDError("No UUID configured. Call register() or set_uuid() first.")
-        if not uuid_is_valid(candidate):
+        if not uuid_is_valid(candidate, self._network):
             raise UUIDError(
                 f"UUID '{candidate}' is invalid (not a valid field string).",
                 uuid=candidate,
@@ -243,7 +272,7 @@ class AsyncRecordScanner:
             data: dict[str, Any] = resp.json()
 
             if self._uuid is None:
-                from .mainnet import Field  # type: ignore[attr-defined]
+                Field = net_module(self._network).Field
                 try:
                     self._uuid = Field.from_string(data["uuid"])
                 except Exception:
@@ -278,7 +307,7 @@ class AsyncRecordScanner:
         self._view_keys.pop(resolved, None)
         if self._account is not None:
             try:
-                if str(compute_uuid(self._account.view_key)) == resolved:
+                if str(compute_uuid(self._account.view_key, self._network)) == resolved:
                     self._account = None
             except Exception:
                 pass
@@ -299,7 +328,7 @@ class AsyncRecordScanner:
     async def owned(self, filter: OwnedFilter) -> dict[str, Any]:
         """Fetch owned records matching the given filter."""
         filter_uuid = filter.get("uuid", "")
-        if filter_uuid and uuid_is_valid(filter_uuid):
+        if filter_uuid and uuid_is_valid(filter_uuid, self._network):
             resolved_uuid = filter_uuid
         elif self._uuid is not None:
             resolved_uuid = str(self._uuid)
@@ -312,18 +341,18 @@ class AsyncRecordScanner:
         filter["uuid"] = resolved_uuid
         body = json.dumps(filter)
 
-        hdrs = await self._build_headers()
-        resp = await self._client.post(
-            f"{self.url}/records/owned", content=body.encode(), headers=hdrs
+        # ``_send_authed`` transparently re-mints the JWT + retries on an
+        # out-of-band auth invalidation (shared-consumer JWT rotation).
+        resp = await self._send_authed(
+            "POST", f"{self.url}/records/owned", content=body.encode()
         )
 
         if resp.status_code == 422 and self.auto_re_register:
             vk = self._view_keys.get(resolved_uuid)
             if vk is not None:
                 await self.register_encrypted(vk, 0)
-                hdrs = await self._build_headers()
-                resp = await self._client.post(
-                    f"{self.url}/records/owned", content=body.encode(), headers=hdrs
+                resp = await self._send_authed(
+                    "POST", f"{self.url}/records/owned", content=body.encode()
                 )
 
         if not resp.is_success:
@@ -410,7 +439,7 @@ class AsyncRecordScanner:
 
     def decrypt(self, view_key: Any, records: list[Any]) -> None:
         """Decrypt record_ciphertext fields in-place."""
-        from .mainnet import RecordCiphertext  # type: ignore[attr-defined]
+        RecordCiphertext = net_module(self._network).RecordCiphertext
         for record in records:
             ct = record.get("record_ciphertext", "").strip()
             if not ct:
@@ -444,7 +473,7 @@ class AsyncRecordScanner:
     ) -> OwnedRecord:
         """Find first credits.aleo record with >= microcredits."""
         filter_uuid = filter.get("uuid", "")
-        if filter_uuid and uuid_is_valid(filter_uuid):
+        if filter_uuid and uuid_is_valid(filter_uuid, self._network):
             resolved_uuid = filter_uuid
         elif self._uuid is not None:
             resolved_uuid = str(self._uuid)
@@ -477,7 +506,7 @@ class AsyncRecordScanner:
 
         records = await self.find_records(credits_filter)
 
-        from .mainnet import RecordPlaintext  # type: ignore[attr-defined]
+        RecordPlaintext = net_module(self._network).RecordPlaintext
         for record in records:
             pt_str = record.get("record_plaintext", "")
             if not pt_str:
@@ -502,7 +531,7 @@ class AsyncRecordScanner:
         """
         # Resolve UUID
         filter_uuid = filter.get("uuid", "")
-        if filter_uuid and uuid_is_valid(filter_uuid):
+        if filter_uuid and uuid_is_valid(filter_uuid, self._network):
             resolved_uuid = filter_uuid
         elif self._uuid is not None:
             resolved_uuid = str(self._uuid)
@@ -535,7 +564,7 @@ class AsyncRecordScanner:
 
         records = await self.find_records(credits_filter)
 
-        from .mainnet import RecordPlaintext  # type: ignore[attr-defined]
+        RecordPlaintext = net_module(self._network).RecordPlaintext
         amounts_set = set(microcredit_amounts)
         result: list[OwnedRecord] = []
         for record in records:

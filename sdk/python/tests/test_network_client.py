@@ -650,6 +650,72 @@ def test_dps_cookie_echoed(nacl_keypair: Any) -> None:
 
 
 @resp_lib.activate
+def test_dps_defaults_to_prove_service_base(nacl_keypair: Any) -> None:
+    """With no prover_uri, the DPS handshake targets the API origin under the
+    ``/prove/{network}`` prefix (a Provable service sibling to ``/scanner``),
+    NOT the read node's ``/v2/{network}`` base."""
+    _, pk_b64 = nacl_keypair
+    # BASE is https://api.provable.com/v2 → origin https://api.provable.com,
+    # so the prover base is https://api.provable.com/prove/mainnet.
+    resp_lib.add(
+        resp_lib.GET, "https://api.provable.com/prove/mainnet/pubkey",
+        json={"key_id": "k1", "public_key": pk_b64},
+        headers={"set-cookie": "session=x"},
+    )
+    resp_lib.add(
+        resp_lib.POST, "https://api.provable.com/prove/mainnet/prove/authorization",
+        json={"transaction": "at1ok", "broadcast_result": {"status": "accepted"}},
+    )
+
+    c = AleoNetworkClient(BASE, network=NET)  # no prover_uri
+    c.jwt_data = {"jwt": "Bearer testjwt", "expiration": 99999999999999}
+
+    result = c.submit_proving_request_safe(_load_proving_request())
+    assert result["ok"] is True
+    # pubkey hit /prove/{network}/pubkey, never the /v2 read base.
+    get_urls = [call.request.url for call in resp_lib.calls if call.request.method == "GET"]
+    assert any(u == "https://api.provable.com/prove/mainnet/pubkey" for u in get_urls)
+    assert not any("/v2" in u for u in get_urls)
+
+
+@resp_lib.activate
+def test_dps_refreshes_jwt_on_401(nacl_keypair: Any) -> None:
+    """A 401 (JWT invalidated out-of-band by the shared-consumer scanner) drops
+    the cached JWT, re-mints, and retries the handshake once."""
+    _, pk_b64 = nacl_keypair
+    prover = "https://prover.provable.prove"
+
+    # Two JWT mints: the initial one, then the forced refresh after the 401.
+    resp_lib.add(
+        resp_lib.POST, "https://api.provable.com/jwts/cid",
+        headers={"Authorization": "Bearer J1"}, json={"exp": 9999999999},
+    )
+    resp_lib.add(
+        resp_lib.POST, "https://api.provable.com/jwts/cid",
+        headers={"Authorization": "Bearer J2"}, json={"exp": 9999999999},
+    )
+    # pubkey: first call 401 (stale JWT), retry 200 (fresh JWT).
+    resp_lib.add(resp_lib.GET, f"{prover}/mainnet/pubkey", status=401, json={})
+    resp_lib.add(
+        resp_lib.GET, f"{prover}/mainnet/pubkey",
+        json={"key_id": "k1", "public_key": pk_b64},
+    )
+    resp_lib.add(
+        resp_lib.POST, f"{prover}/mainnet/prove/authorization",
+        json={"transaction": "at1ok", "broadcast_result": {"status": "accepted"}},
+    )
+
+    c = AleoNetworkClient(BASE, network=NET, prover_uri=prover, api_key="ak", consumer_id="cid")
+    result = c.submit_proving_request_safe(_load_proving_request())
+
+    assert result["ok"] is True
+    pubkey_calls = [x for x in resp_lib.calls if "/pubkey" in x.request.url]
+    assert len(pubkey_calls) == 2  # 401 then a fresh-JWT retry
+    assert pubkey_calls[0].request.headers.get("Authorization") == "Bearer J1"
+    assert pubkey_calls[1].request.headers.get("Authorization") == "Bearer J2"
+
+
+@resp_lib.activate
 def test_dps_authorization_header_sent(nacl_keypair: Any) -> None:
     """JWT is sent as Authorization header on prove POST."""
     _, pk_b64 = nacl_keypair
@@ -716,9 +782,60 @@ def test_network_in_host() -> None:
     assert c._host == "https://api.provable.com/v2/testnet"
 
 
+def test_provable_host_detection() -> None:
+    from aleo._client_common import is_provable_host
+    assert is_provable_host("https://api.provable.com")
+    assert is_provable_host("https://api.provable.com/v2")
+    assert is_provable_host("https://API.PROVABLE.COM/v2/testnet")  # case-insensitive
+    assert not is_provable_host("http://127.0.0.1:3030")
+    assert not is_provable_host("https://my-node.example.com/v2")
+
+
+def test_bare_origin_adds_service_prefixes() -> None:
+    """Bare Provable origin → reads under /v2, prover/scanner off the origin."""
+    c = AleoNetworkClient("https://api.provable.com", network="testnet")
+    assert c.origin == "https://api.provable.com"
+    assert c._host == "https://api.provable.com/v2/testnet"
+    assert c.prover_uri == "https://api.provable.com/prove/testnet"
+    assert c.scanner_uri == "https://api.provable.com/scanner/testnet"
+
+
+def test_legacy_v2_input_still_provable() -> None:
+    """A legacy '.../v2' base is detected as Provable and rebuilt identically."""
+    c = AleoNetworkClient("https://api.provable.com/v2", network="mainnet")
+    assert c._host == "https://api.provable.com/v2/mainnet"
+    assert c.prover_uri == "https://api.provable.com/prove/mainnet"
+    assert c.scanner_uri == "https://api.provable.com/scanner/mainnet"
+
+
+def test_non_provable_host_is_literal_base_no_services() -> None:
+    """Non-Provable host → literal read base (no /v2) and NO prover/scanner."""
+    c = AleoNetworkClient("http://127.0.0.1:3030", network="testnet")
+    assert c._host == "http://127.0.0.1:3030/testnet"  # no /v2 added
+    assert c.prover_uri is None
+    assert c.scanner_uri is None
+
+
+def test_non_provable_prover_uri_override_still_works() -> None:
+    """An explicit prover_uri is honored on any host."""
+    c = AleoNetworkClient(
+        "http://127.0.0.1:3030", network="testnet",
+        prover_uri="http://my-prover:9000",
+    )
+    assert c.prover_uri == "http://my-prover:9000/testnet"
+
+
+def test_delegate_without_prover_errors_off_provable(nacl_keypair: Any) -> None:
+    """submit_proving_request_safe returns a clear error when no prover is set."""
+    c = AleoNetworkClient("http://127.0.0.1:3030", network="testnet")
+    result = c.submit_proving_request_safe(_load_proving_request())
+    assert result["ok"] is False
+    assert "No delegated prover configured" in result["error"]["message"]
+
+
 def test_set_host_updates_host() -> None:
     c = make_client()
-    c.set_host("https://other.example.com/v3")
+    c.set_host("https://other.example.com/v3")  # non-Provable → literal base honored
     assert c._host == f"https://other.example.com/v3/{NET}"
 
 

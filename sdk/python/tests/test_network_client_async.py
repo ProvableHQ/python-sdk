@@ -460,6 +460,47 @@ async def test_async_dps_authorization_routes_correctly() -> None:
 
 
 @pytest.mark.asyncio
+async def test_async_dps_cookie_affinity() -> None:
+    """Async DPS: the /pubkey affinity cookie is re-sent (via the client jar) on
+    the /prove POST, so both calls stick to the same prover backend."""
+    from nacl.public import PrivateKey
+
+    sk = PrivateKey.generate()
+    pk_b64 = base64.b64encode(bytes(sk.public_key)).decode()
+    prover = f"https://prover.provable.prove/{NET}"
+    captured_posts: list[httpx.Request] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        url = str(req.url)
+        if "/pubkey" in url:
+            return jr(
+                {"key_id": "k1", "public_key": pk_b64},
+                headers={"set-cookie": "session=mysession"},
+            )
+        if "/prove/authorization" in url and req.method == "POST":
+            captured_posts.append(req)
+            return jr({"transaction": "at1ok", "broadcast_result": {"status": "accepted"}})
+        return httpx.Response(404)
+
+    try:
+        from pathlib import Path
+        v = json.loads((Path(__file__).parent / "vectors" / "proving_request.json").read_text())
+        from aleo.mainnet import ProvingRequest  # type: ignore[attr-defined]
+        pr = ProvingRequest.from_string(v["PUZZLE_SPINNER_V002_PROVING_REQUEST"])
+    except Exception:
+        pytest.skip("ProvingRequest WASM not available")
+
+    c = make_client_with_handler(handler, _prover_uri=prover)
+    c.jwt_data = {"jwt": "Bearer testjwt", "expiration": 99999999999999}
+
+    result = await c.submit_proving_request_safe(pr)
+    assert result["ok"] is True
+    assert len(captured_posts) >= 1
+    # The jar turns Set-Cookie into a proper name=value Cookie header on the POST.
+    assert captured_posts[-1].headers.get("Cookie") == "session=mysession"
+
+
+@pytest.mark.asyncio
 async def test_async_dps_request_variant_routes_to_prove_request() -> None:
     """Async DPS: Request-variant ProvingRequest hits /prove/request."""
     from nacl.public import PrivateKey, SealedBox
