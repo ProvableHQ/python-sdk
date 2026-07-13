@@ -1,0 +1,41 @@
+{
+ "_source": "GET https://amm-api.dev.provable.com/pools (live capture, 2026-07-13)",
+ "data": [
+  {
+   "id": "b23af9f7-cd72-4d52-928e-637b9748354c",
+   "key": "1981234481256911848949989598432010959786505150793860245840256594800529816749field",
+   "token0": "40965999173564918995621006824189398836596field",
+   "token1": "185528603099650286599904399730556391637784315808306865395426676field",
+   "enabled": true,
+   "creator": "aleo1z3zwzgpgakk89xpknync5rtklkjkyv33g7cvaqe0gku64zs3lv9qyux0qc",
+   "fee": "5.0000000000000000",
+   "created_at": "2026-07-10T11:28:09",
+   "init_tx": "1f025079-439e-48f3-85fa-80751ef82ef9",
+   "scale0": "1",
+   "scale1": "1",
+   "token0_info": {
+    "id": "2c73efd2-3c96-43d9-9ae0-f319e4fbe8d5",
+    "address": "40965999173564918995621006824189398836596field",
+    "name": "Wrapped_USDCx",
+    "symbol": "wUSDCx",
+    "decimals": 6,
+    "image": null,
+    "wrapper_program": "test_arc20_wusdcx.aleo"
+   },
+   "token1_info": {
+    "id": "39420ec1-cea5-42e3-b93f-1065ed47fda6",
+    "address": "185528603099650286599904399730556391637784315808306865395426676field",
+    "name": "Wrapped_ALEO",
+    "symbol": "wALEO",
+    "decimals": 6,
+    "image": null,
+    "wrapper_program": "test_arc20_wrapped_credits.aleo"
+   }
+  }
+ ],
+ "pagination": {
+  "total": 1,
+  "limit": 20,
+  "offset": 0
+ }
+}
