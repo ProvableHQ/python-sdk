@@ -286,6 +286,27 @@ def test_custom_transport_suppresses_sdk_headers() -> None:
     assert not req_headers.get("User-Agent", "").startswith("aleo-python-sdk/")
 
 
+def test_custom_transport_preserves_user_supplied_user_agent() -> None:
+    """Under a custom transport the caller owns headers — a User-Agent they set
+    is passed through untouched (not stripped as an SDK header)."""
+    import requests as _requests
+
+    captured: dict[str, Any] = {}
+
+    def my_transport(method: str, url: str, **kwargs: Any) -> _requests.Response:
+        captured["headers"] = dict(kwargs.get("headers") or {})
+        r = _requests.Response()
+        r.status_code = 200
+        r._content = b"{}"
+        return r
+
+    c = AleoNetworkClient(
+        BASE, network=NET, transport=my_transport, headers={"User-Agent": "myapp/1.0"}
+    )
+    c.get_latest_block()
+    assert captured["headers"].get("User-Agent") == "myapp/1.0"
+
+
 @resp_lib.activate
 def test_set_header() -> None:
     resp_lib.add(resp_lib.GET, f"{HOST}/block/latest", json={})

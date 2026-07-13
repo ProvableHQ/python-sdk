@@ -49,12 +49,7 @@ PROVABLE_API_HOSTS: frozenset[str] = frozenset({"api.provable.com"})
 def is_provable_host(url: str) -> bool:
     """True if *url* points at the hosted Provable API (api.provable.com)."""
     return (urlparse(url).hostname or "").lower() in PROVABLE_API_HOSTS
-SDK_HEADERS: set[str] = {
-    "x-aleo-sdk-version",
-    "x-aleo-environment",
-    "x-aleo-method",
-    "user-agent",
-}
+SDK_HEADERS: set[str] = {"x-aleo-sdk-version", "x-aleo-environment", "x-aleo-method"}
 
 
 def package_version() -> str:
@@ -70,8 +65,9 @@ def user_agent() -> str:
 
     Identifies the Python SDK (and its version) in the standard, always-logged
     header, overriding the underlying ``python-requests`` / ``python-httpx``
-    default.  Treated as an SDK header (see :data:`SDK_HEADERS`), so it is
-    suppressed when the caller supplies their own transport.
+    default.  Only injected on the default transport (see :func:`method_headers`
+    and the scanners' header builders); when the caller supplies their own
+    transport they own the headers, so the SDK does not set it.
     """
     return f"aleo-python-sdk/{package_version()}"
 
