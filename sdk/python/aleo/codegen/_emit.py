@@ -52,3 +52,42 @@ def resolve_ty(ty: Any) -> PyType:
             lambda e, n=name: f"{n}.from_decoded({e})",
         )
     raise ValueError(f"Unsupported ABI type: {ty!r}")
+
+
+def emit_struct(struct: dict[str, Any]) -> str:
+    """Emit one struct as a frozen dataclass with encode/decode methods."""
+    name = struct["path"][-1]
+    fields = struct["fields"]
+    lines: list[str] = ["@dataclass(frozen=True)", f"class {name}:"]
+    for f in fields:
+        lines.append(f"    {f['name']}: {resolve_ty(f['ty']).annotation}")
+
+    # to_plaintext — emitted as a parts list + join (readable generated code).
+    lines += ["", "    def to_plaintext(self) -> str:", "        parts = ["]
+    for f in fields:
+        enc = resolve_ty(f["ty"]).encode_expr("self." + f["name"])
+        lines.append(f"            \"{f['name']}: \" + {enc},")
+    lines += [
+        "        ]",
+        "        return \"{ \" + \", \".join(parts) + \" }\"",
+    ]
+
+    # from_decoded / from_plaintext.  Subscript expressions are precomputed
+    # outside the f-string (no backslashes in f-string expressions on 3.10).
+    kwarg_parts: list[str] = []
+    for f in fields:
+        subscript = "d['" + f["name"] + "']"
+        kwarg_parts.append(f"{f['name']}={resolve_ty(f['ty']).decode_expr(subscript)}")
+    kwargs = ", ".join(kwarg_parts)
+    lines += [
+        "",
+        "    @classmethod",
+        "    def from_decoded(cls, d: dict) -> \"" + name + "\":",
+        f"        return cls({kwargs})",
+        "",
+        "    @classmethod",
+        "    def from_plaintext(cls, text: str) -> \"" + name + "\":",
+        "        return cls.from_decoded(parse_plaintext(text))",
+        "",
+    ]
+    return "\n".join(lines) + "\n"
