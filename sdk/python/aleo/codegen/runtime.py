@@ -1,0 +1,88 @@
+"""Runtime helpers imported by aleo.codegen-generated modules.
+
+Pure Python, no PyO3 — generated modules must import cheaply and work in any
+environment where the ``aleo`` package is installed.
+
+``parse_plaintext`` parses an Aleo plaintext literal into Python values:
+structs/records become dicts (record visibility suffixes ``.private`` /
+``.public`` are stripped; ``_nonce`` is kept as a plain entry), suffixed
+integers become ``int``, booleans become ``bool``, arrays become lists, and
+field/group/scalar/address literals stay verbatim strings.
+
+The ``fmt_*`` helpers are the inverse direction: they format Python values as
+Aleo literals, validating range and shape so a bad value fails at encode time
+with a clear message instead of on-chain.
+"""
+from __future__ import annotations
+
+import re
+from typing import Any
+
+_INT_RE = re.compile(r"^(-?\d+)(u8|u16|u32|u64|u128|i8|i16|i32|i64|i128)$")
+_MODE_RE = re.compile(r"\.(private|public|constant)$")
+_ATOM_RE = re.compile(r"[^,}\]]+")
+
+
+def parse_plaintext(text: str) -> Any:
+    """Parse an Aleo plaintext literal into Python values."""
+    value, rest = _parse_value(text.strip())
+    if rest.strip():
+        raise ValueError(f"Trailing content after plaintext value: {rest!r}")
+    return value
+
+
+def _parse_value(s: str) -> tuple[Any, str]:
+    s = s.lstrip()
+    if s.startswith("{"):
+        return _parse_struct(s)
+    if s.startswith("["):
+        return _parse_array(s)
+    return _parse_atom(s)
+
+
+def _parse_struct(s: str) -> tuple[dict[str, Any], str]:
+    s = s[1:].lstrip()  # consume "{"
+    out: dict[str, Any] = {}
+    while not s.startswith("}"):
+        if not s:
+            raise ValueError("Unterminated struct in plaintext")
+        name, sep, s = s.partition(":")
+        if not sep:
+            raise ValueError(f"Expected 'name:' in struct, got {name!r}")
+        value, s = _parse_value(s)
+        out[name.strip()] = value
+        s = s.lstrip()
+        if s.startswith(","):
+            s = s[1:].lstrip()
+    return out, s[1:]
+
+
+def _parse_array(s: str) -> tuple[list[Any], str]:
+    s = s[1:].lstrip()  # consume "["
+    out: list[Any] = []
+    while not s.startswith("]"):
+        if not s:
+            raise ValueError("Unterminated array in plaintext")
+        value, s = _parse_value(s)
+        out.append(value)
+        s = s.lstrip()
+        if s.startswith(","):
+            s = s[1:].lstrip()
+    return out, s[1:]
+
+
+def _parse_atom(s: str) -> tuple[Any, str]:
+    m = _ATOM_RE.match(s)
+    if m is None:
+        raise ValueError(f"Expected a plaintext atom, got {s[:20]!r}")
+    token = _MODE_RE.sub("", m.group(0).strip())
+    rest = s[m.end():]
+    if token == "true":
+        return True, rest
+    if token == "false":
+        return False, rest
+    im = _INT_RE.match(token)
+    if im:
+        return int(im.group(1)), rest
+    # field/group/scalar literals, addresses, signatures — verbatim strings
+    return token, rest
