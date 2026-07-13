@@ -49,7 +49,12 @@ PROVABLE_API_HOSTS: frozenset[str] = frozenset({"api.provable.com"})
 def is_provable_host(url: str) -> bool:
     """True if *url* points at the hosted Provable API (api.provable.com)."""
     return (urlparse(url).hostname or "").lower() in PROVABLE_API_HOSTS
-SDK_HEADERS: set[str] = {"x-aleo-sdk-version", "x-aleo-environment", "x-aleo-method"}
+SDK_HEADERS: set[str] = {
+    "x-aleo-sdk-version",
+    "x-aleo-environment",
+    "x-aleo-method",
+    "user-agent",
+}
 
 
 def package_version() -> str:
@@ -58,6 +63,17 @@ def package_version() -> str:
         return version("aleo")
     except Exception:
         return "0.0.0"
+
+
+def user_agent() -> str:
+    """The SDK's ``User-Agent`` string, sent on every call.
+
+    Identifies the Python SDK (and its version) in the standard, always-logged
+    header, overriding the underlying ``python-requests`` / ``python-httpx``
+    default.  Treated as an SDK header (see :data:`SDK_HEADERS`), so it is
+    suppressed when the caller supplies their own transport.
+    """
+    return f"aleo-python-sdk/{package_version()}"
 
 
 def make_default_headers() -> dict[str, str]:
@@ -79,7 +95,7 @@ def method_headers(
 ) -> dict[str, str]:
     if has_custom_transport:
         return user_headers(headers)
-    return {**headers, "X-ALEO-METHOD": method}
+    return {**headers, "X-ALEO-METHOD": method, "User-Agent": user_agent()}
 
 
 def jwt_origin(host: str) -> str:

@@ -429,3 +429,48 @@ async def test_async_find_credits_records_success() -> None:
 
     result3 = await scanner3.find_credits_records([999], {})  # type: ignore[arg-type]
     assert result3 == []
+
+
+# ---------------------------------------------------------------------------
+# User-Agent header
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_async_scanner_sends_user_agent() -> None:
+    """Async scanner carries the SDK User-Agent when it owns the transport."""
+    from aleo.mainnet import Field
+    from aleo._client_common import package_version
+
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["ua"] = request.headers.get("user-agent")
+        return httpx.Response(200, json=[])
+
+    # No transport passed to __init__ (so it is NOT treated as a custom
+    # transport); swap the client for a mock one, mirroring the network-client
+    # test pattern.
+    scanner = AsyncRecordScanner(BASE_URL)
+    scanner._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    scanner._uuid = Field.from_string(GOLDEN_UUID)
+    await scanner.owned({"uuid": GOLDEN_UUID, "unspent": True})  # type: ignore[arg-type]
+
+    assert captured["ua"] == f"aleo-python-sdk/{package_version()}"
+
+
+@pytest.mark.asyncio
+async def test_async_scanner_custom_transport_suppresses_user_agent() -> None:
+    """A custom transport (passed to __init__) suppresses the SDK User-Agent."""
+    from aleo.mainnet import Field
+
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["ua"] = request.headers.get("user-agent")
+        return httpx.Response(200, json=[])
+
+    scanner = AsyncRecordScanner(BASE_URL, transport=httpx.MockTransport(handler))
+    scanner._uuid = Field.from_string(GOLDEN_UUID)
+    await scanner.owned({"uuid": GOLDEN_UUID, "unspent": True})  # type: ignore[arg-type]
+
+    assert not (captured["ua"] or "").startswith("aleo-python-sdk/")

@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 
 import requests
 
-from ._client_common import jwt_expired
+from ._client_common import jwt_expired, user_agent
 from ._scanner_common import (
     DecryptionNotEnabledError,
     OwnedFilter,
@@ -120,6 +120,11 @@ class RecordScanner:
     def _build_headers(self) -> dict[str, str]:
         """Build authentication headers, refreshing JWT if needed."""
         hdrs: dict[str, str] = {"Content-Type": "application/json"}
+        # Identify the SDK on every call — unless a custom transport owns the
+        # HTTP layer, in which case the caller controls headers.
+        sdk_ua = None if callable(self._transport) else user_agent()
+        if sdk_ua:
+            hdrs["User-Agent"] = sdk_ua
 
         # Always attach api_key header if set
         if self._api_key:
@@ -132,6 +137,8 @@ class RecordScanner:
                 # Refresh JWT
                 jwt_url = f"{self._origin}/jwts/{self.consumer_id}"
                 jwt_hdrs = {self._api_key["header"]: self._api_key["value"]}
+                if sdk_ua:
+                    jwt_hdrs["User-Agent"] = sdk_ua
                 resp = self._http("POST", jwt_url, headers=jwt_hdrs)
                 if resp.ok:
                     auth = resp.headers.get("Authorization") or resp.headers.get("authorization")

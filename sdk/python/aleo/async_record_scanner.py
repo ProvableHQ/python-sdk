@@ -6,7 +6,7 @@ import json
 from typing import Any
 from urllib.parse import urlparse
 
-from ._client_common import jwt_expired
+from ._client_common import jwt_expired, user_agent
 from ._scanner_common import (
     DecryptionNotEnabledError,
     OwnedFilter,
@@ -104,6 +104,7 @@ class AsyncRecordScanner:
         self._account: Any | None = None
 
         # Build httpx client
+        self._has_custom_transport: bool = transport is not None
         if transport is not None:
             self._client: Any = httpx.AsyncClient(transport=transport)
         else:
@@ -174,6 +175,11 @@ class AsyncRecordScanner:
     async def _build_headers(self) -> dict[str, str]:
         """Build authentication headers, refreshing JWT if needed."""
         hdrs: dict[str, str] = {"Content-Type": "application/json"}
+        # Identify the SDK on every call — unless a custom transport owns the
+        # HTTP layer, in which case the caller controls headers.
+        sdk_ua = None if self._has_custom_transport else user_agent()
+        if sdk_ua:
+            hdrs["User-Agent"] = sdk_ua
 
         if self._api_key:
             hdrs[self._api_key["header"]] = self._api_key["value"]
@@ -183,6 +189,8 @@ class AsyncRecordScanner:
             if self._api_key and self.consumer_id:
                 jwt_url = f"{self._origin}/jwts/{self.consumer_id}"
                 jwt_hdrs = {self._api_key["header"]: self._api_key["value"]}
+                if sdk_ua:
+                    jwt_hdrs["User-Agent"] = sdk_ua
                 resp = await self._client.post(jwt_url, headers=jwt_hdrs)
                 if resp.is_success:
                     auth = resp.headers.get("Authorization") or resp.headers.get("authorization")

@@ -233,6 +233,9 @@ def test_default_sdk_headers_present() -> None:
     assert "X-Aleo-SDK-Version" in req_headers
     assert "X-Aleo-environment" in req_headers
     assert req_headers["X-Aleo-environment"] == "python"
+    # The standard User-Agent identifies the SDK (overriding requests' default).
+    from aleo._client_common import package_version
+    assert req_headers["User-Agent"] == f"aleo-python-sdk/{package_version()}"
 
 
 @resp_lib.activate
@@ -242,6 +245,11 @@ def test_per_method_header() -> None:
     c.get_block(42)
     req_headers = resp_lib.calls[0].request.headers
     assert req_headers.get("X-ALEO-METHOD") == "getBlock"
+
+
+def test_user_agent_value() -> None:
+    from aleo._client_common import package_version, user_agent
+    assert user_agent() == f"aleo-python-sdk/{package_version()}"
 
 
 def test_custom_transport_callable_used_for_requests() -> None:
@@ -273,6 +281,9 @@ def test_custom_transport_suppresses_sdk_headers() -> None:
     req_headers = resp_lib.calls[0].request.headers
     assert "X-Aleo-SDK-Version" not in req_headers
     assert "X-ALEO-METHOD" not in req_headers
+    # UA is suppressed under a custom transport: the SDK does not set its own
+    # (requests' own default python-requests/... may still be present).
+    assert not req_headers.get("User-Agent", "").startswith("aleo-python-sdk/")
 
 
 @resp_lib.activate
