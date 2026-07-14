@@ -17,6 +17,9 @@
 mod authorization;
 pub use authorization::Authorization;
 
+mod deployment;
+pub use deployment::Deployment;
+
 mod dynamic_record;
 pub use dynamic_record::DynamicRecord;
 

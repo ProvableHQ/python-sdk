@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
-use crate::{programs::Transition, types::ExecutionNative, Field};
+use crate::{programs::Transition, types::ExecutionNative, Authorization, Field};
 
 use pyo3::prelude::*;
 use snarkvm::prelude::{FromBytes, ToBytes};
@@ -32,6 +32,23 @@ impl Execution {
     #[getter]
     fn execution_id(&self) -> anyhow::Result<Field> {
         self.0.to_execution_id().map(Into::into)
+    }
+
+    /// Builds an UNPROVEN execution from an authorization — for devnodes
+    /// only (they skip proof verification); real networks reject it.
+    ///
+    /// `state_root` is the node's latest global state root (`sr1…`).
+    #[staticmethod]
+    fn from_authorization_unproven(
+        authorization: &Authorization,
+        state_root: &str,
+    ) -> anyhow::Result<Self> {
+        use snarkvm::prelude::Network;
+        use std::str::FromStr;
+
+        let root = <crate::types::CurrentNetwork as Network>::StateRoot::from_str(state_root)?;
+        let native: crate::types::AuthorizationNative = authorization.clone().into();
+        ExecutionNative::from(native.transitions().values().cloned(), root, None).map(Self)
     }
 
     /// Reads in an Execution from a JSON string.

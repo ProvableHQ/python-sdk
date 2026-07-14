@@ -16,8 +16,8 @@
 
 use crate::{
     types::{CurrentAleo, ProcessNative},
-    Authorization, Execution, Fee, Field, Identifier, PrivateKey, Program, ProgramID, ProvingKey,
-    RecordPlaintext, Response, Trace, Value, VerifyingKey,
+    Address, Authorization, Deployment, Execution, Fee, Field, Identifier, PrivateKey, Program,
+    ProgramID, ProvingKey, RecordPlaintext, Response, Trace, Value, VerifyingKey,
 };
 
 use indexmap::IndexMap;
@@ -25,7 +25,7 @@ use pyo3::prelude::*;
 use rand::rngs::StdRng;
 use snarkvm::algorithms::snark::varuna::VarunaVersion;
 use snarkvm::console::network::ConsensusVersion;
-use snarkvm::synthesizer::process::{execution_cost, InclusionVersion};
+use snarkvm::synthesizer::process::{deployment_cost, execution_cost, InclusionVersion};
 
 /// The Aleo process type.
 #[pyclass]
@@ -201,5 +201,26 @@ impl Process {
     /// Returns the *minimum* cost in microcredits to publish the given execution (total cost, (storage cost, finalize cost)).
     fn execution_cost(&self, execution: &Execution) -> anyhow::Result<(u64, (u64, u64))> {
         execution_cost(&self.0, &execution.clone().into(), ConsensusVersion::V17)
+    }
+
+    /// Synthesizes a deployment for the given program (V9+ semantics: the
+    /// program checksum and owner address are set on the deployment).
+    ///
+    /// The program's imports must already be present in this process.  Key
+    /// synthesis is expensive — expect seconds to minutes for large programs.
+    fn deploy(&self, program: &Program, owner: &Address) -> anyhow::Result<Deployment> {
+        let mut deployment = self
+            .0
+            .deploy::<CurrentAleo, _>(program, &mut rand::make_rng::<StdRng>())?;
+        deployment.set_program_checksum_raw(Some(deployment.program().to_checksum()));
+        deployment.set_program_owner_raw(Some(**owner));
+        Ok(deployment.into())
+    }
+
+    /// Returns the *minimum* cost in microcredits to publish the given deployment.
+    fn deployment_cost(&self, deployment: &Deployment) -> anyhow::Result<u64> {
+        let (minimum_cost, _) =
+            deployment_cost(&self.0, deployment.as_ref(), ConsensusVersion::V17)?;
+        Ok(minimum_cost)
     }
 }

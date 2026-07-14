@@ -15,9 +15,9 @@
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
 use crate::{
-    programs::{Execution, Fee, Program, Transition},
+    programs::{Deployment, Execution, Fee, Program, Transition},
     types::TransactionNative,
-    Field, RecordCiphertext, RecordPlaintext, ViewKey,
+    Field, PrivateKey, RecordCiphertext, RecordPlaintext, ViewKey,
 };
 
 use pyo3::{
@@ -37,6 +37,22 @@ impl Transaction {
     #[staticmethod]
     fn from_execution(execution: Execution, fee: Option<Fee>) -> anyhow::Result<Self> {
         TransactionNative::from_execution(execution.into(), fee.map(Into::into)).map(Self)
+    }
+
+    /// Constructs a deployment transaction: the deployer signs program
+    /// ownership over the deployment ID, and the fee pays for publication.
+    #[staticmethod]
+    fn from_deployment(
+        private_key: &PrivateKey,
+        deployment: Deployment,
+        fee: Fee,
+    ) -> anyhow::Result<Self> {
+        use rand::rngs::StdRng;
+        use snarkvm::prelude::ProgramOwner;
+
+        let deployment_id = deployment.as_ref().to_deployment_id()?;
+        let owner = ProgramOwner::new(private_key, deployment_id, &mut rand::make_rng::<StdRng>())?;
+        TransactionNative::from_deployment(owner, deployment.into(), fee.into()).map(Self)
     }
 
     /// Parses a Transaction from a JSON string.
