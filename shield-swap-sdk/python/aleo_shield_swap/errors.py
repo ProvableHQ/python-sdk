@@ -11,7 +11,7 @@ from aleo import AleoError
 
 
 class ShieldSwapError(AleoError):
-    """Base class for all aleo-shield-swap errors."""
+    """Base class for all shield-swap-sdk errors."""
 
 
 class SwapOutputNotFinalizedError(ShieldSwapError):

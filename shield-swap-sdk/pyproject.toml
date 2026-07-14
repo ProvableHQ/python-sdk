@@ -1,7 +1,8 @@
 [project]
-name = "aleo-shield-swap"
+name = "shield-swap-sdk"
 version = "0.1.0"
 description = "Typed Python client for the shield_swap AMM on Aleo"
+readme = "README.md"
 requires-python = ">=3.10"
 dependencies = ["aleo>=0.2", "requests>=2"]
 

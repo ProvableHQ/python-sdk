@@ -1,4 +1,4 @@
-"""aleo-shield-swap — typed Python client for the shield_swap AMM on Aleo.
+"""shield-swap-sdk — typed Python client for the shield_swap AMM on Aleo.
 
 ::
 

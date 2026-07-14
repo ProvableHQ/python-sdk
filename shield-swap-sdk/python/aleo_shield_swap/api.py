@@ -159,7 +159,7 @@ class AsyncApiClient:
             except ImportError as exc:  # pragma: no cover - env-dependent
                 raise ImportError(
                     "AsyncApiClient requires httpx — install the async extra: "
-                    "pip install 'aleo-shield-swap[async]'"
+                    "pip install 'shield-swap-sdk[async]'"
                 ) from exc
             client = httpx.AsyncClient(timeout=_TIMEOUT)
         self._client = client

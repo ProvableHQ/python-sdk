@@ -30,7 +30,7 @@ try:
 except ImportError as exc:  # pragma: no cover - env-dependent
     raise ImportError(
         "The MCP server requires the mcp package — install the extra: "
-        "pip install 'aleo-shield-swap[mcp]'"
+        "pip install 'shield-swap-sdk[mcp]'"
     ) from exc
 
 from .agent import dispatch_tool, shield_swap_tools
