@@ -265,21 +265,68 @@ jobs:
           name: shield-swap-wheels-universal
           path: shield-swap-sdk/dist
 
-  release:
-    name: Release
+  # Publishing uses PyPI trusted publishing (OIDC) — no token secret. Each
+  # package has its own job because a pending publisher must be unique per
+  # (repo, workflow, environment): the job's environment name must exactly
+  # match the publisher registered on PyPI for that project. All three gate
+  # on every build job, and they release strictly in dependency order:
+  # abi -> sdk -> shield-swap (shield-swap-sdk requires aleo-sdk on PyPI).
+  release-abi:
+    name: Release aleo-contract-abi-generator
     runs-on: ubuntu-latest
     if: "startsWith(github.ref, 'refs/tags/')"
     needs: [build, sdist, build-abi, sdist-abi, build-shield-swap]
+    environment: pypi-abi
+    permissions:
+      id-token: write
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: '*wheels-*'
+          pattern: 'abi-wheels-*'
           merge-multiple: true
           path: dist
       - name: Publish to PyPI
-        uses: PyO3/maturin-action@v1
-        env:
-          MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          command: upload
-          args: --non-interactive --skip-existing dist/*
+          packages-dir: dist
+          skip-existing: true
+
+  release-sdk:
+    name: Release aleo-sdk
+    runs-on: ubuntu-latest
+    if: "startsWith(github.ref, 'refs/tags/')"
+    needs: [build, sdist, build-abi, sdist-abi, build-shield-swap, release-abi]
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: 'wheels-*'
+          merge-multiple: true
+          path: dist
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          skip-existing: true
+
+  release-shield-swap:
+    name: Release shield-swap-sdk
+    runs-on: ubuntu-latest
+    if: "startsWith(github.ref, 'refs/tags/')"
+    needs: [build, sdist, build-abi, sdist-abi, build-shield-swap, release-sdk]
+    environment: pypi-shield-swap
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: 'shield-swap-wheels-*'
+          merge-multiple: true
+          path: dist
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          skip-existing: true
