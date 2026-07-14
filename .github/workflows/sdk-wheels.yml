@@ -5,6 +5,7 @@ on:
     paths:
       - 'sdk/**'
       - 'sdk-abi/**'
+      - 'shield-swap-sdk/**'
       - '.github/workflows/sdk-wheels.yml'
       - '.github/workflows/sdk.yml'
     branches:
@@ -16,6 +17,7 @@ on:
     paths:
       - 'sdk/**'
       - 'sdk-abi/**'
+      - 'shield-swap-sdk/**'
       - '.github/workflows/sdk-wheels.yml'
       - '.github/workflows/sdk.yml'
   workflow_dispatch:
@@ -227,11 +229,47 @@ jobs:
           name: abi-wheels-sdist
           path: sdk-abi/dist
 
+  # shield-swap-sdk is pure Python (hatchling): one universal wheel + sdist.
+  # Depends on the built aleo-sdk wheel so its hermetic suite runs against
+  # the exact artifact shipping in this release, not a PyPI version.
+  build-shield-swap:
+    name: shield-swap-build
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-linux-x86_64
+          path: sdk-dist
+      - name: Build wheel + sdist
+        run: |
+          pip install build
+          python -m build shield-swap-sdk --outdir shield-swap-sdk/dist
+      - name: Test against the built aleo-sdk wheel
+        run: |
+          pip install --find-links sdk-dist aleo-sdk
+          pip install --find-links shield-swap-sdk/dist "shield-swap-sdk[async,mcp]" pytest pytest-asyncio
+          cd shield-swap-sdk && python -m pytest
+      # Prove the installed wheel imports on its own, away from the source tree.
+      - name: Smoke test wheel
+        run: |
+          cd "$RUNNER_TEMP"
+          python -c "import aleo_shield_swap; print('shield-swap-sdk', aleo_shield_swap.__version__)"
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: shield-swap-wheels-universal
+          path: shield-swap-sdk/dist
+
   release:
     name: Release
     runs-on: ubuntu-latest
     if: "startsWith(github.ref, 'refs/tags/')"
-    needs: [build, sdist, build-abi, sdist-abi]
+    needs: [build, sdist, build-abi, sdist-abi, build-shield-swap]
     steps:
       - uses: actions/download-artifact@v4
         with:
