@@ -1,6 +1,6 @@
 # Copyright (C) 2024 Provable Inc.
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Tests for the aleo-abi package."""
+"""Tests for the aleo-contract-abi-generator package."""
 
 import json
 

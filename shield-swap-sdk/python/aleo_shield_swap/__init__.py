@@ -45,7 +45,7 @@ from .agent import (
     shield_swap_tools as shield_swap_tools,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "ShieldSwap", "AsyncShieldSwap", "ApiClient", "AsyncApiClient",

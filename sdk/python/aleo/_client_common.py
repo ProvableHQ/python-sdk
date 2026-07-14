@@ -53,11 +53,16 @@ SDK_HEADERS: set[str] = {"x-aleo-sdk-version", "x-aleo-environment", "x-aleo-met
 
 
 def package_version() -> str:
-    try:
-        from importlib.metadata import version
-        return version("aleo")
-    except Exception:
-        return "0.0.0"
+    from importlib.metadata import version
+
+    # "aleo" is the pre-0.2 distribution name; keep it as a fallback so
+    # older installs still report their real version.
+    for dist in ("aleo-sdk", "aleo"):
+        try:
+            return version(dist)
+        except Exception:
+            continue
+    return "0.0.0"
 
 
 def user_agent() -> str:

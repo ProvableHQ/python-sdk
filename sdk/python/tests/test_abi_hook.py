@@ -37,7 +37,7 @@ function get_token:
 
 _HAS_ALEO_ABI = importlib.util.find_spec("aleo_abi") is not None
 requires_aleo_abi = pytest.mark.skipif(
-    not _HAS_ALEO_ABI, reason="aleo-abi not installed (pip install aleo-abi)"
+    not _HAS_ALEO_ABI, reason="aleo-contract-abi-generator not installed (pip install aleo-contract-abi-generator)"
 )
 
 
@@ -73,7 +73,7 @@ def test_generate_abi_lazy_import_error():
         from aleo import abi
         import importlib
         importlib.reload(abi)
-        with pytest.raises(ImportError, match="pip install aleo-abi"):
+        with pytest.raises(ImportError, match="pip install aleo-contract-abi-generator"):
             abi.generate_abi(SIMPLE_ALEO)
     finally:
         if saved is None:

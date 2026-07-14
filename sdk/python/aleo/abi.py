@@ -1,7 +1,7 @@
 # Copyright (C) 2024 Provable Inc.
 # SPDX-License-Identifier: GPL-3.0-or-later
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false
-"""Integration hook: ABI generation via the aleo-abi package."""
+"""Integration hook: ABI generation via the aleo-contract-abi-generator package."""
 from __future__ import annotations
 
 import json
@@ -29,15 +29,15 @@ def generate_abi(
         A dict containing the ABI for the program.
 
     Raises:
-        ImportError: If the aleo-abi package is not installed.
+        ImportError: If the aleo-contract-abi-generator package is not installed.
         ValueError: If the program name cannot be determined.
     """
     try:
         import aleo_abi as _aleo_abi  # pyright: ignore[reportMissingImports]
     except ImportError:
         raise ImportError(
-            "The aleo-abi package is required for ABI generation. "
-            "Install it with: pip install aleo-abi"
+            "The aleo-contract-abi-generator package is required for ABI generation. "
+            "Install it with: pip install aleo-contract-abi-generator"
         )
 
     # Duck-type: if it has .source and .id, treat as Program object
@@ -77,14 +77,14 @@ def check_compatibility(
         A list of violation strings. Empty list means compatible.
 
     Raises:
-        ImportError: If the aleo-abi package is not installed.
+        ImportError: If the aleo-contract-abi-generator package is not installed.
     """
     try:
         import aleo_abi as _aleo_abi  # pyright: ignore[reportMissingImports]
     except ImportError:
         raise ImportError(
-            "The aleo-abi package is required for compatibility checking. "
-            "Install it with: pip install aleo-abi"
+            "The aleo-contract-abi-generator package is required for compatibility checking. "
+            "Install it with: pip install aleo-contract-abi-generator"
         )
 
     if isinstance(candidate, dict):

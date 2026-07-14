@@ -2,7 +2,7 @@
 """ABI JSON → Python source emitter.
 
 Build-time only; the emitted code imports :mod:`aleo.codegen.runtime` for
-parsing and formatting.  The ABI shape this consumes is the ``aleo-abi``
+parsing and formatting.  The ABI shape this consumes is the ``aleo-contract-abi-generator``
 output: struct = ``{path: [Name], fields: [{name, ty}]}``, record fields add
 ``mode``, mapping = ``{name, key: ty, value: ty}``, and ``ty`` is either
 ``{"Primitive": ...}`` or ``{"Struct": {"path": [...], "program": ...}}``.

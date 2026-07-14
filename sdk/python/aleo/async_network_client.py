@@ -81,7 +81,7 @@ class AsyncAleoNetworkClient:
         except ImportError:
             raise ImportError(
                 "httpx is required for AsyncAleoNetworkClient. "
-                "Install with: pip install aleo[async]"
+                "Install with: pip install aleo-sdk[async]"
             ) from None
 
         self._network: str = network

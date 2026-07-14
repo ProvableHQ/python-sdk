@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Refetch the deployed program and regenerate the pinned ABI + bindings.
-# Run from anywhere; requires the aleo + aleo-abi packages on python3's path.
+# Run from anywhere; requires the aleo + aleo-contract-abi-generator packages on python3's path.
 set -euo pipefail
 cd "$(dirname "$0")"
 PROGRAM="${1:-shield_swap_v3.aleo}"

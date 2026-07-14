@@ -13,7 +13,7 @@ import pytest
 
 # The testnet extension (_aleolib_testnet) is only present in a two-build
 # install (see sdk/build-both.sh). Mainnet-only builds (e.g. the proving/network
-# and aleo-abi CI lanes) don't compile it, so skip this whole module cleanly
+# and aleo-contract-abi-generator CI lanes) don't compile it, so skip this whole module cleanly
 # rather than erroring at collection.
 pytest.importorskip("aleo._aleolib_testnet")
 

@@ -259,7 +259,7 @@ class Aleo:
         Raises
         ------
         ImportError
-            If the ``aleo-abi`` package is not installed.
+            If the ``aleo-contract-abi-generator`` package is not installed.
         """
         from .. import abi as _abi
         from .programs import Program as _FacadeProgram
