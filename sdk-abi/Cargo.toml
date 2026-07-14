@@ -16,7 +16,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 anyhow = "1"
-pyo3 = { version = "0.20.0", features = ["extension-module", "abi3-py37", "anyhow"] }
+pyo3 = { version = "0.28.3", features = ["extension-module", "abi3-py37", "anyhow"] }
 serde_json = "1"
 leo-abi = { git = "https://github.com/ProvableHQ/leo", rev = "ba2c01722a48f84b4d90b93aeaf8305b7c03dbce", package = "leo-abi", features = ["aleo-bytecode"] }
 leo-ast = { git = "https://github.com/ProvableHQ/leo", rev = "ba2c01722a48f84b4d90b93aeaf8305b7c03dbce", package = "leo-ast" }
