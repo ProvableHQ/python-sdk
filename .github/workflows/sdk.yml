@@ -74,7 +74,7 @@ jobs:
           python ../.github/scripts/merge_testnet_so.py dist dist-testnet
       - name: Install wheel + test deps
         run: |
-          pip install --find-links dist aleo
+          pip install --find-links dist aleo-sdk
           pip install pytest pytest-xdist httpx pynacl responses pytest-asyncio
       # Fast, offline tests; -n auto parallelizes across cores.
       - name: pytest (fast suite)
@@ -116,7 +116,7 @@ jobs:
           python ../.github/scripts/merge_testnet_so.py dist dist-testnet
       - name: Install wheel + test deps
         run: |
-          pip install --find-links dist aleo
+          pip install --find-links dist aleo-sdk
           pip install pytest httpx pynacl responses pytest-asyncio
       # The two slow tests share one module-scoped proven execution; xdist
       # would prove twice, so they run in a single worker on purpose.
@@ -129,7 +129,7 @@ jobs:
         run: python -m pytest python/tests/test_testnet.py -v
 
   test-abi:
-    name: Test (aleo-abi package)
+    name: Test (aleo-contract-abi-generator package)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -155,10 +155,10 @@ jobs:
             exit 1
           fi
       # Build the aleo two-network wheel (mainnet + testnet merged) plus the
-      # aleo-abi wheel. The testnet .so must be spliced into the aleo wheel
-      # BEFORE the aleo-abi wheel lands in dist, so the merge sees only the
+      # aleo-contract-abi-generator wheel. The testnet .so must be spliced into the aleo wheel
+      # BEFORE the aleo-contract-abi-generator wheel lands in dist, so the merge sees only the
       # aleo wheel.
-      - name: Build wheels (aleo two-network + aleo-abi)
+      - name: Build wheels (aleo two-network + aleo-contract-abi-generator)
         run: |
           pip install maturin pytest requests
           maturin build --release --features mainnet --manifest-path sdk/Cargo.toml --out dist
@@ -169,11 +169,11 @@ jobs:
           maturin build --release --manifest-path sdk-abi/Cargo.toml --out dist
       - name: Install wheels
         run: |
-          pip install --find-links dist aleo aleo-abi
+          pip install --find-links dist aleo-sdk aleo-contract-abi-generator
       # Run each suite from inside its package dir so pytest uses that
       # package's own pytest.ini (sdk-abi/pytest.ini, sdk/pytest.ini) rather
       # than walking up to the stale legacy root setup.cfg.
-      - name: pytest (aleo-abi package suite)
+      - name: pytest (aleo-contract-abi-generator package suite)
         run: |
           cd sdk-abi
           python -m pytest python/tests -v

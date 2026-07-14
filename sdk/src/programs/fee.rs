@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
-use crate::{types::FeeNative, Address, Transition};
+use crate::{types::FeeNative, Address, Authorization, Transition};
 
 use pyo3::prelude::*;
 use snarkvm::prelude::{FromBytes, ToBytes};
@@ -48,6 +48,27 @@ impl Fee {
     #[getter]
     fn transition(&self) -> Transition {
         self.0.transition().clone().into()
+    }
+
+    /// Builds an UNPROVEN fee from a fee authorization — for devnodes only
+    /// (they skip proof verification); real networks reject it.
+    #[staticmethod]
+    fn from_authorization_unproven(
+        fee_authorization: &Authorization,
+        state_root: &str,
+    ) -> anyhow::Result<Self> {
+        use snarkvm::prelude::Network;
+        use std::str::FromStr;
+
+        let root = <crate::types::CurrentNetwork as Network>::StateRoot::from_str(state_root)?;
+        let native: crate::types::AuthorizationNative = fee_authorization.clone().into();
+        let transition = native
+            .transitions()
+            .values()
+            .next()
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("Fee authorization has no transitions"))?;
+        FeeNative::from(transition, root, None).map(Self)
     }
 
     /// Reads in a Fee from a JSON string.

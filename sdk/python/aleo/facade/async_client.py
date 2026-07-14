@@ -134,7 +134,7 @@ class AsyncProgram:
         """Generate the ABI for this program (object path, sync — local).
 
         Delegates to :func:`aleo.abi.generate_abi` with the underlying network
-        Program object.  Raises :exc:`ImportError` if ``aleo-abi`` is absent.
+        Program object.  Raises :exc:`ImportError` if ``aleo-contract-abi-generator`` is absent.
         """
         from .. import abi as _abi
         return _abi.generate_abi(self._raw, self._client.network_name)
@@ -189,7 +189,7 @@ class AsyncProgramsModule:
         ProgramNotFound
             If the network has no such program (a 404 from the node).
         ImportError
-            If the ``aleo-abi`` package is not installed.
+            If the ``aleo-contract-abi-generator`` package is not installed.
         """
         async with _async_program_404(program_id):
             source: str = await self._client.network_client.get_program(
@@ -1005,7 +1005,7 @@ class AsyncAleo:
         Raises
         ------
         ImportError
-            If the ``aleo-abi`` package is not installed.
+            If the ``aleo-contract-abi-generator`` package is not installed.
         """
         from .. import abi as _abi
 

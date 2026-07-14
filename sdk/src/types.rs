@@ -27,12 +27,12 @@ use snarkvm::ledger::block::{Fee, Transaction};
 use snarkvm::ledger::query::Query;
 use snarkvm::ledger::store::helpers::memory::BlockMemory;
 use snarkvm::prelude::{
-    Address, Argument, Authorization, Boolean, Ciphertext, ComputeKey, Execution, Field, Future,
-    GraphKey, Group, Identifier, Literal, Locator, Plaintext, PrivateKey, Program, ProgramID,
-    ProvingKey, Record, Request, Response, Scalar, Signature, Transition, Value, ValueType,
-    VerifyingKey, ViewKey, I128, I16, I32, I64, I8, U128, U16, U32, U64, U8,
+    Address, Argument, Authorization, Boolean, Ciphertext, ComputeKey, Deployment, Execution,
+    Field, Future, GraphKey, Group, Identifier, Literal, Locator, Plaintext, PrivateKey, Program,
+    ProgramID, ProvingKey, Record, Request, Response, Scalar, Signature, Transition, Value,
+    ValueType, VerifyingKey, ViewKey, I128, I16, I32, I64, I8, U128, U16, U32, U64, U8,
 };
-use snarkvm::synthesizer::{Process, Trace};
+use snarkvm::synthesizer::{snark::Certificate, Process, Trace};
 
 // Network selection (feature-gated; MainnetV0 by default).
 #[cfg(not(feature = "testnet"))]
@@ -73,6 +73,8 @@ pub type U128Native = U128<CurrentNetwork>;
 // Program types
 pub type CurrentBlockMemory = BlockMemory<CurrentNetwork>;
 pub type AuthorizationNative = Authorization<CurrentNetwork>;
+pub type CertificateNative = Certificate<CurrentNetwork>;
+pub type DeploymentNative = Deployment<CurrentNetwork>;
 pub type ExecutionNative = Execution<CurrentNetwork>;
 pub type FeeNative = Fee<CurrentNetwork>;
 pub type IdentifierNative = Identifier<CurrentNetwork>;

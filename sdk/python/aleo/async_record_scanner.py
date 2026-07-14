@@ -76,7 +76,7 @@ class AsyncRecordScanner:
         except ImportError:
             raise ImportError(
                 "httpx is required for AsyncRecordScanner. "
-                "Install with: pip install aleo[async]"
+                "Install with: pip install aleo-sdk[async]"
             ) from None
 
         # Validate: URL must not end with a network suffix

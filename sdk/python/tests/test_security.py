@@ -81,7 +81,7 @@ def test_encrypt_requires_pynacl() -> None:
         import aleo.security as sec_mod
         # Force reimport
         importlib.reload(sec_mod)
-        with pytest.raises(ImportError, match="aleo\\[dps\\]"):
+        with pytest.raises(ImportError, match="aleo-sdk\\[dps\\]"):
             sec_mod.encrypt_proving_request("dGVzdA==", b"msg")
     finally:
         if original is None:

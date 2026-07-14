@@ -387,7 +387,7 @@ class Program:
         The program identifier string (e.g. ``"credits.aleo"``).
     functions:
         A :class:`ProgramFunctions` namespace built from the program's real
-        function set — works without ``aleo-abi`` installed.
+        function set — works without ``aleo-contract-abi-generator`` installed.
     """
 
     def __init__(self, client: Any, raw: Any) -> None:
@@ -446,7 +446,7 @@ class Program:
 
         Delegates to :func:`aleo.abi.generate_abi` with the underlying network
         Program object.  Lazy: raises :exc:`ImportError` (with an install hint)
-        only if the ``aleo-abi`` package is absent.
+        only if the ``aleo-contract-abi-generator`` package is absent.
         """
         from .. import abi as _abi
         return _abi.generate_abi(self._raw, self._client.network_name)
@@ -535,7 +535,7 @@ class ProgramsModule:
         ProgramNotFound
             If the network has no such program (a 404 from the node).
         ImportError
-            If the ``aleo-abi`` package is not installed.
+            If the ``aleo-contract-abi-generator`` package is not installed.
         """
         with _program_404(program_id):
             source: str = self._client.network.get_program(program_id, edition)

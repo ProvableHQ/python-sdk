@@ -21,20 +21,68 @@ fn parse_network(network: &str) -> anyhow::Result<leo_ast::NetworkName> {
     }
 }
 
+/// Generate an ABI with snarkVM validation, loading `imports` into the
+/// process first (in the given order) so import-using programs validate.
+fn generate_with_imports<N: snarkvm::prelude::Network>(
+    program_name: &str,
+    bytecode: &str,
+    imports: &[(String, String)],
+) -> anyhow::Result<leo_abi::Program> {
+    use std::str::FromStr;
+    leo_span::create_session_if_not_set_then(|_| {
+        let mut process = snarkvm::prelude::Process::<N>::load()
+            .map_err(|e| anyhow::anyhow!("failed to load snarkVM process: {e}"))?;
+        for (dep_name, dep_src) in imports {
+            let dep = snarkvm::prelude::Program::<N>::from_str(dep_src)
+                .map_err(|e| anyhow::anyhow!("import {dep_name} failed to parse: {e}"))?;
+            process
+                .lock()
+                .add_program(&dep)
+                .map_err(|e| anyhow::anyhow!("import {dep_name} failed snarkVM validation: {e}"))?;
+        }
+        let aleo = leo_disassembler::disassemble_from_str(program_name, bytecode, &mut process)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        Ok(leo_abi::aleo::generate(&aleo))
+    })
+}
+
 /// Generate an ABI JSON string from Aleo bytecode.
 ///
 /// Args:
 ///     program_name: The program name (e.g. "token.aleo").
 ///     bytecode: The Aleo bytecode string.
 ///     network: One of "mainnet", "testnet", or "canary".
+///     imports: Optional list of (program_id, bytecode) dependencies, in
+///         topological order (dependencies before dependents).  snarkVM's
+///         validation is contextual: a program whose imports are not loaded
+///         first is rejected, so import-using programs require this.
 ///
 /// Returns:
 ///     A pretty-printed JSON string representing the program ABI.
 #[pyfunction]
-fn generate_abi(program_name: &str, bytecode: &str, network: &str) -> anyhow::Result<String> {
+#[pyo3(signature = (program_name, bytecode, network, imports = None))]
+fn generate_abi(
+    program_name: &str,
+    bytecode: &str,
+    network: &str,
+    imports: Option<Vec<(String, String)>>,
+) -> anyhow::Result<String> {
     let net = parse_network(network)?;
-    let abi = leo_abi::aleo::generate_from_bytecode(program_name, bytecode, net)
-        .map_err(|e| anyhow::anyhow!("{}", e))?;
+    let abi = match imports {
+        None => leo_abi::aleo::generate_from_bytecode(program_name, bytecode, net)
+            .map_err(|e| anyhow::anyhow!("{}", e))?,
+        Some(deps) => match net {
+            leo_ast::NetworkName::MainnetV0 => {
+                generate_with_imports::<snarkvm::prelude::MainnetV0>(program_name, bytecode, &deps)?
+            }
+            leo_ast::NetworkName::TestnetV0 => {
+                generate_with_imports::<snarkvm::prelude::TestnetV0>(program_name, bytecode, &deps)?
+            }
+            leo_ast::NetworkName::CanaryV0 => {
+                generate_with_imports::<snarkvm::prelude::CanaryV0>(program_name, bytecode, &deps)?
+            }
+        },
+    };
     Ok(serde_json::to_string_pretty(&abi)?)
 }
 

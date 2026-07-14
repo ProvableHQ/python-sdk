@@ -1,6 +1,6 @@
 [project]
-name = "aleo"
-description = "A Python SDK for zero-knowledge cryptography based on Aleo"
+name = "aleo-sdk"
+description = "Python SDK for building zero-knowledge apps and DeFi on the Aleo network"
 version = "0.2.0"
 readme = "Readme.md"
 license = {file = "LICENSE.md"}

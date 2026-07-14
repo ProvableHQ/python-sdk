@@ -18,7 +18,7 @@ def encrypt_proving_request(public_key_b64: str, pr_bytes: bytes) -> str:
     except ImportError:
         raise ImportError(
             "PyNaCl is required for DPS encryption. "
-            "Install with: pip install aleo[dps]"
+            "Install with: pip install aleo-sdk[dps]"
         ) from None
 
     recipient_key = PublicKey(base64.b64decode(public_key_b64))
@@ -38,7 +38,7 @@ def encrypt_registration_request(public_key_b64: str, view_key: Any, start_block
     except ImportError:
         raise ImportError(
             "PyNaCl is required for record scanner registration. "
-            "Install with: pip install aleo[dps]"
+            "Install with: pip install aleo-sdk[dps]"
         ) from None
 
     vk_bytes = bytes(view_key.bytes())      # 32 bytes, LE
