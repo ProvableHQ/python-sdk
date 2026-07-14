@@ -9,3 +9,6 @@ tmp/
 *.pkl
 .idea/
 .claude/worktrees/
+.superpowers/
+docs/superpowers/
+.worktrees/
