@@ -53,6 +53,11 @@ class ApiClient:
     :meth:`authenticate` once with any Aleo account — the API authenticates
     by signature (challenge/verify), no funds required — or adopt a
     previously issued JWT via ``token=``/:meth:`set_token`.
+
+    Auth alone is not enough for the gated endpoints: the account must also
+    have redeemed an invite code (``POST /access/redeem``), otherwise they
+    return 403 ``redeem an invite code to unlock access``. Check with
+    ``GET /access/status``.
     """
 
     def __init__(self, base_url: str = DEFAULT_API_URL, session: Any | None = None,
@@ -92,8 +97,9 @@ class ApiClient:
         *sign* is a callable taking the challenge message string and
         returning an Aleo signature literal (``sign1…``) — e.g.::
 
-            api.authenticate(str(acct.address),
-                             lambda msg: str(aleo.account.sign(msg.encode(), acct)))
+            pk = aleo.testnet.PrivateKey.from_string(key)
+            api.authenticate(str(pk.address),
+                             lambda msg: str(pk.sign(msg.encode())))
         """
         challenge = self._post("/auth/challenge", {"address": address})
         signature = sign(challenge["data"]["message"])

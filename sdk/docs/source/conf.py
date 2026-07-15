@@ -11,7 +11,7 @@ project = 'aleo'
 copyright = '2023, AleoHQ'
 author = 'kpp'
 
-version = '0.2.0'
+version = '0.2.1'
 
 # -- General configuration
 
