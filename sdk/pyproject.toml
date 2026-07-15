@@ -34,5 +34,5 @@ module-name = "aleo._aleolib_mainnet"
 reportMissingModuleSource = false # don't report missing aleo.so for CI purposes
 # Tests are dynamically-typed pytest code and import deps (pytest) that the
 # bare pyright CI environment doesn't install — type-check the package only.
-exclude = ['docs', 'python/tests', '.env', 'target']
+exclude = ['docs', 'python/tests', 'benchmarks', '.env', 'target']
 strict = ['python/aleo']
