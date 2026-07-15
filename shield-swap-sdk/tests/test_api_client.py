@@ -108,3 +108,98 @@ def test_other_403_stays_dex_api_error():
     s = _Session([_Resp(403, {"error": "forbidden for another reason"})])
     with pytest.raises(DexApiError):
         ApiClient(base_url="https://x", session=s, token="t")._get("/route")
+
+
+def _lifecycle_client(*resps, token="t"):
+    s = _Session(list(resps))
+    return ApiClient(base_url="https://x", session=s, token=token), s
+
+
+def test_access_status():
+    api, s = _lifecycle_client(_Resp(200, {"data": {"has_access": True}}))
+    assert api.access_status().has_access is True
+    assert s.calls[0][:2] == ("GET", "https://x/access/status")
+
+
+def test_redeem_code_adopts_new_token():
+    api, s = _lifecycle_client(_Resp(200, {"data": {"code": "C", "status": "redeemed",
+                                                    "token": "fresh-jwt"}}))
+    out = api.redeem_code("C")
+    assert out.status == "redeemed"
+    assert s.calls[0][2] == {"code": "C"}
+    assert api._token == "fresh-jwt"
+
+
+def test_request_airdrop_and_poll():
+    api, s = _lifecycle_client(
+        _Resp(200, {"data": {"job_id": "j1", "status": "running"}}),
+        _Resp(200, {"data": {"status": "complete", "total": 3, "results": [
+            {"symbol": "wALEO", "wrapper_program": "waleo.aleo",
+             "amount": "1000000", "status": "accepted",
+             "tx_id": "at1...", "error": None}]}}),
+    )
+    start = api.request_airdrop("aleo1abc")
+    assert (start.job_id, start.status) == ("j1", "running")
+    assert s.calls[0][2] == {"address": "aleo1abc"}
+    job = api.get_airdrop_job("j1")
+    assert job.status == "complete" and job.results[0].symbol == "wALEO"
+    assert s.calls[1][1] == "https://x/airdrop/j1"
+
+
+def test_airdrop_429_maps_to_rate_limited():
+    from aleo_shield_swap.errors import AirdropRateLimitedError
+    api, _ = _lifecycle_client(_Resp(429, {"error": "already claimed"}))
+    with pytest.raises(AirdropRateLimitedError):
+        api.request_airdrop("aleo1abc")
+
+
+def test_create_api_token():
+    api, s = _lifecycle_client(_Resp(200, {"data": {
+        "id": "u1", "name": "stress", "token": "sk-live", "token_prefix": "sk",
+        "created_at": "2026-07-15", "expires_at": None}}))
+    out = api.create_api_token("stress", expires_in_days=30)
+    assert out.token == "sk-live"
+    assert s.calls[0][1] == "https://x/api-tokens"
+    assert s.calls[0][2] == {"name": "stress", "expires_in_days": 30}
+
+
+class _AsyncResp(_Resp):
+    pass
+
+
+class _AsyncClient:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    async def get(self, url, params=None, headers=None):
+        self.calls.append(("GET", url, params, headers))
+        return self.responses.pop(0)
+
+    async def post(self, url, json=None, headers=None):
+        self.calls.append(("POST", url, json, headers))
+        return self.responses.pop(0)
+
+
+@pytest.mark.asyncio
+async def test_async_lifecycle_endpoints():
+    from aleo_shield_swap.api import AsyncApiClient
+    from aleo_shield_swap.errors import AirdropRateLimitedError
+    c = _AsyncClient([
+        _AsyncResp(200, {"data": {"has_access": False}}),
+        _AsyncResp(200, {"data": {"code": "C", "status": "redeemed", "token": "t2"}}),
+        _AsyncResp(200, {"data": {"job_id": "j1", "status": "running"}}),
+        _AsyncResp(200, {"data": {"status": "complete", "total": 1, "results": [
+            {"symbol": "wETH", "wrapper_program": "weth.aleo",
+             "amount": "5", "status": "accepted"}]}}),
+        _AsyncResp(429, {"error": "already claimed"}),
+    ])
+    api = AsyncApiClient(base_url="https://x", client=c, token="t")
+    assert (await api.access_status()).has_access is False
+    assert (await api.redeem_code("C")).token == "t2"
+    assert api._token == "t2"
+    assert (await api.request_airdrop("aleo1a")).job_id == "j1"
+    job = await api.get_airdrop_job("j1")
+    assert job.results[0].wrapper_program == "weth.aleo"
+    with pytest.raises(AirdropRateLimitedError):
+        await api.request_airdrop("aleo1a")

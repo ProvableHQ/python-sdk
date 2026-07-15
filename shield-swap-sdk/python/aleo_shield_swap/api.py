@@ -17,6 +17,7 @@ import requests
 
 from . import _api_models as models
 from .errors import (
+    AirdropRateLimitedError,
     DexApiError,
     NotAuthenticatedError,
     NotRedeemedError,
@@ -125,6 +126,59 @@ class ApiClient:
         """Adopt a previously issued JWT."""
         self._token = token
 
+    # ── Lifecycle ──────────────────────────────────────────────────────────
+    # Registration/onboarding endpoints change over time — regen the spec
+    # (codegen/regen-openapi.sh) before touching these.
+
+    def access_status(self) -> models.AccessStatusResponse:
+        """Whether this authenticated account has redeemed an invite code."""
+        return _build(models.AccessStatusResponse,
+                      self._get("/access/status")["data"])
+
+    def redeem_code(self, code: str) -> models.AccessRedeemResponse:
+        """Redeem an invite code; adopts the fresh token the API returns."""
+        out = _build(models.AccessRedeemResponse,
+                     self._post("/access/redeem", {"code": code})["data"])
+        if out.token:
+            self._token = out.token
+        return out
+
+    def request_airdrop(self, address: str) -> models.AirdropStartResult:
+        """Start the test-token airdrop job for *address* (private records).
+
+        One claim per address per 15 minutes — raises
+        :class:`AirdropRateLimitedError` on 429.  Poll the returned
+        ``job_id`` with :meth:`get_airdrop_job`.
+        """
+        try:
+            return _build(models.AirdropStartResult,
+                          self._post("/airdrop", {"address": address})["data"])
+        except DexApiError as exc:
+            if exc.status == 429:
+                raise AirdropRateLimitedError() from exc
+            raise
+
+    def get_airdrop_job(self, job_id: str) -> models.AirdropJob:
+        """Progress of an airdrop job — ``running`` until every transfer lands."""
+        data = self._get(f"/airdrop/{job_id}")["data"]
+        job = _build(models.AirdropJob, data)
+        job.results = [_build(models.AirdropResult, r) for r in data.get("results", [])]
+        return job
+
+    def create_api_token(self, name: str,
+                         expires_in_days: "int | None" = None
+                         ) -> models.ApiTokenCreatedResponse:
+        """Mint a long-lived DEX API token (the secret is returned ONCE).
+
+        JWTs from :meth:`authenticate` expire in 24h; adopt the returned
+        ``.token`` via :meth:`set_token` (or persist it) for durable access.
+        """
+        body: dict[str, Any] = {"name": name}
+        if expires_in_days is not None:
+            body["expires_in_days"] = expires_in_days
+        return _build(models.ApiTokenCreatedResponse,
+                      self._post("/api-tokens", body)["data"])
+
     # ── Pools & tokens ─────────────────────────────────────────────────────
 
     def get_pools(self) -> list[PoolEntry]:
@@ -216,6 +270,48 @@ class AsyncApiClient:
 
     def set_token(self, token: str) -> None:
         self._token = token
+
+    # ── Lifecycle (async mirror of ApiClient) ──────────────────────────────
+
+    async def access_status(self) -> models.AccessStatusResponse:
+        """Whether this authenticated account has redeemed an invite code."""
+        return _build(models.AccessStatusResponse,
+                      (await self._get("/access/status"))["data"])
+
+    async def redeem_code(self, code: str) -> models.AccessRedeemResponse:
+        """Redeem an invite code; adopts the fresh token the API returns."""
+        out = _build(models.AccessRedeemResponse,
+                     (await self._post("/access/redeem", {"code": code}))["data"])
+        if out.token:
+            self._token = out.token
+        return out
+
+    async def request_airdrop(self, address: str) -> models.AirdropStartResult:
+        """Start the airdrop job for *address* — see :meth:`ApiClient.request_airdrop`."""
+        try:
+            return _build(models.AirdropStartResult,
+                          (await self._post("/airdrop", {"address": address}))["data"])
+        except DexApiError as exc:
+            if exc.status == 429:
+                raise AirdropRateLimitedError() from exc
+            raise
+
+    async def get_airdrop_job(self, job_id: str) -> models.AirdropJob:
+        """Progress of an airdrop job — ``running`` until every transfer lands."""
+        data = (await self._get(f"/airdrop/{job_id}"))["data"]
+        job = _build(models.AirdropJob, data)
+        job.results = [_build(models.AirdropResult, r) for r in data.get("results", [])]
+        return job
+
+    async def create_api_token(self, name: str,
+                               expires_in_days: "int | None" = None
+                               ) -> models.ApiTokenCreatedResponse:
+        """Mint a long-lived DEX API token — see :meth:`ApiClient.create_api_token`."""
+        body: dict[str, Any] = {"name": name}
+        if expires_in_days is not None:
+            body["expires_in_days"] = expires_in_days
+        return _build(models.ApiTokenCreatedResponse,
+                      (await self._post("/api-tokens", body))["data"])
 
     async def get_pools(self) -> list[PoolEntry]:
         entries = (await self._get("/pools"))["data"]
