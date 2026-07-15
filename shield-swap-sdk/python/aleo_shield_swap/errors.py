@@ -50,27 +50,33 @@ class InvalidFeeTierError(ShieldSwapError):
 class DexApiError(ShieldSwapError):
     """A DEX REST API request failed; carries the HTTP status and body."""
 
-    def __init__(self, status: int, body: str) -> None:
-        super().__init__(f"DEX API error {status}: {body[:200]}")
+    def __init__(self, status: int, body: str,
+                 message: "str | None" = None) -> None:
+        super().__init__(message or f"DEX API error {status}: {body[:200]}")
         self.status = status
         self.body = body
 
 
-class NotAuthenticatedError(ShieldSwapError):
-    """The DEX API rejected the request for lack of a valid JWT (401)."""
+class NotAuthenticatedError(DexApiError):
+    """The DEX API rejected the request for lack of a valid JWT (401).
 
-    def __init__(self) -> None:
+    Subclasses :class:`DexApiError` so existing ``except DexApiError`` /
+    ``.status`` call sites keep working."""
+
+    def __init__(self, body: str = "") -> None:
         super().__init__(
+            401, body,
             "Not authenticated with the DEX API — run dex.onboard() (or "
             "api.authenticate(address, sign) for manual control)."
         )
 
 
-class NotRedeemedError(ShieldSwapError):
+class NotRedeemedError(DexApiError):
     """Authenticated, but the account has not redeemed an invite code (403)."""
 
-    def __init__(self) -> None:
+    def __init__(self, body: str = "") -> None:
         super().__init__(
+            403, body,
             "This account has not redeemed an invite code — run "
             "dex.onboard(invite_code=...). Codes are distributed by the team."
         )
@@ -98,11 +104,13 @@ class AirdropPendingError(ShieldSwapError):
         self.job_id = job_id
 
 
-class AirdropRateLimitedError(ShieldSwapError):
-    """``POST /airdrop`` returned 429 — one claim per address per 15 minutes."""
+class AirdropRateLimitedError(DexApiError):
+    """The DEX API returned 429 — for ``POST /airdrop``, one claim per
+    address per 15 minutes."""
 
-    def __init__(self) -> None:
+    def __init__(self, body: str = "") -> None:
         super().__init__(
+            429, body,
             "Airdrop already claimed for this address in the last 15 minutes "
             "— wait and retry, or proceed if dex.get_balances() shows funds."
         )

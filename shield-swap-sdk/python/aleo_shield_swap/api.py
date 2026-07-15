@@ -24,15 +24,25 @@ from .errors import (
 )
 
 
-def _check(status_code: int, text: str) -> None:
-    """Map DEX API failures to the lifecycle taxonomy; DexApiError otherwise."""
-    if 200 <= status_code < 300:
+def _check(resp: Any) -> None:
+    """Map DEX API failures to the lifecycle taxonomy; DexApiError otherwise.
+
+    Takes the response object so the body is only decoded on failure.
+    The 403 classification keys on the API's "invite" wording — if the
+    message ever drifts, this degrades to a plain DexApiError(403), which
+    every catcher of these subclasses already handles.
+    """
+    code = resp.status_code
+    if 200 <= code < 300:
         return
-    if status_code == 401:
-        raise NotAuthenticatedError()
-    if status_code == 403 and "invite" in text.lower():
-        raise NotRedeemedError()
-    raise DexApiError(status_code, text)
+    text = resp.text
+    if code == 401:
+        raise NotAuthenticatedError(text)
+    if code == 403 and "invite" in text.lower():
+        raise NotRedeemedError(text)
+    if code == 429:
+        raise AirdropRateLimitedError(text)
+    raise DexApiError(code, text)
 
 DEFAULT_API_URL = "https://amm-api.dev.provable.com"
 _TIMEOUT = 30.0
@@ -94,13 +104,13 @@ class ApiClient:
     def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
         resp = self._session.get(f"{self.base_url}{path}", params=params,
                                  headers=self._headers(), timeout=_TIMEOUT)
-        _check(resp.status_code, resp.text)
+        _check(resp)
         return resp.json()
 
     def _post(self, path: str, body: dict[str, Any]) -> Any:
         resp = self._session.post(f"{self.base_url}{path}", json=body,
                                   headers=self._headers(), timeout=_TIMEOUT)
-        _check(resp.status_code, resp.text)
+        _check(resp)
         return resp.json()
 
     # ── Auth ───────────────────────────────────────────────────────────────
@@ -150,28 +160,25 @@ class ApiClient:
         :class:`AirdropRateLimitedError` on 429.  Poll the returned
         ``job_id`` with :meth:`get_airdrop_job`.
         """
-        try:
-            return _build(models.AirdropStartResult,
-                          self._post("/airdrop", {"address": address})["data"])
-        except DexApiError as exc:
-            if exc.status == 429:
-                raise AirdropRateLimitedError() from exc
-            raise
+        return _build(models.AirdropStartResult,
+                      self._post("/airdrop", {"address": address})["data"])
 
     def get_airdrop_job(self, job_id: str) -> models.AirdropJob:
         """Progress of an airdrop job — ``running`` until every transfer lands."""
         data = self._get(f"/airdrop/{job_id}")["data"]
-        job = _build(models.AirdropJob, data)
-        job.results = [_build(models.AirdropResult, r) for r in data.get("results", [])]
-        return job
+        results = [_build(models.AirdropResult, r)
+                   for r in (data.get("results") or [])]
+        return _build(models.AirdropJob, {**data, "results": results})
 
     def create_api_token(self, name: str,
                          expires_in_days: "int | None" = None
                          ) -> models.ApiTokenCreatedResponse:
         """Mint a long-lived DEX API token (the secret is returned ONCE).
 
-        JWTs from :meth:`authenticate` expire in 24h; adopt the returned
-        ``.token`` via :meth:`set_token` (or persist it) for durable access.
+        JWTs from :meth:`authenticate` expire in 24h; persist the returned
+        ``.token`` for durable access.  Tiering (verified live): ``ss_…``
+        tokens work on data/trading endpoints; ``/access/*`` and token
+        management still require a session JWT.
         """
         body: dict[str, Any] = {"name": name}
         if expires_in_days is not None:
@@ -250,13 +257,13 @@ class AsyncApiClient:
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
         resp = await self._client.get(f"{self.base_url}{path}", params=params,
                                       headers=self._headers())
-        _check(resp.status_code, resp.text)
+        _check(resp)
         return resp.json()
 
     async def _post(self, path: str, body: dict[str, Any]) -> Any:
         resp = await self._client.post(f"{self.base_url}{path}", json=body,
                                        headers=self._headers())
-        _check(resp.status_code, resp.text)
+        _check(resp)
         return resp.json()
 
     async def authenticate(self, address: str, sign: Any) -> str:
@@ -288,20 +295,15 @@ class AsyncApiClient:
 
     async def request_airdrop(self, address: str) -> models.AirdropStartResult:
         """Start the airdrop job for *address* — see :meth:`ApiClient.request_airdrop`."""
-        try:
-            return _build(models.AirdropStartResult,
-                          (await self._post("/airdrop", {"address": address}))["data"])
-        except DexApiError as exc:
-            if exc.status == 429:
-                raise AirdropRateLimitedError() from exc
-            raise
+        return _build(models.AirdropStartResult,
+                      (await self._post("/airdrop", {"address": address}))["data"])
 
     async def get_airdrop_job(self, job_id: str) -> models.AirdropJob:
         """Progress of an airdrop job — ``running`` until every transfer lands."""
         data = (await self._get(f"/airdrop/{job_id}"))["data"]
-        job = _build(models.AirdropJob, data)
-        job.results = [_build(models.AirdropResult, r) for r in data.get("results", [])]
-        return job
+        results = [_build(models.AirdropResult, r)
+                   for r in (data.get("results") or [])]
+        return _build(models.AirdropJob, {**data, "results": results})
 
     async def create_api_token(self, name: str,
                                expires_in_days: "int | None" = None
