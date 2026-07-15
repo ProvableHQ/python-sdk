@@ -13,7 +13,9 @@ Environment:
     ALEO_ENDPOINT     API origin (default ``https://api.provable.com`` —
                       the provider derives ``/v2`` reads, ``/prove``, and
                       ``/scanner`` from it)
-    ALEO_PRIVATE_KEY  Signer for write tools (omit for read-only)
+    ALEO_PRIVATE_KEY  Explicit signer (overrides the profile); without it
+                      the server binds ShieldSwap.from_profile() —
+                      ~/.shield-swap key material, journal, credentials
     ALEO_NETWORK      ``testnet`` (default) or ``mainnet``
     ALEO_E2E_API_KEY / ALEO_E2E_CONSUMER_ID
                       Delegated-proving + hosted-scanner credentials
@@ -81,7 +83,10 @@ def _build_dex() -> Any:
     pk = os.environ.get("ALEO_PRIVATE_KEY")
     if pk:
         aleo.default_account = aleo.account.from_private_key(pk)
-    return ShieldSwap(aleo)
+        return ShieldSwap(aleo)
+    # No explicit key: bind the local participant profile (created on first
+    # use), so MCP agents get persistence — journal, counters, credentials.
+    return ShieldSwap.from_profile()
 
 
 def main() -> None:
