@@ -1,4 +1,4 @@
-// Copyright (C) 2024 Provable Inc.
+// Copyright (C) 2019-2026 Provable Inc.
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Python bindings for leo-abi: ABI generation and compatibility checking for Aleo/Leo programs.
 
