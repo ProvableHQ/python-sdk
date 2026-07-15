@@ -25,7 +25,8 @@ use crate::{
 
 use pyo3::{
     prelude::*,
-    types::{PyDict, PyList, PyTuple},
+    types::{PyDict, PyList},
+    IntoPyObjectExt,
 };
 use snarkvm::prelude::{compute_function_id, FromBytes, Network, ToBytes};
 
@@ -131,15 +132,15 @@ impl Transition {
     }
 
     /// Returns a list of (Field, RecordCiphertext) tuples for all records in this transition.
-    fn records(&self, py: Python) -> PyObject {
+    fn records(&self, py: Python) -> Py<PyAny> {
         let list = PyList::empty(py);
         for (commitment, record) in self.0.records() {
             let f: Field = (*commitment).into();
             let rc: RecordCiphertext = record.clone().into();
-            let t = PyTuple::new(py, [f.into_py(py), rc.into_py(py)]);
+            let t = (f, rc).into_pyobject(py).unwrap();
             list.append(t).unwrap();
         }
-        list.into_py(py)
+        list.into_any().unbind()
     }
 
     /// Returns list of RecordPlaintext owned by view_key.
@@ -166,23 +167,23 @@ impl Transition {
     }
 
     /// Returns a list of dicts representing the transition inputs.
-    fn inputs(&self, py: Python) -> PyObject {
+    fn inputs(&self, py: Python) -> Py<PyAny> {
         let list = PyList::empty(py);
         for input in self.0.inputs().iter() {
             let d = input_to_py_dict(py, input);
             list.append(d).unwrap();
         }
-        list.into_py(py)
+        list.into_any().unbind()
     }
 
     /// Returns a list of dicts representing the transition outputs.
-    fn outputs(&self, py: Python) -> PyObject {
+    fn outputs(&self, py: Python) -> Py<PyAny> {
         let list = PyList::empty(py);
         for output in self.0.outputs().iter() {
             let d = output_to_py_dict(py, output);
             list.append(d).unwrap();
         }
-        list.into_py(py)
+        list.into_any().unbind()
     }
 
     /// Decrypt private inputs/outputs using the transition view key.
@@ -245,7 +246,7 @@ impl Transition {
 
 // ---------- helpers ----------
 
-fn input_to_py_dict<'py>(py: Python<'py>, input: &InputNative) -> &'py PyDict {
+fn input_to_py_dict<'py>(py: Python<'py>, input: &InputNative) -> Bound<'py, PyDict> {
     let d = PyDict::new(py);
     match input {
         InputNative::Constant(id, plaintext) => {
@@ -295,7 +296,7 @@ fn input_to_py_dict<'py>(py: Python<'py>, input: &InputNative) -> &'py PyDict {
     d
 }
 
-fn output_to_py_dict<'py>(py: Python<'py>, output: &OutputNative) -> &'py PyDict {
+fn output_to_py_dict<'py>(py: Python<'py>, output: &OutputNative) -> Bound<'py, PyDict> {
     let d = PyDict::new(py);
     match output {
         OutputNative::Constant(id, plaintext) => {
@@ -377,13 +378,17 @@ fn output_to_py_dict<'py>(py: Python<'py>, output: &OutputNative) -> &'py PyDict
     d
 }
 
-fn future_to_py_dict<'py>(py: Python<'py>, future: &FutureNative, id: &FieldNative) -> &'py PyDict {
-    let arguments: Vec<PyObject> = future
+fn future_to_py_dict<'py>(
+    py: Python<'py>,
+    future: &FutureNative,
+    id: &FieldNative,
+) -> Bound<'py, PyDict> {
+    let arguments: Vec<Py<PyAny>> = future
         .arguments()
         .iter()
         .map(|arg| argument_to_py_object(py, arg, id))
         .collect();
-    let args_list = PyList::new(py, arguments);
+    let args_list = PyList::new(py, arguments).unwrap();
     let d = PyDict::new(py);
     d.set_item("type", "future").unwrap();
     d.set_item("id", id.to_string()).unwrap();
@@ -395,19 +400,19 @@ fn future_to_py_dict<'py>(py: Python<'py>, future: &FutureNative, id: &FieldNati
     d
 }
 
-fn argument_to_py_object(py: Python<'_>, arg: &ArgumentNative, id: &FieldNative) -> PyObject {
+fn argument_to_py_object(py: Python<'_>, arg: &ArgumentNative, id: &FieldNative) -> Py<PyAny> {
     match arg {
-        ArgumentNative::Plaintext(plaintext) => plaintext.to_string().into_py(py),
-        ArgumentNative::Future(future) => future_to_py_dict(py, future, id).into_py(py),
+        ArgumentNative::Plaintext(plaintext) => plaintext.to_string().into_py_any(py).unwrap(),
+        ArgumentNative::Future(future) => future_to_py_dict(py, future, id).into_any().unbind(),
         ArgumentNative::DynamicFuture(dynamic_future) => {
             if let Ok(future) = dynamic_future.to_future() {
-                future_to_py_dict(py, &future, id).into_py(py)
+                future_to_py_dict(py, &future, id).into_any().unbind()
             } else {
                 let d = PyDict::new(py);
                 d.set_item("type", "dynamic_future").unwrap();
                 d.set_item("checksum", dynamic_future.checksum().to_string())
                     .unwrap();
-                d.into_py(py)
+                d.into_any().unbind()
             }
         }
     }

@@ -45,7 +45,7 @@ use std::{
 macro_rules! integer_unsigned {
     ($export_ty:ident, $native:ident, $machine:ident, $literal_variant:ident, $desc:literal) => {
         #[doc = concat!("The Aleo ", $desc, " type.")]
-        #[pyclass(frozen)]
+        #[pyclass(frozen, from_py_object)]
         #[derive(Copy, Clone)]
         pub struct $export_ty($native);
 
@@ -409,7 +409,7 @@ macro_rules! integer_unsigned {
 macro_rules! integer_signed {
     ($export_ty:ident, $native:ident, $machine:ident, $literal_variant:ident, $desc:literal) => {
         #[doc = concat!("The Aleo ", $desc, " type.")]
-        #[pyclass(frozen)]
+        #[pyclass(frozen, from_py_object)]
         #[derive(Copy, Clone)]
         pub struct $export_ty($native);
 

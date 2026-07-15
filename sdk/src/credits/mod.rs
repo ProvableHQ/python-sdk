@@ -17,7 +17,7 @@
 use pyo3::prelude::*;
 
 /// The type represents the amount of Aleo credits.
-#[pyclass(frozen)]
+#[pyclass(frozen, from_py_object)]
 #[derive(Clone, Copy)]
 pub struct Credits(f64);
 
@@ -41,11 +41,11 @@ impl Credits {
     }
 
     #[classattr]
-    const __hash__: Option<PyObject> = None;
+    const __hash__: Option<Py<PyAny>> = None;
 }
 
 /// The type represents the amount of Aleo microcredits.
-#[pyclass(frozen)]
+#[pyclass(frozen, from_py_object)]
 #[derive(Clone, Copy)]
 pub struct MicroCredits(u64);
 
@@ -65,7 +65,7 @@ impl MicroCredits {
     }
 
     #[classattr]
-    const __hash__: Option<PyObject> = None;
+    const __hash__: Option<Py<PyAny>> = None;
 }
 
 impl From<u64> for MicroCredits {

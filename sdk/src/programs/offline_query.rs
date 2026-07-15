@@ -16,7 +16,7 @@ type StateRoot = <CurrentNetwork as Network>::StateRoot;
 
 /// An offline query object used to insert the global state root and state paths
 /// needed to create a valid inclusion proof offline.
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct OfflineQuery {
     block_height: u32,

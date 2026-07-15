@@ -26,7 +26,7 @@ use std::{
 };
 
 /// The Aleo identifier type.
-#[pyclass(frozen)]
+#[pyclass(frozen, from_py_object)]
 #[derive(Clone, Eq, Hash, PartialEq)]
 pub struct Identifier(IdentifierNative);
 

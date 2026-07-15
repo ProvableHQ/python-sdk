@@ -35,7 +35,7 @@ const DEVNODE_CERTIFICATE: &str =
 /// certificates, and (V9+) the program checksum and owner address.
 ///
 /// Produced by `Process.deploy`; consumed by `Transaction.from_deployment`.
-#[pyclass(frozen)]
+#[pyclass(frozen, from_py_object)]
 #[derive(Clone)]
 pub struct Deployment(DeploymentNative);
 

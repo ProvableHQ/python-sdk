@@ -26,7 +26,7 @@ use std::{
 };
 
 /// The account graph key used for record scanning.
-#[pyclass(frozen)]
+#[pyclass(frozen, from_py_object)]
 #[derive(Clone)]
 pub struct GraphKey(GraphKeyNative);
 

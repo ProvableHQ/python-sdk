@@ -23,7 +23,7 @@ use snarkvm::prelude::{FromBytes, ToBytes};
 use std::str::FromStr;
 
 /// The Aleo verifying key type.
-#[pyclass(frozen)]
+#[pyclass(frozen, from_py_object)]
 #[derive(Clone)]
 pub struct VerifyingKey(VerifyingKeyNative);
 
@@ -56,7 +56,7 @@ impl VerifyingKey {
     }
 
     #[classattr]
-    const __hash__: Option<PyObject> = None;
+    const __hash__: Option<Py<PyAny>> = None;
 
     // ---- Task 7 additions ----
 

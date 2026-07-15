@@ -27,7 +27,7 @@ use std::{
 };
 
 /// The account view key used to decrypt records and ciphertext.
-#[pyclass(frozen)]
+#[pyclass(frozen, from_py_object)]
 #[derive(Clone)]
 pub struct ViewKey(ViewKeyNative);
 

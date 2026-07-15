@@ -8,7 +8,7 @@ version = "0.2.0"
 description = "Python bindings for ABI generation from Aleo bytecode"
 readme = "README.md"
 license = {text = "GPL-3.0-or-later"}
-requires-python = ">=3.7"
+requires-python = ">=3.8"
 dependencies = []
 
 [tool.maturin]

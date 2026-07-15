@@ -22,7 +22,7 @@ use crate::{
 
 use pyo3::{
     prelude::*,
-    types::{PyDict, PyList, PyTuple},
+    types::{PyDict, PyList},
 };
 use snarkvm::prelude::{FromBytes, ToBytes};
 
@@ -87,7 +87,7 @@ impl Transaction {
     }
 
     #[classattr]
-    const __hash__: Option<PyObject> = None;
+    const __hash__: Option<Py<PyAny>> = None;
 
     // ---- new methods ----
 
@@ -141,15 +141,15 @@ impl Transaction {
     }
 
     /// Returns a list of (Field, RecordCiphertext) tuples for all records in the transaction.
-    fn records(&self, py: Python) -> PyObject {
+    fn records(&self, py: Python) -> Py<PyAny> {
         let list = PyList::empty(py);
         for (commitment, record) in self.0.records() {
             let f: Field = (*commitment).into();
             let rc: RecordCiphertext = record.clone().into();
-            let t = PyTuple::new(py, [f.into_py(py), rc.into_py(py)]);
+            let t = (f, rc).into_pyobject(py).unwrap();
             list.append(t).unwrap();
         }
-        list.into_py(py)
+        list.into_any().unbind()
     }
 
     /// Returns list of RecordPlaintext owned by view_key.
@@ -193,7 +193,7 @@ impl Transaction {
     }
 
     /// Returns a list of dicts with keys "program", "function", "verifying_key", "certificate".
-    fn verifying_keys(&self, py: Python) -> PyObject {
+    fn verifying_keys(&self, py: Python) -> Py<PyAny> {
         let list = PyList::empty(py);
         if let Some(deployment) = self.0.deployment() {
             for (fname, (vk, cert)) in deployment.verifying_keys() {
@@ -206,11 +206,11 @@ impl Transaction {
                 list.append(d).unwrap();
             }
         }
-        list.into_py(py)
+        list.into_any().unbind()
     }
 
     /// Returns a Python dict summarizing the transaction (id, type, fee fields).
-    fn summary(&self, py: Python) -> PyObject {
+    fn summary(&self, py: Python) -> Py<PyAny> {
         let d = PyDict::new(py);
         d.set_item("id", self.id()).unwrap();
         d.set_item("type", self.transaction_type()).unwrap();
@@ -218,7 +218,7 @@ impl Transaction {
         d.set_item("base_fee", self.base_fee_amount()).unwrap();
         d.set_item("priority_fee", self.priority_fee_amount())
             .unwrap();
-        d.into_py(py)
+        d.into_any().unbind()
     }
 }
 

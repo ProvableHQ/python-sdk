@@ -228,7 +228,7 @@ impl std::fmt::Display for ProvingRequestInner {
 /// Use `kind()` when handling a `ProvingRequest` of unknown variant (e.g. after
 /// deserialization). Variant-specific accessors raise if called on the wrong
 /// variant.
-#[pyclass(frozen)]
+#[pyclass(frozen, from_py_object)]
 #[derive(Clone)]
 pub struct ProvingRequest(ProvingRequestInner);
 
@@ -374,7 +374,7 @@ impl ProvingRequest {
     }
 
     #[classattr]
-    const __hash__: Option<PyObject> = None;
+    const __hash__: Option<Py<PyAny>> = None;
 }
 
 impl From<ProvingRequestInner> for ProvingRequest {

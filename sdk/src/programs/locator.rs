@@ -29,7 +29,7 @@ use std::{
 };
 
 /// A locator is of the form `{program_id}/{resource}` (i.e. `howard.aleo/notify`).
-#[pyclass(frozen)]
+#[pyclass(frozen, from_py_object)]
 #[derive(Clone)]
 pub struct Locator(LocatorNative);
 

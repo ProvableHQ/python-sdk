@@ -34,7 +34,7 @@ use std::{
 };
 
 /// The Aleo private key type.
-#[pyclass(frozen)]
+#[pyclass(frozen, from_py_object)]
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub struct PrivateKey(PrivateKeyNative);
 

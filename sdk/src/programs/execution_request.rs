@@ -32,7 +32,7 @@ use std::{ops::Deref, str::FromStr};
 /// Used by the delegated proving service: a `Request` is signed client-side and
 /// the server turns it into an `Authorization` via `Process::authorize_request`
 /// before proving.
-#[pyclass(frozen)]
+#[pyclass(frozen, from_py_object)]
 #[derive(Clone)]
 pub struct ExecutionRequest(RequestNative);
 
@@ -180,7 +180,7 @@ impl ExecutionRequest {
     }
 
     #[classattr]
-    const __hash__: Option<PyObject> = None;
+    const __hash__: Option<Py<PyAny>> = None;
 }
 
 impl Deref for ExecutionRequest {

@@ -37,7 +37,7 @@ use std::{
 };
 
 /// The Aleo group type.
-#[pyclass(frozen)]
+#[pyclass(frozen, from_py_object)]
 #[derive(Clone)]
 pub struct Group(GroupNative);
 

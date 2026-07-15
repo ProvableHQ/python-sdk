@@ -35,7 +35,7 @@ use std::{
 };
 
 /// The Aleo boolean type.
-#[pyclass(frozen)]
+#[pyclass(frozen, from_py_object)]
 #[derive(Copy, Clone)]
 pub struct Boolean(BooleanNative);
 

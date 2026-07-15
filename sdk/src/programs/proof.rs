@@ -11,7 +11,7 @@ use snarkvm::prelude::{FromBytes, ToBytes};
 use std::{ops::Deref, str::FromStr};
 
 /// SNARK proof for verification of program execution.
-#[pyclass(frozen)]
+#[pyclass(frozen, from_py_object)]
 #[derive(Clone)]
 pub struct Proof(ProofNative);
 
@@ -44,7 +44,7 @@ impl Proof {
     }
 
     #[classattr]
-    const __hash__: Option<PyObject> = None;
+    const __hash__: Option<Py<PyAny>> = None;
 }
 
 impl Deref for Proof {

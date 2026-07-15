@@ -21,7 +21,7 @@ use pyo3::prelude::*;
 use snarkvm::prelude::Network as NetworkTrait;
 
 /// The type represents the current network.
-#[pyclass(frozen)]
+#[pyclass(frozen, from_py_object)]
 #[derive(Clone)]
 pub struct Network;
 

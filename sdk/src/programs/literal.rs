@@ -28,7 +28,7 @@ use std::{
 };
 
 /// The literal type represents all supported types in snarkVM.
-#[pyclass(frozen)]
+#[pyclass(frozen, from_py_object)]
 #[derive(Clone)]
 pub struct Literal(LiteralNative);
 

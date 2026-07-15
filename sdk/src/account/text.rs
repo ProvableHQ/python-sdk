@@ -23,7 +23,7 @@ use crate::{
 };
 use std::ops::Deref;
 
-use pyo3::{exceptions::PyTypeError, prelude::*};
+use pyo3::{exceptions::PyTypeError, prelude::*, IntoPyObjectExt};
 
 use snarkvm::prelude::{
     compute_function_id, FromBits, FromBytes, FromFields, Network, ToBits, ToBitsRaw, ToBytes,
@@ -139,7 +139,7 @@ impl From<CiphertextNative> for Ciphertext {
 }
 
 /// The Aleo plaintext type.
-#[pyclass(frozen)]
+#[pyclass(frozen, from_py_object)]
 #[derive(Clone)]
 pub struct Plaintext(PlaintextNative);
 
@@ -339,7 +339,7 @@ impl Plaintext {
     /// - Literal(address/field/group/scalar/signature) → str
     /// - Struct → dict[str, <recursive>]
     /// - Array → list[<recursive>]
-    pub fn to_python(&self, py: Python<'_>) -> PyObject {
+    pub fn to_python(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         plaintext_to_pyobject(&self.0, py)
     }
 
@@ -373,32 +373,35 @@ impl From<Plaintext> for PlaintextNative {
     }
 }
 
-fn plaintext_to_pyobject(p: &PlaintextNative, py: Python<'_>) -> PyObject {
+fn plaintext_to_pyobject(p: &PlaintextNative, py: Python<'_>) -> PyResult<Py<PyAny>> {
     match p {
         PlaintextNative::Literal(lit, _) => match lit {
-            LiteralNative::Boolean(b) => (**b).into_py(py),
-            LiteralNative::U8(n) => (**n).into_py(py),
-            LiteralNative::U16(n) => (**n).into_py(py),
-            LiteralNative::U32(n) => (**n).into_py(py),
-            LiteralNative::U64(n) => (**n).into_py(py),
-            LiteralNative::U128(n) => (**n).into_py(py),
-            LiteralNative::I8(n) => (**n).into_py(py),
-            LiteralNative::I16(n) => (**n).into_py(py),
-            LiteralNative::I32(n) => (**n).into_py(py),
-            LiteralNative::I64(n) => (**n).into_py(py),
-            LiteralNative::I128(n) => (**n).into_py(py),
-            _ => lit.to_string().into_py(py),
+            LiteralNative::Boolean(b) => (**b).into_py_any(py),
+            LiteralNative::U8(n) => (**n).into_py_any(py),
+            LiteralNative::U16(n) => (**n).into_py_any(py),
+            LiteralNative::U32(n) => (**n).into_py_any(py),
+            LiteralNative::U64(n) => (**n).into_py_any(py),
+            LiteralNative::U128(n) => (**n).into_py_any(py),
+            LiteralNative::I8(n) => (**n).into_py_any(py),
+            LiteralNative::I16(n) => (**n).into_py_any(py),
+            LiteralNative::I32(n) => (**n).into_py_any(py),
+            LiteralNative::I64(n) => (**n).into_py_any(py),
+            LiteralNative::I128(n) => (**n).into_py_any(py),
+            _ => lit.to_string().into_py_any(py),
         },
         PlaintextNative::Struct(members, _) => {
             let dict = pyo3::types::PyDict::new(py);
             for (k, v) in members.iter() {
-                let _ = dict.set_item(k.to_string(), plaintext_to_pyobject(v, py));
+                dict.set_item(k.to_string(), plaintext_to_pyobject(v, py)?)?;
             }
-            dict.into_py(py)
+            dict.into_py_any(py)
         }
         PlaintextNative::Array(elems, _) => {
-            let list: Vec<PyObject> = elems.iter().map(|e| plaintext_to_pyobject(e, py)).collect();
-            list.into_py(py)
+            let list: Vec<Py<PyAny>> = elems
+                .iter()
+                .map(|e| plaintext_to_pyobject(e, py))
+                .collect::<PyResult<_>>()?;
+            list.into_py_any(py)
         }
     }
 }

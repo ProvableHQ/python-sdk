@@ -283,8 +283,8 @@ class TestViewKeyParity:
         pk = PrivateKey.random()
         vk = pk.view_key
         b = vk.bytes()
-        assert isinstance(b, list)
-        assert all(isinstance(x, int) for x in b)
+        assert isinstance(b, bytes)   # pyo3 0.23+: Vec<u8> maps to bytes
+        assert len(b) == 32
 
 
 # ---------------------------------------------------------------------------
