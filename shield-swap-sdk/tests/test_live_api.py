@@ -33,14 +33,21 @@ def _authed_client(pk) -> ApiClient:
 
 
 @pytest.fixture(scope="module")
+def e2e_address() -> str:
+    key = os.environ.get("ALEO_E2E_PRIVATE_KEY")
+    if not key:
+        pytest.skip("ALEO_E2E_PRIVATE_KEY not set")
+    return str(aleo.testnet.PrivateKey.from_string(key).address)
+
+
+@pytest.fixture(scope="module")
 def funded_api() -> ApiClient:
     key = os.environ.get("ALEO_E2E_PRIVATE_KEY")
     if not key:
         pytest.skip("ALEO_E2E_PRIVATE_KEY not set")
     pk = aleo.testnet.PrivateKey.from_string(key)
     api = _authed_client(pk)
-    status = api._get("/access/status")["data"]
-    if not status.get("has_access"):
+    if not api.access_status().has_access:
         pytest.skip("e2e account has not redeemed an invite code")
     return api
 
@@ -104,3 +111,17 @@ def test_funded_balances(funded_api):
     addr = str(aleo.testnet.PrivateKey.from_string(key).address)
     balances = funded_api.get_public_balances(addr)
     assert isinstance(balances, list)
+
+
+def test_access_status_typed(funded_api):
+    assert funded_api.access_status().has_access is True
+
+
+def test_airdrop_request_is_rate_limit_tolerant(funded_api, e2e_address):
+    from aleo_shield_swap.errors import AirdropRateLimitedError
+    try:
+        start = funded_api.request_airdrop(e2e_address)
+        job = funded_api.get_airdrop_job(start.job_id)
+        assert job.status in ("running", "complete")
+    except AirdropRateLimitedError:
+        pass                             # claimed recently — contract confirmed
