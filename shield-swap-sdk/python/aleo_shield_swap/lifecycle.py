@@ -95,6 +95,9 @@ def _creds_run(ctx: _Ctx) -> str:
     if not (key and cid):
         raise CredentialsMissingError()
     ctx.profile.save_credentials(dps_api_key=key, dps_consumer_id=cid)
+    refresh = getattr(ctx.dex, "_refresh_credentials", None)
+    if refresh is not None:
+        refresh()                         # live facade picks up the new key
     return "delegated-proving credentials imported from env"
 
 

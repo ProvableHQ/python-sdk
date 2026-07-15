@@ -15,8 +15,9 @@ from __future__ import annotations
 import fcntl
 import json
 import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from .types import SwapHandle
 
@@ -35,13 +36,24 @@ class Journal:
     def __repr__(self) -> str:
         return f"Journal({str(self.path)!r})"
 
+    @contextmanager
+    def _locked(self) -> Iterator[None]:
+        """Advisory lock shared by every writer (and the counter reader)."""
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self._lock_path.open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock, fcntl.LOCK_UN)
+
     # ── Raw events ───────────────────────────────────────────────────────────
 
     def append(self, type: str, **fields: Any) -> None:
         event = {"type": type, "ts": time.time(), **fields}
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a") as f:
-            f.write(json.dumps(event) + "\n")
+        with self._locked():
+            with self.path.open("a") as f:
+                f.write(json.dumps(event) + "\n")
 
     def events(self) -> list[dict[str, Any]]:
         if not self.path.exists():
@@ -53,23 +65,23 @@ class Journal:
 
     def reserve_counters(self, n: int) -> list[int]:
         """Issue the next *n* counters, exactly once, under a file lock."""
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self._lock_path.open("a") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
-            try:
-                start = self.counter_cursor()
-                counters = list(range(start, start + n))
-                self.append("counters_reserved", counters=counters)
-                return counters
-            finally:
-                fcntl.flock(lock, fcntl.LOCK_UN)
+        if n <= 0:
+            return []
+        with self._locked():
+            start = self.counter_cursor()
+            counters = list(range(start, start + n))
+            event = {"type": "counters_reserved", "ts": time.time(),
+                     "counters": counters}
+            with self.path.open("a") as f:      # already under the lock
+                f.write(json.dumps(event) + "\n")
+            return counters
 
     def counter_cursor(self) -> int:
         """Next unissued counter (max seen in any event + 1)."""
         top = -1
         for e in self.events():
             if e["type"] == "counters_reserved":
-                top = max(top, *e["counters"])
+                top = max(top, *e.get("counters") or [-1])
             elif e["type"] in ("swap", "swap_failed"):
                 top = max(top, e.get("counter", -1))
         return top + 1
@@ -104,17 +116,26 @@ class Journal:
     # ── Derived state ────────────────────────────────────────────────────────
 
     def pending_claims(self) -> list[SwapHandle]:
-        """Swaps recorded but never claimed, as re-hydrated handles."""
-        claimed = {e["swap_id"] for e in self.events() if e["type"] == "claim"}
-        return [SwapHandle(**{k: e[k] for k in _HANDLE_FIELDS})
-                for e in self.events()
-                if e["type"] == "swap" and e["swap_id"] not in claimed]
+        """Claimable swaps: recorded with a swap id and never claimed."""
+        events = self.events()
+        claimed = {e["swap_id"] for e in events if e["type"] == "claim"}
+        out: list[SwapHandle] = []
+        for e in events:
+            if e["type"] != "swap" or not e.get("swap_id"):
+                continue                  # id-less swaps need manual recovery
+            if e["swap_id"] in claimed:
+                continue
+            if not all(k in e for k in _HANDLE_FIELDS):
+                continue                  # legacy/malformed event — skip
+            out.append(SwapHandle(**{k: e[k] for k in _HANDLE_FIELDS}))
+        return out
 
     def open_positions(self) -> list[dict[str, Any]]:
         """Positions recorded and not burned: {position_token_id, pool_key}."""
-        burned = {e["position_token_id"] for e in self.events()
+        events = self.events()
+        burned = {e["position_token_id"] for e in events
                   if e["type"] == "position_burned"}
         return [{"position_token_id": e["position_token_id"],
                  "pool_key": e["pool_key"]}
-                for e in self.events()
+                for e in events
                 if e["type"] == "position" and e["position_token_id"] not in burned]

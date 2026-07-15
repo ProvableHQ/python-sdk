@@ -16,6 +16,7 @@ from . import _generated as g
 from ._core import (
     ensure_programs,
     find_position_plaintext,
+    record_plaintext,
     generate_field_nonce,
     generate_swap_nonce,
     get_deadline,
@@ -116,6 +117,37 @@ class ShieldSwap:
             dex.api.set_token(creds["jwt"])
         return dex
 
+    def _refresh_credentials(self) -> None:
+        """Push freshly provisioned profile credentials onto the live facade.
+
+        ``from_profile()`` builds the provider before the credentials stage
+        has run, so a fresh ``onboard()`` re-applies them here instead of
+        requiring a rebuilt client.
+        """
+        creds = self.profile.credentials if self.profile else {}
+        key = creds.get("dps_api_key")
+        cid = creds.get("dps_consumer_id")
+        if not key:
+            return
+        provider = getattr(self._aleo, "provider", None)
+        if provider is not None:          # future lazy builds (e.g. scanner)
+            provider._api_key = key
+            if cid:
+                provider._consumer_id = cid
+        nc = getattr(self._aleo, "network_client", None)
+        if nc is not None:                # delegated proving
+            nc.api_key = key
+            if cid:
+                nc.consumer_id = cid
+        records = getattr(self._aleo, "records", None)
+        if records is not None:           # already-built scanner
+            try:
+                records.scanner.set_api_key(key)
+                if cid:
+                    records.scanner.consumer_id = cid
+            except Exception:
+                pass                      # scanner unreachable — built lazily later
+
     def onboard(self, invite_code: Optional[str] = None) -> OnboardReport:
         """Register this profile end to end — safe to re-run any time.
 
@@ -200,8 +232,7 @@ class ShieldSwap:
             except Exception:
                 records = []          # scanner unavailable — journal only
             for rec in records:
-                plaintext = (rec.get("record_plaintext") if isinstance(rec, dict)
-                             else getattr(rec, "record_plaintext", None))
+                plaintext = record_plaintext(rec)
                 if not plaintext:
                     continue
                 try:
@@ -210,7 +241,7 @@ class ShieldSwap:
                     continue
                 if not (isinstance(decoded, dict) and "pool" in decoded):
                     continue
-                pid = decoded.get("position_token_id")
+                pid = decoded.get("token_id")   # PositionNFT's id field
                 pid = str(pid) if pid is not None else None
                 if pid not in views:
                     views[pid] = PositionView(pid, str(decoded["pool"]), "scanned")
@@ -277,8 +308,7 @@ class ShieldSwap:
         for program in programs:
             total = 0
             for rec in provider.find(account, program=program, unspent=True):
-                plaintext = (rec.get("record_plaintext") if isinstance(rec, dict)
-                             else getattr(rec, "record_plaintext", None))
+                plaintext = record_plaintext(rec)
                 info = parse_token_record_info(plaintext) if plaintext else None
                 if info is not None:
                     total += info["amount"]

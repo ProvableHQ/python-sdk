@@ -4,8 +4,8 @@ from aleo_shield_swap import ShieldSwap
 from aleo_shield_swap.journal import Journal
 from aleo_shield_swap.profile import Profile
 
-POS_A = "{ owner: aleo1x.private, pool: 1field.private, tick_lower: -60i32.private, tick_upper: 60i32.private, liquidity: 5u128.private, position_token_id: 11field.private }"
-POS_B = "{ owner: aleo1x.private, pool: 2field.private, tick_lower: -10i32.private, tick_upper: 10i32.private, liquidity: 9u128.private, position_token_id: 22field.private }"
+POS_A = "{ owner: aleo1x.private, pool: 1field.private, tick_lower: -60i32.private, tick_upper: 60i32.private, liquidity: 5u128.private, token_id: 11field.private }"
+POS_B = "{ owner: aleo1x.private, pool: 2field.private, tick_lower: -10i32.private, tick_upper: 10i32.private, liquidity: 9u128.private, token_id: 22field.private }"
 
 
 class _Provider:

@@ -131,3 +131,17 @@ def test_stage_progress_journaled(profile, dps_env):
     names = [e["name"] for e in Journal(profile.journal_path).events()
              if e["type"] == "stage"]
     assert names == [s.name for s in REGISTRATION_STAGES]
+
+
+def test_credentials_stage_refreshes_live_facade(profile, dps_env):
+    refreshed = []
+
+    class _RefreshingDex(_StubDex):
+        def _refresh_credentials(self):
+            refreshed.append(True)
+
+    api = _StubApi(has_access=True)
+    api._token = "jwt"
+    dex = _RefreshingDex(api, {"waleo.aleo": 7}, funded_from_start=True)
+    run_onboard(dex, profile)
+    assert refreshed == [True]            # live provider picked up the new key

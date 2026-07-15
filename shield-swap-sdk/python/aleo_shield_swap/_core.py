@@ -140,8 +140,7 @@ def pick_covering_record(records: Any, *, min_amount: int,
     """
     candidates: list[tuple[int, str]] = []
     for rec in records:
-        plaintext = (rec.get("record_plaintext") if isinstance(rec, dict)
-                     else getattr(rec, "record_plaintext", None))
+        plaintext = record_plaintext(rec)
         if not plaintext:
             continue
         info = parse_token_record_info(plaintext)
@@ -153,11 +152,17 @@ def pick_covering_record(records: Any, *, min_amount: int,
     return min(candidates)[1] if candidates else None
 
 
+def record_plaintext(rec: Any) -> Optional[str]:
+    """The decrypted plaintext of a provider record, dict- or object-shaped."""
+    if isinstance(rec, dict):
+        return rec.get("record_plaintext")
+    return getattr(rec, "record_plaintext", None)
+
+
 def find_position_plaintext(records: Any, pool_key: str) -> Optional[str]:
     """First unspent PositionNFT plaintext whose ``pool`` matches, or None."""
     for rec in records:
-        plaintext = (rec.get("record_plaintext") if isinstance(rec, dict)
-                     else getattr(rec, "record_plaintext", None))
+        plaintext = record_plaintext(rec)
         if not plaintext:
             continue
         try:

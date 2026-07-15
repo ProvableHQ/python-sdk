@@ -18,8 +18,12 @@ _CREDENTIALS = "credentials.json"
 
 
 def _write_private(path: Path, payload: dict[str, Any]) -> None:
-    path.write_text(json.dumps(payload, indent=1))
-    path.chmod(0o600)
+    """Owner-only file, written atomically (no umask window, no torn reads)."""
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(json.dumps(payload, indent=1))
+    os.replace(tmp, path)
 
 
 def _generate_key(network: str) -> tuple[str, str]:
@@ -58,6 +62,7 @@ class Profile:
         home = Path(home) if home is not None else cls.default_home()
         path = home / _PROFILE
         if path.exists():
+            path.chmod(0o600)             # heal a pre-existing loose mode
             return cls(home, json.loads(path.read_text()))
         home.mkdir(parents=True, exist_ok=True)
         private_key, address = _generate_key(network)
