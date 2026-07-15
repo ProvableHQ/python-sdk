@@ -254,6 +254,8 @@ jobs:
           pip install --find-links sdk-dist aleo-sdk
           pip install --find-links shield-swap-sdk/dist "shield-swap-sdk[async,mcp]" pytest pytest-asyncio
           cd shield-swap-sdk && python -m pytest
+      - name: AGENTS.md up to date
+        run: python shield-swap-sdk/codegen/gen_context.py --check
       # Prove the installed wheel imports on its own, away from the source tree.
       - name: Smoke test wheel
         run: |
