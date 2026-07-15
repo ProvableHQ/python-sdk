@@ -45,6 +45,7 @@ from .lifecycle import run_onboard
 from .profile import Profile
 from .types import (
     ClaimResult,
+    CollectReport,
     MintResult,
     OnboardReport,
     PositionView,
@@ -536,6 +537,57 @@ class ShieldSwap:
                 self.journal.record_swap_failed(counter, str(exc))
                 failures.append({"counter": counter, "error": str(exc)})
         return SwapBatchReport(handles=handles, failures=failures)
+
+    def _position_state(self, position_token_id: str) -> Optional[g.Position]:
+        """The on-chain position entry (owed amounts), or None if absent."""
+        raw = self._mapping_value("positions", position_token_id)
+        return g.Position.from_plaintext(raw) if raw is not None else None
+
+    def collect_all(self, account: Any = None) -> CollectReport:
+        """Claim every finalized swap and collect owed fees on open positions.
+
+        Safe to run any time, from any session: works off the journal, skips
+        swaps whose finalize hasn't landed (they stay pending for next time),
+        never double-claims, and requests exactly the owed amounts the chain
+        reports.  Requires ``from_profile()``.
+        """
+        if self.journal is None:
+            raise ValueError("collect_all() needs a journal — construct with "
+                             "ShieldSwap.from_profile().")
+        acct = self._account(account)
+        claimed: list[dict] = []
+        still_pending: list[str] = []
+        for handle in self.journal.pending_claims():
+            try:
+                res = self.claim_swap_output(handle, account=acct).delegate(acct)
+            except SwapOutputNotFinalizedError:
+                still_pending.append(handle.swap_id or "")
+                continue
+            self.journal.record_claim(handle.swap_id or "", res.transaction_id,
+                                      res.amount_out)
+            claimed.append({"swap_id": handle.swap_id,
+                            "transaction_id": res.transaction_id,
+                            "amount_out": res.amount_out})
+        fees: list[dict] = []
+        for view in self.get_positions(account=acct):
+            if view.source != "journal" or not view.position_token_id:
+                continue          # scanned-only positions lack journal context
+            pos = self._position_state(view.position_token_id)
+            if pos is None or (pos.tokens_owed0 == 0 and pos.tokens_owed1 == 0):
+                continue
+            pool = self.get_pool(view.pool_key)
+            # The contract asserts requested <= owed and requested % scale == 0;
+            # owed is stored in scaled units, so request exactly owed * scale.
+            res = self.collect(
+                pool_key=view.pool_key,
+                amount0_requested=pos.tokens_owed0 * pool.scale0,
+                amount1_requested=pos.tokens_owed1 * pool.scale1,
+                account=acct,
+            ).delegate(acct)
+            fees.append({"position_token_id": view.position_token_id,
+                         "pool_key": view.pool_key,
+                         "transaction_id": res.transaction_id})
+        return CollectReport(claimed, still_pending, fees)
 
     def create_pool(
         self,

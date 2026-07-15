@@ -155,3 +155,12 @@ class SwapBatchReport:
 
     handles: list[SwapHandle]
     failures: list[dict]
+
+
+@dataclass
+class CollectReport:
+    """``collect_all()`` outcome — what was claimed, what is not ready yet."""
+
+    claimed: list[dict]
+    still_pending: list[str]
+    fees: list[dict]
