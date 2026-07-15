@@ -16,7 +16,22 @@ from typing import Any, Optional, TypeVar
 import requests
 
 from . import _api_models as models
-from .errors import DexApiError
+from .errors import (
+    DexApiError,
+    NotAuthenticatedError,
+    NotRedeemedError,
+)
+
+
+def _check(status_code: int, text: str) -> None:
+    """Map DEX API failures to the lifecycle taxonomy; DexApiError otherwise."""
+    if 200 <= status_code < 300:
+        return
+    if status_code == 401:
+        raise NotAuthenticatedError()
+    if status_code == 403 and "invite" in text.lower():
+        raise NotRedeemedError()
+    raise DexApiError(status_code, text)
 
 DEFAULT_API_URL = "https://amm-api.dev.provable.com"
 _TIMEOUT = 30.0
@@ -78,15 +93,13 @@ class ApiClient:
     def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
         resp = self._session.get(f"{self.base_url}{path}", params=params,
                                  headers=self._headers(), timeout=_TIMEOUT)
-        if not 200 <= resp.status_code < 300:
-            raise DexApiError(resp.status_code, resp.text)
+        _check(resp.status_code, resp.text)
         return resp.json()
 
     def _post(self, path: str, body: dict[str, Any]) -> Any:
         resp = self._session.post(f"{self.base_url}{path}", json=body,
                                   headers=self._headers(), timeout=_TIMEOUT)
-        if not 200 <= resp.status_code < 300:
-            raise DexApiError(resp.status_code, resp.text)
+        _check(resp.status_code, resp.text)
         return resp.json()
 
     # ── Auth ───────────────────────────────────────────────────────────────
@@ -183,15 +196,13 @@ class AsyncApiClient:
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
         resp = await self._client.get(f"{self.base_url}{path}", params=params,
                                       headers=self._headers())
-        if not 200 <= resp.status_code < 300:
-            raise DexApiError(resp.status_code, resp.text)
+        _check(resp.status_code, resp.text)
         return resp.json()
 
     async def _post(self, path: str, body: dict[str, Any]) -> Any:
         resp = await self._client.post(f"{self.base_url}{path}", json=body,
                                        headers=self._headers())
-        if not 200 <= resp.status_code < 300:
-            raise DexApiError(resp.status_code, resp.text)
+        _check(resp.status_code, resp.text)
         return resp.json()
 
     async def authenticate(self, address: str, sign: Any) -> str:

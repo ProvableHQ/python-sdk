@@ -88,3 +88,23 @@ def test_authenticate_stores_bearer_token():
     client.get_public_balances("aleo1me")
     headers = s.calls[2][3]
     assert headers["authorization"] == "Bearer jwt-abc"
+
+
+def test_401_maps_to_not_authenticated():
+    from aleo_shield_swap.errors import NotAuthenticatedError
+    s = _Session([_Resp(401, {"error": "missing token"})])
+    with pytest.raises(NotAuthenticatedError):
+        ApiClient(base_url="https://x", session=s)._get("/access/status")
+
+
+def test_403_invite_maps_to_not_redeemed():
+    from aleo_shield_swap.errors import NotRedeemedError
+    s = _Session([_Resp(403, {"error": "redeem an invite code to unlock access"})])
+    with pytest.raises(NotRedeemedError):
+        ApiClient(base_url="https://x", session=s, token="t")._get("/route")
+
+
+def test_other_403_stays_dex_api_error():
+    s = _Session([_Resp(403, {"error": "forbidden for another reason"})])
+    with pytest.raises(DexApiError):
+        ApiClient(base_url="https://x", session=s, token="t")._get("/route")

@@ -54,3 +54,66 @@ class DexApiError(ShieldSwapError):
         super().__init__(f"DEX API error {status}: {body[:200]}")
         self.status = status
         self.body = body
+
+
+class NotAuthenticatedError(ShieldSwapError):
+    """The DEX API rejected the request for lack of a valid JWT (401)."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Not authenticated with the DEX API — run dex.onboard() (or "
+            "api.authenticate(address, sign) for manual control)."
+        )
+
+
+class NotRedeemedError(ShieldSwapError):
+    """Authenticated, but the account has not redeemed an invite code (403)."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "This account has not redeemed an invite code — run "
+            "dex.onboard(invite_code=...). Codes are distributed by the team."
+        )
+
+
+class NotFundedError(ShieldSwapError):
+    """The account holds none of the token required for this action."""
+
+    def __init__(self, detail: str = "") -> None:
+        super().__init__(
+            "This account holds no usable tokens — run dex.onboard() to "
+            "request the airdrop, or check dex.get_balances()."
+            + (f" ({detail})" if detail else "")
+        )
+
+
+class AirdropPendingError(ShieldSwapError):
+    """An airdrop job was accepted but its records have not landed yet."""
+
+    def __init__(self, job_id: "str | None" = None) -> None:
+        super().__init__(
+            "Airdrop requested but not landed yet — check dex.status() and "
+            "retry shortly."
+        )
+        self.job_id = job_id
+
+
+class AirdropRateLimitedError(ShieldSwapError):
+    """``POST /airdrop`` returned 429 — one claim per address per 15 minutes."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Airdrop already claimed for this address in the last 15 minutes "
+            "— wait and retry, or proceed if dex.get_balances() shows funds."
+        )
+
+
+class CredentialsMissingError(ShieldSwapError):
+    """Delegated-proving/scanner credentials are not configured."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "No delegated-proving credentials — set ALEO_E2E_API_KEY and "
+            "ALEO_E2E_CONSUMER_ID in the environment (they are persisted to "
+            "the profile on next onboard())."
+        )

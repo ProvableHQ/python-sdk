@@ -356,7 +356,7 @@
                     "airdrop"
                 ],
                 "summary": "POST /airdrop",
-                "description": "Mints 1000 (\u00d710^decimals) of every token registered in the DB to the given\naddress by calling `<wrapper_program>::mint_public` on each. Because each\ntoken's admin is the treasury/deployer key, this never requires the treasury\nto hold a balance \u2014 it mints fresh supply.\n\nProving each token takes ~15-30s and the list can be long, so this returns\nimmediately with `status: \"running\"` + a `job_id`. The mints run in a\ndetached worker (capped concurrency, per-token timeout); poll\n`GET /airdrop/{job_id}` until `status == \"complete\"` to read per-token\nresults.\n\nRequired env: `DEPLOYER_PRIVATE_KEY` (the treasury/admin of every token;\n`AIRDROP_PRIVATE_KEY` honored as a fallback), `RPC_URLS` (first entry used).",
+                "description": "Delivers ~$10 worth each of wALEO, wUSDCx, and wETH to the given address as\nprivate records via `transfer_public_to_private`, spent from the\ntreasury's wrapped public balance in each program. One claim per\nrecipient address per 15 minutes (429 after that).\n\nProving each token takes ~15-30s, so this returns immediately with\n`status: \"running\"` + a `job_id`. The transfers run in a detached worker\n(capped concurrency, per-token timeout); poll `GET /airdrop/{job_id}` until\n`status == \"complete\"` to read per-token results.\n\nRequired env: `DEPLOYER_PRIVATE_KEY` (the treasury key whose public wrapped\nbalance funds every airdrop; `AIRDROP_PRIVATE_KEY` honored as a fallback),\n`RPC_URLS` (first entry used).",
                 "operationId": "airdrop",
                 "requestBody": {
                     "content": {
@@ -421,6 +421,16 @@
                     },
                     "422": {
                         "description": "Request body does not match schema",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Airdrop already claimed for this address in the last 15 minutes",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -3449,7 +3459,7 @@
             },
             "AirdropJob": {
                 "type": "object",
-                "description": "Status of a background airdrop job. `status` is `\"running\"` until every token\nhas resolved, then `\"complete\"`. `results` grows as each per-token mint lands,\nso a poller sees live progress (`results.len()` of `total`).",
+                "description": "Status of a background airdrop job. `status` is `\"running\"` until every token\nhas resolved, then `\"complete\"`. `results` grows as each per-token transfer\nlands, so a poller sees live progress (`results.len()` of `total`).",
                 "required": [
                     "status",
                     "total",
@@ -3490,14 +3500,13 @@
                 "properties": {
                     "address": {
                         "type": "string",
-                        "description": "Aleo address (`aleo1...`) to receive 1000 of each registered token."
+                        "description": "Aleo address (`aleo1...`) to receive the airdrop."
                     }
                 }
             },
             "AirdropResult": {
                 "type": "object",
                 "required": [
-                    "token_address",
                     "symbol",
                     "wrapper_program",
                     "amount",
@@ -3506,7 +3515,7 @@
                 "properties": {
                     "amount": {
                         "type": "string",
-                        "description": "Base-unit amount (`1000 * 10^decimals`)."
+                        "description": "Base-unit amount delivered."
                     },
                     "error": {
                         "type": [
@@ -3515,12 +3524,10 @@
                         ]
                     },
                     "status": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "`\"accepted\"` | `\"rejected\"` (broadcast but aborted at finalize, e.g.\ninsufficient treasury balance) | `\"pending\"` (broadcast, not yet\nconfirmed) | `\"failed\"` (never broadcast \u2014 see `error`)."
                     },
                     "symbol": {
-                        "type": "string"
-                    },
-                    "token_address": {
                         "type": "string"
                     },
                     "tx_id": {
@@ -4639,6 +4646,7 @@
                     "amount0",
                     "amount1",
                     "executedAt",
+                    "transactionHash",
                     "pool"
                 ],
                 "properties": {
@@ -4659,6 +4667,9 @@
                     },
                     "tradeType": {
                         "$ref": "#/components/schemas/PoolTradeTypeDoc"
+                    },
+                    "transactionHash": {
+                        "type": "string"
                     }
                 }
             },
@@ -5918,7 +5929,7 @@
         },
         {
             "name": "airdrop",
-            "description": "Faucet \u2014 sends 1000 of every registered token to a user address"
+            "description": "Faucet \u2014 sends ~$10 each of wALEO, wUSDCx, and wETH to a user address as private records, once per address per 15 min"
         },
         {
             "name": "unclaimed",
