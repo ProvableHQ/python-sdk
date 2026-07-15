@@ -26,6 +26,8 @@ from ._core import (
 )
 from .api import ApiClient, DEFAULT_API_URL
 from .derivations import (
+    BlindedIdentity,
+    blinded_identity_at,
     derive_pool_key as _derive_pool_key,
     derive_tick_key as _derive_tick_key,
     next_blinded_identity,
@@ -48,6 +50,7 @@ from .types import (
     PositionView,
     SessionStatus,
     SlotView,
+    SwapBatchReport,
     SwapHandle,
     TxResult,
 )
@@ -349,6 +352,7 @@ class ShieldSwap:
         sqrt_price_limit: Optional[int] = None,
         deadline_offset_blocks: int = 100,
         nonce: Optional[int] = None,
+        identity: Optional[BlindedIdentity] = None,
         token_in_program: Optional[str] = None,
         token_record: Optional[str] = None,
         imports: Optional[dict[str, str]] = None,
@@ -365,6 +369,8 @@ class ShieldSwap:
 
         Quote first (``dex.api.get_route``) and pass *expected_out*: without
         it a spot estimate is used, which ignores fees and price impact.
+        Pass *identity* (from journal-reserved counters) to skip the
+        on-chain probe — required for concurrent swaps.
         """
         acct = self._account(account)
         pool = self.get_pool(pool_key)
@@ -376,7 +382,7 @@ class ShieldSwap:
         )
         deadline = get_deadline(self._aleo, deadline_offset_blocks)
         swap_nonce = nonce if nonce is not None else generate_swap_nonce()
-        identity = next_blinded_identity(self._aleo, acct, self.program)
+        identity = identity or next_blinded_identity(self._aleo, acct, self.program)
 
         record = token_record
         if record is None:
@@ -492,6 +498,44 @@ class ShieldSwap:
         )
 
     # ── Liquidity ────────────────────────────────────────────────────────────
+
+    def swap_many(
+        self,
+        *,
+        pool_key: str,
+        token_in_id: str,
+        amount_in: int,
+        count: int,
+        slippage_bps: int = 50,
+        account: Any = None,
+    ) -> SwapBatchReport:
+        """*count* private swaps of *amount_in* each, with reserved counters.
+
+        Counters come from the journal (no probe races); every handle is
+        journaled before the next swap fires, so a crash mid-batch loses
+        nothing — ``collect_all()`` later claims whatever landed.  A failed
+        swap burns its counter and the batch continues; failures are
+        reported, not raised.  Requires ``from_profile()``.
+        """
+        if self.journal is None:
+            raise ValueError("swap_many() needs a journal — construct with "
+                             "ShieldSwap.from_profile().")
+        acct = self._account(account)
+        counters = self.journal.reserve_counters(count)
+        handles: list[SwapHandle] = []
+        failures: list[dict] = []
+        for counter in counters:
+            ident = blinded_identity_at(self._aleo, acct, self.program, counter)
+            try:
+                handle = self.swap(pool_key=pool_key, token_in_id=token_in_id,
+                                   amount_in=amount_in, slippage_bps=slippage_bps,
+                                   identity=ident, account=acct).delegate(acct)
+                self.journal.record_swap(handle, counter)
+                handles.append(handle)
+            except Exception as exc:                  # journal + continue
+                self.journal.record_swap_failed(counter, str(exc))
+                failures.append({"counter": counter, "error": str(exc)})
+        return SwapBatchReport(handles=handles, failures=failures)
 
     def create_pool(
         self,

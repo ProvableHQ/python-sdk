@@ -177,3 +177,23 @@ def next_blinded_identity(
         f"No unused blinded address in counters [{start_counter}, "
         f"{start_counter + max_scan}) for {program} — wrong program or scan range?"
     )
+
+
+def blinded_identity_at(
+    aleo: Any,
+    account: Any,
+    program: str,
+    counter: int,
+) -> BlindedIdentity:
+    """The identity at an exact *counter* — no on-chain probing.
+
+    Use with journal-reserved counters for concurrent swaps;
+    :func:`next_blinded_identity` (probe-based) remains the recovery path
+    when no journal exists.
+    """
+    network = aleo.network_name
+    scalar = str(account.view_key.to_scalar())
+    signer = str(account.address)
+    bf = derive_blinding_factor(scalar, counter, program, network=network)
+    ba = derive_blinded_address(bf, signer, program, network=network)
+    return BlindedIdentity(counter, bf, ba)

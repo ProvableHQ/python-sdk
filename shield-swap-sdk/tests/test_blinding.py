@@ -90,3 +90,28 @@ def test_next_blinded_identity_max_scan():
     used = {VECTORS[0][2], VECTORS[1][2]}
     with pytest.raises(ValueError, match="No unused blinded address"):
         next_blinded_identity(_StubAleo(used=used), _StubAccount(), max_scan=2)
+
+
+def test_blinded_identity_at_exact_counter_no_probe():
+    from aleo_shield_swap.derivations import blinded_identity_at
+
+    class _VK:
+        def to_scalar(self):
+            return VIEW_KEY_SCALAR
+
+    class _Acct:
+        view_key = _VK()
+        address = SIGNER
+
+    class _Aleo:
+        network_name = "testnet"
+
+        @property
+        def programs(self):          # any chain probe is a bug
+            raise AssertionError("blinded_identity_at must not touch the chain")
+
+    for counter, bf, ba in VECTORS:
+        ident = blinded_identity_at(_Aleo(), _Acct(), "shield_swap_v3.aleo",
+                                    counter)
+        assert (ident.counter, ident.blinding_factor,
+                ident.blinded_address) == (counter, bf, ba)

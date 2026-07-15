@@ -147,3 +147,11 @@ class SessionStatus:
     pending_claim_ids: list[str]
     open_positions: list[PositionView]
     counter_cursor: int
+
+
+@dataclass
+class SwapBatchReport:
+    """``swap_many()`` outcome — journaled handles plus per-counter failures."""
+
+    handles: list[SwapHandle]
+    failures: list[dict]
