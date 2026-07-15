@@ -31,7 +31,7 @@ if ! command -v maturin >/dev/null 2>&1; then
 fi
 
 echo "==> [1/2] mainnet: maturin develop --features mainnet"
-maturin develop --features mainnet
+maturin develop --features mainnet "$@"
 
 echo "==> [2/2] testnet: build wheel with module-name override, extract .so"
 WORK="$(mktemp -d)"
@@ -58,7 +58,7 @@ s = s.replace('module-name = "aleo._aleolib_mainnet"',
 open(p, "w").write(s)
 PY
 
-maturin build --no-default-features --features testnet --out "$WORK/dist"
+maturin build --no-default-features --features testnet --out "$WORK/dist" "$@"
 
 restore_pyproject
 

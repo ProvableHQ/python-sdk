@@ -32,3 +32,16 @@ sha2 = "0.10"
 snarkvm = { git = "https://github.com/ProvableHQ/snarkVM.git", tag = "v4.8.1", default-features = false, features = [
     "console", "circuit", "synthesizer", "ledger", "utilities", "algorithms", "parameters",
 ] }
+
+# Mirror snarkvm's profiles: crypto is unusable unoptimized, so dev builds
+# get opt-level 3 too (profiles apply from the root crate only — snarkvm's
+# own settings are ignored when it builds as a dependency).
+[profile.release]
+opt-level = 3
+lto = "thin"
+incremental = true
+
+[profile.dev]
+opt-level = 3
+lto = "off"
+incremental = true
