@@ -35,7 +35,7 @@ use std::{
 };
 
 /// Private key encrypted into ciphertext using a secret.
-#[pyclass(frozen)]
+#[pyclass(frozen, from_py_object)]
 #[derive(Clone)]
 pub struct PrivateKeyCiphertext(CiphertextNative);
 

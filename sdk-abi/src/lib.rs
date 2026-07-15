@@ -109,7 +109,7 @@ fn check_compatibility(
 }
 
 #[pymodule]
-fn _aleo_abi(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
+fn _aleo_abi(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(generate_abi, m)?)?;
     m.add_function(wrap_pyfunction!(check_compatibility, m)?)?;
     Ok(())

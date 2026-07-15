@@ -99,7 +99,7 @@ impl From<RecordCiphertextNative> for RecordCiphertext {
 }
 
 /// A value(plaintext) stored in program record.
-#[pyclass(frozen)]
+#[pyclass(frozen, from_py_object)]
 #[derive(Clone)]
 pub struct RecordPlaintext(RecordPlaintextNative);
 

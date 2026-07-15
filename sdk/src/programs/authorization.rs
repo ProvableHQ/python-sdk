@@ -24,7 +24,7 @@ use pyo3::prelude::*;
 use snarkvm::prelude::{FromBytes, ToBytes};
 
 /// The Aleo authorization type.
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone)]
 pub struct Authorization(AuthorizationNative);
 

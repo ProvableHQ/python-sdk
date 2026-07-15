@@ -35,7 +35,7 @@ use std::{
 };
 
 /// The Aleo field type.
-#[pyclass(frozen)]
+#[pyclass(frozen, from_py_object)]
 #[derive(Clone)]
 pub struct Field(FieldNative);
 

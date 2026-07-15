@@ -38,7 +38,7 @@ fn make_metadata(
 }
 
 /// Metadata for an Aleo credits function's proving and verifying keys.
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone)]
 pub struct Metadata {
     #[pyo3(get)]

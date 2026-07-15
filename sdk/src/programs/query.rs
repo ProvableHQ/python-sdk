@@ -19,7 +19,7 @@ use crate::types::QueryNative;
 use pyo3::prelude::*;
 
 /// The Aleo query type.
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone)]
 pub struct Query(QueryNative);
 
@@ -32,7 +32,7 @@ impl Query {
     }
 
     #[classattr]
-    const __hash__: Option<PyObject> = None;
+    const __hash__: Option<Py<PyAny>> = None;
 }
 
 impl From<QueryNative> for Query {

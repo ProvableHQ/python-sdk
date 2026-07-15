@@ -39,7 +39,7 @@ use std::{
 };
 
 /// The Aleo scalar type.
-#[pyclass(frozen)]
+#[pyclass(frozen, from_py_object)]
 #[derive(Clone)]
 pub struct Scalar(ScalarNative);
 

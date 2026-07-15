@@ -25,7 +25,7 @@ use pyo3::prelude::*;
 use std::str::FromStr;
 
 /// The Aleo value type to interact with a call to an Aleo program.
-#[pyclass(frozen)]
+#[pyclass(frozen, from_py_object)]
 #[derive(Clone)]
 pub struct Value(ValueNative);
 
@@ -133,7 +133,7 @@ impl Value {
     }
 
     #[classattr]
-    const __hash__: Option<PyObject> = None;
+    const __hash__: Option<Py<PyAny>> = None;
 }
 
 impl From<ValueNative> for Value {

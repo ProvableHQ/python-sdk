@@ -236,6 +236,6 @@ class TestBytesRoundTrips:
     def test_authorization_bytes_round_trip(self):
         auth = self._make_auth()
         raw = auth.bytes()
-        assert isinstance(raw, list)
-        auth2 = Authorization.from_bytes(bytes(raw))
+        assert isinstance(raw, bytes)  # pyo3 0.23+: Vec<u8> maps to bytes
+        auth2 = Authorization.from_bytes(raw)
         assert auth.to_json() == auth2.to_json()

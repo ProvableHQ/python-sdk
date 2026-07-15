@@ -38,7 +38,7 @@ use programs::*;
 /// Python developers with zk (zero-knowledge) programming capabilities
 /// via the usage of Aleo's zkSnarks.
 /// Registers all classes into the module (shared by both network builds).
-fn register(_py: Python, m: &PyModule) -> PyResult<()> {
+fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Account>()?;
     m.add_class::<Address>()?;
     m.add_class::<Authorization>()?;
@@ -107,13 +107,13 @@ fn register(_py: Python, m: &PyModule) -> PyResult<()> {
 #[cfg(not(feature = "testnet"))]
 #[pymodule]
 #[pyo3(name = "_aleolib_mainnet")]
-fn aleolib_mainnet(py: Python, m: &PyModule) -> PyResult<()> {
-    register(py, m)
+fn aleolib_mainnet(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    register(m)
 }
 
 #[cfg(feature = "testnet")]
 #[pymodule]
 #[pyo3(name = "_aleolib_testnet")]
-fn aleolib_testnet(py: Python, m: &PyModule) -> PyResult<()> {
-    register(py, m)
+fn aleolib_testnet(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    register(m)
 }

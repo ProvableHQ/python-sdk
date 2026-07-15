@@ -12,7 +12,7 @@ use std::{ops::Deref, str::FromStr};
 
 /// A fixed-size representation of an Aleo record that stores the Merkle root
 /// of the record data rather than the full data.
-#[pyclass(frozen)]
+#[pyclass(frozen, from_py_object)]
 #[derive(Clone)]
 pub struct DynamicRecord(DynamicRecordNative);
 
@@ -92,7 +92,7 @@ impl DynamicRecord {
     }
 
     #[classattr]
-    const __hash__: Option<PyObject> = None;
+    const __hash__: Option<Py<PyAny>> = None;
 }
 
 impl Deref for DynamicRecord {

@@ -23,6 +23,7 @@ use crate::{
 use pyo3::{
     prelude::*,
     types::{PyDict, PyList},
+    IntoPyObjectExt,
 };
 use snarkvm::prelude::{EntryType, PlaintextType, ValueType};
 
@@ -88,7 +89,7 @@ impl Program {
     }
 
     #[classattr]
-    const __hash__: Option<PyObject> = None;
+    const __hash__: Option<Py<PyAny>> = None;
 
     /// Returns true if the program contains a function with the given name.
     fn has_function(&self, function_name: &str) -> bool {
@@ -100,7 +101,7 @@ impl Program {
         &self,
         py: Python<'py>,
         function_name: &str,
-    ) -> anyhow::Result<PyObject> {
+    ) -> anyhow::Result<Py<PyAny>> {
         let id = IdentifierNative::from_str(function_name)?;
         let function = self
             .0
@@ -159,11 +160,11 @@ impl Program {
                 }
             }
         }
-        Ok(list.into_py(py))
+        Ok(list.into_py_any(py)?)
     }
 
     /// Returns a list of dicts describing each mapping in the program.
-    fn get_mappings<'py>(&self, py: Python<'py>) -> anyhow::Result<PyObject> {
+    fn get_mappings<'py>(&self, py: Python<'py>) -> anyhow::Result<Py<PyAny>> {
         let list = PyList::empty(py);
         for (name, mapping) in self.0.mappings().iter() {
             let d = PyDict::new(py);
@@ -172,7 +173,7 @@ impl Program {
             d.set_item("value_type", mapping.value().plaintext_type().to_string())?;
             list.append(d)?;
         }
-        Ok(list.into_py(py))
+        Ok(list.into_py_any(py)?)
     }
 
     /// Returns a dict describing the members of the given record type.
@@ -180,9 +181,9 @@ impl Program {
         &self,
         py: Python<'py>,
         record_name: &str,
-    ) -> anyhow::Result<PyObject> {
+    ) -> anyhow::Result<Py<PyAny>> {
         let d = record_members_dict(py, &self.0, record_name)?;
-        Ok(d.into_py(py))
+        Ok(d.into_py_any(py)?)
     }
 
     /// Returns a list of dicts describing the members of the given struct type.
@@ -190,9 +191,9 @@ impl Program {
         &self,
         py: Python<'py>,
         struct_name: &str,
-    ) -> anyhow::Result<PyObject> {
+    ) -> anyhow::Result<Py<PyAny>> {
         let list = struct_members_list(py, &self.0, struct_name)?;
-        Ok(list.into_py(py))
+        Ok(list.into_py_any(py)?)
     }
 
     /// Returns the address corresponding to this program's ID.
@@ -225,7 +226,7 @@ fn plaintext_input_to_dict<'py>(
     plaintext: &PlaintextType<CurrentNetwork>,
     visibility: Option<&str>,
     name: Option<&str>,
-) -> anyhow::Result<&'py PyDict> {
+) -> anyhow::Result<Bound<'py, PyDict>> {
     let d = PyDict::new(py);
     match plaintext {
         PlaintextType::Literal(lit) => {
@@ -277,7 +278,7 @@ fn record_members_dict<'py>(
     py: Python<'py>,
     program: &ProgramNative,
     record_name: &str,
-) -> anyhow::Result<&'py PyDict> {
+) -> anyhow::Result<Bound<'py, PyDict>> {
     let id = IdentifierNative::from_str(record_name)?;
     let record_type = program
         .get_record(&id)
@@ -311,7 +312,7 @@ fn struct_members_list<'py>(
     py: Python<'py>,
     program: &ProgramNative,
     struct_name: &str,
-) -> anyhow::Result<&'py PyList> {
+) -> anyhow::Result<Bound<'py, PyList>> {
     let id = IdentifierNative::from_str(struct_name)?;
     let struct_type = program
         .get_struct(&id)

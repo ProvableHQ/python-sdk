@@ -92,14 +92,14 @@ class TestPlaintextParity:
     def test_to_bytes_raw_le(self):
         p = Plaintext.from_string(PLAINTEXT_LITERAL)
         raw = p.to_bytes_raw_le()
-        assert isinstance(raw, list)
-        assert all(isinstance(x, int) for x in raw)
+        assert isinstance(raw, bytes)  # pyo3 0.23+: Vec<u8> maps to bytes
+        assert len(raw) > 0
 
     def test_to_bytes_raw_be(self):
         p = Plaintext.from_string(PLAINTEXT_LITERAL)
         raw = p.to_bytes_raw_be()
-        assert isinstance(raw, list)
-        assert all(isinstance(x, int) for x in raw)
+        assert isinstance(raw, bytes)  # pyo3 0.23+: Vec<u8> maps to bytes
+        assert len(raw) > 0
 
     def test_to_fields_roundtrip(self):
         p = Plaintext.from_string(STRUCT)
