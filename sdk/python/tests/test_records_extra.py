@@ -1,4 +1,4 @@
-# Copyright (C) 2019-2023 Aleo Systems Inc.
+# Copyright (C) 2019-2026 Provable Inc.
 # This file is part of the Aleo SDK library.
 # Tests for W4a: record-scanning parity (GraphKey, commitments, tags, RVK, arithmetic).
 # Source notes: github.com/ProvableHQ/sdk@543b41e wasm/src/...

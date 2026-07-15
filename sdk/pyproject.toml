@@ -1,7 +1,7 @@
 [project]
 name = "aleo-sdk"
 description = "Python SDK for building zero-knowledge apps and DeFi on the Aleo network"
-version = "0.2.0"
+version = "0.2.1"
 readme = "Readme.md"
 license = {file = "LICENSE.md"}
 authors = [

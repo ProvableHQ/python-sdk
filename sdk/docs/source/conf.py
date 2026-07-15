@@ -8,10 +8,10 @@ import aleo
 # -- Project information
 
 project = 'aleo'
-copyright = '2023, AleoHQ'
+copyright = '2019-2026, Provable Inc.'
 author = 'kpp'
 
-version = '0.2.0'
+version = '0.2.1'
 
 # -- General configuration
 

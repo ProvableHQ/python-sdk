@@ -1,11 +1,11 @@
-# Copyright (C) 2024 Provable Inc.
+# Copyright (C) 2019-2026 Provable Inc.
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 [workspace]  # Prevent parent workspace capture
 
 [package]
 name = "aleo-abi"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 license = "GPL-3.0-or-later"
 description = "Python bindings for ABI generation from Aleo bytecode (via Leo's leo-abi crate)"

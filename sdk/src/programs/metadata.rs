@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2023 Aleo Systems Inc.
+// Copyright (C) 2019-2026 Provable Inc.
 // This file is part of the Aleo SDK library.
 //
 // Licensed under GPL-3.0-or-later.
