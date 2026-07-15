@@ -124,3 +124,26 @@ class OnboardReport:
     address: str
     outcomes: list[StageOutcome]
     funded: bool
+
+
+@dataclass
+class PositionView:
+    """An open position: journaled, or discovered by scanning records."""
+
+    position_token_id: Optional[str]
+    pool_key: str
+    source: str                     # "journal" | "scanned"
+
+
+@dataclass
+class SessionStatus:
+    """Everything an agent needs to re-orient in one call."""
+
+    address: str
+    network: str
+    authenticated: bool
+    has_access: Optional[bool]      # None when not authenticated / unreachable
+    balances: dict
+    pending_claim_ids: list[str]
+    open_positions: list[PositionView]
+    counter_cursor: int

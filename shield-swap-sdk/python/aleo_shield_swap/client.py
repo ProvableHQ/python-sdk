@@ -35,6 +35,7 @@ from .errors import (
     InvalidFeeTierError,
     PoolNotFoundError,
     PoolNotInitializedError,
+    ShieldSwapError,
     SwapOutputNotFinalizedError,
 )
 from .journal import Journal
@@ -44,6 +45,8 @@ from .types import (
     ClaimResult,
     MintResult,
     OnboardReport,
+    PositionView,
+    SessionStatus,
     SlotView,
     SwapHandle,
     TxResult,
@@ -169,6 +172,86 @@ class ShieldSwap:
     def is_pool_initialized(self, pool_key: str) -> bool:
         raw = self._mapping_value("initialized_pools", pool_key)
         return raw is not None and "true" in raw
+
+    # ── Discovery ────────────────────────────────────────────────────────────
+
+    def get_positions(self, account: Any = None) -> list[PositionView]:
+        """Every open position — journaled ones plus a record scan.
+
+        The scan catches positions the journal never saw (account used from
+        another machine, journal lost); it needs a registered record
+        provider and is skipped silently without one.
+        """
+        views: dict[Optional[str], PositionView] = {}
+        if self.journal is not None:
+            for p in self.journal.open_positions():
+                views[p["position_token_id"]] = PositionView(
+                    p["position_token_id"], p["pool_key"], "journal")
+        acct = self._account(account)
+        provider = getattr(self._aleo, "record_provider", None)
+        if provider is not None:
+            try:
+                records = list(provider.find(acct, program=self.program,
+                                             unspent=True))
+            except Exception:
+                records = []          # scanner unavailable — journal only
+            for rec in records:
+                plaintext = (rec.get("record_plaintext") if isinstance(rec, dict)
+                             else getattr(rec, "record_plaintext", None))
+                if not plaintext:
+                    continue
+                try:
+                    decoded = parse_plaintext(plaintext)
+                except (ValueError, TypeError):
+                    continue
+                if not (isinstance(decoded, dict) and "pool" in decoded):
+                    continue
+                pid = decoded.get("position_token_id")
+                pid = str(pid) if pid is not None else None
+                if pid not in views:
+                    views[pid] = PositionView(pid, str(decoded["pool"]), "scanned")
+        return list(views.values())
+
+    def status(self) -> SessionStatus:
+        """One re-orientation call: identity, access, holdings, pending work.
+
+        Run this first in any session — it answers "is this account already
+        registered, what do I hold, what is in flight" from the profile,
+        journal, chain, and API without changing anything.
+        """
+        authenticated = getattr(self.api, "_token", None) is not None
+        has_access: Optional[bool] = None
+        if authenticated:
+            try:
+                has_access = bool(self.api.access_status().has_access)
+            except ShieldSwapError:
+                has_access = None
+        address = (self.profile.address if self.profile
+                   else str(self._account().address))
+        try:
+            balances = self.get_balances()
+        except Exception:
+            # Private scan unavailable (e.g. credentials stage not run yet) —
+            # degrade to public-only rather than reporting nothing.
+            try:
+                balances = {b.token_id: {"symbol": b.symbol,
+                                         "decimals": b.decimals,
+                                         "public": int(b.balance), "private": 0,
+                                         "total": int(b.balance)}
+                            for b in self.api.get_public_balances(address)}
+            except Exception:
+                balances = {}
+        pending = self.journal.pending_claims() if self.journal else []
+        return SessionStatus(
+            address=address,
+            network=getattr(self._aleo, "network_name", "testnet"),
+            authenticated=authenticated,
+            has_access=has_access,
+            balances=balances,
+            pending_claim_ids=[h.swap_id for h in pending if h.swap_id],
+            open_positions=self.get_positions(),
+            counter_cursor=(self.journal.counter_cursor() if self.journal else 0),
+        )
 
     # ── Pure derivations (no network) ────────────────────────────────────────
 
