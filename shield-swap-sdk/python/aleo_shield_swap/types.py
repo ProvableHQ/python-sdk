@@ -106,3 +106,21 @@ class SlotView:
             round_tick_to_spacing(s.tick - s.tick_spacing * width, s.tick_spacing),
             round_tick_to_spacing(s.tick + s.tick_spacing * width, s.tick_spacing),
         )
+
+
+@dataclass
+class StageOutcome:
+    """One onboarding stage's result: ``action`` is ``"ran"`` or ``"skipped"``."""
+
+    name: str
+    action: str
+    detail: str = ""
+
+
+@dataclass
+class OnboardReport:
+    """What ``onboard()`` did, stage by stage, and whether funds are usable."""
+
+    address: str
+    outcomes: list[StageOutcome]
+    funded: bool

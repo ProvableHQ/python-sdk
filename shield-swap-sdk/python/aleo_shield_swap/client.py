@@ -37,7 +37,17 @@ from .errors import (
     PoolNotInitializedError,
     SwapOutputNotFinalizedError,
 )
-from .types import ClaimResult, MintResult, SlotView, SwapHandle, TxResult
+from .journal import Journal
+from .lifecycle import run_onboard
+from .profile import Profile
+from .types import (
+    ClaimResult,
+    MintResult,
+    OnboardReport,
+    SlotView,
+    SwapHandle,
+    TxResult,
+)
 from ._calls import DexCall
 from .tick_hints import pick_insert_hint
 from .tick_math import (
@@ -63,9 +73,54 @@ class ShieldSwap:
         self._aleo = aleo
         self.program = program
         self.api = ApiClient(api_url)
+        self.profile: Any = None          # set by from_profile()
+        self.journal: Any = None          # set by from_profile()
 
     def __repr__(self) -> str:
         return f"ShieldSwap(program={self.program!r}, api={self.api.base_url!r})"
+
+    @classmethod
+    def from_profile(cls, home: Any = None) -> "ShieldSwap":
+        """The client for the local participant profile (created on first use).
+
+        Wires endpoint, network, signer, and (when present) delegated-proving
+        credentials from ``$SHIELD_SWAP_HOME``/``~/.shield-swap``.  Run
+        ``onboard()`` next on a fresh profile.
+        """
+        from aleo import Aleo, HTTPProvider
+
+        profile = Profile.load_or_create(home)
+        creds = profile.credentials
+        provider = HTTPProvider(profile.endpoint, network=profile.network,
+                                api_key=creds.get("dps_api_key"),
+                                consumer_id=creds.get("dps_consumer_id"))
+        aleo = Aleo(provider)
+        aleo.default_account = aleo.account.from_private_key(profile.private_key)
+        try:
+            # Hosted-scanner registration (keyless); scanning itself needs the
+            # DPS api key, which the credentials stage provisions.
+            aleo.records.register(aleo.default_account)
+        except Exception:
+            pass  # offline or scanner down — record verbs will surface it
+        dex = cls(aleo)
+        dex.profile = profile
+        dex.journal = Journal(profile.journal_path)
+        if creds.get("jwt"):
+            dex.api.set_token(creds["jwt"])
+        return dex
+
+    def onboard(self, invite_code: Optional[str] = None) -> OnboardReport:
+        """Register this profile end to end — safe to re-run any time.
+
+        Runs only the registration stages not already satisfied (see
+        ``lifecycle.REGISTRATION_STAGES``); a registered, funded account is
+        a no-op.  The one thing it may need from you: *invite_code*, on the
+        first run.  Requires a profile-bound client (``from_profile()``).
+        """
+        if self.profile is None:
+            raise ValueError("onboard() needs a profile-bound client — "
+                             "construct with ShieldSwap.from_profile().")
+        return run_onboard(self, self.profile, invite_code)
 
     # ── Mapping plumbing ─────────────────────────────────────────────────────
 
