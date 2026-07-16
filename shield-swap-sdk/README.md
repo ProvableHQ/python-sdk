@@ -35,9 +35,16 @@ Requires `aleo-sdk>=0.2` (this repo's SDK; imports as `aleo`) and Python 3.10+.
 
 `AGENTS.md` (generated from the SDK's docstrings — always current) is the
 one page an agent needs: the five-verb lifecycle, the conversation pattern,
-and the building-block reference. Claude Code users get it via the
-`shield-swap` skill; any MCP client can run the same lifecycle through
-`python -m aleo_shield_swap.mcp`.
+and the building-block reference. It ships in the wheel:
+
+```bash
+pip install shield-swap-sdk
+python -m aleo_shield_swap          # prints the agent guide
+```
+
+Claude Code users get it via the `shield-swap` skill (packaged under
+`aleo_shield_swap/skills/`, copy into `.claude/skills/`); any MCP client
+can run the same lifecycle through `python -m aleo_shield_swap.mcp`.
 
 ## How calls work
 

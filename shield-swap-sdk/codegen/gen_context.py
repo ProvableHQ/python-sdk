@@ -21,7 +21,9 @@ from aleo_shield_swap import ShieldSwap, derivations  # noqa: E402
 from aleo_shield_swap.api import ApiClient  # noqa: E402
 from aleo_shield_swap.lifecycle import REGISTRATION_STAGES  # noqa: E402
 
-OUT = _ROOT / "AGENTS.md"
+# Two copies of one render: the repo root (for people browsing the repo)
+# and inside the package (ships in the wheel; `python -m aleo_shield_swap`).
+OUTS = [_ROOT / "AGENTS.md", _ROOT / "python" / "aleo_shield_swap" / "AGENTS.md"]
 
 TIER1 = ["from_profile", "onboard", "status", "get_positions",
          "swap_many", "collect_all"]
@@ -190,14 +192,16 @@ def main() -> int:
         print(page, end="")
         return 0
     if args.check:
-        current = OUT.read_text() if OUT.exists() else ""
-        if current != page:
-            print("AGENTS.md is stale — run: python codegen/gen_context.py",
-                  file=sys.stderr)
-            return 1
+        for out in OUTS:
+            current = out.read_text() if out.exists() else ""
+            if current != page:
+                print(f"{out} is stale — run: python codegen/gen_context.py",
+                      file=sys.stderr)
+                return 1
         return 0
-    OUT.write_text(page)
-    print(f"wrote {OUT} ({len(page)} chars)")
+    for out in OUTS:
+        out.write_text(page)
+        print(f"wrote {out} ({len(page)} chars)")
     return 0
 
 

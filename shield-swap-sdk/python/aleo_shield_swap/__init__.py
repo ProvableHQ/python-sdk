@@ -61,6 +61,15 @@ from .agent import (
     shield_swap_tools as shield_swap_tools,
 )
 
+def agent_guide() -> str:
+    """The packaged AGENTS.md — everything an agent needs to drive the DEX.
+
+    Also printable from a shell: ``python -m aleo_shield_swap``.
+    """
+    from importlib.resources import files
+    return files(__name__).joinpath("AGENTS.md").read_text()
+
+
 __version__ = "0.2.1"
 
 __all__ = [
@@ -77,6 +86,6 @@ __all__ = [
     "Profile", "Journal", "REGISTRATION_STAGES",
     "OnboardReport", "StageOutcome", "SessionStatus", "PositionView",
     "SwapBatchReport", "CollectReport", "blinded_identity_at",
-    "shield_swap_tools", "dispatch_tool",
+    "shield_swap_tools", "dispatch_tool", "agent_guide",
     "__version__",
 ]

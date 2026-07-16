@@ -261,6 +261,7 @@ jobs:
         run: |
           cd "$RUNNER_TEMP"
           python -c "import aleo_shield_swap; print('shield-swap-sdk', aleo_shield_swap.__version__)"
+          python -m aleo_shield_swap | head -1   # packaged agent guide
       - name: Upload wheel
         uses: actions/upload-artifact@v4
         with:
