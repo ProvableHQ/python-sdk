@@ -114,7 +114,9 @@ class ShieldSwap:
         dex.profile = profile
         dex.journal = Journal(profile.journal_path)
         if creds.get("jwt"):
-            dex.api.set_token(creds["jwt"])
+            dex.api.set_token(creds["jwt"])       # session tier (24h)
+        elif creds.get("dex_api_token"):
+            dex.api.set_token(creds["dex_api_token"])  # durable data tier
         return dex
 
     def _refresh_credentials(self) -> None:

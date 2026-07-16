@@ -117,11 +117,14 @@ class AirdropRateLimitedError(DexApiError):
 
 
 class CredentialsMissingError(ShieldSwapError):
-    """Delegated-proving/scanner credentials are not configured."""
+    """Provable API (delegated-proving/scanner) credentials could not be
+    provisioned or found."""
 
-    def __init__(self) -> None:
+    def __init__(self, detail: str = "") -> None:
         super().__init__(
-            "No delegated-proving credentials — set ALEO_E2E_API_KEY and "
-            "ALEO_E2E_CONSUMER_ID in the environment (they are persisted to "
-            "the profile on next onboard())."
+            "Could not obtain Provable API credentials — automatic "
+            "provisioning failed and ALEO_E2E_API_KEY/ALEO_E2E_CONSUMER_ID "
+            "are not set. Retry dex.onboard(), or set those env vars (they "
+            "are persisted to the profile)."
+            + (f" ({detail})" if detail else "")
         )

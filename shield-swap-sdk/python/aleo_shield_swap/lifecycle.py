@@ -16,6 +16,7 @@ from .errors import (
     AirdropPendingError,
     AirdropRateLimitedError,
     CredentialsMissingError,
+    NotAuthenticatedError,
     NotRedeemedError,
 )
 from .journal import Journal
@@ -57,7 +58,13 @@ class Stage:
 # ── Stages ────────────────────────────────────────────────────────────────────
 
 def _auth_done(ctx: _Ctx) -> bool:
-    return getattr(ctx.dex.api, "_token", None) is not None
+    if getattr(ctx.dex.api, "_token", None) is None:
+        return False
+    try:                                  # a stored-but-expired JWT is not auth
+        ctx.dex.api.access_status()
+        return True
+    except NotAuthenticatedError:
+        return False
 
 
 def _auth_run(ctx: _Ctx) -> str:
@@ -82,23 +89,59 @@ def _redeem_run(ctx: _Ctx) -> str:
     return f"invite redeemed ({out.status})"
 
 
+def provision_provable_credentials(endpoint: str, username: str) -> tuple[str, str]:
+    """Create a Provable API consumer + key (``POST /consumers``, keyless).
+
+    Returns ``(api_key, consumer_id)`` — the pair the scanner and delegated
+    proving authenticate with.
+    """
+    import requests
+
+    resp = requests.post(f"{endpoint.rstrip('/')}/consumers",
+                         json={"username": username}, timeout=30.0)
+    if not 200 <= resp.status_code < 300:
+        raise CredentialsMissingError(
+            f"POST /consumers -> {resp.status_code}: {resp.text[:120]}")
+    data = resp.json()
+    return data["key"], data["consumer"]["id"]
+
+
 def _creds_done(ctx: _Ctx) -> bool:
     c = ctx.profile.credentials
-    return bool(c.get("dps_api_key") and c.get("dps_consumer_id"))
+    return bool(c.get("dps_api_key") and c.get("dps_consumer_id")
+                and c.get("dex_api_token"))
 
 
 def _creds_run(ctx: _Ctx) -> str:
-    # No provisioning endpoint exists yet (spec blocker) — import from env.
-    # When the API grows one, this function body is the only change.
-    key = os.environ.get("ALEO_E2E_API_KEY")
-    cid = os.environ.get("ALEO_E2E_CONSUMER_ID")
-    if not (key and cid):
-        raise CredentialsMissingError()
-    ctx.profile.save_credentials(dps_api_key=key, dps_consumer_id=cid)
+    """Register BOTH credential systems, unless already stored.
+
+    Provable API (scanner + delegated proving): imported from
+    ``ALEO_E2E_API_KEY``/``ALEO_E2E_CONSUMER_ID`` when set, otherwise
+    provisioned via ``POST /consumers``.  Shield-swap API: a durable
+    ``ss_…`` token minted via ``POST /api-tokens`` (the 24h session JWT
+    stays for the ``/access/*`` tier).
+    """
+    details: list[str] = []
+    creds = ctx.profile.credentials
+    if not (creds.get("dps_api_key") and creds.get("dps_consumer_id")):
+        key = os.environ.get("ALEO_E2E_API_KEY")
+        cid = os.environ.get("ALEO_E2E_CONSUMER_ID")
+        if key and cid:
+            details.append("Provable credentials imported from env")
+        else:
+            key, cid = provision_provable_credentials(
+                ctx.profile.endpoint, f"shield-swap-{ctx.profile.address}")
+            details.append("Provable consumer + API key provisioned")
+        ctx.profile.save_credentials(dps_api_key=key, dps_consumer_id=cid)
+    if not ctx.profile.credentials.get("dex_api_token"):
+        tok = ctx.dex.api.create_api_token(
+            f"shield-swap-profile-{ctx.profile.address[:16]}")
+        ctx.profile.save_credentials(dex_api_token=tok.token)
+        details.append("durable DEX API token minted")
     refresh = getattr(ctx.dex, "_refresh_credentials", None)
     if refresh is not None:
         refresh()                         # live facade picks up the new key
-    return "delegated-proving credentials imported from env"
+    return "; ".join(details) or "already stored"
 
 
 def _airdrop_done(ctx: _Ctx) -> bool:

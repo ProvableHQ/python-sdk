@@ -42,6 +42,9 @@ class _StubApi:
     def get_tokens(self):
         return [_Tok("waleo.aleo"), _Tok("wusdcx.aleo"), _Tok("weth.aleo")]
 
+    def create_api_token(self, name, expires_in_days=None):
+        return type("T", (), {"token": f"ss_minted_{name[:12]}"})()
+
 
 class _StubDex:
     def __init__(self, api, balances, funded_from_start=False):
@@ -79,11 +82,13 @@ def test_fresh_account_runs_every_stage(profile, dps_env):
     assert api.redeemed_with == "CODE" and api.airdrops == 1
     assert report.funded is True
     assert profile.credentials["dps_api_key"] == "k"
+    assert profile.credentials["dex_api_token"].startswith("ss_minted_")
     assert profile.credentials["jwt"] == "jwt2"       # redeem's fresh token wins
 
 
 def test_registered_funded_account_is_noop(profile, dps_env):
-    profile.save_credentials(jwt="oldjwt", dps_api_key="k", dps_consumer_id="c")
+    profile.save_credentials(jwt="oldjwt", dps_api_key="k", dps_consumer_id="c",
+                             dex_api_token="ss_stored")
     api = _StubApi(has_access=True)
     api._token = "oldjwt"
     dex = _StubDex(api, {"waleo.aleo": 7}, funded_from_start=True)
@@ -100,14 +105,34 @@ def test_redeem_without_code_raises_instructively(profile, dps_env):
         run_onboard(dex, profile)                     # no invite_code
 
 
-def test_missing_dps_creds_raise(profile, monkeypatch):
+def test_provisioning_failure_raises_instructively(profile, monkeypatch):
     monkeypatch.delenv("ALEO_E2E_API_KEY", raising=False)
     monkeypatch.delenv("ALEO_E2E_CONSUMER_ID", raising=False)
+    monkeypatch.setattr("aleo_shield_swap.lifecycle.provision_provable_credentials",
+                        lambda endpoint, username: (_ for _ in ()).throw(
+                            CredentialsMissingError("POST /consumers -> 500")))
     api = _StubApi(has_access=True)
     api._token = "jwt"
     dex = _StubDex(api, {"waleo.aleo": 7})
-    with pytest.raises(CredentialsMissingError):
+    with pytest.raises(CredentialsMissingError, match="consumers"):
         run_onboard(dex, profile)
+
+
+def test_credentials_auto_provision_both_systems(profile, monkeypatch):
+    monkeypatch.delenv("ALEO_E2E_API_KEY", raising=False)
+    monkeypatch.delenv("ALEO_E2E_CONSUMER_ID", raising=False)
+    monkeypatch.setattr("aleo_shield_swap.lifecycle.provision_provable_credentials",
+                        lambda endpoint, username: ("pk-auto", "cid-auto"))
+    api = _StubApi(has_access=True)
+    api._token = "jwt"
+    dex = _StubDex(api, {"waleo.aleo": 7}, funded_from_start=True)
+    report = run_onboard(dex, profile)
+    creds_stage = next(o for o in report.outcomes if o.name == "credentials")
+    assert creds_stage.action == "ran"
+    assert "provisioned" in creds_stage.detail and "minted" in creds_stage.detail
+    assert profile.credentials["dps_api_key"] == "pk-auto"
+    assert profile.credentials["dps_consumer_id"] == "cid-auto"
+    assert profile.credentials["dex_api_token"].startswith("ss_minted_")
 
 
 def test_rate_limited_airdrop_with_funds_is_tolerated(profile, dps_env):
