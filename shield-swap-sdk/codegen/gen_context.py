@@ -49,21 +49,66 @@ dex.collect_all()                        # any session, any time
 CONVERSATION_PATTERN = """\
 ## Serving a chatting user (the conversation pattern)
 
-1. Run `status()` first — is the account registered and funded, what does
-   it hold, what is pending.  Never onboard an account that `status()`
-   shows is already set up.
-2. Present tradable pairs from the user's ACTUAL balances crossed with
-   `dex.api.get_pools()`, and ask which they want to trade.
-3. Proactively recommend minting/liquidity options: pools matching their
-   tokens, tick ranges around `get_slot(pool_key)` (see
-   `SlotView.tick_range`).  Don't wait for exact parameters.
-4. Confirm, act, report ids.
+### Before doing anything: two questions
 
-The invite code (first run) is the only thing you should ever need to ask
-the user for.  Errors name their own fix — read the exception message and
-do what it says.  State (handles, counters, positions) lives in
-`~/.shield-swap/`, not in your context: any fresh session re-orients with
-`status()`."""
+1. **Existing account?**  When `status()` shows a brand-new, unregistered
+   profile, ask whether the user already has a shield-swap account before
+   creating anything — their funds and access live on the old key.
+   **NEVER ask the user to paste a private key into the conversation.**
+   They supply it out-of-band: `export SHIELD_SWAP_PRIVATE_KEY=...` (or
+   `SHIELD_SWAP_PRIVATE_KEY_FILE=path`) in their own shell before the
+   profile is first created.
+2. **Invite code.**  Access is invite-gated per account; `onboard()` stops
+   with `NotRedeemedError` until one is supplied.  Ask the user for their
+   code; codes are one-time — never guess or reuse.
+
+### After startup: ask what's next
+
+When onboarding reports funded, STOP and ask the user what they want to do
+— never launch into a journey unprompted.  Present the options in plain
+language (identities, records, and journals are your business, not the
+user's).  Frame the setting first — Shield Swap is a private exchange on
+Aleo's test network: trading uses test tokens, and what is traded, and by
+whom, stays hidden on the public chain — then offer:
+
+- **Swap tokens** — trade one token for another.  It settles in two steps
+  — placing the trade, then collecting what was bought — and you do both,
+  so the proceeds arrive without a separate trip.  The natural first move.
+- **Several swaps at once** — place a handful of trades and watch them all
+  land (`swap_many`); the busiest way to exercise the exchange.  First
+  show which trades are possible right now (tokens held x live pools) and
+  ask how many — and which — they want.
+- **Open a liquidity position** — instead of trading, become the market:
+  deposit a pair of tokens so others can trade against them (`mint`).
+  The user picks the price range; while the market price sits inside it
+  they earn a cut of every trade passing through.
+- **Add or remove liquidity** — grow a position or take some back out
+  (`increase_liquidity`/`decrease_liquidity`); whatever comes out becomes
+  earnings to collect.
+- **Collect earnings** — sweep everything the account is owed (tokens
+  bought in earlier swaps, fees its liquidity earned) into the wallet
+  (`collect_all`); good after any trading session.
+- **Building something?**  If they are developing a dApp, bot, or agent
+  integration rather than trading here, use Tier 2 below.
+
+If the user brings their own playbook (a strategy file, notes, a memory
+store), read it and treat it as the plan — it decides what to do, the
+verbs here are how.
+
+### While acting
+
+1. `status()` first in any session — never onboard an account that is
+   already set up; state lives in `~/.shield-swap/`, not in your context.
+2. Ground every proposal in ACTUAL holdings crossed with
+   `dex.api.get_pools()`; recommend tick ranges from `get_slot(pool_key)`
+   (see `SlotView.tick_range`) instead of waiting for exact parameters.
+3. **Never show raw base units to the user** — render amounts in human
+   units with the symbol via the token registry's `decimals`
+   ("0.0534 ETH", never "53,369,000,000,000 raw").
+4. Writes are slow (delegated proving + confirmation ≈ a minute or two).
+   Never re-submit because a call seems slow — check `status()` first.
+5. Confirm, act, report ids.  Errors name their own fix — read the
+   exception message and do what it says."""
 
 
 def _entry(name: str, fn: object) -> str:

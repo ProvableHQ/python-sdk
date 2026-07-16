@@ -39,3 +39,23 @@ def test_credentials_roundtrip(tmp_path):
 def test_journal_path(tmp_path):
     p = Profile.load_or_create(tmp_path / "home")
     assert p.journal_path == p.home / "journal.jsonl"
+
+
+def test_existing_key_imported_from_env(tmp_path, monkeypatch):
+    import aleo
+    pk = aleo.testnet.PrivateKey.random()
+    monkeypatch.setenv("SHIELD_SWAP_PRIVATE_KEY", str(pk))
+    p = Profile.load_or_create(tmp_path / "home")
+    assert p.private_key == str(pk)
+    assert p.address == str(pk.address)
+
+
+def test_existing_key_imported_from_file(tmp_path, monkeypatch):
+    import aleo
+    pk = aleo.testnet.PrivateKey.random()
+    key_file = tmp_path / "key.txt"
+    key_file.write_text(str(pk) + "\n")
+    monkeypatch.delenv("SHIELD_SWAP_PRIVATE_KEY", raising=False)
+    monkeypatch.setenv("SHIELD_SWAP_PRIVATE_KEY_FILE", str(key_file))
+    p = Profile.load_or_create(tmp_path / "home")
+    assert p.address == str(pk.address)

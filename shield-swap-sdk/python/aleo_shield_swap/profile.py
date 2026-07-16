@@ -26,11 +26,21 @@ def _write_private(path: Path, payload: dict[str, Any]) -> None:
     os.replace(tmp, path)
 
 
-def _generate_key(network: str) -> tuple[str, str]:
-    """(private_key, address) for a fresh random account."""
+def _initial_key(network: str) -> tuple[str, str]:
+    """(private_key, address) for a new profile.
+
+    Imports ``SHIELD_SWAP_PRIVATE_KEY`` (or a path in
+    ``SHIELD_SWAP_PRIVATE_KEY_FILE``) when set — users with an existing
+    account supply their key out-of-band, never pasted into a conversation
+    — and generates a fresh random account otherwise.
+    """
     import aleo
     net = getattr(aleo, network)
-    pk = net.PrivateKey.random()
+    key = os.environ.get("SHIELD_SWAP_PRIVATE_KEY")
+    key_file = os.environ.get("SHIELD_SWAP_PRIVATE_KEY_FILE")
+    if not key and key_file:
+        key = Path(key_file).read_text().strip()
+    pk = net.PrivateKey.from_string(key) if key else net.PrivateKey.random()
     return str(pk), str(pk.address)
 
 
@@ -65,7 +75,7 @@ class Profile:
             path.chmod(0o600)             # heal a pre-existing loose mode
             return cls(home, json.loads(path.read_text()))
         home.mkdir(parents=True, exist_ok=True)
-        private_key, address = _generate_key(network)
+        private_key, address = _initial_key(network)
         data = {"address": address, "private_key": private_key,
                 "network": network, "endpoint": endpoint}
         _write_private(path, data)
