@@ -9,6 +9,43 @@ The SDK ships two layers:
 
 Built with snarkvm 4.8.1 (MainnetV0). For build instructions, see [sdk/Readme.md](./sdk/Readme.md).
 
+## Agent skills (trade on Shield Swap by chatting)
+
+The [`shield-swap-sdk`](./shield-swap-sdk) package ships everything an AI
+agent needs to drive the shield_swap AMM — set up an account, redeem an
+invite code, get the airdrop, make private swaps, manage liquidity, and
+collect earnings — from a single generated guide.
+
+**Any agent (Claude Code, Codex, Cursor, custom):**
+
+```bash
+pip install shield-swap-sdk
+python -m aleo_shield_swap          # prints the agent guide (AGENTS.md)
+```
+
+Point your agent at that guide (or paste it into context) and say things
+like *"set up a shield-swap account and get tokens"* or *"find pools and
+start swapping"*. The one thing the agent will ask you for is an invite
+code; everything else — key material, API credentials, airdrop — is
+handled by the SDK. Bring an existing account by exporting
+`SHIELD_SWAP_PRIVATE_KEY` (or `SHIELD_SWAP_PRIVATE_KEY_FILE`) before the
+first run — never paste a private key into the chat.
+
+**Claude Code:** working in this repo, the skill is already installed
+(`.claude/skills/shield-swap/`) — just ask. In your own project, copy the
+packaged skill in:
+
+```bash
+cp -r "$(python -c 'import aleo_shield_swap, pathlib; print(pathlib.Path(aleo_shield_swap.__file__).parent / "skills")')" .claude/skills/shield-swap
+```
+
+**MCP clients (Claude Desktop, etc.):**
+
+```bash
+pip install "shield-swap-sdk[mcp]"
+python -m aleo_shield_swap.mcp      # stdio server with the lifecycle tools
+```
+
 ## Quick Start (facade)
 
 ```python
