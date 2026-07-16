@@ -20,14 +20,16 @@ collect earnings — from a single generated guide.
 
 ```bash
 pip install shield-swap-sdk
-python -m aleo_shield_swap          # prints the agent guide (AGENTS.md)
+python -m aleo_shield_swap > AGENTS.md   # drop the agent guide into your project
 ```
 
-Point your agent at that guide (or paste it into context) and say things
-like *"set up a shield-swap account and get tokens"* or *"find pools and
-start swapping"*. The one thing the agent will ask you for is an invite
-code; everything else — key material, API credentials, airdrop — is
-handled by the SDK. Bring an existing account by exporting
+Most coding agents (Codex, Cursor, Claude Code, …) automatically read a
+repo-root `AGENTS.md`, so after that one command just chat: *"set up a
+shield-swap account and get tokens"*, *"find pools and start swapping"*.
+(Equivalently, open with "run `python -m aleo_shield_swap` and follow that
+guide", or paste the output into the agent's instructions.) The one thing
+the agent will ask you for is an invite code; everything else — key
+material, API credentials, airdrop — is handled by the SDK. Bring an existing account by exporting
 `SHIELD_SWAP_PRIVATE_KEY` (or `SHIELD_SWAP_PRIVATE_KEY_FILE`) before the
 first run — never paste a private key into the chat.
 
