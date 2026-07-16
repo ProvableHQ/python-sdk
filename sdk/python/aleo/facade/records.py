@@ -212,7 +212,11 @@ class RecordsModule:
             scanner.set_account(acct)
             scanner.set_decrypt_enabled(True)
 
-        from .._scanner_common import build_owned_filter, compute_uuid
+        from .._scanner_common import (
+            build_owned_filter,
+            compute_uuid,
+            enforce_record_filter,
+        )
 
         uuid = (
             str(compute_uuid(acct.view_key, self._client._provider.network))
@@ -224,8 +228,11 @@ class RecordsModule:
         )
 
         if amounts is not None:
-            return scanner.find_credits_records(amounts, owned_filter)
-        return scanner.find_records(owned_filter)
+            found = scanner.find_credits_records(amounts, owned_filter)
+        else:
+            found = scanner.find_records(owned_filter)
+        # The hosted scanner ignores the filter subobject; enforce it here.
+        return enforce_record_filter(found, program=program, record=record)
 
     def find_credits(
         self, account: Any = None, at_least: int | None = None
@@ -275,7 +282,13 @@ class RecordsModule:
         owned_filter = build_owned_filter(
             uuid, program="credits.aleo", record="credits"
         )
-        return scanner.find_records(owned_filter)
+        from .._scanner_common import enforce_record_filter
+
+        return enforce_record_filter(
+            scanner.find_records(owned_filter),
+            program="credits.aleo",
+            record="credits",
+        )
 
     # ── RecordProvider protocol ────────────────────────────────────────────────
 

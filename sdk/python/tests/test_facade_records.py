@@ -225,6 +225,71 @@ def test_find_with_nonces() -> None:
     assert body["nonces"] == [RECORD_NONCE]
 
 
+MIXED_PROGRAM_RECORDS = [
+    {
+        "record_plaintext": RECORD_PLAINTEXT_STR,
+        "program_name": "credits.aleo",
+        "record_name": "credits",
+        "spent": False,
+    },
+    {
+        "record_plaintext": "{ owner: aleo1..., amount: 5u128.private }",
+        "program_name": "ethx_f466cc.aleo",
+        "record_name": "Token",
+        "spent": False,
+    },
+    {
+        "record_plaintext": "{ owner: aleo1..., amount: 7u128.private }",
+        "program_name": "test_arc20_eth.aleo",
+        "record_name": "Token",
+        "spent": False,
+    },
+]
+
+
+@resp_lib.activate
+def test_find_enforces_program_filter_client_side() -> None:
+    # The hosted scanner ignores the "filter" subobject and returns every
+    # record the account owns (verified live 2026-07-16); find() must enforce
+    # its documented program= contract on the results itself, or callers
+    # select records from the wrong program (phantom commitments on chain).
+    resp_lib.add(resp_lib.POST, f"{HOST}/records/owned", json=MIXED_PROGRAM_RECORDS)
+
+    a = _client()
+    _inject_scanner(a)
+    acct = _golden_account()
+
+    records = a.records.find(acct, program="test_arc20_eth.aleo")
+    assert [r["program_name"] for r in records] == ["test_arc20_eth.aleo"]
+
+
+@resp_lib.activate
+def test_find_enforces_record_name_filter_client_side() -> None:
+    resp_lib.add(resp_lib.POST, f"{HOST}/records/owned", json=MIXED_PROGRAM_RECORDS)
+
+    a = _client()
+    _inject_scanner(a)
+    acct = _golden_account()
+
+    records = a.records.find(acct, program="credits.aleo", record="credits")
+    assert [r["program_name"] for r in records] == ["credits.aleo"]
+    assert all(r["record_name"] == "credits" for r in records)
+
+
+@resp_lib.activate
+def test_find_credits_excludes_foreign_programs() -> None:
+    # Same service quirk as above, via the find_credits(at_least=None) path:
+    # non-credits records must not leak into the returned list.
+    resp_lib.add(resp_lib.POST, f"{HOST}/records/owned", json=MIXED_PROGRAM_RECORDS)
+
+    a = _client()
+    _inject_scanner(a)
+    acct = _golden_account()
+
+    records = a.records.find_credits(acct)
+    assert [r["program_name"] for r in records] == ["credits.aleo"]
+
+
 # ---------------------------------------------------------------------------
 # 4. find_credits — at_least filter
 # ---------------------------------------------------------------------------

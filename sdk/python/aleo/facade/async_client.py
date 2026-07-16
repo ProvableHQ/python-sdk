@@ -291,7 +291,11 @@ class AsyncRecordsModule:
             scanner.set_account(acct)
             scanner.set_decrypt_enabled(True)
 
-        from .._scanner_common import build_owned_filter, compute_uuid
+        from .._scanner_common import (
+            build_owned_filter,
+            compute_uuid,
+            enforce_record_filter,
+        )
 
         uuid = (
             str(compute_uuid(acct.view_key, self._client.provider.network))
@@ -303,8 +307,11 @@ class AsyncRecordsModule:
         )
 
         if amounts is not None:
-            return await scanner.find_credits_records(amounts, owned_filter)
-        return await scanner.find_records(owned_filter)
+            found = await scanner.find_credits_records(amounts, owned_filter)
+        else:
+            found = await scanner.find_records(owned_filter)
+        # The hosted scanner ignores the filter subobject; enforce it here.
+        return enforce_record_filter(found, program=program, record=record)
 
     async def find_credits(
         self, account: Any = None, at_least: int | None = None
@@ -336,7 +343,13 @@ class AsyncRecordsModule:
         owned_filter = build_owned_filter(
             uuid, program="credits.aleo", record="credits"
         )
-        return await scanner.find_records(owned_filter)
+        from .._scanner_common import enforce_record_filter
+
+        return enforce_record_filter(
+            await scanner.find_records(owned_filter),
+            program="credits.aleo",
+            record="credits",
+        )
 
     async def get_unspent_credits_record(
         self,

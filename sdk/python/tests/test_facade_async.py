@@ -280,6 +280,50 @@ async def test_async_records_find_passes_filter() -> None:
 
 
 @pytest.mark.asyncio
+async def test_async_records_find_enforces_filter_client_side() -> None:
+    """find() filters by program/record locally — the hosted scanner ignores
+    the filter subobject and returns every record the account owns."""
+    a = AsyncAleo(HTTPProvider(BASE))
+    acct = _account(a)
+
+    mixed = [
+        {"program_name": "credits.aleo", "record_name": "credits", "spent": False},
+        {"program_name": "ethx_f466cc.aleo", "record_name": "Token", "spent": False},
+        {"program_name": "test_arc20_eth.aleo", "record_name": "Token", "spent": False},
+    ]
+
+    async def fake_find_records(filt: Any) -> list[Any]:
+        return mixed
+
+    a.records.scanner.set_account(acct)
+    a.records.scanner.find_records = fake_find_records  # type: ignore[method-assign]
+
+    records = await a.records.find(acct, program="test_arc20_eth.aleo")
+    assert [r["program_name"] for r in records] == ["test_arc20_eth.aleo"]
+
+
+@pytest.mark.asyncio
+async def test_async_records_find_credits_excludes_foreign_programs() -> None:
+    """find_credits() must not leak non-credits records the scanner returns."""
+    a = AsyncAleo(HTTPProvider(BASE))
+    acct = _account(a)
+
+    mixed = [
+        {"program_name": "credits.aleo", "record_name": "credits", "spent": False},
+        {"program_name": "test_arc20_eth.aleo", "record_name": "Token", "spent": False},
+    ]
+
+    async def fake_find_records(filt: Any) -> list[Any]:
+        return mixed
+
+    a.records.scanner.set_account(acct)
+    a.records.scanner.find_records = fake_find_records  # type: ignore[method-assign]
+
+    records = await a.records.find_credits(acct)
+    assert [r["program_name"] for r in records] == ["credits.aleo"]
+
+
+@pytest.mark.asyncio
 async def test_async_records_get_unspent_credits_record_covering() -> None:
     """get_unspent_credits_record returns a parsed RecordPlaintext when a covering record exists."""
     a = AsyncAleo(HTTPProvider(BASE))
