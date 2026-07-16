@@ -50,7 +50,81 @@ class InvalidFeeTierError(ShieldSwapError):
 class DexApiError(ShieldSwapError):
     """A DEX REST API request failed; carries the HTTP status and body."""
 
-    def __init__(self, status: int, body: str) -> None:
-        super().__init__(f"DEX API error {status}: {body[:200]}")
+    def __init__(self, status: int, body: str,
+                 message: "str | None" = None) -> None:
+        super().__init__(message or f"DEX API error {status}: {body[:200]}")
         self.status = status
         self.body = body
+
+
+class NotAuthenticatedError(DexApiError):
+    """The DEX API rejected the request for lack of a valid JWT (401).
+
+    Subclasses :class:`DexApiError` so existing ``except DexApiError`` /
+    ``.status`` call sites keep working."""
+
+    def __init__(self, body: str = "") -> None:
+        super().__init__(
+            401, body,
+            "Not authenticated with the DEX API — run dex.onboard() (or "
+            "api.authenticate(address, sign) for manual control)."
+        )
+
+
+class NotRedeemedError(DexApiError):
+    """Authenticated, but the account has not redeemed an invite code (403)."""
+
+    def __init__(self, body: str = "") -> None:
+        super().__init__(
+            403, body,
+            "This account has not redeemed an invite code — run "
+            "dex.onboard(invite_code=...). Codes are distributed by the team."
+        )
+
+
+class NotFundedError(ShieldSwapError):
+    """The account holds none of the token required for this action."""
+
+    def __init__(self, detail: str = "") -> None:
+        super().__init__(
+            "This account holds no usable tokens — run dex.onboard() to "
+            "request the airdrop, or check dex.get_balances()."
+            + (f" ({detail})" if detail else "")
+        )
+
+
+class AirdropPendingError(ShieldSwapError):
+    """An airdrop job was accepted but its records have not landed yet."""
+
+    def __init__(self, job_id: "str | None" = None) -> None:
+        super().__init__(
+            "Airdrop requested but not landed yet — check dex.status() and "
+            "retry shortly."
+        )
+        self.job_id = job_id
+
+
+class AirdropRateLimitedError(DexApiError):
+    """The DEX API returned 429 — for ``POST /airdrop``, one claim per
+    address per 15 minutes."""
+
+    def __init__(self, body: str = "") -> None:
+        super().__init__(
+            429, body,
+            "Airdrop already claimed for this address in the last 15 minutes "
+            "— wait and retry, or proceed if dex.get_balances() shows funds."
+        )
+
+
+class CredentialsMissingError(ShieldSwapError):
+    """Provable API (delegated-proving/scanner) credentials could not be
+    provisioned or found."""
+
+    def __init__(self, detail: str = "") -> None:
+        super().__init__(
+            "Could not obtain Provable API credentials — automatic "
+            "provisioning failed and ALEO_E2E_API_KEY/ALEO_E2E_CONSUMER_ID "
+            "are not set. Retry dex.onboard(), or set those env vars (they "
+            "are persisted to the profile)."
+            + (f" ({detail})" if detail else "")
+        )

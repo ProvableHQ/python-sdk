@@ -106,3 +106,61 @@ class SlotView:
             round_tick_to_spacing(s.tick - s.tick_spacing * width, s.tick_spacing),
             round_tick_to_spacing(s.tick + s.tick_spacing * width, s.tick_spacing),
         )
+
+
+@dataclass
+class StageOutcome:
+    """One onboarding stage's result: ``action`` is ``"ran"`` or ``"skipped"``."""
+
+    name: str
+    action: str
+    detail: str = ""
+
+
+@dataclass
+class OnboardReport:
+    """What ``onboard()`` did, stage by stage, and whether funds are usable."""
+
+    address: str
+    outcomes: list[StageOutcome]
+    funded: bool
+
+
+@dataclass
+class PositionView:
+    """An open position: journaled, or discovered by scanning records."""
+
+    position_token_id: Optional[str]
+    pool_key: str
+    source: str                     # "journal" | "scanned"
+
+
+@dataclass
+class SessionStatus:
+    """Everything an agent needs to re-orient in one call."""
+
+    address: str
+    network: str
+    authenticated: bool
+    has_access: Optional[bool]      # None when not authenticated / unreachable
+    balances: dict
+    pending_claim_ids: list[str]
+    open_positions: list[PositionView]
+    counter_cursor: int
+
+
+@dataclass
+class SwapBatchReport:
+    """``swap_many()`` outcome — journaled handles plus per-counter failures."""
+
+    handles: list[SwapHandle]
+    failures: list[dict]
+
+
+@dataclass
+class CollectReport:
+    """``collect_all()`` outcome — what was claimed, what is not ready yet."""
+
+    claimed: list[dict]
+    still_pending: list[str]
+    fees: list[dict]

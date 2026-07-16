@@ -79,7 +79,6 @@ class AirdropResult:
     amount: str
     status: str
     symbol: str
-    token_address: str
     wrapper_program: str
     error: str | None = None
     tx_id: str | None = None
@@ -720,6 +719,7 @@ class PoolTradeDoc:
     id: str
     pool: str
     tradeType: PoolTradeTypeDoc
+    transactionHash: str
 
 
 @dataclass

@@ -139,3 +139,18 @@ def test_position_auto_select_requires_matching_pool():
     stub = _stub(records=[{"record_plaintext": TOKEN0_RECORD}])   # no position
     with pytest.raises(InsufficientRecordsError, match="PositionNFT"):
         ShieldSwap(stub).burn(pool_key="5field")
+
+
+def test_mint_journals_position(stub_aleo, tmp_path):
+    from aleo_shield_swap.journal import Journal
+    from aleo_shield_swap.client import ShieldSwap
+
+    dex = ShieldSwap(stub_aleo)
+    dex.journal = Journal(tmp_path / "journal.jsonl")
+    result = dex.mint(pool_key="5field", tick_lower=-60, tick_upper=60,
+                      amount0_desired=10, amount1_desired=10,
+                      token0_program="tok.aleo",
+                      token1_program="tok.aleo").delegate()
+    assert result.position_token_id
+    assert dex.journal.open_positions() == [
+        {"position_token_id": result.position_token_id, "pool_key": "5field"}]

@@ -22,10 +22,29 @@ def extract_tx_id(payload: Any) -> str:
     if isinstance(payload, str) and payload.strip():
         return payload.strip()
     if isinstance(payload, dict):
+        # Current DPS shape: the whole transaction nested under "transaction".
+        tx = payload.get("transaction")
+        if isinstance(tx, dict) and tx.get("id"):
+            return str(tx["id"])
         for key in ("transaction_id", "transactionId", "id", "txid", "tx_id"):
             if payload.get(key):
                 return str(payload[key])
     raise ValueError(f"Cannot find a transaction id in DPS payload: {payload!r}")
+
+
+def _payload_transitions(payload: Any) -> "list[dict[str, Any]] | None":
+    """Decoded transitions straight from a DPS payload carrying the full
+    transaction, or None when the payload is just an id."""
+    if not isinstance(payload, dict):
+        return None
+    tx = payload.get("transaction")
+    if not isinstance(tx, dict):
+        return None
+    transitions = (tx.get("execution") or {}).get("transitions")
+    if not isinstance(transitions, list):
+        return None
+    return [{"program": str(t.get("program")), "function": str(t.get("function")),
+             "outputs": t.get("outputs", [])} for t in transitions]
 
 
 def output_values(outputs: Any) -> list[str]:
@@ -81,18 +100,29 @@ class DexCall(Generic[R]):
         self._aleo.network.submit_transaction(tx.raw)
         return self._build(tx.id, outputs)
 
-    def delegate(self, account: Any = None, **fee_kwargs: Any) -> R:
-        """Delegate proving to the DPS (fee master pays by default), wait for
-        the transaction, and build the typed result from its root transition."""
+    def delegate(self, account: Any = None, *, wait: bool = True,
+                 wait_timeout: float = 180.0, **fee_kwargs: Any) -> R:
+        """Delegate proving to the DPS (fee master pays by default) and build
+        the typed result from the root transition.
+
+        Outputs are harvested from the DPS payload itself when it carries
+        the full transaction, so ``wait=False`` returns as soon as the
+        broadcast is accepted — callers that read chain state later (e.g.
+        ``collect_all``) don't need to block on confirmation here.
+        """
         payload = self._bound.delegate(account, **fee_kwargs)
         tx_id = extract_tx_id(payload)
-        self._aleo.network.wait_for_transaction(tx_id)
-        tx = self._aleo.network.get_transaction_object(tx_id)
-        decoded = [
-            {"program": str(t.program_id), "function": str(t.function_name),
-             "outputs": list(t.outputs())}
-            for t in tx.transitions()
-        ]
+        decoded = _payload_transitions(payload)
+        if decoded is None:
+            self._aleo.network.wait_for_transaction(tx_id, timeout=wait_timeout)
+            tx = self._aleo.network.get_transaction_object(tx_id)
+            decoded = [
+                {"program": str(t.program_id), "function": str(t.function_name),
+                 "outputs": list(t.outputs())}
+                for t in tx.transitions()
+            ]
+        elif wait:
+            self._aleo.network.wait_for_transaction(tx_id, timeout=wait_timeout)
         outputs = root_outputs(decoded, self._bound.program_id,
                                self._bound.function_name)
         return self._build(tx_id, outputs)

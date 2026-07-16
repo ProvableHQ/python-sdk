@@ -16,7 +16,33 @@ from typing import Any, Optional, TypeVar
 import requests
 
 from . import _api_models as models
-from .errors import DexApiError
+from .errors import (
+    AirdropRateLimitedError,
+    DexApiError,
+    NotAuthenticatedError,
+    NotRedeemedError,
+)
+
+
+def _check(resp: Any) -> None:
+    """Map DEX API failures to the lifecycle taxonomy; DexApiError otherwise.
+
+    Takes the response object so the body is only decoded on failure.
+    The 403 classification keys on the API's "invite" wording — if the
+    message ever drifts, this degrades to a plain DexApiError(403), which
+    every catcher of these subclasses already handles.
+    """
+    code = resp.status_code
+    if 200 <= code < 300:
+        return
+    text = resp.text
+    if code == 401:
+        raise NotAuthenticatedError(text)
+    if code == 403 and "invite" in text.lower():
+        raise NotRedeemedError(text)
+    if code == 429:
+        raise AirdropRateLimitedError(text)
+    raise DexApiError(code, text)
 
 DEFAULT_API_URL = "https://amm-api.dev.provable.com"
 _TIMEOUT = 30.0
@@ -78,15 +104,13 @@ class ApiClient:
     def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
         resp = self._session.get(f"{self.base_url}{path}", params=params,
                                  headers=self._headers(), timeout=_TIMEOUT)
-        if not 200 <= resp.status_code < 300:
-            raise DexApiError(resp.status_code, resp.text)
+        _check(resp)
         return resp.json()
 
     def _post(self, path: str, body: dict[str, Any]) -> Any:
         resp = self._session.post(f"{self.base_url}{path}", json=body,
                                   headers=self._headers(), timeout=_TIMEOUT)
-        if not 200 <= resp.status_code < 300:
-            raise DexApiError(resp.status_code, resp.text)
+        _check(resp)
         return resp.json()
 
     # ── Auth ───────────────────────────────────────────────────────────────
@@ -112,6 +136,56 @@ class ApiClient:
         """Adopt a previously issued JWT."""
         self._token = token
 
+    # ── Lifecycle ──────────────────────────────────────────────────────────
+    # Registration/onboarding endpoints change over time — regen the spec
+    # (codegen/regen-openapi.sh) before touching these.
+
+    def access_status(self) -> models.AccessStatusResponse:
+        """Whether this authenticated account has redeemed an invite code."""
+        return _build(models.AccessStatusResponse,
+                      self._get("/access/status")["data"])
+
+    def redeem_code(self, code: str) -> models.AccessRedeemResponse:
+        """Redeem an invite code; adopts the fresh token the API returns."""
+        out = _build(models.AccessRedeemResponse,
+                     self._post("/access/redeem", {"code": code})["data"])
+        if out.token:
+            self._token = out.token
+        return out
+
+    def request_airdrop(self, address: str) -> models.AirdropStartResult:
+        """Start the test-token airdrop job for *address* (private records).
+
+        One claim per address per 15 minutes — raises
+        :class:`AirdropRateLimitedError` on 429.  Poll the returned
+        ``job_id`` with :meth:`get_airdrop_job`.
+        """
+        return _build(models.AirdropStartResult,
+                      self._post("/airdrop", {"address": address})["data"])
+
+    def get_airdrop_job(self, job_id: str) -> models.AirdropJob:
+        """Progress of an airdrop job — ``running`` until every transfer lands."""
+        data = self._get(f"/airdrop/{job_id}")["data"]
+        results = [_build(models.AirdropResult, r)
+                   for r in (data.get("results") or [])]
+        return _build(models.AirdropJob, {**data, "results": results})
+
+    def create_api_token(self, name: str,
+                         expires_in_days: "int | None" = None
+                         ) -> models.ApiTokenCreatedResponse:
+        """Mint a long-lived DEX API token (the secret is returned ONCE).
+
+        JWTs from :meth:`authenticate` expire in 24h; persist the returned
+        ``.token`` for durable access.  Tiering (verified live): ``ss_…``
+        tokens work on data/trading endpoints; ``/access/*`` and token
+        management still require a session JWT.
+        """
+        body: dict[str, Any] = {"name": name}
+        if expires_in_days is not None:
+            body["expires_in_days"] = expires_in_days
+        return _build(models.ApiTokenCreatedResponse,
+                      self._post("/api-tokens", body)["data"])
+
     # ── Pools & tokens ─────────────────────────────────────────────────────
 
     def get_pools(self) -> list[PoolEntry]:
@@ -131,7 +205,10 @@ class ApiClient:
     # ── Trading ────────────────────────────────────────────────────────────
 
     def get_route(self, *, token_in: str, token_out: str,
-                  amount_in: int | None = None) -> models.RouteResultDoc:
+                  amount_in: Any = None) -> models.RouteResultDoc:
+        """Best route between two tokens.  *amount_in* is a CANONICAL
+        decimal amount (human units, e.g. ``1.5``) — not base units —
+        and the returned ``estimated_amount_out`` is decimal too."""
         params: dict[str, Any] = {"token_in": token_in, "token_out": token_out}
         if amount_in is not None:
             params["amount_in"] = str(amount_in)
@@ -183,15 +260,13 @@ class AsyncApiClient:
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
         resp = await self._client.get(f"{self.base_url}{path}", params=params,
                                       headers=self._headers())
-        if not 200 <= resp.status_code < 300:
-            raise DexApiError(resp.status_code, resp.text)
+        _check(resp)
         return resp.json()
 
     async def _post(self, path: str, body: dict[str, Any]) -> Any:
         resp = await self._client.post(f"{self.base_url}{path}", json=body,
                                        headers=self._headers())
-        if not 200 <= resp.status_code < 300:
-            raise DexApiError(resp.status_code, resp.text)
+        _check(resp)
         return resp.json()
 
     async def authenticate(self, address: str, sign: Any) -> str:
@@ -205,6 +280,43 @@ class AsyncApiClient:
 
     def set_token(self, token: str) -> None:
         self._token = token
+
+    # ── Lifecycle (async mirror of ApiClient) ──────────────────────────────
+
+    async def access_status(self) -> models.AccessStatusResponse:
+        """Whether this authenticated account has redeemed an invite code."""
+        return _build(models.AccessStatusResponse,
+                      (await self._get("/access/status"))["data"])
+
+    async def redeem_code(self, code: str) -> models.AccessRedeemResponse:
+        """Redeem an invite code; adopts the fresh token the API returns."""
+        out = _build(models.AccessRedeemResponse,
+                     (await self._post("/access/redeem", {"code": code}))["data"])
+        if out.token:
+            self._token = out.token
+        return out
+
+    async def request_airdrop(self, address: str) -> models.AirdropStartResult:
+        """Start the airdrop job for *address* — see :meth:`ApiClient.request_airdrop`."""
+        return _build(models.AirdropStartResult,
+                      (await self._post("/airdrop", {"address": address}))["data"])
+
+    async def get_airdrop_job(self, job_id: str) -> models.AirdropJob:
+        """Progress of an airdrop job — ``running`` until every transfer lands."""
+        data = (await self._get(f"/airdrop/{job_id}"))["data"]
+        results = [_build(models.AirdropResult, r)
+                   for r in (data.get("results") or [])]
+        return _build(models.AirdropJob, {**data, "results": results})
+
+    async def create_api_token(self, name: str,
+                               expires_in_days: "int | None" = None
+                               ) -> models.ApiTokenCreatedResponse:
+        """Mint a long-lived DEX API token — see :meth:`ApiClient.create_api_token`."""
+        body: dict[str, Any] = {"name": name}
+        if expires_in_days is not None:
+            body["expires_in_days"] = expires_in_days
+        return _build(models.ApiTokenCreatedResponse,
+                      (await self._post("/api-tokens", body))["data"])
 
     async def get_pools(self) -> list[PoolEntry]:
         entries = (await self._get("/pools"))["data"]

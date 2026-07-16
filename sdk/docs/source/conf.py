@@ -11,7 +11,7 @@ project = 'aleo'
 copyright = '2019-2026, Provable Inc.'
 author = 'kpp'
 
-version = '0.2.1'
+version = '0.2.2'
 
 # -- General configuration
 

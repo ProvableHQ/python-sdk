@@ -15,10 +15,10 @@ def test_tool_definitions_carry_exact_schemas():
     expected = {t["name"]: t for t in shield_swap_tools()}
     assert set(by_name) == set(expected)
     # The precise agent schema must survive — not FastMCP signature inference.
-    swap = by_name["swap"]
-    assert swap.inputSchema == expected["swap"]["input_schema"]
-    assert "pool_key" in swap.inputSchema["properties"]
-    assert "amount_in" in swap.inputSchema["required"]
+    swap_many = by_name["swap_many"]
+    assert swap_many.inputSchema == expected["swap_many"]["input_schema"]
+    assert "pool_key" in swap_many.inputSchema["properties"]
+    assert "count" in swap_many.inputSchema["required"]
 
 
 def test_build_server_constructs():
@@ -26,6 +26,8 @@ def test_build_server_constructs():
 
 
 async def test_call_tool_dispatches_and_serializes(stub_aleo):
-    out = await call_tool(ShieldSwap(stub_aleo), "get_slot", {"pool_key": "5field"})
+    dex = ShieldSwap(stub_aleo)
+    dex.api.get_pools = lambda: []          # no network in unit tests
+    out = await call_tool(dex, "get_pools", {})
     assert out[0].type == "text"
-    assert json.loads(out[0].text)["tick"] == 4055
+    assert json.loads(out[0].text) == []
