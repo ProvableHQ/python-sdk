@@ -65,6 +65,15 @@ def main() -> int:
                       amount0_desired=100 * int(state.scale0),
                       amount1_desired=100 * int(state.scale1)).delegate()
     pos = dex._position_state(minted.position_token_id)
+    from aleo_shield_swap._core import find_position_plaintext
+    import time
+    deadline = time.monotonic() + 600
+    while time.monotonic() < deadline:      # wait for the record to scan
+        records = dex._aleo.record_provider.find(
+            dex._aleo.default_account, program=dex.program, unspent=True)
+        if find_position_plaintext(records, pools[0].key):
+            break
+        time.sleep(15)
     dex.decrease_liquidity(pool_key=pools[0].key,
                            liquidity_to_remove=pos.liquidity // 2).delegate()
     results.append(("liquidity", f"ok: minted {minted.position_token_id[:14]}…, "

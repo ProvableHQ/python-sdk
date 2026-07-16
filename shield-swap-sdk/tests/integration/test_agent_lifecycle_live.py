@@ -99,6 +99,18 @@ def test_full_lifecycle_from_fresh_profile(tmp_path, monkeypatch):
 
     pos = dex._position_state(minted.position_token_id)
     assert pos is not None and pos.liquidity > 0
+
+    # The freshly minted PositionNFT record must reach the scanner before a
+    # resize can spend it — poll instead of failing on the immediate read.
+    from aleo_shield_swap._core import find_position_plaintext
+    deadline = time.monotonic() + 600
+    while time.monotonic() < deadline:
+        records = dex._aleo.record_provider.find(
+            dex._aleo.default_account, program=dex.program, unspent=True)
+        if find_position_plaintext(records, pool.key):
+            break
+        time.sleep(15)
+
     dex.decrease_liquidity(pool_key=pool.key,
                            liquidity_to_remove=pos.liquidity // 2).delegate()
 

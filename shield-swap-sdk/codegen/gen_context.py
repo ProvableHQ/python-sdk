@@ -67,35 +67,49 @@ CONVERSATION_PATTERN = """\
 ### After startup: ask what's next
 
 When onboarding reports funded, STOP and ask the user what they want to do
-— never launch into a journey unprompted.  Present the options in plain
-language (identities, records, and journals are your business, not the
-user's).  Frame the setting first — Shield Swap is a private exchange on
-Aleo's test network: trading uses test tokens, and what is traded, and by
-whom, stays hidden on the public chain — then offer:
+— never launch into a journey unprompted.  Present the options WITH their
+context, in plain language (identities, records, and journals are your
+business, not the user's):
 
-- **Swap tokens** — trade one token for another.  It settles in two steps
-  — placing the trade, then collecting what was bought — and you do both,
-  so the proceeds arrive without a separate trip.  The natural first move.
-- **Several swaps at once** — place a handful of trades and watch them all
-  land (`swap_many`); the busiest way to exercise the exchange.  First
-  show which trades are possible right now (tokens held x live pools) and
-  ask how many — and which — they want.
-- **Open a liquidity position** — instead of trading, become the market:
-  deposit a pair of tokens so others can trade against them (`mint`).
-  The user picks the price range; while the market price sits inside it
-  they earn a cut of every trade passing through.
-- **Add or remove liquidity** — grow a position or take some back out
-  (`increase_liquidity`/`decrease_liquidity`); whatever comes out becomes
-  earnings to collect.
-- **Collect earnings** — sweep everything the account is owed (tokens
-  bought in earlier swaps, fees its liquidity earned) into the wallet
-  (`collect_all`); good after any trading session.
-- **Building something?**  If they are developing a dApp, bot, or agent
-  integration rather than trading here, use Tier 2 below.
+1. **Their own playbook.**  Ask whether they have instructions of their
+   own — a strategy file, notes, a memory store, output from a previous
+   session.  If so, read it and treat it as the plan: their document
+   decides what to do, the verbs here describe how each step works.
 
-If the user brings their own playbook (a strategy file, notes, a memory
-store), read it and treat it as the plan — it decides what to do, the
-verbs here are how.
+2. **A suggested journey.**  Frame the setting first — Shield Swap is a
+   private exchange on Aleo's test network: trading uses test tokens, and
+   what is traded, and by whom, stays hidden on the public chain — then
+   offer:
+
+   - *Swap tokens* — trade one token for another.  It settles in two
+     steps — placing the trade, then collecting what was bought — and you
+     do both, so the proceeds arrive without a separate trip.  The
+     natural first move.
+   - *Several swaps at once* — place a handful of trades and watch them
+     all land (`swap_many`); the busiest way to exercise the exchange.
+     First show which trades are possible right now (tokens held x live
+     pools) and ask how many — and which — they want.
+   - *Open a liquidity position* — instead of trading, become the market:
+     deposit a pair of tokens so others can trade against them (`mint`).
+     The user picks the price range; while the market price sits inside
+     it they earn a cut of every trade passing through.
+   - *Add or remove liquidity* — grow a position or take some back out
+     (`increase_liquidity`/`decrease_liquidity`); whatever comes out
+     becomes earnings to collect.
+   - *Collect earnings* — sweep everything the account is owed (tokens
+     bought in earlier swaps, fees its liquidity earned) into the wallet
+     (`collect_all`); good after any trading session.
+
+3. **Developing a trading application or agent?**  Ask whether they are
+   building on Shield Swap — a dApp, a trading bot, a server or agent
+   integration — rather than (or besides) trading here.  The chat
+   journeys above are one way to use the DEX; consumers also build on
+   the SDK directly — route builders to Tier 2 below, which opens with
+   the client-choice table (bot/server, agent integration, browser dApp)
+   and the integration checklist.
+
+4. **A free-form prompt.**  Whatever they describe, map it onto the
+   verbs and journeys above before improvising against the SDK.
 
 ### While acting
 
@@ -111,6 +125,46 @@ verbs here are how.
    Never re-submit because a call seems slow — check `status()` first.
 5. Confirm, act, report ids.  Errors name their own fix — read the
    exception message and do what it says."""
+
+
+DEVELOPER_OPTIONS = """\
+### Building a trading application or agent?
+
+Start by asking what they are building — the client choice follows from
+where the signing keys live:
+
+| Building | Stack | Keys live |
+| --- | --- | --- |
+| Bot / server / CLI / notebook | `aleo-sdk` facade + `shield-swap-sdk` (this package) | A local private key (`ShieldSwap.from_profile()` manages it); delegated proving through the Provable prover — fees covered by default. |
+| Agent integration | `aleo_shield_swap.agent` (Claude-shape tool schemas + `dispatch_tool`) or `python -m aleo_shield_swap.mcp` (MCP server), over the same client | Same as the underlying client; the tools bind to it. |
+| Browser dApp (wallet-signed) | The TypeScript stack: `@provablehq/shield-swap-sdk` + Veil react hooks — not this package | The user's wallet signs and proves. |
+
+What every integration must handle (each enforced or automated by the
+verbs above — this list is the review checklist for code that bypasses
+them):
+
+- **Auth is layered**: a bearer credential (24h session JWT from the
+  challenge/verify handshake, or a durable `ss_…` API token — data/trading
+  endpoints only) AND a one-time invite redemption per account.
+- **Dynamic-dispatch imports**: every record-spending write must register
+  the involved token programs with the prover (the verbs resolve this via
+  the token registry; pass `imports=`/`token_*_program=` to override).
+- **Tokens are private records**: spendable balances do not appear in
+  public reads; one covering record funds an amount — no aggregation.
+- **Amounts obey the no-dust rule** both directions (`amount % scale == 0`);
+  quote in canonical decimals, transact in raw base units, display human.
+- **A `SwapHandle` is the only key to a swap's output** — persist before
+  anything else (the journal does this); claim after finalize with retry.
+- **Concurrency needs partitioned blinded-identity counters AND disjoint
+  input records** — `swap_many` implements the recipe; copy it, don't
+  improvise.
+
+Suggested path for a new integrator: (1) `onboard()` a profile — it
+doubles as a test fixture; (2) walk swap → `collect_all()` once with the
+Tier 1 verbs so the mechanics are concrete; (3) read the reference below
+for the surface your app needs; (4) `tests/integration/` and
+`scripts/rehearsal.py` in the repo are working reference implementations
+of the full journey."""
 
 
 def _entry(name: str, fn: object) -> str:
@@ -144,6 +198,8 @@ def render() -> str:
         CONVERSATION_PATTERN,
         "",
         "## Tier 2 — the development guide (building your own tools)",
+        "",
+        DEVELOPER_OPTIONS,
         "",
         "Every write verb returns a prepared `DexCall`: nothing touches the",
         "network until a terminal verb — `.simulate()` (local, free),",
