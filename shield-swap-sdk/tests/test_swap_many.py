@@ -36,7 +36,7 @@ def _fake_swap_factory(fail_counters=()):
         calls.append(identity.counter)
 
         class _Call:
-            def delegate(inner, account=None):
+            def delegate(inner, account=None, **kw):
                 if identity.counter in fail_counters:
                     raise RuntimeError(f"boom at {identity.counter}")
                 return SwapHandle(swap_id=f"s{identity.counter}",
@@ -88,7 +88,7 @@ def test_swap_many_quotes_route_for_expected_out(dex, monkeypatch):
         seen.append(expected_out)
 
         class _Call:
-            def delegate(inner, account=None):
+            def delegate(inner, account=None, **kw):
                 return SwapHandle(swap_id=f"s{identity.counter}",
                                   blinding_factor="bf", blinded_address="ba",
                                   token_in_id="t0", token_out_id="t1",

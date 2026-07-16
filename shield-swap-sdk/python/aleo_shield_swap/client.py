@@ -583,9 +583,11 @@ class ShieldSwap:
         """*count* private swaps of *amount_in* each, with reserved counters.
 
         Counters come from the journal (no probe races); every handle is
-        journaled before the next swap fires, so a crash mid-batch loses
-        nothing — ``collect_all()`` later claims whatever landed.  A failed
-        swap burns its counter and the batch continues; failures are
+        journaled as soon as its broadcast is accepted (no confirmation
+        wait), so a crash mid-batch loses nothing — ``collect_all()`` later
+        claims whatever finalized.  A swap the network rejects simply never
+        becomes claimable (it stays in ``still_pending``).  A failed
+        broadcast burns its counter and the batch continues; failures are
         reported, not raised.  Requires ``from_profile()``.
         """
         if self.journal is None:
@@ -608,7 +610,8 @@ class ShieldSwap:
                 handle = self.swap(pool_key=pool_key, token_in_id=token_in_id,
                                    amount_in=amount_in, slippage_bps=slippage_bps,
                                    expected_out=expected_out,
-                                   identity=ident, account=acct).delegate(acct)
+                                   identity=ident, account=acct
+                                   ).delegate(acct, wait=False)
                 self.journal.record_swap(handle, counter)
                 handles.append(handle)
             except Exception as exc:                  # journal + continue
