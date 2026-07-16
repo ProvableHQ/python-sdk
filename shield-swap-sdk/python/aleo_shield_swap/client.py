@@ -149,6 +149,11 @@ class ShieldSwap:
                     records.scanner.consumer_id = cid
             except Exception:
                 pass                      # scanner unreachable — built lazily later
+            # Re-register now that the key exists: a keyless registration at
+            # from_profile() time does not stick for fresh accounts.
+            account = getattr(self._aleo, "default_account", None)
+            if account is not None:
+                records.register(account)
 
     def onboard(self, invite_code: Optional[str] = None) -> OnboardReport:
         """Register this profile end to end — safe to re-run any time.
@@ -554,6 +559,19 @@ class ShieldSwap:
             raise ValueError("swap_many() needs a journal — construct with "
                              "ShieldSwap.from_profile().")
         acct = self._account(account)
+        # Quote once for the batch: a spot estimate ignores the pool fee, so
+        # min-out would exceed the real output and finalize would reject.
+        expected_out: Optional[int] = None
+        pool = self.get_pool(pool_key)
+        token_out_id = pool.token1 if token_in_id == pool.token0 else pool.token0
+        try:
+            route = self.api.get_route(token_in=token_in_id,
+                                       token_out=token_out_id,
+                                       amount_in=amount_in)
+            if route.estimated_amount_out:
+                expected_out = int(route.estimated_amount_out)
+        except ShieldSwapError:
+            pass                          # no quotable route — spot fallback
         counters = self.journal.reserve_counters(count)
         handles: list[SwapHandle] = []
         failures: list[dict] = []
@@ -562,6 +580,7 @@ class ShieldSwap:
             try:
                 handle = self.swap(pool_key=pool_key, token_in_id=token_in_id,
                                    amount_in=amount_in, slippage_bps=slippage_bps,
+                                   expected_out=expected_out,
                                    identity=ident, account=acct).delegate(acct)
                 self.journal.record_swap(handle, counter)
                 handles.append(handle)

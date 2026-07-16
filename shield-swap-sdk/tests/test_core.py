@@ -127,3 +127,17 @@ def test_select_token_record_filters_token_id_and_raises():
                             min_amount=400, token_id="9field")
     with pytest.raises(InsufficientRecordsError):
         select_token_record(_Aleo([]), program="tok.aleo", min_amount=1)
+
+
+def test_extract_tx_id_handles_all_dps_shapes():
+    import pytest
+    from aleo_shield_swap._calls import extract_tx_id
+
+    assert extract_tx_id("at1abc") == "at1abc"
+    assert extract_tx_id({"transaction_id": "at1a"}) == "at1a"
+    assert extract_tx_id({"id": "at1b"}) == "at1b"
+    # current DPS shape: full transaction nested under "transaction"
+    assert extract_tx_id({"transaction": {"type": "execute", "id": "at1c",
+                                          "execution": {}}}) == "at1c"
+    with pytest.raises(ValueError, match="Cannot find"):
+        extract_tx_id({"transaction": {"type": "execute"}})

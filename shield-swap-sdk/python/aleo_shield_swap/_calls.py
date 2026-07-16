@@ -22,6 +22,10 @@ def extract_tx_id(payload: Any) -> str:
     if isinstance(payload, str) and payload.strip():
         return payload.strip()
     if isinstance(payload, dict):
+        # Current DPS shape: the whole transaction nested under "transaction".
+        tx = payload.get("transaction")
+        if isinstance(tx, dict) and tx.get("id"):
+            return str(tx["id"])
         for key in ("transaction_id", "transactionId", "id", "txid", "tx_id"):
             if payload.get(key):
                 return str(payload[key])

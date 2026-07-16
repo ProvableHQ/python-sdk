@@ -21,6 +21,11 @@ def dex(tmp_path, monkeypatch):
         lambda aleo, acct, prog, c: type(
             "I", (), {"counter": c, "blinding_factor": f"bf{c}",
                       "blinded_address": f"ba{c}"})())
+    monkeypatch.setattr(ShieldSwap, "get_pool",
+                        lambda self, key: type("P", (), {"token0": "t0",
+                                                         "token1": "t1"})())
+    monkeypatch.setattr(d.api, "get_route", lambda **kw: type(
+        "R", (), {"estimated_amount_out": None})())
     return d
 
 
@@ -72,3 +77,25 @@ def test_swap_many_requires_journal(dex):
     dex.journal = None
     with pytest.raises(ValueError, match="from_profile"):
         dex.swap_many(pool_key="1field", token_in_id="t0", amount_in=5, count=2)
+
+
+def test_swap_many_quotes_route_for_expected_out(dex, monkeypatch):
+    monkeypatch.setattr(dex.api, "get_route",
+                        lambda **kw: type("R", (), {"estimated_amount_out": "990"})())
+    seen = []
+
+    def fake_swap(self, *, expected_out=None, identity=None, **kw):
+        seen.append(expected_out)
+
+        class _Call:
+            def delegate(inner, account=None):
+                return SwapHandle(swap_id=f"s{identity.counter}",
+                                  blinding_factor="bf", blinded_address="ba",
+                                  token_in_id="t0", token_out_id="t1",
+                                  pool_key="1field", amount_in=5,
+                                  transaction_id="tx", program="p")
+        return _Call()
+
+    monkeypatch.setattr(ShieldSwap, "swap", fake_swap)
+    dex.swap_many(pool_key="1field", token_in_id="t0", amount_in=5, count=2)
+    assert seen == [990, 990]              # quoted once, applied to every swap
