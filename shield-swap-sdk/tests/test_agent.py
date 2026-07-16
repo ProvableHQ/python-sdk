@@ -84,28 +84,19 @@ def test_dispatch_adjust_liquidity_signs():
     assert calls[1][0] == "inc" and calls[1][1]["amount0_desired"] == 7
 
 
-def test_dispatch_mint_position_journals():
-    journaled = []
-
-    class _Journal:
-        def record_position(self, pid, pool_key, tx):
-            journaled.append((pid, pool_key, tx))
-
+def test_dispatch_mint_position_serializes():
     class _Call:
         def delegate(self):
             return MintResult("11field", "txm")
 
     class _Dex:
-        journal = _Journal()
-
         def mint(self, **kw):
             return _Call()
 
     out = dispatch_tool(_Dex(), "mint_position",
                         {"pool_key": "pk", "tick_lower": -60, "tick_upper": 60,
                          "amount0_desired": 1, "amount1_desired": 1})
-    assert out["position_token_id"] == "11field"
-    assert journaled == [("11field", "pk", "txm")]
+    assert out["position_token_id"] == "11field"   # journaling lives in client.mint
 
 
 def test_dispatch_request_airdrop_defaults_to_profile():

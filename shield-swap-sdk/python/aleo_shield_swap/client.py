@@ -843,20 +843,32 @@ class ShieldSwap:
             tick_lower_hint=lo_hint, tick_upper_hint=hi_hint,
         ).to_plaintext()
 
+        program0 = token0_program or self._token_program(pool.token0)
+        program1 = token1_program or self._token_program(pool.token1)
         record0 = token0_record or select_token_record(
-            self._aleo, program=token0_program or self._token_program(pool.token0),
+            self._aleo, program=program0,
             min_amount=amount0_desired, token_id=pool.token0, account=acct)
         record1 = token1_record or select_token_record(
-            self._aleo, program=token1_program or self._token_program(pool.token1),
+            self._aleo, program=program1,
             min_amount=amount1_desired, token_id=pool.token1, account=acct)
-        self._ensure([p for p in (token0_program, token1_program) if p], imports)
+        self._ensure([program0, program1], imports)
 
         field_nonce = nonce if nonce is not None else generate_field_nonce()
         to = recipient or str(acct.address)
 
         inputs = [field_nonce, record0, record1, to, request, pool.token0, pool.token1]
         bound = self._aleo.programs.get(self.program).functions.mint(*inputs)
-        return DexCall(self._aleo, bound, self._position_result(MintResult))
+
+        base_build = self._position_result(MintResult)
+
+        def build_result(tx_id: str, outputs: list[Any]) -> MintResult:
+            result = base_build(tx_id, outputs)
+            if self.journal is not None and result.position_token_id:
+                self.journal.record_position(result.position_token_id,
+                                             pool_key, tx_id)
+            return result
+
+        return DexCall(self._aleo, bound, build_result)
 
     def increase_liquidity(
         self,
@@ -889,13 +901,15 @@ class ShieldSwap:
         hi_hint = (tick_upper_hint if tick_upper_hint is not None
                    else pick_insert_hint(slot, int(decoded["tick_upper"])))
 
+        program0 = token0_program or self._token_program(pool.token0)
+        program1 = token1_program or self._token_program(pool.token1)
         record0 = token0_record or select_token_record(
-            self._aleo, program=token0_program or self._token_program(pool.token0),
+            self._aleo, program=program0,
             min_amount=amount0_desired, token_id=pool.token0, account=acct)
         record1 = token1_record or select_token_record(
-            self._aleo, program=token1_program or self._token_program(pool.token1),
+            self._aleo, program=program1,
             min_amount=amount1_desired, token_id=pool.token1, account=acct)
-        self._ensure([p for p in (token0_program, token1_program) if p], imports)
+        self._ensure([program0, program1], imports)
 
         inputs = [
             position, record0, record1,
@@ -942,7 +956,15 @@ class ShieldSwap:
         acct = self._account(account)
         pool = self.get_pool(pool_key)
         position = position_record or self._select_position_record(pool_key, acct)
-        self._ensure([], imports)
+        # The collect transition pays out via dynamic token-program calls —
+        # both programs must be registered with the prover.
+        token_programs = []
+        for token_id in (pool.token0, pool.token1):
+            try:
+                token_programs.append(self._token_program(str(token_id)))
+            except ValueError:
+                pass
+        self._ensure(token_programs, imports)
         to = recipient or str(acct.address)
         inputs = [position, f"{amount0_requested}u128", f"{amount1_requested}u128",
                   pool.token0, pool.token1, to]
@@ -962,8 +984,19 @@ class ShieldSwap:
         """Burn an empty position NFT."""
         acct = self._account(account)
         position = position_record or self._select_position_record(pool_key, acct)
+        decoded = parse_plaintext(position)
+        pid = str(decoded.get("token_id")) if isinstance(decoded, dict) else None
         bound = self._aleo.programs.get(self.program).functions.burn(position)
-        return DexCall(self._aleo, bound, self._position_result(TxResult))
+
+        base_build = self._position_result(TxResult)
+
+        def build_result(tx_id: str, outputs: list[Any]) -> TxResult:
+            result = base_build(tx_id, outputs)
+            if self.journal is not None and pid:
+                self.journal.record_position_burned(pid, tx_id)
+            return result
+
+        return DexCall(self._aleo, bound, build_result)
 
     @staticmethod
     def _position_result(result_cls: Any) -> Any:

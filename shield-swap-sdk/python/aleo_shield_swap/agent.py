@@ -86,10 +86,7 @@ def _h_mint_position(dex: Any, args: dict[str, Any]) -> Any:
         amount1_desired=int(args["amount1_desired"]),
         token0_program=args.get("token0_program"),
         token1_program=args.get("token1_program")).delegate()
-    if dex.journal is not None and result.position_token_id:
-        dex.journal.record_position(result.position_token_id,
-                                    args["pool_key"], result.transaction_id)
-    return _serialize(result)
+    return _serialize(result)          # the client journals the position
 
 
 def _h_adjust_liquidity(dex: Any, args: dict[str, Any]) -> Any:

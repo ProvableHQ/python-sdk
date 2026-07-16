@@ -58,9 +58,17 @@ def main() -> int:
     collected = dex.collect_all()
     results.append(("collection", f"{len(collected.claimed)} claimed, "
                                   f"{len(collected.still_pending)} pending"))
-    # Liquidity flow (mint/adjust) joins once ops designates a rehearsal
-    # pool with mintable ranges — noted rather than silently skipped.
-    results.append(("liquidity", "SKIPPED: no designated rehearsal pool yet"))
+
+    state = dex.get_pool(pools[0].key)
+    lo, hi = dex.get_slot(pools[0].key).tick_range(width=4)
+    minted = dex.mint(pool_key=pools[0].key, tick_lower=lo, tick_upper=hi,
+                      amount0_desired=100 * int(state.scale0),
+                      amount1_desired=100 * int(state.scale1)).delegate()
+    pos = dex._position_state(minted.position_token_id)
+    dex.decrease_liquidity(pool_key=pools[0].key,
+                           liquidity_to_remove=pos.liquidity // 2).delegate()
+    results.append(("liquidity", f"ok: minted {minted.position_token_id[:14]}…, "
+                                 f"resized; run collection again for earnings"))
 
     failed = False
     for flow, outcome in results:

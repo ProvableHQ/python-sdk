@@ -6,7 +6,9 @@ Env:    ALEO_E2E_PRIVATE_KEY     mints a fresh invite code (or set
 Provable + DEX API credentials self-provision during onboarding.
 
 One ordered test: onboarding a fresh account is rate-limited and slow, so
-each phase asserts and feeds the next rather than re-onboarding.
+each phase asserts and feeds the next rather than re-onboarding.  Covers
+all four stress-test flows: startup, discovery+swaps, liquidity
+(mint/resize/collect), and collection.
 """
 from __future__ import annotations
 
@@ -85,8 +87,37 @@ def test_full_lifecycle_from_fresh_profile(tmp_path, monkeypatch):
             time.sleep(15)
     assert claimed_total == 2, "swap outputs never became claimable"
 
+    # ── Liquidity: mint, resize, collect the owed earnings ─────────────────
+    lo, hi = dex.get_slot(pool.key).tick_range(width=4)
+    scale0, scale1 = int(state.scale0), int(state.scale1)
+    minted = dex.mint(pool_key=pool.key, tick_lower=lo, tick_upper=hi,
+                      amount0_desired=100 * scale0,
+                      amount1_desired=100 * scale1).delegate()
+    assert minted.position_token_id, "mint returned no position id"
+    assert any(v.position_token_id == minted.position_token_id
+               for v in dex.get_positions())
+
+    pos = dex._position_state(minted.position_token_id)
+    assert pos is not None and pos.liquidity > 0
+    dex.decrease_liquidity(pool_key=pool.key,
+                           liquidity_to_remove=pos.liquidity // 2).delegate()
+
+    # The re-issued position record can lag the scanner — collect_all is
+    # designed to be re-run until the owed amounts drain.
+    deadline = time.monotonic() + 600
+    fees = []
+    while time.monotonic() < deadline and not fees:
+        try:
+            fees = dex.collect_all().fees
+        except Exception:
+            pass                     # stale record / transient — retry
+        if not fees:
+            time.sleep(20)
+    assert fees, "LP earnings never became collectable"
+
     # ── Resumability: a brand-new client sees a clean, consistent state ────
     fresh = ShieldSwap.from_profile(tmp_path / "home")
     st2 = fresh.status()
     assert st2.pending_claim_ids == []
     assert st2.counter_cursor == 2
+    assert len(st2.open_positions) == 1        # the minted position, journaled
