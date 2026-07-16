@@ -42,7 +42,7 @@ def test_swap_builds_exact_inputs(stub_aleo):
     assert args[6] == f"{1_000_000 * 9950 // 10000}u128"   # slippage applied
     assert args[7] == f"{MIN_SQRT_PRICE}u128"         # directional default
     assert args[8] == "123u64"
-    assert args[9] == "1100u32"                       # height 1000 + 100
+    assert args[9] == "11000u32"                      # height 1000 + 10_000 (DPS latency)
     assert args[10] == "1field" and args[11] == "2field"
     assert len(args) == 12
     # Dynamic dispatch: the DEX program and the token wrapper program must be

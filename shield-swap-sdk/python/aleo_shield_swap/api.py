@@ -205,7 +205,10 @@ class ApiClient:
     # ── Trading ────────────────────────────────────────────────────────────
 
     def get_route(self, *, token_in: str, token_out: str,
-                  amount_in: int | None = None) -> models.RouteResultDoc:
+                  amount_in: Any = None) -> models.RouteResultDoc:
+        """Best route between two tokens.  *amount_in* is a CANONICAL
+        decimal amount (human units, e.g. ``1.5``) — not base units —
+        and the returned ``estimated_amount_out`` is decimal too."""
         params: dict[str, Any] = {"token_in": token_in, "token_out": token_out}
         if amount_in is not None:
             params["amount_in"] = str(amount_in)

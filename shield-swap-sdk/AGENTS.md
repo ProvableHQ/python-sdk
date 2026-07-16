@@ -161,9 +161,11 @@ management still require a session JWT.
 
 
 
-### `api.get_route(self, *, token_in: 'str', token_out: 'str', amount_in: 'int | None' = None) -> 'models.RouteResultDoc'`
+### `api.get_route(self, *, token_in: 'str', token_out: 'str', amount_in: 'Any' = None) -> 'models.RouteResultDoc'`
 
-
+Best route between two tokens.  *amount_in* is a CANONICAL
+decimal amount (human units, e.g. ``1.5``) — not base units —
+and the returned ``estimated_amount_out`` is decimal too.
 
 ### Counters & blinding
 
@@ -191,7 +193,7 @@ fast when something is systematically wrong (e.g. wrong program).
 
 ### Chain verbs
 
-### `swap(self, *, pool_key: 'str', token_in_id: 'str', amount_in: 'int', slippage_bps: 'int' = 50, expected_out: 'Optional[int]' = None, sqrt_price_limit: 'Optional[int]' = None, deadline_offset_blocks: 'int' = 100, nonce: 'Optional[int]' = None, identity: 'Optional[BlindedIdentity]' = None, token_in_program: 'Optional[str]' = None, token_record: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[SwapHandle]'`
+### `swap(self, *, pool_key: 'str', token_in_id: 'str', amount_in: 'int', slippage_bps: 'int' = 50, expected_out: 'Optional[int]' = None, sqrt_price_limit: 'Optional[int]' = None, deadline_offset_blocks: 'int' = 10000, nonce: 'Optional[int]' = None, identity: 'Optional[BlindedIdentity]' = None, token_in_program: 'Optional[str]' = None, token_record: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[SwapHandle]'`
 
 Request a private swap — phase one of the two-transaction flow.
 
@@ -205,7 +207,10 @@ process might die before the claim.
 Quote first (``dex.api.get_route``) and pass *expected_out*: without
 it a spot estimate is used, which ignores fees and price impact.
 Pass *identity* (from journal-reserved counters) to skip the
-on-chain probe — required for concurrent swaps.
+on-chain probe — required for concurrent swaps.  The default
+*deadline_offset_blocks* (~8h at ~3s blocks) absorbs delegated-
+proving latency; a tight deadline aborts at finalize when proving
+outlives it.
 
 ### `claim_swap_output(self, handle: 'SwapHandle', *, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[ClaimResult]'`
 

@@ -24,8 +24,8 @@ def dex(tmp_path, monkeypatch):
     monkeypatch.setattr(ShieldSwap, "get_pool",
                         lambda self, key: type("P", (), {"token0": "t0",
                                                          "token1": "t1"})())
-    monkeypatch.setattr(d.api, "get_route", lambda **kw: type(
-        "R", (), {"estimated_amount_out": None})())
+    monkeypatch.setattr(ShieldSwap, "_quote_expected_out",
+                        lambda self, **kw: None)
     return d
 
 
@@ -80,8 +80,8 @@ def test_swap_many_requires_journal(dex):
 
 
 def test_swap_many_quotes_route_for_expected_out(dex, monkeypatch):
-    monkeypatch.setattr(dex.api, "get_route",
-                        lambda **kw: type("R", (), {"estimated_amount_out": "990"})())
+    monkeypatch.setattr(ShieldSwap, "_quote_expected_out",
+                        lambda self, **kw: 990)
     seen = []
 
     def fake_swap(self, *, expected_out=None, identity=None, **kw):
@@ -99,3 +99,24 @@ def test_swap_many_quotes_route_for_expected_out(dex, monkeypatch):
     monkeypatch.setattr(ShieldSwap, "swap", fake_swap)
     dex.swap_many(pool_key="1field", token_in_id="t0", amount_in=5, count=2)
     assert seen == [990, 990]              # quoted once, applied to every swap
+
+
+def test_quote_expected_out_converts_units_both_ways(tmp_path, monkeypatch):
+    # fresh client: the shared fixture stubs _quote_expected_out itself
+    dex = ShieldSwap(_Facade())
+    monkeypatch.setattr(dex.api, "get_tokens", lambda: [
+        type("T", (), {"address": "tin", "decimals": 18})(),
+        type("T", (), {"address": "tout", "decimals": 6})()])
+    seen = {}
+
+    def fake_route(*, token_in, token_out, amount_in):
+        seen["amount_in"] = str(amount_in)
+        return type("R", (), {"estimated_amount_out": "1089.461274"})()
+
+    monkeypatch.setattr(dex.api, "get_route", fake_route)
+    out = dex._quote_expected_out(token_in_id="tin", token_out_id="tout",
+                                  amount_in=10**19)
+    assert seen["amount_in"] == "10"           # base -> canonical decimal
+    assert out == 1089461274                   # canonical -> base units
+    assert dex._quote_expected_out(token_in_id="unknown", token_out_id="tout",
+                                   amount_in=1) is None

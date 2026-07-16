@@ -388,7 +388,7 @@ class ShieldSwap:
         slippage_bps: int = 50,
         expected_out: Optional[int] = None,
         sqrt_price_limit: Optional[int] = None,
-        deadline_offset_blocks: int = 100,
+        deadline_offset_blocks: int = 10_000,
         nonce: Optional[int] = None,
         identity: Optional[BlindedIdentity] = None,
         token_in_program: Optional[str] = None,
@@ -408,7 +408,10 @@ class ShieldSwap:
         Quote first (``dex.api.get_route``) and pass *expected_out*: without
         it a spot estimate is used, which ignores fees and price impact.
         Pass *identity* (from journal-reserved counters) to skip the
-        on-chain probe — required for concurrent swaps.
+        on-chain probe — required for concurrent swaps.  The default
+        *deadline_offset_blocks* (~8h at ~3s blocks) absorbs delegated-
+        proving latency; a tight deadline aborts at finalize when proving
+        outlives it.
         """
         acct = self._account(account)
         pool = self.get_pool(pool_key)
@@ -537,6 +540,36 @@ class ShieldSwap:
 
     # ── Liquidity ────────────────────────────────────────────────────────────
 
+    def _token_decimals(self, token_id: str) -> Optional[int]:
+        for t in self.api.get_tokens():
+            if t.address == token_id:
+                return int(t.decimals)
+        return None
+
+    def _quote_expected_out(self, *, token_in_id: str, token_out_id: str,
+                            amount_in: int) -> Optional[int]:
+        """Base-unit expected output for a trade, via the route quote.
+
+        The route endpoint speaks canonical decimal amounts, the contract
+        speaks base units — this converts in both directions using the
+        token registry's decimals.  None (spot fallback) when either token
+        is unknown or no route is quotable.
+        """
+        from decimal import Decimal
+        dec_in = self._token_decimals(token_in_id)
+        dec_out = self._token_decimals(token_out_id)
+        if dec_in is None or dec_out is None:
+            return None
+        try:
+            route = self.api.get_route(
+                token_in=token_in_id, token_out=token_out_id,
+                amount_in=Decimal(amount_in) / (10 ** dec_in))
+        except ShieldSwapError:
+            return None                   # no quotable route
+        if not route.estimated_amount_out:
+            return None
+        return int(Decimal(route.estimated_amount_out) * (10 ** dec_out))
+
     def swap_many(
         self,
         *,
@@ -561,17 +594,11 @@ class ShieldSwap:
         acct = self._account(account)
         # Quote once for the batch: a spot estimate ignores the pool fee, so
         # min-out would exceed the real output and finalize would reject.
-        expected_out: Optional[int] = None
         pool = self.get_pool(pool_key)
         token_out_id = pool.token1 if token_in_id == pool.token0 else pool.token0
-        try:
-            route = self.api.get_route(token_in=token_in_id,
-                                       token_out=token_out_id,
-                                       amount_in=amount_in)
-            if route.estimated_amount_out:
-                expected_out = int(route.estimated_amount_out)
-        except ShieldSwapError:
-            pass                          # no quotable route — spot fallback
+        expected_out = self._quote_expected_out(
+            token_in_id=token_in_id, token_out_id=token_out_id,
+            amount_in=amount_in)
         counters = self.journal.reserve_counters(count)
         handles: list[SwapHandle] = []
         failures: list[dict] = []
