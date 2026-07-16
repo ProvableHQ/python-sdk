@@ -43,16 +43,6 @@ def _h_get_pools(dex: Any, args: dict[str, Any]) -> Any:
             for p in dex.api.get_pools()]
 
 
-def _h_get_route(dex: Any, args: dict[str, Any]) -> Any:
-    return _serialize(dex.api.get_route(
-        token_in=args["token_in"], token_out=args["token_out"],
-        amount_in=args.get("amount_in")))
-
-
-def _h_get_slot(dex: Any, args: dict[str, Any]) -> Any:
-    return _serialize(dex.get_slot(args["pool_key"]))
-
-
 def _h_get_balances(dex: Any, args: dict[str, Any]) -> Any:
     return dex.get_balances(address=args.get("address"))
 

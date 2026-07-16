@@ -36,7 +36,7 @@ def _initial_key(network: str) -> tuple[str, str]:
     """
     import aleo
     net = getattr(aleo, network)
-    key = os.environ.get("SHIELD_SWAP_PRIVATE_KEY")
+    key = (os.environ.get("SHIELD_SWAP_PRIVATE_KEY") or "").strip()
     key_file = os.environ.get("SHIELD_SWAP_PRIVATE_KEY_FILE")
     if not key and key_file:
         key = Path(key_file).read_text().strip()

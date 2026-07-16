@@ -132,16 +132,18 @@ def normalize_mapping_value(raw: Any) -> Optional[str]:
 
 
 def pick_covering_record(records: Any, *, min_amount: int,
-                         token_id: Optional[str]) -> Optional[str]:
+                         token_id: Optional[str],
+                         exclude: Optional[set[str]] = None) -> Optional[str]:
     """Smallest unspent token-record plaintext covering *min_amount*, or None.
 
     *token_id* filters registry-style records; wrapper-program records carry
-    no ``token_id`` and match any.
+    no ``token_id`` and match any.  *exclude* skips records already assigned
+    (e.g. to earlier swaps of a concurrent batch).
     """
     candidates: list[tuple[int, str]] = []
     for rec in records:
         plaintext = record_plaintext(rec)
-        if not plaintext:
+        if not plaintext or (exclude and plaintext in exclude):
             continue
         info = parse_token_record_info(plaintext)
         if info is None or info["amount"] < min_amount:

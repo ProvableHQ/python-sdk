@@ -16,6 +16,7 @@ from . import _generated as g
 from ._core import (
     ensure_programs,
     find_position_plaintext,
+    pick_covering_record,
     record_plaintext,
     generate_field_nonce,
     generate_swap_nonce,
@@ -434,7 +435,10 @@ class ShieldSwap:
             )
             token_programs = [program]
         else:
-            token_programs = [token_in_program] if token_in_program else []
+            # An explicit record still needs its program registered with the
+            # prover — resolve it unless the caller named one.
+            program = token_in_program or self._token_program(token_in_id)
+            token_programs = [program]
         # Dynamic dispatch: the prover cannot discover token callees
         # statically — register the DEX program and the involved token
         # programs with the process before authorization.
@@ -569,9 +573,10 @@ class ShieldSwap:
         if dec_in is None or dec_out is None:
             return None
         try:
+            canonical = Decimal(amount_in) / (10 ** dec_in)
             route = self.api.get_route(
                 token_in=token_in_id, token_out=token_out_id,
-                amount_in=Decimal(amount_in) / (10 ** dec_in))
+                amount_in=f"{canonical:f}")   # fixed-point, never "1E-8"
         except ShieldSwapError:
             return None                   # no quotable route
         if not route.estimated_amount_out:
@@ -616,15 +621,11 @@ class ShieldSwap:
 
         def _fresh_record() -> Optional[str]:
             """An unspent covering record not already used by this batch."""
-            for rec in self._aleo.record_provider.find(acct, program=program,
-                                                       unspent=True):
-                plaintext = record_plaintext(rec)
-                info = parse_token_record_info(plaintext) if plaintext else None
-                if (plaintext and plaintext not in used_records
-                        and info and info["amount"] >= amount_in
-                        and info.get("token_id") in (None, token_in_id)):
-                    return plaintext
-            return None
+            records = self._aleo.record_provider.find(acct, program=program,
+                                                      unspent=True)
+            return pick_covering_record(records, min_amount=amount_in,
+                                        token_id=token_in_id,
+                                        exclude=used_records)
 
         handles: list[SwapHandle] = []
         failures: list[dict] = []
@@ -659,6 +660,7 @@ class ShieldSwap:
                 handle = self.swap(pool_key=pool_key, token_in_id=token_in_id,
                                    amount_in=amount_in, slippage_bps=slippage_bps,
                                    expected_out=expected_out, token_record=record,
+                                   token_in_program=program,
                                    identity=ident, account=acct
                                    ).delegate(acct, wait=False)
                 self.journal.record_swap(handle, counter)
@@ -693,11 +695,10 @@ class ShieldSwap:
             except SwapOutputNotFinalizedError:
                 still_pending.append(handle.swap_id or "")
                 continue
-            except Exception as exc:
+            except Exception:
                 # Transient failure (network blip, node hiccup): the claim
                 # was not journaled, so the next collect_all retries it.
-                failures_note = f"{type(exc).__name__}: {exc}"
-                still_pending.append(handle.swap_id or failures_note[:0])
+                still_pending.append(handle.swap_id or "")
                 continue
             self.journal.record_claim(handle.swap_id or "", res.transaction_id,
                                       res.amount_out)
