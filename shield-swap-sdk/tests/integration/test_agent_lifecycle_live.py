@@ -90,10 +90,22 @@ def test_full_lifecycle_from_fresh_profile(tmp_path, monkeypatch):
     # ── Liquidity: mint, resize, collect the owed earnings ─────────────────
     lo, hi = dex.get_slot(pool.key).tick_range(width=4)
     scale0, scale1 = int(state.scale0), int(state.scale1)
-    minted = dex.mint(pool_key=pool.key, tick_lower=lo, tick_upper=hi,
-                      amount0_desired=100 * scale0,
-                      amount1_desired=100 * scale1).delegate()
-    assert minted.position_token_id, "mint returned no position id"
+
+    # Right after claims, the scanner can still serve just-spent records; a
+    # mint built on one is silently dropped.  Model the careful client:
+    # verify the drop, let the scanner refresh, re-select records, retry.
+    minted = None
+    for attempt in range(3):
+        try:
+            minted = dex.mint(pool_key=pool.key, tick_lower=lo, tick_upper=hi,
+                              amount0_desired=100 * scale0,
+                              amount1_desired=100 * scale1).delegate()
+            break
+        except Exception:
+            if attempt == 2:
+                raise
+            time.sleep(60)               # scanner catches up; records re-scan
+    assert minted and minted.position_token_id, "mint returned no position id"
     assert any(v.position_token_id == minted.position_token_id
                for v in dex.get_positions())
 
