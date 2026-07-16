@@ -199,6 +199,25 @@ def build_owned_filter(
     return owned
 
 
+def enforce_record_filter(
+    records: list[OwnedRecord],
+    *,
+    program: str | None = None,
+    record: str | None = None,
+) -> list[OwnedRecord]:
+    """Apply the ``program``/``record`` subfilter to scanned records locally.
+
+    The hosted scanner ignores the ``filter`` subobject of an
+    :class:`OwnedFilter` and returns every record the account owns, so the
+    filter contract must be enforced on the results client-side.
+    """
+    if program is not None:
+        records = [r for r in records if r.get("program_name") == program]
+    if record is not None:
+        records = [r for r in records if r.get("record_name") == record]
+    return records
+
+
 def uuid_is_valid(uuid: str, network: str = "mainnet") -> bool:
     """Return True if uuid is a valid Field string (e.g. '1234...field')."""
     try:
