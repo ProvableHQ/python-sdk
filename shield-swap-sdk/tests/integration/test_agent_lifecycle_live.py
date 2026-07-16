@@ -3,16 +3,13 @@
 Opt in: python -m pytest tests/integration/test_agent_lifecycle_live.py -m live
 Env:    ALEO_E2E_PRIVATE_KEY     mints a fresh invite code (or set
                                  SHIELD_SWAP_INVITE_CODE explicitly)
-        ALEO_E2E_API_KEY /
-        ALEO_E2E_CONSUMER_ID     delegated-proving + scanner credentials
-        ALEO_E2E_ENDPOINT        API origin (default https://api.provable.com)
+Provable + DEX API credentials self-provision during onboarding.
 
 One ordered test: onboarding a fresh account is rate-limited and slow, so
 each phase asserts and feeds the next rather than re-onboarding.
 """
 from __future__ import annotations
 
-import json
 import os
 import time
 
@@ -22,8 +19,6 @@ pytestmark = pytest.mark.live
 
 _HAS_CODE_SOURCE = bool(os.environ.get("SHIELD_SWAP_INVITE_CODE")
                         or os.environ.get("ALEO_E2E_PRIVATE_KEY"))
-_HAS_DPS = all(os.environ.get(k)
-               for k in ("ALEO_E2E_API_KEY", "ALEO_E2E_CONSUMER_ID"))
 
 
 def _invite_code() -> str:
@@ -43,10 +38,10 @@ def _invite_code() -> str:
 @pytest.mark.skipif(not _HAS_CODE_SOURCE,
                     reason="no invite code source (SHIELD_SWAP_INVITE_CODE "
                            "or ALEO_E2E_PRIVATE_KEY)")
-@pytest.mark.skipif(not _HAS_DPS,
-                    reason="delegated-proving env missing "
-                           "(ALEO_E2E_API_KEY/ALEO_E2E_CONSUMER_ID)")
-def test_full_lifecycle_from_fresh_profile(tmp_path):
+def test_full_lifecycle_from_fresh_profile(tmp_path, monkeypatch):
+    # Prove the participant path: credentials must SELF-provision.
+    monkeypatch.delenv("ALEO_E2E_API_KEY", raising=False)
+    monkeypatch.delenv("ALEO_E2E_CONSUMER_ID", raising=False)
     from aleo_shield_swap import ShieldSwap
 
     # ── Startup: fresh key material, full registration, airdrop ────────────
@@ -71,10 +66,12 @@ def test_full_lifecycle_from_fresh_profile(tmp_path):
     # Pick a pool whose tokens we actually hold (the conversation pattern).
     pool = next(p for p in pools if p.token0 in held or p.token1 in held)
     token_in = pool.token0 if pool.token0 in held else pool.token1
+    state = dex.get_pool(pool.key)
+    scale_in = state.scale0 if token_in == pool.token0 else state.scale1
 
     # ── Swaps: concurrent counters, journaled handles ───────────────────────
     batch = dex.swap_many(pool_key=pool.key, token_in_id=token_in,
-                          amount_in=10**4, count=2)
+                          amount_in=10**4 * int(scale_in), count=2)
     assert len(batch.handles) == 2, f"swap failures: {batch.failures}"
     assert len({h.blinded_address for h in batch.handles}) == 2
 
@@ -93,28 +90,3 @@ def test_full_lifecycle_from_fresh_profile(tmp_path):
     st2 = fresh.status()
     assert st2.pending_claim_ids == []
     assert st2.counter_cursor == 2
-
-
-@pytest.mark.skipif(not _HAS_CODE_SOURCE,
-                    reason="no invite code source")
-def test_live_registration_without_dps_creds(tmp_path, monkeypatch):
-    """The registration half of the lifecycle, provable without DPS creds:
-    fresh account authenticates, redeems a minted invite, and the
-    credentials stage fails with the instructive error (not a crash)."""
-    from aleo_shield_swap import ShieldSwap
-    from aleo_shield_swap.errors import CredentialsMissingError
-
-    monkeypatch.delenv("ALEO_E2E_API_KEY", raising=False)
-    monkeypatch.delenv("ALEO_E2E_CONSUMER_ID", raising=False)
-
-    dex = ShieldSwap.from_profile(tmp_path / "home")
-    with pytest.raises(CredentialsMissingError, match="ALEO_E2E_API_KEY"):
-        dex.onboard(invite_code=_invite_code())
-
-    st = dex.status()
-    assert st.authenticated and st.has_access     # auth + redeem DID land
-    stages = {e["name"]: e["action"] for e in dex.journal.events()
-              if e["type"] == "stage"}
-    assert stages["authenticate"] == "ran" and stages["redeem"] == "ran"
-    # And the fresh JWT is persisted for the next session.
-    assert json.loads((dex.profile.home / "credentials.json").read_text())["jwt"]
