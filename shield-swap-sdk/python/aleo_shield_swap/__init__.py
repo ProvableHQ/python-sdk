@@ -70,7 +70,7 @@ def agent_guide() -> str:
     return files(__name__).joinpath("AGENTS.md").read_text()
 
 
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 
 __all__ = [
     "ShieldSwap", "AsyncShieldSwap", "ApiClient", "AsyncApiClient",

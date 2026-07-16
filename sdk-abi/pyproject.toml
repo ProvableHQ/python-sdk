@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "aleo-contract-abi-generator"
-version = "0.2.1"
+version = "0.2.2"
 description = "Python bindings for ABI generation from Aleo bytecode"
 readme = "README.md"
 license = {text = "GPL-3.0-or-later"}
