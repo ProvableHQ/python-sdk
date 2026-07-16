@@ -54,7 +54,7 @@ The scan catches positions the journal never saw (account used from
 another machine, journal lost); it needs a registered record
 provider and is skipped silently without one.
 
-### `swap_many(self, *, pool_key: 'str', token_in_id: 'str', amount_in: 'int', count: 'int', slippage_bps: 'int' = 50, account: 'Any' = None) -> 'SwapBatchReport'`
+### `swap_many(self, *, pool_key: 'str', token_in_id: 'str', amount_in: 'int', count: 'int', slippage_bps: 'int' = 50, record_wait_seconds: 'float' = 120.0, account: 'Any' = None) -> 'SwapBatchReport'`
 
 *count* private swaps of *amount_in* each, with reserved counters.
 

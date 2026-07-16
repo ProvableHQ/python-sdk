@@ -510,7 +510,15 @@ class ShieldSwap:
             )
         # Trust-critical read: the amounts the claim moves come from the chain.
         out = self.get_swap_output(handle.swap_id)
-        self._ensure([], imports)
+        # The claim dynamically calls BOTH token programs (payout + refund) —
+        # register them; a fresh process has neither cached.
+        token_programs = []
+        for token_id in (out.token_in, out.token_out):
+            try:
+                token_programs.append(self._token_program(str(token_id)))
+            except ValueError:
+                pass                      # unknown to the registry — imports= override
+        self._ensure(token_programs, imports)
 
         inputs = [
             handle.blinding_factor,
@@ -578,6 +586,7 @@ class ShieldSwap:
         amount_in: int,
         count: int,
         slippage_bps: int = 50,
+        record_wait_seconds: float = 120.0,
         account: Any = None,
     ) -> SwapBatchReport:
         """*count* private swaps of *amount_in* each, with reserved counters.
@@ -602,14 +611,54 @@ class ShieldSwap:
             token_in_id=token_in_id, token_out_id=token_out_id,
             amount_in=amount_in)
         counters = self.journal.reserve_counters(count)
+        program = self._token_program(token_in_id)
+        used_records: set[str] = set()
+
+        def _fresh_record() -> Optional[str]:
+            """An unspent covering record not already used by this batch."""
+            for rec in self._aleo.record_provider.find(acct, program=program,
+                                                       unspent=True):
+                plaintext = record_plaintext(rec)
+                info = parse_token_record_info(plaintext) if plaintext else None
+                if (plaintext and plaintext not in used_records
+                        and info and info["amount"] >= amount_in
+                        and info.get("token_id") in (None, token_in_id)):
+                    return plaintext
+            return None
+
         handles: list[SwapHandle] = []
         failures: list[dict] = []
         for counter in counters:
+            # Each in-flight swap must spend a DISTINCT record — the scanner
+            # still shows a record unspent until its swap confirms, so reuse
+            # would double-spend and the network would reject the copy.
+            record = _fresh_record()
+            if record is None and handles:
+                # Out of distinct records: wait for the last broadcast swap
+                # to confirm, then poll for its change record.
+                import time as _time
+                try:
+                    self._aleo.network.wait_for_transaction(
+                        handles[-1].transaction_id, timeout=180.0)
+                except Exception:
+                    pass
+                poll_deadline = _time.monotonic() + record_wait_seconds
+                while record is None and _time.monotonic() < poll_deadline:
+                    _time.sleep(5.0)
+                    record = _fresh_record()
+            if record is None:
+                msg = (f"no distinct unspent record covers {amount_in} for "
+                       f"this swap — earlier swaps in the batch hold the "
+                       f"records; collect_all() then retry")
+                self.journal.record_swap_failed(counter, msg)
+                failures.append({"counter": counter, "error": msg})
+                continue
+            used_records.add(record)
             ident = blinded_identity_at(self._aleo, acct, self.program, counter)
             try:
                 handle = self.swap(pool_key=pool_key, token_in_id=token_in_id,
                                    amount_in=amount_in, slippage_bps=slippage_bps,
-                                   expected_out=expected_out,
+                                   expected_out=expected_out, token_record=record,
                                    identity=ident, account=acct
                                    ).delegate(acct, wait=False)
                 self.journal.record_swap(handle, counter)
@@ -643,6 +692,12 @@ class ShieldSwap:
                 res = self.claim_swap_output(handle, account=acct).delegate(acct)
             except SwapOutputNotFinalizedError:
                 still_pending.append(handle.swap_id or "")
+                continue
+            except Exception as exc:
+                # Transient failure (network blip, node hiccup): the claim
+                # was not journaled, so the next collect_all retries it.
+                failures_note = f"{type(exc).__name__}: {exc}"
+                still_pending.append(handle.swap_id or failures_note[:0])
                 continue
             self.journal.record_claim(handle.swap_id or "", res.transaction_id,
                                       res.amount_out)

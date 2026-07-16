@@ -6,8 +6,20 @@ from aleo_shield_swap.profile import Profile
 from aleo_shield_swap.types import SwapHandle
 
 
+RECORDS = [
+    {"record_plaintext": f"{{ owner: aleo1x.private, amount: {n}u128.private }}"}
+    for n in (100, 101, 102)
+]
+
+
+class _Provider:
+    def find(self, account, program=None, unspent=True):
+        return list(RECORDS)
+
+
 class _Facade:
     network_name = "testnet"
+    record_provider = _Provider()
 
 
 @pytest.fixture
@@ -26,6 +38,8 @@ def dex(tmp_path, monkeypatch):
                                                          "token1": "t1"})())
     monkeypatch.setattr(ShieldSwap, "_quote_expected_out",
                         lambda self, **kw: None)
+    monkeypatch.setattr(ShieldSwap, "_token_program",
+                        lambda self, token_id: "tok.aleo")
     return d
 
 
@@ -120,3 +134,35 @@ def test_quote_expected_out_converts_units_both_ways(tmp_path, monkeypatch):
     assert out == 1089461274                   # canonical -> base units
     assert dex._quote_expected_out(token_in_id="unknown", token_out_id="tout",
                                    amount_in=1) is None
+
+
+def test_swap_many_partitions_distinct_records(dex, monkeypatch):
+    fake, _ = _fake_swap_factory()
+    seen_records = []
+    orig = fake
+
+    def spy(self, *, token_record=None, **kw):
+        seen_records.append(token_record)
+        return orig(self, **kw)
+
+    monkeypatch.setattr(ShieldSwap, "swap", spy)
+    report = dex.swap_many(pool_key="1field", token_in_id="t0",
+                           amount_in=5, count=3)
+    assert len(report.handles) == 3
+    assert len(set(seen_records)) == 3     # every swap spends its own record
+
+
+def test_swap_many_fails_cleanly_when_records_run_out(dex, monkeypatch):
+    fake, _ = _fake_swap_factory()
+    monkeypatch.setattr(ShieldSwap, "swap", fake)
+
+    class _Net:
+        def wait_for_transaction(self, tx_id, timeout=180.0):
+            return None
+
+    dex._aleo.network = _Net()
+    report = dex.swap_many(pool_key="1field", token_in_id="t0",
+                           amount_in=5, count=5, record_wait_seconds=0)
+    assert len(report.handles) == 3        # one per distinct record
+    assert len(report.failures) == 2
+    assert all("distinct unspent record" in f["error"] for f in report.failures)
