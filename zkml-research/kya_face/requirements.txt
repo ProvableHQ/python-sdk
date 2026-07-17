@@ -1,0 +1,14 @@
+# -------------------------------------------------
+# KYA Face ID demo – pinned, known-good versions
+# -------------------------------------------------
+numpy>=1.26,<2.0
+pandas>=2.2,<3.0
+matplotlib>=3.9,<4.0
+scikit-learn>=1.5,<1.6
+Pillow>=10.3,<11.0
+face_recognition==1.3.0        # needs CMake & compiler
+face_recognition_models>=0.3.0
+zkml>=0.0.2b2
+jupyterlab>=4.2,<5.0
+ipykernel>=6.29,<7.0
+pyobjc-framework-AVFoundation; sys_platform == "darwin"
