@@ -32,6 +32,200 @@ use std::{ops::Deref, str::FromStr};
 #[pyclass(frozen)]
 pub struct Program(ProgramNative);
 
+/// The required signature of an interface function or view function, expressed in the
+/// canonical `.aleo` bytecode type notation (e.g. "address.public", "Token.record").
+/// The special output marker "future" matches any future type, since a future's locator
+/// embeds the id of the program being checked.
+struct InterfaceFunction {
+    name: &'static str,
+    inputs: &'static [&'static str],
+    outputs: &'static [&'static str],
+}
+
+const FUTURE: &str = "future";
+
+/// Input marker for the ARC-22 Merkle proof array, which is matched structurally rather
+/// than by exact type string since the MerkleProof struct may be local or imported.
+const MERKLE_PROOFS: &str = "[MerkleProof; 2u32].private";
+
+/// The functions required by the ARC-20 token interface (IARC20).
+const ARC20_FUNCTIONS: &[InterfaceFunction] = &[
+    InterfaceFunction {
+        name: "transfer_public",
+        inputs: &["address.public", "u128.public"],
+        outputs: &[FUTURE],
+    },
+    InterfaceFunction {
+        name: "transfer_private",
+        inputs: &["Token.record", "address.private", "u128.private"],
+        outputs: &["Token.record", "Token.record"],
+    },
+    InterfaceFunction {
+        name: "transfer_private_to_public",
+        inputs: &["Token.record", "address.public", "u128.public"],
+        outputs: &["Token.record", FUTURE],
+    },
+    InterfaceFunction {
+        name: "transfer_public_to_private",
+        inputs: &["address.private", "u128.public"],
+        outputs: &["Token.record", FUTURE],
+    },
+    InterfaceFunction {
+        name: "transfer_public_as_signer",
+        inputs: &["address.public", "u128.public"],
+        outputs: &[FUTURE],
+    },
+    InterfaceFunction {
+        name: "transfer_from_public",
+        inputs: &["address.public", "address.public", "u128.public"],
+        outputs: &[FUTURE],
+    },
+    InterfaceFunction {
+        name: "transfer_from_public_to_private",
+        inputs: &["address.public", "address.private", "u128.public"],
+        outputs: &["Token.record", FUTURE],
+    },
+    InterfaceFunction {
+        name: "approve_public",
+        inputs: &["address.public", "u128.public"],
+        outputs: &[FUTURE],
+    },
+    InterfaceFunction {
+        name: "unapprove_public",
+        inputs: &["address.public", "u128.public"],
+        outputs: &[FUTURE],
+    },
+    InterfaceFunction {
+        name: "join",
+        inputs: &["Token.record", "Token.record"],
+        outputs: &["Token.record"],
+    },
+    InterfaceFunction {
+        name: "split",
+        inputs: &["Token.record", "u128.private"],
+        outputs: &["Token.record", "Token.record"],
+    },
+];
+
+/// The view functions required by both the ARC-20 (IARC20) and ARC-22 (IARC22) token
+/// interfaces. View function inputs and outputs are always public.
+const ARC20_VIEWS: &[InterfaceFunction] = &[
+    InterfaceFunction {
+        name: "balance_of",
+        inputs: &["address.public"],
+        outputs: &["u128.public"],
+    },
+    InterfaceFunction {
+        name: "allowance",
+        inputs: &["address.public", "address.public"],
+        outputs: &["u128.public"],
+    },
+    InterfaceFunction {
+        name: "supply",
+        inputs: &[],
+        outputs: &["u128.public"],
+    },
+    InterfaceFunction {
+        name: "max_supply",
+        inputs: &[],
+        outputs: &["u128.public"],
+    },
+    InterfaceFunction {
+        name: "decimals",
+        inputs: &[],
+        outputs: &["u8.public"],
+    },
+    InterfaceFunction {
+        name: "name",
+        inputs: &[],
+        outputs: &["identifier.public"],
+    },
+    InterfaceFunction {
+        name: "symbol",
+        inputs: &[],
+        outputs: &["identifier.public"],
+    },
+];
+
+/// The functions required by the ARC-22 compliant token interface (IARC22).
+const ARC22_FUNCTIONS: &[InterfaceFunction] = &[
+    InterfaceFunction {
+        name: "approve_public",
+        inputs: &["address.public", "u128.public"],
+        outputs: &[FUTURE],
+    },
+    InterfaceFunction {
+        name: "unapprove_public",
+        inputs: &["address.public", "u128.public"],
+        outputs: &[FUTURE],
+    },
+    InterfaceFunction {
+        name: "transfer_public",
+        inputs: &["address.public", "u128.public"],
+        outputs: &[FUTURE],
+    },
+    InterfaceFunction {
+        name: "transfer_private",
+        inputs: &[
+            "address.private",
+            "u128.private",
+            "Token.record",
+            MERKLE_PROOFS,
+        ],
+        outputs: &[
+            "ComplianceRecord.record",
+            "Token.record",
+            "Token.record",
+            FUTURE,
+        ],
+    },
+    InterfaceFunction {
+        name: "transfer_private_to_public",
+        inputs: &[
+            "address.public",
+            "u128.public",
+            "Token.record",
+            MERKLE_PROOFS,
+        ],
+        outputs: &["ComplianceRecord.record", "Token.record", FUTURE],
+    },
+    InterfaceFunction {
+        name: "transfer_public_to_private",
+        inputs: &["address.private", "u128.public"],
+        outputs: &["ComplianceRecord.record", "Token.record", FUTURE],
+    },
+    InterfaceFunction {
+        name: "transfer_from_public",
+        inputs: &["address.public", "address.public", "u128.public"],
+        outputs: &[FUTURE],
+    },
+    InterfaceFunction {
+        name: "transfer_from_public_to_private",
+        inputs: &["address.public", "address.private", "u128.public"],
+        outputs: &["ComplianceRecord.record", "Token.record", FUTURE],
+    },
+    InterfaceFunction {
+        name: "transfer_public_as_signer",
+        inputs: &["address.public", "u128.public"],
+        outputs: &[FUTURE],
+    },
+    InterfaceFunction {
+        name: "join",
+        inputs: &["Token.record", "Token.record"],
+        outputs: &["Token.record"],
+    },
+    InterfaceFunction {
+        name: "split",
+        inputs: &["Token.record", "u128.private"],
+        outputs: &["Token.record", "Token.record"],
+    },
+];
+
+/// The members of the MerkleProof struct required by the ARC-22 interface, where
+/// the siblings array is sized by `MAX_TREE_DEPTH + 1` with `MAX_TREE_DEPTH = 15`.
+const ARC22_MERKLE_PROOF_MEMBERS: &[(&str, &str)] =
+    &[("siblings", "[field; 16u32]"), ("leaf_index", "u32")];
+
 #[pymethods]
 impl Program {
     /// Creates a program from source code.
@@ -199,6 +393,176 @@ impl Program {
     fn address(&self) -> anyhow::Result<Address> {
         self.0.id().to_address().map(Address::from)
     }
+
+    /// Returns true if the program implements the ARC-20 fungible token interface (IARC20).
+    ///
+    /// This checks that the program defines a `Token` record with an `amount: u128` entry
+    /// (additional entries are permitted, per the interface's open record definition) and
+    /// that every function and view function required by ARC-20 is present with the exact
+    /// input and output signature defined by the standard.
+    ///
+    /// See https://github.com/ProvableHQ/ARCs/blob/master/arc-0020/README.md
+    fn is_arc20(&self) -> bool {
+        self.record_has_entries("Token", &[("amount", "u128")])
+            && ARC20_FUNCTIONS
+                .iter()
+                .all(|function| self.matches_function(function))
+            && ARC20_VIEWS.iter().all(|view| self.matches_view(view))
+    }
+
+    /// Returns true if the program implements the ARC-22 compliant token interface (IARC22).
+    ///
+    /// This checks that the program defines `Token` and `ComplianceRecord` records with the
+    /// entries required by the standard (additional entries are permitted, per the
+    /// interface's open record definitions), and that every function and view function
+    /// required by ARC-22 is present with the exact input and output signature defined by
+    /// the standard. The `MerkleProof` struct used by the private transfer functions may be
+    /// declared locally (in which case its shape must match the standard exactly) or
+    /// imported from another program such as a freeze list registry.
+    ///
+    /// Note: this checks the token interface (IARC22) only. The freeze list registry
+    /// interface (IARC22Freezelist) is typically implemented by a separate program and is
+    /// not required for a token program to be considered ARC-22 compliant.
+    ///
+    /// See https://github.com/ProvableHQ/ARCs/blob/master/arc-0022/README.md
+    fn is_arc22(&self) -> bool {
+        self.record_has_entries("Token", &[("amount", "u128")])
+            && self.record_has_entries(
+                "ComplianceRecord",
+                &[
+                    ("amount", "u128"),
+                    ("sender", "address"),
+                    ("recipient", "address"),
+                ],
+            )
+            && ARC22_FUNCTIONS
+                .iter()
+                .all(|function| self.matches_function(function))
+            && ARC20_VIEWS.iter().all(|view| self.matches_view(view))
+    }
+}
+
+// Private helpers backing the ARC-20/ARC-22 interface checks (not exposed to Python).
+impl Program {
+    // Check that a function exists with the exact interface signature.
+    fn matches_function(&self, interface_function: &InterfaceFunction) -> bool {
+        let Ok(name) = IdentifierNative::from_str(interface_function.name) else {
+            return false;
+        };
+        let Some(function) = self.0.functions().get(&name) else {
+            return false;
+        };
+        let inputs = function.input_types();
+        let outputs = function.output_types();
+        inputs.len() == interface_function.inputs.len()
+            && outputs.len() == interface_function.outputs.len()
+            && inputs
+                .iter()
+                .zip(interface_function.inputs)
+                .all(|(input, expected)| {
+                    if *expected == MERKLE_PROOFS {
+                        self.is_merkle_proof_array(input)
+                    } else {
+                        input.to_string() == *expected
+                    }
+                })
+            && outputs
+                .iter()
+                .zip(interface_function.outputs)
+                .all(|(output, expected)| {
+                    if *expected == FUTURE {
+                        // A `Final` output must be the function's own future — a future pointing
+                        // at another program's function does not satisfy the interface.
+                        matches!(output, ValueType::Future(locator)
+                        if locator.program_id() == self.0.id()
+                            && locator.resource().to_string() == interface_function.name)
+                    } else {
+                        output.to_string() == *expected
+                    }
+                })
+    }
+
+    // Check that a function input is a private two-element array of the ARC-22 MerkleProof
+    // struct. The struct may be declared locally, in which case its shape must match the
+    // standard exactly, or imported from another program (e.g. a freeze list registry),
+    // whose definition cannot be resolved from this program alone.
+    fn is_merkle_proof_array(&self, input: &ValueType<CurrentNetwork>) -> bool {
+        let ValueType::Private(PlaintextType::Array(array)) = input else {
+            return false;
+        };
+        if **array.length() != 2u32 {
+            return false;
+        }
+        match array.next_element_type() {
+            PlaintextType::Struct(name) => {
+                name.to_string() == "MerkleProof"
+                    && self.struct_matches("MerkleProof", ARC22_MERKLE_PROOF_MEMBERS)
+            }
+            PlaintextType::ExternalStruct(locator) => {
+                locator.resource().to_string() == "MerkleProof"
+            }
+            _ => false,
+        }
+    }
+
+    // Check that a view function exists with the exact interface signature.
+    fn matches_view(&self, interface_view: &InterfaceFunction) -> bool {
+        let Ok(name) = IdentifierNative::from_str(interface_view.name) else {
+            return false;
+        };
+        let Some(view) = self.0.views().get(&name) else {
+            return false;
+        };
+        let inputs = view.input_types();
+        let outputs = view.output_types();
+        inputs.len() == interface_view.inputs.len()
+            && outputs.len() == interface_view.outputs.len()
+            && inputs
+                .iter()
+                .zip(interface_view.inputs)
+                .all(|(input, expected)| input.to_string() == *expected)
+            && outputs
+                .iter()
+                .zip(interface_view.outputs)
+                .all(|(output, expected)| output.to_string() == *expected)
+    }
+
+    // Check that a record exists with a private owner, containing at least the given
+    // private entries; additional entries are permitted, matching the `..` in interface
+    // record definitions.
+    fn record_has_entries(&self, record_name: &str, entries: &[(&str, &str)]) -> bool {
+        let Ok(name) = IdentifierNative::from_str(record_name) else {
+            return false;
+        };
+        let Ok(record) = self.0.get_record(&name) else {
+            return false;
+        };
+        if !record.owner().is_private() {
+            return false;
+        }
+        entries.iter().all(|(entry_name, entry_type)| {
+            record.entries().iter().any(|(name, ty)| {
+                name.to_string() == *entry_name
+                    && matches!(ty, EntryType::Private(plaintext) if plaintext.to_string() == *entry_type)
+            })
+        })
+    }
+
+    // Check that a struct exists with exactly the given members in order.
+    fn struct_matches(&self, struct_name: &str, members: &[(&str, &str)]) -> bool {
+        let Ok(name) = IdentifierNative::from_str(struct_name) else {
+            return false;
+        };
+        let Ok(struct_) = self.0.get_struct(&name) else {
+            return false;
+        };
+        struct_.members().len() == members.len()
+            && struct_.members().iter().zip(members).all(
+                |((name, ty), (expected_name, expected_type))| {
+                    name.to_string() == *expected_name && ty.to_string() == *expected_type
+                },
+            )
+    }
 }
 
 impl Deref for Program {
@@ -260,9 +624,9 @@ fn plaintext_input_to_dict<'py>(
                 d.set_item("name", n)?;
             }
             d.set_item("type", "struct")?;
-            d.set_item("struct_id", locator.name().to_string())?;
+            d.set_item("struct_id", locator.resource().to_string())?;
             // External structs live in another program; best-effort expansion only if locally available.
-            if let Ok(members) = struct_members_list(py, program, &locator.name().to_string()) {
+            if let Ok(members) = struct_members_list(py, program, &locator.resource().to_string()) {
                 d.set_item("members", members)?;
             }
         }
