@@ -118,10 +118,13 @@ jobs:
           python .github/scripts/merge_testnet_so.py sdk/dist sdk/dist-testnet
       # Every runner here matches its wheel's platform, so install and smoke
       # test the actual artifact — importing BOTH networks — before it ships.
+      # Install by path: --find-links also consults PyPI, and once this
+      # version is published there pip may prefer the PyPI wheel over the
+      # one just built (tag-order tie on macOS/Windows).
       - name: Smoke test wheel
         shell: bash
         run: |
-          pip install --find-links sdk/dist aleo-sdk
+          pip install sdk/dist/aleo_sdk-*.whl
           python -c "
           from aleo.mainnet import PrivateKey as MainnetPrivateKey
           from aleo.testnet import PrivateKey as TestnetPrivateKey
@@ -187,7 +190,7 @@ jobs:
       - name: Smoke test wheel
         shell: bash
         run: |
-          pip install --find-links sdk-abi/dist aleo-contract-abi-generator
+          pip install sdk-abi/dist/*.whl
           python -c "import aleo_abi; print(aleo_abi.generate_abi.__name__)"
       - name: Upload wheel
         uses: actions/upload-artifact@v4
@@ -251,8 +254,8 @@ jobs:
           python -m build shield-swap-sdk --outdir shield-swap-sdk/dist
       - name: Test against the built aleo-sdk wheel
         run: |
-          pip install --find-links sdk-dist aleo-sdk
-          pip install --find-links shield-swap-sdk/dist "shield-swap-sdk[async,mcp]" pytest pytest-asyncio
+          pip install sdk-dist/aleo_sdk-*.whl
+          pip install "$(ls shield-swap-sdk/dist/*.whl)[async,mcp]" pytest pytest-asyncio
           cd shield-swap-sdk && python -m pytest
       - name: AGENTS.md up to date
         run: python shield-swap-sdk/codegen/gen_context.py --check

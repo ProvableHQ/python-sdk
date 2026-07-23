@@ -72,9 +72,12 @@ jobs:
           maturin build --release --no-default-features --features testnet --out dist-testnet
           mv pyproject.toml.bak pyproject.toml
           python ../.github/scripts/merge_testnet_so.py dist dist-testnet
+      # Install the built wheel by path: --find-links also consults PyPI, and
+      # once the branch's version is published there pip may prefer the PyPI
+      # wheel over the one just built (tag-order tie on macOS/Windows).
       - name: Install wheel + test deps
         run: |
-          pip install --find-links dist aleo-sdk
+          pip install dist/aleo_sdk-*.whl
           pip install pytest pytest-xdist httpx pynacl responses pytest-asyncio
       # Fast, offline tests; -n auto parallelizes across cores.
       - name: pytest (fast suite)
@@ -116,7 +119,7 @@ jobs:
           python ../.github/scripts/merge_testnet_so.py dist dist-testnet
       - name: Install wheel + test deps
         run: |
-          pip install --find-links dist aleo-sdk
+          pip install dist/aleo_sdk-*.whl
           pip install pytest httpx pynacl responses pytest-asyncio
       # The two slow tests share one module-scoped proven execution; xdist
       # would prove twice, so they run in a single worker on purpose.
@@ -169,7 +172,7 @@ jobs:
           maturin build --release --manifest-path sdk-abi/Cargo.toml --out dist
       - name: Install wheels
         run: |
-          pip install --find-links dist aleo-sdk aleo-contract-abi-generator
+          pip install dist/*.whl
       # Run each suite from inside its package dir so pytest uses that
       # package's own pytest.ini (sdk-abi/pytest.ini, sdk/pytest.ini) rather
       # than walking up to the stale legacy root setup.cfg.
