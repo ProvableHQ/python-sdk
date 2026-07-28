@@ -4,7 +4,7 @@ import pytest
 
 from aleo_shield_swap.async_client import AsyncShieldSwap
 from aleo_shield_swap.errors import SwapOutputNotFinalizedError
-from aleo_shield_swap.tick_math import MIN_SQRT_PRICE
+from aleo_shield_swap.tick_math import MIN_SQRT_RATIO_X128, int_to_u256_plaintext
 
 from .conftest import (
     BLINDED_ADDRESS_0,
@@ -35,8 +35,9 @@ class _Tx:
     id = "at1asynctx"
     raw = object()
 
-    def __init__(self, fn):
+    def __init__(self, fn, pid=PROGRAM_ID):
         self._fn = fn
+        self._pid = pid
 
     @property
     def outputs(self):
@@ -45,46 +46,49 @@ class _Tx:
     def decoded(self):
         return [{"program": "tok.aleo", "function": "transfer",
                  "outputs": [{"value": "999field"}]},
-                {"program": PROGRAM_ID, "function": self._fn,
+                {"program": self._pid, "function": self._fn,
                  "outputs": [{"value": "88field"}]}]
 
     def transitions(self):
         return [_StubTransition("tok.aleo", "transfer", ["999field"]),
-                _StubTransition(PROGRAM_ID, self._fn, ["88field"])]
+                _StubTransition(self._pid, self._fn, ["88field"])]
 
 
 class _AsyncBoundCall:
-    def __init__(self, recorder, fn, args):
-        self.program_id = PROGRAM_ID
+    def __init__(self, recorder, fn, args, pid=PROGRAM_ID):
+        self.program_id = pid
         self.function_name = fn
         self._recorder = recorder
         recorder.last_call = (fn, list(args))
+        recorder.last_program = pid
 
     def simulate(self, account=None):
         return "simulated"
 
     async def build_transaction(self, account=None, **kw):
-        return _Tx(self.function_name)
+        return _Tx(self.function_name, self.program_id)
 
     async def delegate(self, account=None, **kw):
         self._recorder.delegated_fn = self.function_name
+        self._recorder.delegated_program = self.program_id
         return {"transaction_id": "at1delegated"}
 
 
 class _AsyncFunctions:
-    def __init__(self, recorder):
+    def __init__(self, recorder, pid):
         self._recorder = recorder
+        self._pid = pid
 
     def __getattr__(self, fn):
         def call(*args):
-            return _AsyncBoundCall(self._recorder, fn, args)
+            return _AsyncBoundCall(self._recorder, fn, args, self._pid)
         return call
 
 
 class _AsyncProgram:
     def __init__(self, recorder, mappings, pid):
         self._mappings = mappings
-        self.functions = _AsyncFunctions(recorder)
+        self.functions = _AsyncFunctions(recorder, pid)
         self.source = _valid_source(pid)
 
     def mapping(self, name):
@@ -115,7 +119,8 @@ class _AsyncNetwork:
         self._recorder.waited.append(tx_id)
 
     async def get_transaction_object(self, tx_id):
-        return _Tx(self._recorder.delegated_fn)
+        return _Tx(self._recorder.delegated_fn,
+                   self._recorder.delegated_program or PROGRAM_ID)
 
 
 class _AsyncProvider:
@@ -131,7 +136,9 @@ class AsyncStubAleo:
 
     def __init__(self, mappings=None, records=None):
         self.last_call = None
+        self.last_program = None
         self.delegated_fn = None
+        self.delegated_program = None
         self.submitted = []
         self.waited = []
         self.registered_programs = []
@@ -172,7 +179,7 @@ async def test_async_swap_inputs_and_handle(astub):
     assert fn == "swap" and len(args) == 12
     assert args[0] == RECORD_TEXT
     assert args[1] == BLINDING_FACTOR_0 and args[2] == BLINDED_ADDRESS_0
-    assert args[7] == f"{MIN_SQRT_PRICE}u128"
+    assert args[7] == int_to_u256_plaintext(MIN_SQRT_RATIO_X128)
     assert args[9] == "1100u32"
 
     handle = await call.transact()
@@ -190,3 +197,41 @@ async def test_async_delegate_waits_and_recovers(astub):
     assert handle.transaction_id == "at1delegated"
     assert handle.swap_id == "88field"
     assert astub.waited == ["at1delegated"]
+
+
+async def test_async_swap_wrapped_routes_through_router():
+    from aleo_shield_swap._routing import ROUTER_ID
+    astub = AsyncStubAleo(mappings={
+        "pools": {"5field": POOL_TEXT},
+        "slots": {"5field": SLOT_TEXT},
+        "used_blinded_addresses": {},
+        "from_wrapper_token_id": {"1field": "9field"},
+    })
+    dex = AsyncShieldSwap(astub)
+    await dex.swap(pool_key="5field", token_in_id="1field", amount_in=10**9,
+                   expected_out=1_000_000, token_in_program="credits.aleo")
+    fn, args = astub.last_call
+    assert (astub.last_program, fn) == (ROUTER_ID, "swap_from_wrapped")
+    assert len(args) == 13
+    assert args[1].startswith("[{ siblings: [0field")
+
+
+async def test_async_claim_wrapped_output_routes_through_router():
+    from aleo_shield_swap._routing import ROUTER_ID
+    from aleo_shield_swap.types import SwapHandle
+    out_text = ("{ recipient: 3field, caller: 4field, token_in: 1field, "
+                "token_out: 2field, amount_out: 990000u128, amount_remaining: 0u128 }")
+    astub = AsyncStubAleo(mappings={
+        "pools": {"5field": POOL_TEXT},
+        "slots": {"5field": SLOT_TEXT},
+        "swap_outputs": {"77field": out_text},
+        "from_wrapper_token_id": {"2field": "9field"},
+    })
+    handle = SwapHandle(swap_id="77field", blinding_factor="11field",
+                        blinded_address="aleo1blinded", token_in_id="1field",
+                        token_out_id="2field", pool_key="5field", amount_in=1,
+                        transaction_id="at1req", program="shield_swap.aleo")
+    await AsyncShieldSwap(astub).claim_swap_output(handle)
+    fn, args = astub.last_call
+    assert (astub.last_program, fn) == (ROUTER_ID, "claim_to_wrapped_refund_arc20")
+    assert len(args) == 9

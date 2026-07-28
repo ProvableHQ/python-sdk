@@ -12,6 +12,7 @@ from typing import Any, Callable, Generic, Optional, TypeVar
 from . import _generated as g
 from ._calls import extract_tx_id, root_outputs
 from ._core import (
+    default_merkle_proofs,
     find_position_plaintext,
     normalize_mapping_value,
     generate_swap_nonce,
@@ -21,7 +22,9 @@ from ._core import (
     register_program_sources,
     resolve_swap_params,
 )
+from ._routing import claim_route, swap_route
 from .api import AsyncApiClient, DEFAULT_API_URL
+from .tick_math import int_to_u256_plaintext
 from .derivations import (
     BlindedIdentity,
     derive_blinded_address,
@@ -83,6 +86,9 @@ class AsyncShieldSwap:
         self._aleo = aleo
         self.program = program
         self.api = AsyncApiClient(api_url)
+        # allow_token relationships are immutable — cache probes for the
+        # client's lifetime.
+        self._wrapped_cache: dict[str, bool] = {}
 
     def __repr__(self) -> str:
         return f"AsyncShieldSwap(program={self.program!r}, api={self.api.base_url!r})"
@@ -186,13 +192,46 @@ class AsyncShieldSwap:
             stack.extend(program_imports(sources[pid]))
         register_program_sources(self._aleo, sources)
 
-    async def _token_program(self, token_id: str) -> str:
+    async def _is_wrapped(self, token_id: str) -> bool:
+        """True when the AMM registers *token_id* as a wrapper (chain probe
+        of ``from_wrapper_token_id``, cached; transport errors propagate —
+        see the sync client)."""
+        tid = str(token_id)
+        if tid not in self._wrapped_cache:
+            prog = await self._aleo.programs.get(self.program)
+            raw = await prog.mapping("from_wrapper_token_id").get(tid)
+            self._wrapped_cache[tid] = normalize_mapping_value(raw) is not None
+        return self._wrapped_cache[tid]
+
+    async def _registry_row(self, token_id: str) -> Any:
         for tok in await self.api.get_tokens():
-            if tok.address == token_id and tok.wrapper_program:
-                return tok.wrapper_program
+            if tok.address == token_id:
+                return tok
+        return None
+
+    async def _token_program(self, token_id: str) -> str:
+        """Program holding the records that FUND a token — the underlying
+        program for wrapped assets, the ARC-20 program itself for plain."""
+        tok = await self._registry_row(token_id)
+        prog = tok and (getattr(tok, "underlying_program", None)
+                        or getattr(tok, "amm_token_program", None)
+                        or getattr(tok, "wrapper_program", None))
+        if prog:
+            return prog
         raise ValueError(
-            f"Cannot resolve the wrapper program for {token_id} — pass "
+            f"Cannot resolve the record program for {token_id} — pass "
             "token_in_program= (or token_record=) explicitly.")
+
+    async def _amm_token_program(self, token_id: str) -> Optional[str]:
+        """Wrapper program the AMM stores balances in (routed calls'
+        dynamic-dispatch callee).  Best-effort — None when the registry
+        has no row or is unreachable; routing never depends on this."""
+        try:
+            tok = await self._registry_row(token_id)
+        except Exception:
+            return None
+        return tok and (getattr(tok, "amm_token_program", None)
+                        or getattr(tok, "wrapper_program", None))
 
     def _account(self, account: Any = None) -> Any:
         acct = account if account is not None else self._aleo.default_account
@@ -253,6 +292,7 @@ class AsyncShieldSwap:
                    nonce: Optional[int] = None,
                    token_in_program: Optional[str] = None,
                    token_record: Optional[str] = None,
+                   wrapper_proofs: Optional[str] = None,
                    imports: Optional[dict[str, str]] = None,
                    account: Any = None) -> AsyncDexCall[SwapHandle]:
         acct = self._account(account)
@@ -275,18 +315,32 @@ class AsyncShieldSwap:
             token_programs = [program]
         else:
             token_programs = [token_in_program] if token_in_program else []
+
+        route = swap_route(await self._is_wrapped(token_in_id))
+        if route.program != self.program:
+            token_programs.append(route.program)
+            wrapper = await self._amm_token_program(token_in_id)
+            if wrapper:
+                token_programs.append(wrapper)
         await self._ensure(token_programs, imports)
 
         inputs = [
             record, identity.blinding_factor, identity.blinded_address,
             pool_key, resolved.zero_for_one,
             f"{amount_in}u128", f"{resolved.amount_out_min}u128",
-            f"{resolved.sqrt_price_limit}u128",
+            int_to_u256_plaintext(resolved.sqrt_price_limit),
             f"{swap_nonce}u64", f"{deadline}u32",
             pool.token0, pool.token1,
         ]
-        prog = await self._aleo.programs.get(self.program)
-        bound = prog.functions.swap(*inputs)
+        if route.program != self.program:
+            if resolved.amount_out_min <= 0:
+                raise ValueError(
+                    "routed swaps require amount_out_min > 0 — pass "
+                    "expected_out or a slippage below 100%")
+            inputs = [record, wrapper_proofs or default_merkle_proofs(),
+                      *inputs[1:]]
+        prog = await self._aleo.programs.get(route.program)
+        bound = getattr(prog.functions, route.function)(*inputs)
 
         def build_result(tx_id: str, outputs: list[Any]) -> SwapHandle:
             swap_id = next((o for o in outputs
@@ -302,6 +356,7 @@ class AsyncShieldSwap:
         return AsyncDexCall(self._aleo, bound, build_result)
 
     async def claim_swap_output(self, handle: SwapHandle, *,
+                                wrapper_proofs: Optional[str] = None,
                                 imports: Optional[dict[str, str]] = None,
                                 account: Any = None) -> AsyncDexCall[ClaimResult]:
         self._account(account)
@@ -312,12 +367,27 @@ class AsyncShieldSwap:
             raise ValueError("Claims need handle.blinding_factor and "
                              "handle.blinded_address (set by swap()).")
         out = await self.get_swap_output(handle.swap_id)
-        await self._ensure([], imports)
+        w_out = await self._is_wrapped(str(out.token_out))
+        w_in = await self._is_wrapped(str(out.token_in))
+        route = claim_route(w_out, w_in)
+        token_programs = [route.program] if route.program != self.program else []
+        for token_id, wrapped in ((out.token_in, w_in), (out.token_out, w_out)):
+            if wrapped:
+                wrapper = await self._amm_token_program(str(token_id))
+                if wrapper:
+                    token_programs.append(wrapper)
+        await self._ensure(token_programs, imports)
         inputs = [handle.blinding_factor, handle.blinded_address, handle.swap_id,
                   out.token_in, out.token_out,
-                  f"{out.amount_out}u128", f"{out.amount_remaining}u128"]
-        prog = await self._aleo.programs.get(self.program)
-        bound = prog.functions.claim_swap_output(*inputs)
+                  f"{out.amount_out}u128", f"{out.amount_remaining}u128",
+                  default_merkle_proofs()]
+        wp = wrapper_proofs or default_merkle_proofs()
+        if w_out and w_in:
+            inputs += [wp, wp]            # wp for the output, then the refund
+        elif w_out or w_in:
+            inputs += [wp]
+        prog = await self._aleo.programs.get(route.program)
+        bound = getattr(prog.functions, route.function)(*inputs)
         return AsyncDexCall(self._aleo, bound,
                             lambda tx_id, _o: ClaimResult(tx_id, out.amount_out,
                                                           out.amount_remaining))
