@@ -42,4 +42,6 @@ def test_committed_page_is_current():
 
 
 def test_page_stays_compact():
-    assert len(_render()) < 20_000        # ~5k tokens — cheap context, enforced
+    # ~5k tokens — cheap context, enforced.  Raised 20k → 22k with the
+    # router-dispatch surface (wrapper_proofs / withdrawal params).
+    assert len(_render()) < 22_000

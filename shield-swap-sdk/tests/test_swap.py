@@ -93,3 +93,45 @@ def test_swap_no_covering_record_raises():
     )
     with pytest.raises(InsufficientRecordsError):
         _swap_call(stub)
+
+
+def _wrapped_stub(records=None):
+    """token 1field is wrapped (maps to underlying 9field on chain)."""
+    return StubAleo(
+        mappings={
+            "pools": {"5field": POOL_TEXT},
+            "slots": {"5field": SLOT_TEXT},
+            "used_blinded_addresses": {},
+            "from_wrapper_token_id": {"1field": "9field"},
+        },
+        records=records,
+    )
+
+
+def test_swap_wrapped_input_routes_through_router():
+    from aleo_shield_swap._routing import ROUTER_ID
+    stub = _wrapped_stub()
+    _swap_call(stub, token_in_program="credits.aleo")
+    fn, args = stub.last_call
+    assert stub.last_program == ROUTER_ID
+    assert fn == "swap_from_wrapped"
+    assert len(args) == 13
+    assert args[0] == RECORD_TEXT                    # UNDERLYING record
+    assert args[1].startswith("[{ siblings: [0field")  # wrapper proofs
+    assert args[2] == BLINDING_FACTOR_0              # core order follows
+    # router + underlying registered with the prover
+    assert "shield_swap_router.aleo" in stub.registered_programs
+    assert "credits.aleo" not in stub.registered_programs  # credits is preloaded
+    assert "shield_swap.aleo" in stub.registered_programs
+
+
+def test_routed_swap_rejects_zero_min_out():
+    stub = _wrapped_stub()
+    with pytest.raises(ValueError, match="amount_out_min > 0"):
+        _swap_call(stub, token_in_program="credits.aleo",
+                   expected_out=0, slippage_bps=10_000)
+
+
+def test_plain_swap_stays_on_core(stub_aleo):
+    _swap_call(stub_aleo)
+    assert stub_aleo.last_program == "shield_swap.aleo"

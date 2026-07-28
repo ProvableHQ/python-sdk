@@ -292,9 +292,12 @@ fast when something is systematically wrong (e.g. wrong program).
 
 ### Chain verbs
 
-### `swap(self, *, pool_key: 'str', token_in_id: 'str', amount_in: 'int', slippage_bps: 'int' = 50, expected_out: 'Optional[int]' = None, sqrt_price_limit: 'Optional[int]' = None, deadline_offset_blocks: 'int' = 10000, nonce: 'Optional[int]' = None, identity: 'Optional[BlindedIdentity]' = None, token_in_program: 'Optional[str]' = None, token_record: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[SwapHandle]'`
+### `swap(self, *, pool_key: 'str', token_in_id: 'str', amount_in: 'int', slippage_bps: 'int' = 50, expected_out: 'Optional[int]' = None, sqrt_price_limit: 'Optional[int]' = None, deadline_offset_blocks: 'int' = 10000, nonce: 'Optional[int]' = None, identity: 'Optional[BlindedIdentity]' = None, token_in_program: 'Optional[str]' = None, token_record: 'Optional[str]' = None, wrapper_proofs: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[SwapHandle]'`
 
 Request a private swap — phase one of the two-transaction flow.
+
+Wrapped inputs route via the swap router automatically; fund them
+with UNDERLYING records — the deposit happens in-transaction.
 
 Resolves the intent against live pool state, derives a single-use
 blinded identity from the signer's view key, selects an unspent token
@@ -311,15 +314,18 @@ on-chain probe — required for concurrent swaps.  The default
 proving latency; a tight deadline aborts at finalize when proving
 outlives it.
 
-### `claim_swap_output(self, handle: 'SwapHandle', *, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[ClaimResult]'`
+### `claim_swap_output(self, handle: 'SwapHandle', *, wrapper_proofs: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[ClaimResult]'`
 
 Claim a private swap's output — phase two of the lifecycle.
 
 Reads the chain-computed result from ``swap_outputs`` (never an
 off-chain service — these amounts gate money movement), proves
-ownership of the blinded identity, and prepares ``claim_swap_output``.
-The output and any refund arrive as private records owned by the
-signer; the mapping entry is consumed.
+ownership of the blinded identity, and claims.  A wrapped output or
+refund routes automatically through the router, which unwraps to
+the signer in the same transaction — even for swaps that started
+as direct core calls.  The output and any refund arrive as private
+records owned by the signer (output first, refund second); the
+mapping entry is consumed.
 
 Raises :class:`SwapOutputNotFinalizedError` **at prepare time** when
 the output is not readable yet (retry after a few blocks) or was
@@ -333,7 +339,7 @@ The fee tier must be registered with the program (validated before
 submission); tick spacing defaults to the tier's on-chain binding and
 the opening price to the tick's sqrt price.
 
-### `mint(self, *, pool_key: 'str', tick_lower: 'int', tick_upper: 'int', amount0_desired: 'int', amount1_desired: 'int', amount0_min: 'int' = 0, amount1_min: 'int' = 0, token0_program: 'Optional[str]' = None, token1_program: 'Optional[str]' = None, token0_record: 'Optional[str]' = None, token1_record: 'Optional[str]' = None, tick_lower_hint: 'Optional[int]' = None, tick_upper_hint: 'Optional[int]' = None, recipient: 'Optional[str]' = None, withdrawal: 'Optional[str]' = None, nonce: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[MintResult]'`
+### `mint(self, *, pool_key: 'str', tick_lower: 'int', tick_upper: 'int', amount0_desired: 'int', amount1_desired: 'int', amount0_min: 'int' = 0, amount1_min: 'int' = 0, token0_program: 'Optional[str]' = None, token1_program: 'Optional[str]' = None, token0_record: 'Optional[str]' = None, token1_record: 'Optional[str]' = None, tick_lower_hint: 'Optional[int]' = None, tick_upper_hint: 'Optional[int]' = None, recipient: 'Optional[str]' = None, withdrawal: 'Optional[str]' = None, nonce: 'Optional[str]' = None, wrapper_proofs: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[MintResult]'`
 
 Mint a concentrated-liquidity position as a private PositionNFT.
 
@@ -341,21 +347,24 @@ Tick bounds are rounded to the pool's spacing; insert hints derive
 from the slot's neighbors unless given explicitly.  *withdrawal* is
 the immutable payout address stored on the NFT — ``collect`` always
 pays it and it can never be changed; defaults to *recipient*.
+Wrapped pool sides route via the LP router; fund with UNDERLYING records.
 
-### `increase_liquidity(self, *, pool_key: 'str', amount0_desired: 'int', amount1_desired: 'int', amount0_min: 'int' = 0, amount1_min: 'int' = 0, token0_program: 'Optional[str]' = None, token1_program: 'Optional[str]' = None, token0_record: 'Optional[str]' = None, token1_record: 'Optional[str]' = None, position_record: 'Optional[str]' = None, tick_lower_hint: 'Optional[int]' = None, tick_upper_hint: 'Optional[int]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[TxResult]'`
+### `increase_liquidity(self, *, pool_key: 'str', amount0_desired: 'int', amount1_desired: 'int', amount0_min: 'int' = 0, amount1_min: 'int' = 0, token0_program: 'Optional[str]' = None, token1_program: 'Optional[str]' = None, token0_record: 'Optional[str]' = None, token1_record: 'Optional[str]' = None, position_record: 'Optional[str]' = None, tick_lower_hint: 'Optional[int]' = None, tick_upper_hint: 'Optional[int]' = None, wrapper_proofs: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[TxResult]'`
 
 Add funds to an existing position (range fixed at mint).
+Wrapped pool sides route via the LP router; fund with UNDERLYING records.
 
 ### `decrease_liquidity(self, *, pool_key: 'str', liquidity_to_remove: 'int', amount0_min: 'int' = 0, amount1_min: 'int' = 0, position_record: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[TxResult]'`
 
 Remove liquidity from a position; owed amounts become collectable.
 
-### `collect(self, *, pool_key: 'str', amount0_requested: 'int', amount1_requested: 'int', position_record: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[TxResult]'`
+### `collect(self, *, pool_key: 'str', amount0_requested: 'int', amount1_requested: 'int', position_record: 'Optional[str]' = None, wrapper_proofs: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[TxResult]'`
 
 Collect owed token amounts from a position.
 
 The payout always goes to the position's immutable ``withdrawal``
-address — set at mint, not redirectable here.
+address — set at mint, not redirectable here.  Wrapped pool sides
+route via the LP router, unwrapping to that address in-transaction.
 
 ### `burn(self, *, pool_key: 'str', position_record: 'Optional[str]' = None, account: 'Any' = None) -> 'DexCall[TxResult]'`
 

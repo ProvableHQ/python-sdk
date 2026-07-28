@@ -180,3 +180,89 @@ def test_mint_journals_position(stub_aleo, tmp_path):
     assert result.position_token_id
     assert dex.journal.open_positions() == [
         {"position_token_id": result.position_token_id, "pool_key": "5field"}]
+
+
+# ── LP router dispatch (wrapped pool sides) ──────────────────────────────────
+
+def _wrapped_stub(wrapped):
+    """Standard LP stub with the given token ids marked wrapped on chain."""
+    mappings = {
+        "pools": {"5field": POOL_TEXT},
+        "slots": {"5field": SLOT_TEXT},
+        "fee_tiers": {"3000u16": "true"},
+        "fee_to_tick_spacing": {"3000u16": "60u32"},
+        "used_blinded_addresses": {},
+        "from_wrapper_token_id": {t: "9field" for t in wrapped},
+    }
+    return StubAleo(mappings=mappings,
+                    records=[{"record_plaintext": TOKEN0_RECORD},
+                             {"record_plaintext": POSITION_TEXT}])
+
+
+def test_mint_wrapped_token0_routes_through_lp_router():
+    from aleo_shield_swap._routing import LP_ROUTER_ID
+    stub = _wrapped_stub({"1field"})
+    ShieldSwap(stub).mint(pool_key="5field", tick_lower=-4080, tick_upper=4080,
+                          amount0_desired=10**9, amount1_desired=100,
+                          token0_program="credits.aleo", token1_program="tok1.aleo",
+                          nonce="9field")
+    fn, args = stub.last_call
+    assert stub.last_program == LP_ROUTER_ID
+    assert fn == "mint_from_wrapped_arc20"
+    assert len(args) == 12
+    assert args[1] == TOKEN0_RECORD                  # underlying record0
+    assert args[2] == default_merkle_proofs()        # wp0 right after record0
+    assert args[3] == TOKEN0_RECORD                  # plain record1
+    assert args[4] == SIGNER and args[5] == SIGNER   # recipient, withdrawal
+    assert "shield_swap_lp_router.aleo" in stub.registered_programs
+
+
+def test_mint_both_wrapped_interleaves_proofs():
+    stub = _wrapped_stub({"1field", "2field"})
+    ShieldSwap(stub).mint(pool_key="5field", tick_lower=-4080, tick_upper=4080,
+                          amount0_desired=10**9, amount1_desired=100,
+                          token0_program="credits.aleo",
+                          token1_program="usdcx.aleo", nonce="9field")
+    fn, args = stub.last_call
+    assert fn == "mint_from_wrapped_wrapped"
+    assert len(args) == 13
+    wp = default_merkle_proofs()
+    assert args[2] == wp and args[4] == wp           # wp0 / wp1 after each record
+
+
+def test_increase_wrapped_token1_routes_through_lp_router():
+    from aleo_shield_swap._routing import LP_ROUTER_ID
+    stub = _wrapped_stub({"2field"})
+    ShieldSwap(stub).increase_liquidity(
+        pool_key="5field", amount0_desired=10**9, amount1_desired=100,
+        token0_program="tok0.aleo", token1_program="usdcx.aleo")
+    fn, args = stub.last_call
+    assert (stub.last_program, fn) == (LP_ROUTER_ID, "increase_from_arc20_wrapped")
+    assert len(args) == 12
+    assert args[3] == default_merkle_proofs()        # wp1 right after record1
+
+
+def test_collect_wrapped_sides_append_wrapper_proofs():
+    from aleo_shield_swap._routing import LP_ROUTER_ID
+    stub = _wrapped_stub({"1field"})
+    ShieldSwap(stub).collect(pool_key="5field", amount0_requested=7,
+                             amount1_requested=8)
+    fn, args = stub.last_call
+    assert (stub.last_program, fn) == (LP_ROUTER_ID, "collect_to_wrapped_arc20")
+    assert len(args) == 8                            # + trailing wp0
+
+    stub = _wrapped_stub({"1field", "2field"})
+    ShieldSwap(stub).collect(pool_key="5field", amount0_requested=7,
+                             amount1_requested=8)
+    fn, args = stub.last_call
+    assert fn == "collect_to_wrapped_wrapped"
+    assert len(args) == 9                            # + wp0 + wp1
+
+
+def test_decrease_and_burn_always_direct():
+    stub = _wrapped_stub({"1field", "2field"})
+    dex = ShieldSwap(stub)
+    dex.decrease_liquidity(pool_key="5field", liquidity_to_remove=500)
+    assert stub.last_program == "shield_swap.aleo"
+    dex.burn(pool_key="5field")
+    assert stub.last_program == "shield_swap.aleo"

@@ -83,8 +83,9 @@ class _Tx:
     id = "at1stubtx"
     raw = object()
 
-    def __init__(self, fn):
+    def __init__(self, fn, pid=PROGRAM_ID):
         self._fn = fn
+        self._pid = pid
 
     @property
     def outputs(self):
@@ -92,39 +93,42 @@ class _Tx:
 
     def decoded(self):
         return [dict(CHILD_TRANSITION),
-                {"program": PROGRAM_ID, "function": self._fn,
+                {"program": self._pid, "function": self._fn,
                  "outputs": [{"value": "77field"}]}]
 
     def transitions(self):
         return [_StubTransition("tok.aleo", "transfer", ["999field"]),
-                _StubTransition(PROGRAM_ID, self._fn, ["77field"])]
+                _StubTransition(self._pid, self._fn, ["77field"])]
 
 
 class _BoundCall:
-    def __init__(self, recorder, fn, args):
-        self.program_id = PROGRAM_ID
+    def __init__(self, recorder, fn, args, pid=PROGRAM_ID):
+        self.program_id = pid
         self.function_name = fn
         self._recorder = recorder
         self._recorder.last_call = (fn, list(args))
+        self._recorder.last_program = pid
 
     def simulate(self, account=None):
         return "simulated"
 
     def build_transaction(self, account=None, **kw):
-        return _Tx(self.function_name)
+        return _Tx(self.function_name, self.program_id)
 
     def delegate(self, account=None, **kw):
         self._recorder.delegated_fn = self.function_name
+        self._recorder.delegated_program = self.program_id
         return {"transaction_id": "at1delegated"}
 
 
 class _Functions:
-    def __init__(self, recorder):
+    def __init__(self, recorder, pid):
         self._recorder = recorder
+        self._pid = pid
 
     def __getattr__(self, fn):
         def call(*args):
-            return _BoundCall(self._recorder, fn, args)
+            return _BoundCall(self._recorder, fn, args, self._pid)
         return call
 
 
@@ -132,7 +136,7 @@ class _Program:
     def __init__(self, recorder, mappings, pid):
         self._recorder = recorder
         self._mappings = mappings
-        self.functions = _Functions(recorder)
+        self.functions = _Functions(recorder, pid)
         self.source = _valid_source(pid)
 
     def mapping(self, name):
@@ -178,7 +182,8 @@ class _Network:
         return {"status": "confirmed"}
 
     def get_transaction_object(self, tx_id):
-        return _Tx(self._recorder.delegated_fn)
+        return _Tx(self._recorder.delegated_fn,
+                   self._recorder.delegated_program or PROGRAM_ID)
 
 
 class _Provider:
@@ -196,7 +201,9 @@ class StubAleo:
 
     def __init__(self, mappings=None, records=None):
         self.last_call = None
+        self.last_program = None
         self.delegated_fn = None
+        self.delegated_program = None
         self.submitted = []
         self.waited = []
         self.fetched_programs = []

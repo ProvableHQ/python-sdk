@@ -59,6 +59,13 @@ from .types import (
     TxResult,
 )
 from ._calls import DexCall
+from ._routing import (
+    claim_route,
+    collect_route,
+    increase_route,
+    mint_route,
+    swap_route,
+)
 from .tick_hints import pick_insert_hint
 from .tick_math import (
     MAX_TICK,
@@ -86,6 +93,9 @@ class ShieldSwap:
         self.api = ApiClient(api_url)
         self.profile: Any = None          # set by from_profile()
         self.journal: Any = None          # set by from_profile()
+        # allow_token relationships are immutable — cache probes for the
+        # client's lifetime.
+        self._wrapped_cache: dict[str, bool] = {}
 
     def __repr__(self) -> str:
         return f"ShieldSwap(program={self.program!r}, api={self.api.base_url!r})"
@@ -382,6 +392,21 @@ class ShieldSwap:
         pids = [self.program, *token_programs, *(imports or {})]
         ensure_programs(self._aleo, pids, imports)
 
+    def _lp_programs(self, route: Any, program0: str, program1: str,
+                     pool: Any, w0: bool, w1: bool) -> list[str]:
+        """Programs a (possibly routed) LP call touches: both funding
+        programs, the LP router when routed, and each wrapped side's
+        wrapper program (the router's dynamic-dispatch callee)."""
+        pids = [program0, program1]
+        if route.program != self.program:
+            pids.append(route.program)
+        for token_id, wrapped in ((pool.token0, w0), (pool.token1, w1)):
+            if wrapped:
+                wrapper = self._amm_token_program(str(token_id))
+                if wrapper:
+                    pids.append(wrapper)
+        return pids
+
     def swap(
         self,
         *,
@@ -396,10 +421,14 @@ class ShieldSwap:
         identity: Optional[BlindedIdentity] = None,
         token_in_program: Optional[str] = None,
         token_record: Optional[str] = None,
+        wrapper_proofs: Optional[str] = None,
         imports: Optional[dict[str, str]] = None,
         account: Any = None,
     ) -> DexCall[SwapHandle]:
         """Request a private swap — phase one of the two-transaction flow.
+
+        Wrapped inputs route via the swap router automatically; fund them
+        with UNDERLYING records — the deposit happens in-transaction.
 
         Resolves the intent against live pool state, derives a single-use
         blinded identity from the signer's view key, selects an unspent token
@@ -428,25 +457,26 @@ class ShieldSwap:
         swap_nonce = nonce if nonce is not None else generate_swap_nonce()
         identity = identity or next_blinded_identity(self._aleo, acct, self.program)
 
+        # An explicit record still needs its program registered with the
+        # prover — resolve it unless the caller named one.
+        program = token_in_program or self._token_program(token_in_id)
         record = token_record
         if record is None:
-            program = token_in_program or self._token_program(token_in_id)
             record = select_token_record(
                 self._aleo, program=program, min_amount=amount_in,
                 token_id=token_in_id, account=acct,
             )
-            token_programs = [program]
-        else:
-            # An explicit record still needs its program registered with the
-            # prover — resolve it unless the caller named one.
-            program = token_in_program or self._token_program(token_in_id)
-            token_programs = [program]
-        # Dynamic dispatch: the prover cannot discover token callees
-        # statically — register the DEX program and the involved token
-        # programs with the process before authorization.
-        self._ensure(token_programs, imports)
 
-        # Input order per the contract's swap entrypoint (mirrors the TS SDK):
+        route = swap_route(self._is_wrapped(token_in_id))
+        # Dynamic dispatch: the prover cannot discover token callees
+        # statically — register the DEX program, the involved token
+        # programs, and (for routed swaps) the router + wrapper with the
+        # process before authorization.
+        extra = [route.program] if route.program != self.program else []
+        wrapper = self._amm_token_program(token_in_id) if extra else None
+        self._ensure([p for p in (program, wrapper, *extra) if p], imports)
+
+        # Core input order per the contract's swap entrypoint:
         # record, blinding slots, then pool/direction/amounts/bounds/timing/tokens.
         inputs = [
             record,
@@ -462,7 +492,17 @@ class ShieldSwap:
             pool.token0,
             pool.token1,
         ]
-        bound = self._aleo.programs.get(self.program).functions.swap(*inputs)
+        if route.program != self.program:
+            # Router deposits the underlying, swaps, and burns the empty
+            # wrapper change record in one transaction.
+            if resolved.amount_out_min <= 0:
+                raise ValueError(
+                    "routed swaps require amount_out_min > 0 — pass "
+                    "expected_out or a slippage below 100%")
+            inputs = [record, wrapper_proofs or default_merkle_proofs(),
+                      *inputs[1:]]
+        bound = getattr(self._aleo.programs.get(route.program).functions,
+                        route.function)(*inputs)
 
         def build_result(tx_id: str, outputs: list[Any]) -> SwapHandle:
             swap_id = next(
@@ -487,6 +527,7 @@ class ShieldSwap:
         self,
         handle: SwapHandle,
         *,
+        wrapper_proofs: Optional[str] = None,
         imports: Optional[dict[str, str]] = None,
         account: Any = None,
     ) -> DexCall[ClaimResult]:
@@ -494,9 +535,12 @@ class ShieldSwap:
 
         Reads the chain-computed result from ``swap_outputs`` (never an
         off-chain service — these amounts gate money movement), proves
-        ownership of the blinded identity, and prepares ``claim_swap_output``.
-        The output and any refund arrive as private records owned by the
-        signer; the mapping entry is consumed.
+        ownership of the blinded identity, and claims.  A wrapped output or
+        refund routes automatically through the router, which unwraps to
+        the signer in the same transaction — even for swaps that started
+        as direct core calls.  The output and any refund arrive as private
+        records owned by the signer (output first, refund second); the
+        mapping entry is consumed.
 
         Raises :class:`SwapOutputNotFinalizedError` **at prepare time** when
         the output is not readable yet (retry after a few blocks) or was
@@ -516,10 +560,17 @@ class ShieldSwap:
             )
         # Trust-critical read: the amounts the claim moves come from the chain.
         out = self.get_swap_output(handle.swap_id)
-        # The claim dynamically calls BOTH token programs (payout + refund) —
-        # register them; a fresh process has neither cached.
-        token_programs = []
+        w_out = self._is_wrapped(str(out.token_out))
+        w_in = self._is_wrapped(str(out.token_in))
+        route = claim_route(w_out, w_in)
+        # The claim dynamically calls BOTH token programs (payout + refund),
+        # and a routed claim additionally calls the router + wrapper(s) —
+        # register them; a fresh process has none cached.
+        token_programs = [route.program] if route.program != self.program else []
         for token_id in (out.token_in, out.token_out):
+            wrapper = self._amm_token_program(str(token_id))
+            if wrapper:
+                token_programs.append(wrapper)
             try:
                 token_programs.append(self._token_program(str(token_id)))
             except ValueError:
@@ -536,22 +587,68 @@ class ShieldSwap:
             f"{out.amount_remaining}u128",
             default_merkle_proofs(),
         ]
-        bound = self._aleo.programs.get(self.program).functions.claim_swap_output(*inputs)
+        wp = wrapper_proofs or default_merkle_proofs()
+        if w_out and w_in:
+            inputs += [wp, wp]            # wp for the output, then the refund
+        elif w_out or w_in:
+            inputs += [wp]
+        bound = getattr(self._aleo.programs.get(route.program).functions,
+                        route.function)(*inputs)
 
         def build_result(tx_id: str, outputs: list[Any]) -> ClaimResult:
             return ClaimResult(tx_id, out.amount_out, out.amount_remaining)
 
         return DexCall(self._aleo, bound, build_result)
 
-    def _token_program(self, token_id: str) -> str:
-        """Wrapper program holding a token's records, from the API registry."""
+    def _is_wrapped(self, token_id: str) -> bool:
+        """True when the AMM registers *token_id* as a wrapper.
+
+        Chain probe of ``from_wrapper_token_id`` (the source of truth), cached
+        for the client's lifetime.  A transport error propagates — silently
+        classifying a wrapped token as plain would route a wrapped swap to
+        the core AMM and burn a proof on a guaranteed revert.
+        """
+        tid = str(token_id)
+        if tid not in self._wrapped_cache:
+            raw = self._aleo.programs.get(self.program) \
+                      .mapping("from_wrapper_token_id").get(tid)
+            self._wrapped_cache[tid] = normalize_mapping_value(raw) is not None
+        return self._wrapped_cache[tid]
+
+    def _registry_row(self, token_id: str) -> Any:
         for tok in self.api.get_tokens():
-            if tok.address == token_id and tok.wrapper_program:
-                return tok.wrapper_program
+            if tok.address == token_id:
+                return tok
+        return None
+
+    def _token_program(self, token_id: str) -> str:
+        """Program holding the records that FUND a token — the underlying
+        program for wrapped assets (users hold underlying records; wrapping
+        happens inside the routed transaction), the ARC-20 program itself
+        for plain tokens."""
+        tok = self._registry_row(token_id)
+        prog = tok and (getattr(tok, "underlying_program", None)
+                        or getattr(tok, "amm_token_program", None)
+                        or getattr(tok, "wrapper_program", None))
+        if prog:
+            return prog
         raise ValueError(
-            f"Cannot resolve the wrapper program for {token_id} — pass "
+            f"Cannot resolve the record program for {token_id} — pass "
             "token_in_program= (or token_record=) explicitly."
         )
+
+    def _amm_token_program(self, token_id: str) -> Optional[str]:
+        """The wrapper program the AMM stores balances in — needed to
+        register the dynamic-dispatch callee of routed calls with the
+        prover.  Best-effort: None when the registry has no row or is
+        unreachable (callers can pass imports= instead); routing itself
+        never depends on this."""
+        try:
+            tok = self._registry_row(token_id)
+        except Exception:
+            return None
+        return tok and (getattr(tok, "amm_token_program", None)
+                        or getattr(tok, "wrapper_program", None))
 
     # ── Liquidity ────────────────────────────────────────────────────────────
 
@@ -814,6 +911,7 @@ class ShieldSwap:
         recipient: Optional[str] = None,
         withdrawal: Optional[str] = None,
         nonce: Optional[str] = None,
+        wrapper_proofs: Optional[str] = None,
         imports: Optional[dict[str, str]] = None,
         account: Any = None,
     ) -> DexCall[MintResult]:
@@ -823,6 +921,7 @@ class ShieldSwap:
         from the slot's neighbors unless given explicitly.  *withdrawal* is
         the immutable payout address stored on the NFT — ``collect`` always
         pays it and it can never be changed; defaults to *recipient*.
+        Wrapped pool sides route via the LP router; fund with UNDERLYING records.
         """
 
         acct = self._account(account)
@@ -856,16 +955,27 @@ class ShieldSwap:
         record1 = token1_record or select_token_record(
             self._aleo, program=program1,
             min_amount=amount1_desired, token_id=pool.token1, account=acct)
-        self._ensure([program0, program1], imports)
+
+        w0 = self._is_wrapped(str(pool.token0))
+        w1 = self._is_wrapped(str(pool.token1))
+        route = mint_route(w0, w1)
+        self._ensure(self._lp_programs(route, program0, program1, pool, w0, w1),
+                     imports)
 
         field_nonce = nonce if nonce is not None else generate_field_nonce()
         to = recipient or str(acct.address)
         payout = withdrawal or to
         proofs = default_merkle_proofs()
+        wp = wrapper_proofs or default_merkle_proofs()
 
-        inputs = [field_nonce, record0, record1, to, payout, request,
+        # Wrapper proofs sit directly after their wrapped-side record
+        # (deployed LP-router input order).
+        rec0 = [record0, wp] if w0 else [record0]
+        rec1 = [record1, wp] if w1 else [record1]
+        inputs = [field_nonce, *rec0, *rec1, to, payout, request,
                   pool.token0, pool.token1, proofs, proofs, proofs]
-        bound = self._aleo.programs.get(self.program).functions.mint(*inputs)
+        bound = getattr(self._aleo.programs.get(route.program).functions,
+                        route.function)(*inputs)
 
         base_build = self._position_result(MintResult)
 
@@ -893,10 +1003,12 @@ class ShieldSwap:
         position_record: Optional[str] = None,
         tick_lower_hint: Optional[int] = None,
         tick_upper_hint: Optional[int] = None,
+        wrapper_proofs: Optional[str] = None,
         imports: Optional[dict[str, str]] = None,
         account: Any = None,
     ) -> DexCall[TxResult]:
-        """Add funds to an existing position (range fixed at mint)."""
+        """Add funds to an existing position (range fixed at mint).
+        Wrapped pool sides route via the LP router; fund with UNDERLYING records."""
 
         acct = self._account(account)
         pool = self.get_pool(pool_key)
@@ -917,16 +1029,25 @@ class ShieldSwap:
         record1 = token1_record or select_token_record(
             self._aleo, program=program1,
             min_amount=amount1_desired, token_id=pool.token1, account=acct)
-        self._ensure([program0, program1], imports)
 
+        w0 = self._is_wrapped(str(pool.token0))
+        w1 = self._is_wrapped(str(pool.token1))
+        route = increase_route(w0, w1)
+        self._ensure(self._lp_programs(route, program0, program1, pool, w0, w1),
+                     imports)
+
+        wp = wrapper_proofs or default_merkle_proofs()
+        rec0 = [record0, wp] if w0 else [record0]
+        rec1 = [record1, wp] if w1 else [record1]
         inputs = [
-            position, record0, record1,
+            position, *rec0, *rec1,
             f"{amount0_desired}u128", f"{amount1_desired}u128",
             f"{amount0_min}u128", f"{amount1_min}u128",
             pool.token0, pool.token1,
             f"{lo_hint}i32", f"{hi_hint}i32",
         ]
-        bound = self._aleo.programs.get(self.program).functions.increase_liquidity(*inputs)
+        bound = getattr(self._aleo.programs.get(route.program).functions,
+                        route.function)(*inputs)
         return DexCall(self._aleo, bound, self._position_result(TxResult))
 
     def decrease_liquidity(
@@ -956,30 +1077,45 @@ class ShieldSwap:
         amount0_requested: int,
         amount1_requested: int,
         position_record: Optional[str] = None,
+        wrapper_proofs: Optional[str] = None,
         imports: Optional[dict[str, str]] = None,
         account: Any = None,
     ) -> DexCall[TxResult]:
         """Collect owed token amounts from a position.
 
         The payout always goes to the position's immutable ``withdrawal``
-        address — set at mint, not redirectable here.
+        address — set at mint, not redirectable here.  Wrapped pool sides
+        route via the LP router, unwrapping to that address in-transaction.
         """
         acct = self._account(account)
         pool = self.get_pool(pool_key)
         position = position_record or self._select_position_record(pool_key, acct)
+        w0 = self._is_wrapped(str(pool.token0))
+        w1 = self._is_wrapped(str(pool.token1))
+        route = collect_route(w0, w1)
         # The collect transition pays out via dynamic token-program calls —
-        # both programs must be registered with the prover.
-        token_programs = []
-        for token_id in (pool.token0, pool.token1):
+        # every involved program must be registered with the prover.
+        token_programs = [route.program] if route.program != self.program else []
+        for token_id, wrapped in ((pool.token0, w0), (pool.token1, w1)):
+            if wrapped:
+                wrapper = self._amm_token_program(str(token_id))
+                if wrapper:
+                    token_programs.append(wrapper)
             try:
                 token_programs.append(self._token_program(str(token_id)))
             except ValueError:
                 pass
         self._ensure(token_programs, imports)
         proofs = default_merkle_proofs()
+        wp = wrapper_proofs or default_merkle_proofs()
         inputs = [position, f"{amount0_requested}u128", f"{amount1_requested}u128",
                   pool.token0, pool.token1, proofs, proofs]
-        bound = self._aleo.programs.get(self.program).functions.collect(*inputs)
+        if w0:
+            inputs.append(wp)
+        if w1:
+            inputs.append(wp)
+        bound = getattr(self._aleo.programs.get(route.program).functions,
+                        route.function)(*inputs)
         # collect's first output is the re-issued PositionNFT record, not a
         # public field — there is no positional id to read back.
         return DexCall(self._aleo, bound,
