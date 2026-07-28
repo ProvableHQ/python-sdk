@@ -86,3 +86,17 @@ def test_fmt_fieldlike_and_address():
     assert fmt_address("aleo1abc") == "aleo1abc"
     with pytest.raises(ValueError):
         fmt_address("0xdeadbeef")
+
+
+def test_fmt_array_encodes_fixed_length_list():
+    from aleo.codegen.runtime import fmt_array
+    out = fmt_array(["1field", "2field"], lambda x: fmt_fieldlike(x, "field"), 2)
+    assert out == "[1field, 2field]"
+
+
+def test_fmt_array_rejects_wrong_length_and_type():
+    from aleo.codegen.runtime import fmt_array
+    with pytest.raises(ValueError, match="length 2"):
+        fmt_array(["1field"], str, 2)
+    with pytest.raises(ValueError, match="Expected a list"):
+        fmt_array("1field", str, 2)

@@ -156,3 +156,12 @@ def fmt_address(v: object) -> str:
     if not (isinstance(v, str) and v.startswith("aleo1")):
         raise ValueError(f"Expected an aleo1… address literal, got {v!r}")
     return v
+
+
+def fmt_array(v: object, encode_one: Any, length: int) -> str:
+    """Format a fixed-length list as an Aleo array literal."""
+    if not isinstance(v, list):
+        raise ValueError(f"Expected a list of length {length}, got {type(v).__name__}")
+    if len(v) != length:
+        raise ValueError(f"Expected a list of length {length}, got length {len(v)}")
+    return "[" + ", ".join(encode_one(x) for x in v) + "]"

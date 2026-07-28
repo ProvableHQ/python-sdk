@@ -138,3 +138,37 @@ def test_emit_module_rejects_unresolvable_struct_refs():
         {"path": ["Inner"], "fields": [{"name": "b", "ty": {"Primitive": "Boolean"}}]}])
     with pytest.raises(ValueError, match="Inner"):
         emit_module(duped)
+
+
+def test_array_struct_roundtrip():
+    abi = {
+        "program": "arr_test.aleo",
+        "structs": [{"path": ["MerkleProof"], "fields": [
+            {"name": "siblings", "ty": {"Array": {"element": {"Primitive": "Field"}, "length": 3}}},
+            {"name": "leaf_index", "ty": {"Primitive": {"UInt": "U32"}}},
+        ]}],
+        "records": [], "mappings": [], "functions": [],
+    }
+    ns: dict = {}
+    exec(compile(emit_module(abi), "<gen>", "exec"), ns)
+    mp = ns["MerkleProof"](siblings=["0field", "1field", "2field"], leaf_index=1)
+    text = mp.to_plaintext()
+    assert text == "{ siblings: [0field, 1field, 2field], leaf_index: 1u32 }"
+    assert ns["MerkleProof"].from_plaintext(text) == mp
+
+
+def test_array_of_structs_decodes_elementwise():
+    abi = {
+        "program": "arr_test.aleo",
+        "structs": [
+            {"path": ["Inner"], "fields": [{"name": "x", "ty": {"Primitive": {"UInt": "U8"}}}]},
+            {"path": ["Outer"], "fields": [{"name": "pair", "ty": {"Array": {
+                "element": {"Struct": {"path": ["Inner"], "program": "arr_test.aleo"}}, "length": 2}}}]},
+        ],
+        "records": [], "mappings": [], "functions": [],
+    }
+    ns: dict = {}
+    exec(compile(emit_module(abi), "<gen>", "exec"), ns)
+    o = ns["Outer"].from_plaintext("{ pair: [{ x: 1u8 }, { x: 2u8 }] }")
+    assert o.pair == [ns["Inner"](x=1), ns["Inner"](x=2)]
+    assert o.to_plaintext() == "{ pair: [{ x: 1u8 }, { x: 2u8 }] }"
