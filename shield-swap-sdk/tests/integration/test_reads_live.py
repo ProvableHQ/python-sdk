@@ -14,10 +14,11 @@ from aleo_shield_swap.errors import (
 )
 from .conftest import skip_if_access_gated
 from aleo_shield_swap.tick_math import (
-    MAX_SQRT_PRICE,
+    MAX_SQRT_RATIO_X128,
     MAX_TICK,
-    MIN_SQRT_PRICE,
+    MIN_SQRT_RATIO_X128,
     MIN_TICK,
+    u256_to_int,
 )
 
 pytestmark = pytest.mark.live
@@ -46,7 +47,7 @@ def test_api_get_pools_shapes(pools):
         assert isinstance(entry.enabled, bool)
         if entry.token0_info is not None:
             assert entry.token0_info.decimals >= 0
-            assert entry.token0_info.wrapper_program.endswith(".aleo")
+            assert entry.token0_info.amm_token_program.endswith(".aleo")
 
 
 def test_api_get_tokens(live_dex_module):
@@ -97,18 +98,37 @@ def test_get_pool_matches_api(live_dex_module, pool):
     chain_pool = live_dex_module.get_pool(pool.key)
     assert chain_pool.token0 == pool.token0
     assert chain_pool.token1 == pool.token1
-    assert chain_pool.scale0 >= 1 and chain_pool.scale1 >= 1
+    # New stack: raw native amounts — the scale fields are gone.
+    assert not hasattr(chain_pool, "scale0")
+    assert isinstance(chain_pool.enabled, bool)
 
 
 def test_get_slot_invariants(live_dex_module, pool):
     slot = live_dex_module.get_slot(pool.key)
-    assert MIN_SQRT_PRICE <= slot.sqrt_price <= MAX_SQRT_PRICE
+    sqrt_price = u256_to_int(slot.raw.sqrt_price)
+    assert MIN_SQRT_RATIO_X128 <= sqrt_price <= MAX_SQRT_RATIO_X128
     assert MIN_TICK <= slot.tick <= MAX_TICK
     assert slot.tick_spacing > 0
     assert slot.next_init_below <= slot.tick <= slot.next_init_above
     d0 = pool.token0_info.decimals if pool.token0_info else 9
     d1 = pool.token1_info.decimals if pool.token1_info else 9
     assert slot.price(d0, d1) > 0
+
+
+def test_registry_agrees_with_chain_on_wrappedness(live_dex_module):
+    """Staging registry rows vs the chain's from_wrapper_token_id mapping:
+    a token is wrapped exactly when its underlying token id differs from
+    its own address."""
+    checked = 0
+    for tok in live_dex_module.api.get_tokens():
+        if tok.underlying_token_id is None:
+            continue
+        registry_wrapped = tok.underlying_token_id != tok.address
+        assert live_dex_module._is_wrapped(tok.address) == registry_wrapped, tok.symbol
+        if registry_wrapped:
+            assert tok.underlying_program != tok.amm_token_program
+        checked += 1
+    assert checked > 0, "registry exposed no underlying_token_id rows"
 
 
 def test_is_pool_initialized(live_dex_module, pool):

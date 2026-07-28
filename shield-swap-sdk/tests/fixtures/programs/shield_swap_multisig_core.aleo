@@ -1,5 +1,4 @@
-// _source: aleo-viem@4a63636 packages/shield-swap/test/fixtures/programs/test_shield_swap_multisig_core.aleo
-program test_shield_swap_multisig_core.aleo;
+program shield_swap_multisig_core.aleo;
 
 struct AdminOp:
     op as u8;
@@ -85,7 +84,7 @@ function init:
     input r0 as address.private;
     input r1 as boolean.private;
     async init self.caller r0 r1 into r2;
-    output r2 as test_shield_swap_multisig_core.aleo/init.future;
+    output r2 as shield_swap_multisig_core.aleo/init.future;
 
 finalize init:
     input r0 as address.public;
@@ -100,7 +99,7 @@ finalize init:
 
 function disallow_upgrades:
     async disallow_upgrades self.caller into r0;
-    output r0 as test_shield_swap_multisig_core.aleo/disallow_upgrades.future;
+    output r0 as shield_swap_multisig_core.aleo/disallow_upgrades.future;
 
 finalize disallow_upgrades:
     input r0 as address.public;
@@ -114,7 +113,7 @@ finalize disallow_upgrades:
 function set_upgrader_address:
     input r0 as address.private;
     async set_upgrader_address self.caller r0 into r1;
-    output r1 as test_shield_swap_multisig_core.aleo/set_upgrader_address.future;
+    output r1 as shield_swap_multisig_core.aleo/set_upgrader_address.future;
 
 finalize set_upgrader_address:
     input r0 as address.public;
@@ -155,7 +154,7 @@ function create_wallet:
     hash.bhp256 r22 into r23 as field;
     cast r17 r19 r21 r23 into r24 as [field; 4u32];
     async create_wallet r0 r1 r2 r3 self.caller r15 r24 into r25;
-    output r25 as test_shield_swap_multisig_core.aleo/create_wallet.future;
+    output r25 as shield_swap_multisig_core.aleo/create_wallet.future;
 
 finalize create_wallet:
     input r0 as address.public;
@@ -168,18 +167,18 @@ finalize create_wallet:
     contains program_settings_map[true] into r7;
     assert.eq r7 true;
     get program_settings_map[true] into r8;
-    is.neq r0 test_shield_swap_multisig_core.aleo into r9;
+    is.neq r0 shield_swap_multisig_core.aleo into r9;
     and r8.guard_create_wallet r9 into r10;
     branch.eq r10 false to end_then_0_0;
     cast r0 r1 r2 r3 into r11 as GuardedCreateWalletOp;
     hash.bhp256 r11 into r12 as field;
-    cast test_shield_swap_multisig_core.aleo r12 into r13 as WalletSigningOpId;
+    cast shield_swap_multisig_core.aleo r12 into r13 as WalletSigningOpId;
     hash.bhp256 r13 into r14 as field;
     contains completed_signing_ops[r14] into r15;
     assert.eq r15 true;
     branch.eq true true to end_otherwise_0_1;
     position end_then_0_0;
-    is.eq r0 test_shield_swap_multisig_core.aleo into r16;
+    is.eq r0 shield_swap_multisig_core.aleo into r16;
     branch.eq r16 false to end_then_1_2;
     assert.eq r4 aleo1sa2gyw566v8k7ezjljs8hg4y6ja3vf0sm0kwzfvw5hvredjq3gys6wvfys;
     branch.eq true true to end_otherwise_1_3;
@@ -298,7 +297,7 @@ function initiate_signing_op:
     hash.bhp256 r6 into r7 as field;
     async initiate_signing_op r0 r5 r7 r2 into r8;
     output r5 as field.private;
-    output r8 as test_shield_swap_multisig_core.aleo/initiate_signing_op.future;
+    output r8 as shield_swap_multisig_core.aleo/initiate_signing_op.future;
 
 finalize initiate_signing_op:
     input r0 as address.public;
@@ -365,7 +364,7 @@ function sign:
     cast r0 self.signer into r2 as WalletAleoSigner;
     hash.bhp256 r2 into r3 as field;
     async sign r0 r1 r3 into r4;
-    output r4 as test_shield_swap_multisig_core.aleo/sign.future;
+    output r4 as shield_swap_multisig_core.aleo/sign.future;
 
 finalize sign:
     input r0 as address.public;
@@ -407,7 +406,7 @@ function sign_for_round:
     cast r0 self.signer into r3 as WalletAleoSigner;
     hash.bhp256 r3 into r4 as field;
     async sign_for_round r0 r1 r4 r2 into r5;
-    output r5 as test_shield_swap_multisig_core.aleo/sign_for_round.future;
+    output r5 as shield_swap_multisig_core.aleo/sign_for_round.future;
 
 finalize sign_for_round:
     input r0 as address.public;
@@ -455,7 +454,7 @@ function sign_ecdsa:
     input r4 as u64.public;
     cast r0 r2 into r5 as WalletEcdsaSigner;
     async sign_ecdsa r0 r1 r5 r3 r4 into r6;
-    output r6 as test_shield_swap_multisig_core.aleo/sign_ecdsa.future;
+    output r6 as shield_swap_multisig_core.aleo/sign_ecdsa.future;
 
 finalize sign_ecdsa:
     input r0 as address.public;
@@ -517,7 +516,7 @@ function sign_ecdsa_for_round:
     input r5 as u32.public;
     cast r0 r2 into r6 as WalletEcdsaSigner;
     async sign_ecdsa_for_round r0 r1 r6 r3 r4 r5 into r7;
-    output r7 as test_shield_swap_multisig_core.aleo/sign_ecdsa_for_round.future;
+    output r7 as shield_swap_multisig_core.aleo/sign_ecdsa_for_round.future;
 
 finalize sign_ecdsa_for_round:
     input r0 as address.public;
@@ -628,7 +627,7 @@ function init_admin_op:
     hash.bhp256 r6 into r7 as field;
     async init_admin_op r0 r5 r7 r2 r3 into r8;
     output r5 as field.private;
-    output r8 as test_shield_swap_multisig_core.aleo/init_admin_op.future;
+    output r8 as shield_swap_multisig_core.aleo/init_admin_op.future;
 
 finalize init_admin_op:
     input r0 as address.public;
@@ -696,7 +695,7 @@ function exec_admin_op:
     cast r0 r1 into r3 as WalletSigningOpId;
     hash.bhp256 r3 into r4 as field;
     async exec_admin_op r0 r4 r2 into r5;
-    output r5 as test_shield_swap_multisig_core.aleo/exec_admin_op.future;
+    output r5 as shield_swap_multisig_core.aleo/exec_admin_op.future;
 
 finalize exec_admin_op:
     input r0 as address.public;
@@ -803,7 +802,7 @@ function assert_signing_completed:
     input r0 as address.public;
     input r1 as field.public;
     async assert_signing_completed r0 r1 into r2;
-    output r2 as test_shield_swap_multisig_core.aleo/assert_signing_completed.future;
+    output r2 as shield_swap_multisig_core.aleo/assert_signing_completed.future;
 
 finalize assert_signing_completed:
     input r0 as address.public;

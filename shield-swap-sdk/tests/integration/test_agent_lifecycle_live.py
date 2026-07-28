@@ -68,12 +68,14 @@ def test_full_lifecycle_from_fresh_profile(tmp_path, monkeypatch):
     # Pick a pool whose tokens we actually hold (the conversation pattern).
     pool = next(p for p in pools if p.token0 in held or p.token1 in held)
     token_in = pool.token0 if pool.token0 in held else pool.token1
-    state = dex.get_pool(pool.key)
-    scale_in = state.scale0 if token_in == pool.token0 else state.scale1
+    # Raw native units (the AMM no longer scales): ~1e-5 of a token.
+    d0 = pool.token0_info.decimals if pool.token0_info else 9
+    d1 = pool.token1_info.decimals if pool.token1_info else 9
+    dec_in = d0 if token_in == pool.token0 else d1
 
     # ── Swaps: concurrent counters, journaled handles ───────────────────────
     batch = dex.swap_many(pool_key=pool.key, token_in_id=token_in,
-                          amount_in=10**4 * int(scale_in), count=2)
+                          amount_in=10 ** max(dec_in - 5, 1), count=2)
     assert len(batch.handles) == 2, f"swap failures: {batch.failures}"
     assert len({h.blinded_address for h in batch.handles}) == 2
 
@@ -89,7 +91,8 @@ def test_full_lifecycle_from_fresh_profile(tmp_path, monkeypatch):
 
     # ── Liquidity: mint, resize, collect the owed earnings ─────────────────
     lo, hi = dex.get_slot(pool.key).tick_range(width=4)
-    scale0, scale1 = int(state.scale0), int(state.scale1)
+    # ~1e-7 of each token, raw native units.
+    amt0, amt1 = 10 ** max(d0 - 7, 1), 10 ** max(d1 - 7, 1)
 
     # Right after claims, the scanner can still serve just-spent records; a
     # mint built on one is silently dropped.  Model the careful client:
@@ -98,8 +101,8 @@ def test_full_lifecycle_from_fresh_profile(tmp_path, monkeypatch):
     for attempt in range(3):
         try:
             minted = dex.mint(pool_key=pool.key, tick_lower=lo, tick_upper=hi,
-                              amount0_desired=100 * scale0,
-                              amount1_desired=100 * scale1).delegate()
+                              amount0_desired=amt0,
+                              amount1_desired=amt1).delegate()
             break
         except Exception:
             if attempt == 2:

@@ -27,7 +27,7 @@ import pytest
 
 from aleo_shield_swap import ShieldSwap
 from aleo_shield_swap.errors import SwapOutputNotFinalizedError
-from aleo_shield_swap.tick_math import MIN_TICK
+from aleo_shield_swap.tick_math import MIN_TICK, u256_to_int
 
 from .devnode_amm import AMM_PROGRAM, AmmDevnode, setup_amm_devnode
 
@@ -135,9 +135,18 @@ def test_admin_setup_landed(ctx):
     assert ctx.read_mapping("tick_spacings", "60u32") == "true"
     assert ctx.read_mapping("fee_to_tick_spacing", "500u16") == "10u32"
     assert ctx.read_mapping("token_allowed", ctx.token0_field) == "true"
-    assert ctx.read_mapping("token_decimals", ctx.token1_field) == "6u8"
+    # Plain tokens register as (t, t) and get NO wrapper mapping entry.
+    assert ctx.read_mapping("from_wrapper_token_id", ctx.token0_field) is None
     assert ctx.read_mapping("pool_creation_is_open", "true") == "true"
     assert ctx.read_mapping("admin", "true") == str(ctx.admin.address)
+
+
+def test_freezelist_initialized(ctx):
+    from aleo_shield_swap._core import normalize_mapping_value
+    raw = ctx.aleo.programs.get("shield_swap_freezelist.aleo") \
+             .mapping("freeze_list_root").get("1u8")
+    assert normalize_mapping_value(raw) is not None, \
+        "freezelist root missing — mint/claim/collect finalize would abort"
 
 
 def test_non_admin_creates_two_pools(ctx, dex, journey):
@@ -265,10 +274,12 @@ def test_swaps_both_directions_and_claims(ctx, dex, journey):
             dex.get_swap_output(handle)          # the claim consumed the entry
 
         slot_after = dex.get_slot(pool_case["pool_key"])
+        sp_after = u256_to_int(slot_after.raw.sqrt_price)
+        sp_before = u256_to_int(slot_before.raw.sqrt_price)
         if zero_for_one:
-            assert slot_after.sqrt_price < slot_before.sqrt_price
+            assert sp_after < sp_before
         else:
-            assert slot_after.sqrt_price > slot_before.sqrt_price
+            assert sp_after > sp_before
 
 
 def test_collect_pays_out_owed(ctx, dex, journey):
@@ -296,6 +307,46 @@ def test_collect_pays_out_owed(ctx, dex, journey):
         after = _position(ctx, pool_case)
         assert after["tokens_owed0"] == 0 and after["tokens_owed1"] == 0
         assert paid_out > 0
+
+
+def test_collect_pays_immutable_withdrawal(ctx, dex, journey):
+    """owner != withdrawal: the collect payout lands with the withdrawal
+    address (the admin here), while the NFT stays with the owner (user)."""
+    pool_case = journey.pools[0]
+    spacing = pool_case["tick_spacing"]
+    record0 = ctx.privatize_token(ctx.user, ctx.token0_program, 50_000_000)
+    record1 = ctx.privatize_token(ctx.user, ctx.token1_program, 50_000_000)
+    result = _submit(ctx, dex.mint(
+        pool_key=pool_case["pool_key"],
+        tick_lower=-5 * spacing, tick_upper=5 * spacing,
+        amount0_desired=20_000_000, amount1_desired=20_000_000,
+        token0_record=record0, token1_record=record1,
+        withdrawal=str(ctx.admin.address),
+        imports=ctx.imports, account=ctx.user), ctx.user)
+    nft = next(r for r in ctx.records_of(ctx.user, result.transaction_id)
+               if "tick_lower" in r)
+    assert str(ctx.admin.address) in nft          # withdrawal baked into the NFT
+
+    result = _submit(ctx, dex.decrease_liquidity(
+        pool_key=pool_case["pool_key"], liquidity_to_remove=1_000,
+        position_record=nft, imports=ctx.imports, account=ctx.user), ctx.user)
+    nft = next(r for r in ctx.records_of(ctx.user, result.transaction_id)
+               if "tick_lower" in r)
+    owed = ctx.read_mapping("positions", result.position_token_id)
+    m0 = re.search(r"tokens_owed0:\s*(\d+)u128", owed)
+    m1 = re.search(r"tokens_owed1:\s*(\d+)u128", owed)
+
+    result = _submit(ctx, dex.collect(
+        pool_key=pool_case["pool_key"],
+        amount0_requested=int(m0.group(1)), amount1_requested=int(m1.group(1)),
+        position_record=nft, imports=ctx.imports, account=ctx.user), ctx.user)
+    # The payout Token records belong to the WITHDRAWAL address, not the owner.
+    admin_records = ctx.records_of(ctx.admin, result.transaction_id)
+    assert any("amount:" in r for r in admin_records), \
+        "collect payout did not land with the withdrawal address"
+    user_token_records = [r for r in ctx.records_of(ctx.user, result.transaction_id)
+                          if "amount:" in r and "tick_lower" not in r]
+    assert not user_token_records, "owner received the payout despite withdrawal"
 
 
 def test_burn_exits_positions(ctx, dex, journey):

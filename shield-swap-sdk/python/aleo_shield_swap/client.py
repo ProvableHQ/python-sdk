@@ -399,9 +399,10 @@ class ShieldSwap:
     def _lp_programs(self, route: Any, program0: str, program1: str,
                      pool: Any, w0: bool, w1: bool) -> list[str]:
         """Programs a (possibly routed) LP call touches: both funding
-        programs, the LP router when routed, and each wrapped side's
-        wrapper program (the router's dynamic-dispatch callee)."""
-        pids = [program0, program1]
+        programs (None when an explicit record made resolution unnecessary),
+        the LP router when routed, and each wrapped side's wrapper program
+        (the router's dynamic-dispatch callee)."""
+        pids = [p for p in (program0, program1) if p]
         if route.program != self.program:
             pids.append(route.program)
         for token_id, wrapped in ((pool.token0, w0), (pool.token1, w1)):
@@ -461,11 +462,13 @@ class ShieldSwap:
         swap_nonce = nonce if nonce is not None else generate_swap_nonce()
         identity = identity or next_blinded_identity(self._aleo, acct, self.program)
 
-        # An explicit record still needs its program registered with the
-        # prover — resolve it unless the caller named one.
-        program = token_in_program or self._token_program(token_in_id)
+        # Resolve the record-funding program lazily: an explicit record
+        # needs no registry lookup (its program registration comes from
+        # token_in_program= or imports=).
+        program = token_in_program
         record = token_record
         if record is None:
+            program = program or self._token_program(token_in_id)
             record = select_token_record(
                 self._aleo, program=program, min_amount=amount_in,
                 token_id=token_in_id, account=acct,
@@ -951,8 +954,10 @@ class ShieldSwap:
             tick_lower_hint=lo_hint, tick_upper_hint=hi_hint,
         ).to_plaintext()
 
-        program0 = token0_program or self._token_program(pool.token0)
-        program1 = token1_program or self._token_program(pool.token1)
+        program0 = token0_program or (
+            None if token0_record else self._token_program(pool.token0))
+        program1 = token1_program or (
+            None if token1_record else self._token_program(pool.token1))
         record0 = token0_record or select_token_record(
             self._aleo, program=program0,
             min_amount=amount0_desired, token_id=pool.token0, account=acct)
@@ -1025,8 +1030,10 @@ class ShieldSwap:
         hi_hint = (tick_upper_hint if tick_upper_hint is not None
                    else pick_insert_hint(slot, int(decoded["tick_upper"])))
 
-        program0 = token0_program or self._token_program(pool.token0)
-        program1 = token1_program or self._token_program(pool.token1)
+        program0 = token0_program or (
+            None if token0_record else self._token_program(pool.token0))
+        program1 = token1_program or (
+            None if token1_record else self._token_program(pool.token1))
         record0 = token0_record or select_token_record(
             self._aleo, program=program0,
             min_amount=amount0_desired, token_id=pool.token0, account=acct)

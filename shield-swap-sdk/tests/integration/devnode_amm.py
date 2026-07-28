@@ -3,8 +3,11 @@
 Python port of the TS suite's ``devnodeAmm.ts``: boots ``aleo-devnode``,
 advances past the last TEST consensus-version height (the devnode's snarkVM
 uses the test schedule — V17 from height 20), deploys the vendored AMM +
-multisig import and two locally-compiled ARC-20 test tokens, runs the admin
-configuration, and funds a non-admin user.  Fully hermetic — no live network.
+its multisig/freezelist imports and two locally-compiled ARC-20 test
+tokens, initializes the freezelist, runs the admin configuration, and funds
+a non-admin user.  Fully hermetic — no live network.  Plain/plain flows
+only: the wrapper programs (and their underlying stablecoins) are not
+deployed here — wrapped routing is covered by the live tier.
 
 Two execution ladders (see the suite docstring):
 
@@ -34,10 +37,14 @@ from aleo_shield_swap._core import ensure_programs
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "programs"
 
-AMM_PROGRAM = "shield_swap_v3.aleo"
-MULTISIG_PROGRAM = "test_shield_swap_multisig_core.aleo"
+AMM_PROGRAM = "shield_swap.aleo"
+MULTISIG_PROGRAM = "shield_swap_multisig_core.aleo"
+FREEZELIST_PROGRAM = "shield_swap_freezelist.aleo"
 TOKEN_A = "test_token_a.aleo"
 TOKEN_B = "test_token_b.aleo"
+
+# Grace window (blocks) for accepting the previous freezelist root.
+FREEZELIST_WINDOW = 100
 
 # One million tokens at 6 decimals — the per-user provisioning amount.
 TOKEN_SUPPLY = 1_000_000_000_000
@@ -64,13 +71,13 @@ def read_fixture(file_name: str) -> str:
 
 
 def patch_admin_address(source: str, admin_address: str) -> str:
-    """Rewrites the baked deployer/admin address in the AMM source to
-    *admin_address* — the constructor promotes that literal to the ``admin``
-    mapping at edition 0."""
+    """Rewrites the baked deployer/admin address to *admin_address* —
+    EVERY occurrence, not just the constructor's: the freezelist bakes the
+    same literal into its ``initialize`` finalize (caller gate)."""
     constructor = source[source.index("constructor:"):]
     baked = re.search(r"aleo1[a-z0-9]{58}", constructor)
     if not baked:
-        raise RuntimeError("No admin address literal found in the AMM constructor")
+        raise RuntimeError("No admin address literal found in the constructor")
     return source.replace(baked.group(0), admin_address)
 
 
@@ -216,6 +223,8 @@ def setup_amm_devnode() -> AmmDevnode:
     devnode.advance(LAST_TEST_CONSENSUS_HEIGHT + 2)
 
     multisig_source = read_fixture(MULTISIG_PROGRAM)
+    freezelist_source = patch_admin_address(read_fixture(FREEZELIST_PROGRAM),
+                                            str(admin.address))
     amm_source = patch_admin_address(read_fixture(AMM_PROGRAM), str(admin.address))
     token_a_source = read_fixture(f"{TOKEN_A.removesuffix('.aleo')}.aleo")
     token_b_source = read_fixture(f"{TOKEN_B.removesuffix('.aleo')}.aleo")
@@ -223,6 +232,7 @@ def setup_amm_devnode() -> AmmDevnode:
 
     imports = {
         MULTISIG_PROGRAM: multisig_source,
+        FREEZELIST_PROGRAM: freezelist_source,
         AMM_PROGRAM: amm_source,
         TOKEN_A: token_a_source,
         TOKEN_B: token_b_source,
@@ -241,13 +251,23 @@ def setup_amm_devnode() -> AmmDevnode:
         token1_program=TOKEN_B if a_first else TOKEN_A,
     )
 
-    # Deploy in dependency order; the AMM statically imports the multisig.
+    # Deploy in dependency order; the AMM statically imports the multisig
+    # and the freezelist.
     ctx.deploy_program(multisig_source, MULTISIG_PROGRAM)
+    ctx.deploy_program(freezelist_source, FREEZELIST_PROGRAM)
     ctx.deploy_program(amm_source, AMM_PROGRAM)
     ctx.deploy_program(token_a_source, TOKEN_A)
     ctx.deploy_program(token_b_source, TOKEN_B)
 
+    # Freezelist bootstrap: initialize (empty tree + manager role) BEFORE
+    # any mint / claim / collect — their finalize reads the root.
+    ctx.execute(admin, FREEZELIST_PROGRAM, "initialize",
+                [str(admin.address), f"{FREEZELIST_WINDOW}u32"],
+                "freezelist initialize")
+
     # Admin configuration: fee tiers, spacings, bindings, token registration.
+    # allow_token is one-time and takes (token_id, underlying_token_id) —
+    # plain ARC-20s register as (t, t) with no wrapper mapping entry.
     for label, function, inputs in [
         ("add_fee_tier 3000", "add_fee_tier", ["3000u16"]),
         ("add_fee_tier 500", "add_fee_tier", ["500u16"]),
@@ -255,12 +275,12 @@ def setup_amm_devnode() -> AmmDevnode:
         ("add_tick_spacing 10", "add_tick_spacing", ["10u32"]),
         ("bind 3000->60", "bind_fee_to_tick_spacing", ["3000u16", "60u32"]),
         ("bind 500->10", "bind_fee_to_tick_spacing", ["500u16", "10u32"]),
-        ("decimals A", "set_token_decimals", [a_field, "6u8"]),
-        ("decimals B", "set_token_decimals", [b_field, "6u8"]),
-        ("allow A", "allow_token", [a_field]),
-        ("allow B", "allow_token", [b_field]),
+        ("allow A", "allow_token", [a_field, a_field]),
+        ("allow B", "allow_token", [b_field, b_field]),
         ("open pool creation", "set_pool_creation_is_open", ["true"]),
     ]:
+        if function == "allow_token" and ctx.read_mapping("token_allowed", inputs[0]):
+            continue          # one-time registration — skip completed rows
         ctx.execute(admin, AMM_PROGRAM, function, inputs, f"admin {label}")
 
     # A non-admin user proves the open-pool-creation gate: fund fees, mint
