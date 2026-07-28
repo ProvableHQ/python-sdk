@@ -35,3 +35,39 @@ def test_lp_routes():
     assert collect_route(False, True) == (LP_ROUTER_ID, "collect_to_arc20_wrapped")
     assert collect_route(True, True) == (LP_ROUTER_ID, "collect_to_wrapped_wrapped")
     assert collect_route(False, False) == (CORE, "collect")
+
+
+def test_client_input_counts_match_pinned_router_abis():
+    """ABI ↔ client parity: the input counts the dispatch tests pin on the
+    client side must equal the pinned router signatures.  A router redeploy
+    that changes a signature fails here hermetically (and in the live drift
+    test), instead of as an authorization error on a wrapped flow."""
+    import json
+    from pathlib import Path
+
+    pinned: dict[str, int] = {}
+    codegen = Path(__file__).parents[1] / "codegen"
+    for name in ("shield_swap_router", "shield_swap_lp_router"):
+        abi = json.loads((codegen / f"{name}.abi.json").read_text())
+        pinned.update({fn["name"]: len(fn["inputs"]) for fn in abi["functions"]})
+
+    # The exact input lists the client assembles (asserted in
+    # test_swap/test_claim/test_liquidity against the stub recorder).
+    assembled = {
+        "swap_from_wrapped": 13,
+        "claim_to_wrapped_refund_arc20": 9,
+        "claim_to_arc20_refund_wrapped": 9,
+        "claim_to_wrapped_refund_wrapped": 10,
+        "mint_from_wrapped_arc20": 12,
+        "mint_from_arc20_wrapped": 12,
+        "mint_from_wrapped_wrapped": 13,
+        "increase_from_wrapped_arc20": 12,
+        "increase_from_arc20_wrapped": 12,
+        "increase_from_wrapped_wrapped": 13,
+        "collect_to_wrapped_arc20": 8,
+        "collect_to_arc20_wrapped": 8,
+        "collect_to_wrapped_wrapped": 9,
+    }
+    for fn, count in assembled.items():
+        assert pinned[fn] == count, (
+            f"{fn}: pinned ABI takes {pinned[fn]} inputs, client assembles {count}")

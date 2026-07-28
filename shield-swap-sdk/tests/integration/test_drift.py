@@ -9,8 +9,11 @@ from .conftest import ENDPOINT
 
 pytestmark = pytest.mark.live
 
-ABI_PATH = Path(__file__).parents[2] / "codegen" / "shield_swap.abi.json"
-PROGRAM = "shield_swap.aleo"
+CODEGEN = Path(__file__).parents[2] / "codegen"
+# Core drives codegen; the routers are pinned as pure drift guards — the
+# client assembles their inputs positionally from these exact signatures.
+PROGRAMS = ["shield_swap.aleo", "shield_swap_router.aleo",
+            "shield_swap_lp_router.aleo"]
 
 
 def _fetch(program_id: str) -> str:
@@ -31,15 +34,17 @@ def _load_deps(program_id: str, seen: dict) -> None:
     seen[program_id] = src
 
 
-def test_pinned_abi_matches_deployed():
+@pytest.mark.parametrize("program", PROGRAMS)
+def test_pinned_abi_matches_deployed(program):
     import aleo.abi
 
     seen: dict = {}
-    _load_deps(PROGRAM, seen)
-    src = seen.pop(PROGRAM)
+    _load_deps(program, seen)
+    src = seen.pop(program)
     live = aleo.abi.generate_abi(src, "testnet", imports=list(seen.items()))
-    violations = aleo.abi.check_compatibility(live, json.loads(ABI_PATH.read_text()))
+    pinned_path = CODEGEN / (program.removesuffix(".aleo") + ".abi.json")
+    violations = aleo.abi.check_compatibility(live, json.loads(pinned_path.read_text()))
     assert violations == [], (
-        f"deployed {PROGRAM} drifted from the pinned ABI — rerun "
+        f"deployed {program} drifted from the pinned ABI — rerun "
         f"codegen/regen-abi.sh and review the diff: {violations}"
     )

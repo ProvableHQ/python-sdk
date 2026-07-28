@@ -1,0 +1,715 @@
+{
+ "program": "shield_swap_router.aleo",
+ "structs": [
+  {
+   "path": [
+    "U256__8JquwLopp8"
+   ],
+   "fields": [
+    {
+     "name": "hi",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "lo",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "path": [
+    "MerkleProof"
+   ],
+   "fields": [
+    {
+     "name": "siblings",
+     "ty": {
+      "Array": {
+       "element": {
+        "Primitive": "Field"
+       },
+       "length": 16
+      }
+     }
+    },
+    {
+     "name": "leaf_index",
+     "ty": {
+      "Primitive": {
+       "UInt": "U32"
+      }
+     }
+    }
+   ]
+  }
+ ],
+ "records": [],
+ "mappings": [],
+ "storage_variables": [],
+ "functions": [
+  {
+   "name": "swap_from_wrapped",
+   "inputs": [
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap_router.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Address"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Boolean"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "U256__8JquwLopp8"
+        ],
+        "program": "shield_swap_router.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U64"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U32"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    }
+   ],
+   "outputs": [
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "SwapComplianceRecord"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    "Final"
+   ]
+  },
+  {
+   "name": "swap_mh_from_wrapped",
+   "inputs": [
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap_router.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Address"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "SwapHop"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "SwapHop"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "SwapHop"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U8"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U64"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U32"
+       }
+      },
+      "mode": "Public"
+     }
+    }
+   ],
+   "outputs": [
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "MultiHopSwapComplianceRecord"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    "Final"
+   ]
+  },
+  {
+   "name": "claim_to_wrapped_refund_arc20",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Address"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap_router.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    }
+   ],
+   "outputs": [
+    "DynamicRecord",
+    "DynamicRecord",
+    "Final"
+   ]
+  },
+  {
+   "name": "claim_to_arc20_refund_wrapped",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Address"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap_router.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    }
+   ],
+   "outputs": [
+    "DynamicRecord",
+    "DynamicRecord",
+    "Final"
+   ]
+  },
+  {
+   "name": "claim_to_wrapped_refund_wrapped",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Address"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap_router.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap_router.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    }
+   ],
+   "outputs": [
+    "DynamicRecord",
+    "DynamicRecord",
+    "Final"
+   ]
+  }
+ ]
+}
