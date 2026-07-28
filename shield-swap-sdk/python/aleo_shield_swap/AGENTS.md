@@ -229,7 +229,11 @@ Whether this authenticated account has redeemed an invite code.
 
 ### `api.redeem_code(self, code: 'str') -> 'models.AccessRedeemResponse'`
 
-Redeem an invite code; adopts the fresh token the API returns.
+Redeem an invite code.
+
+The staging API no longer returns a session token here (sessions
+moved to the ``/auth/*`` endpoints) — re-authenticate after
+redeeming.  A token is still adopted if the API resurrects one.
 
 ### `api.request_airdrop(self, address: 'str') -> 'models.AirdropStartResult'`
 

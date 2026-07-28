@@ -37,10 +37,12 @@ class _Ctx:
         self._wrappers: Optional[list[str]] = None
 
     def wrapper_programs(self) -> list[str]:
-        """Airdroppable token programs, from the live token registry."""
+        """Record-funding token programs (underlying for wrapped assets),
+        from the live token registry — where airdropped records land."""
         if self._wrappers is None:
-            self._wrappers = [t.wrapper_program for t in self.dex.api.get_tokens()
-                              if t.wrapper_program]
+            self._wrappers = [t.underlying_program or t.amm_token_program
+                              for t in self.dex.api.get_tokens()
+                              if t.underlying_program or t.amm_token_program]
         return self._wrappers
 
     def funded(self) -> bool:

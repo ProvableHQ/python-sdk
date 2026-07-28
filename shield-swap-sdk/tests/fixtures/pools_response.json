@@ -1,41 +1,289 @@
 {
- "_source": "GET https://amm-api.dev.provable.com/pools (live capture, 2026-07-13)",
- "data": [
-  {
-   "id": "b23af9f7-cd72-4d52-928e-637b9748354c",
-   "key": "1981234481256911848949989598432010959786505150793860245840256594800529816749field",
-   "token0": "40965999173564918995621006824189398836596field",
-   "token1": "185528603099650286599904399730556391637784315808306865395426676field",
-   "enabled": true,
-   "creator": "aleo1z3zwzgpgakk89xpknync5rtklkjkyv33g7cvaqe0gku64zs3lv9qyux0qc",
-   "fee": "5.0000000000000000",
-   "created_at": "2026-07-10T11:28:09",
-   "init_tx": "1f025079-439e-48f3-85fa-80751ef82ef9",
-   "scale0": "1",
-   "scale1": "1",
-   "token0_info": {
-    "id": "2c73efd2-3c96-43d9-9ae0-f319e4fbe8d5",
-    "address": "40965999173564918995621006824189398836596field",
-    "name": "Wrapped_USDCx",
-    "symbol": "wUSDCx",
-    "decimals": 6,
-    "image": null,
-    "wrapper_program": "test_arc20_wusdcx.aleo"
-   },
-   "token1_info": {
-    "id": "39420ec1-cea5-42e3-b93f-1065ed47fda6",
-    "address": "185528603099650286599904399730556391637784315808306865395426676field",
-    "name": "Wrapped_ALEO",
-    "symbol": "wALEO",
-    "decimals": 6,
-    "image": null,
-    "wrapper_program": "test_arc20_wrapped_credits.aleo"
-   }
-  }
- ],
- "pagination": {
-  "total": 1,
-  "limit": 20,
-  "offset": 0
- }
+    "data": [
+        {
+            "id": "9fb78708-6f12-43ec-af2c-43f11eaf4385",
+            "key": "5905392528088736716502352327676815883959790811081903315511484137973858480171field",
+            "token0": "2118592438692976300771526183183732field",
+            "token1": "724721105858008932013114020280511843613117371369744086165619field",
+            "enabled": true,
+            "creator": "aleo1z3zwzgpgakk89xpknync5rtklkjkyv33g7cvaqe0gku64zs3lv9qyux0qc",
+            "fee_percent": "1",
+            "created_at": "2026-07-28T11:01:55",
+            "init_tx": "355ece25-b42e-46df-be2f-00a120a3289d",
+            "token0_info": {
+                "id": "371f0de6-bc04-46d7-a49a-9eed51e58511",
+                "address": "2118592438692976300771526183183732field",
+                "name": "ETH",
+                "symbol": "ETH",
+                "decimals": 18,
+                "image": null,
+                "amm_token_program": "test_arc20_eth.aleo",
+                "underlying_program": "test_arc20_eth.aleo",
+                "underlying_token_id": "2118592438692976300771526183183732field"
+            },
+            "token1_info": {
+                "id": "e6a82bab-b762-4e6a-a714-3b6bc6720bf0",
+                "address": "724721105858008932013114020280511843613117371369744086165619field",
+                "name": "Aleo",
+                "symbol": "ALEO",
+                "decimals": 6,
+                "image": null,
+                "amm_token_program": "shield_swap_arc20_credits.aleo",
+                "underlying_program": "credits.aleo",
+                "underlying_token_id": "32497618326483555field"
+            },
+            "display_flipped": true,
+            "base_token": {
+                "id": "e6a82bab-b762-4e6a-a714-3b6bc6720bf0",
+                "address": "724721105858008932013114020280511843613117371369744086165619field",
+                "name": "Aleo",
+                "symbol": "ALEO",
+                "decimals": 6,
+                "image": null,
+                "amm_token_program": "shield_swap_arc20_credits.aleo",
+                "underlying_program": "credits.aleo",
+                "underlying_token_id": "32497618326483555field"
+            },
+            "quote_token": {
+                "id": "371f0de6-bc04-46d7-a49a-9eed51e58511",
+                "address": "2118592438692976300771526183183732field",
+                "name": "ETH",
+                "symbol": "ETH",
+                "decimals": 18,
+                "image": null,
+                "amm_token_program": "test_arc20_eth.aleo",
+                "underlying_program": "test_arc20_eth.aleo",
+                "underlying_token_id": "2118592438692976300771526183183732field"
+            }
+        },
+        {
+            "id": "ba4d8768-40c0-4189-aa60-28ede5d8e837",
+            "key": "172132360768538428736178966225670187308781992225627888611524574051967533493field",
+            "token0": "2118592438692976300771526183183732field",
+            "token1": "212707628815602939926313406778312270053663804591730917421274098438979020915field",
+            "enabled": true,
+            "creator": "aleo1z3zwzgpgakk89xpknync5rtklkjkyv33g7cvaqe0gku64zs3lv9qyux0qc",
+            "fee_percent": "1",
+            "created_at": "2026-07-28T10:45:05",
+            "init_tx": "4ee62cdc-bbbe-4f14-b0c1-41a222e75a5f",
+            "token0_info": {
+                "id": "371f0de6-bc04-46d7-a49a-9eed51e58511",
+                "address": "2118592438692976300771526183183732field",
+                "name": "ETH",
+                "symbol": "ETH",
+                "decimals": 18,
+                "image": null,
+                "amm_token_program": "test_arc20_eth.aleo",
+                "underlying_program": "test_arc20_eth.aleo",
+                "underlying_token_id": "2118592438692976300771526183183732field"
+            },
+            "token1_info": {
+                "id": "7f4ebbd0-438f-41bf-957c-62d5245629f7",
+                "address": "212707628815602939926313406778312270053663804591730917421274098438979020915field",
+                "name": "USDCx",
+                "symbol": "USDCx",
+                "decimals": 6,
+                "image": null,
+                "amm_token_program": "shield_swap_arc20_wrapped_usdcx.aleo",
+                "underlying_program": "test_usdcx_stablecoin.aleo",
+                "underlying_token_id": "161367108178681754800154536922102733562196220142964field"
+            },
+            "display_flipped": false,
+            "base_token": {
+                "id": "371f0de6-bc04-46d7-a49a-9eed51e58511",
+                "address": "2118592438692976300771526183183732field",
+                "name": "ETH",
+                "symbol": "ETH",
+                "decimals": 18,
+                "image": null,
+                "amm_token_program": "test_arc20_eth.aleo",
+                "underlying_program": "test_arc20_eth.aleo",
+                "underlying_token_id": "2118592438692976300771526183183732field"
+            },
+            "quote_token": {
+                "id": "7f4ebbd0-438f-41bf-957c-62d5245629f7",
+                "address": "212707628815602939926313406778312270053663804591730917421274098438979020915field",
+                "name": "USDCx",
+                "symbol": "USDCx",
+                "decimals": 6,
+                "image": null,
+                "amm_token_program": "shield_swap_arc20_wrapped_usdcx.aleo",
+                "underlying_program": "test_usdcx_stablecoin.aleo",
+                "underlying_token_id": "161367108178681754800154536922102733562196220142964field"
+            }
+        },
+        {
+            "id": "88162b59-1f96-4e8c-8946-44b6f9a18997",
+            "key": "1173589166721621645334743807748851198116844333784471634115272069852805846368field",
+            "token0": "2118592438692976300771526183183732field",
+            "token1": "212707628815602939926313406778312270053663804591730917421274098438979020915field",
+            "enabled": true,
+            "creator": "aleo1z3zwzgpgakk89xpknync5rtklkjkyv33g7cvaqe0gku64zs3lv9qyux0qc",
+            "fee_percent": "5",
+            "created_at": "2026-07-28T02:02:10",
+            "init_tx": "7c5f96d9-5d07-4fff-944e-dcbd286a5876",
+            "token0_info": {
+                "id": "371f0de6-bc04-46d7-a49a-9eed51e58511",
+                "address": "2118592438692976300771526183183732field",
+                "name": "ETH",
+                "symbol": "ETH",
+                "decimals": 18,
+                "image": null,
+                "amm_token_program": "test_arc20_eth.aleo",
+                "underlying_program": "test_arc20_eth.aleo",
+                "underlying_token_id": "2118592438692976300771526183183732field"
+            },
+            "token1_info": {
+                "id": "7f4ebbd0-438f-41bf-957c-62d5245629f7",
+                "address": "212707628815602939926313406778312270053663804591730917421274098438979020915field",
+                "name": "USDCx",
+                "symbol": "USDCx",
+                "decimals": 6,
+                "image": null,
+                "amm_token_program": "shield_swap_arc20_wrapped_usdcx.aleo",
+                "underlying_program": "test_usdcx_stablecoin.aleo",
+                "underlying_token_id": "161367108178681754800154536922102733562196220142964field"
+            },
+            "display_flipped": false,
+            "base_token": {
+                "id": "371f0de6-bc04-46d7-a49a-9eed51e58511",
+                "address": "2118592438692976300771526183183732field",
+                "name": "ETH",
+                "symbol": "ETH",
+                "decimals": 18,
+                "image": null,
+                "amm_token_program": "test_arc20_eth.aleo",
+                "underlying_program": "test_arc20_eth.aleo",
+                "underlying_token_id": "2118592438692976300771526183183732field"
+            },
+            "quote_token": {
+                "id": "7f4ebbd0-438f-41bf-957c-62d5245629f7",
+                "address": "212707628815602939926313406778312270053663804591730917421274098438979020915field",
+                "name": "USDCx",
+                "symbol": "USDCx",
+                "decimals": 6,
+                "image": null,
+                "amm_token_program": "shield_swap_arc20_wrapped_usdcx.aleo",
+                "underlying_program": "test_usdcx_stablecoin.aleo",
+                "underlying_token_id": "161367108178681754800154536922102733562196220142964field"
+            }
+        },
+        {
+            "id": "5074f243-d878-46d8-bd47-1f0621b930c0",
+            "key": "6085766987492189793297428838557366304238221215806401539320680501321625719720field",
+            "token0": "2118592438692976300771526183183732field",
+            "token1": "212707628815602939926313406778312270053663804591730917421274098438979020915field",
+            "enabled": true,
+            "creator": "aleo1z3zwzgpgakk89xpknync5rtklkjkyv33g7cvaqe0gku64zs3lv9qyux0qc",
+            "fee_percent": "30",
+            "created_at": "2026-07-24T17:24:32",
+            "init_tx": "50166664-09cd-45f3-afc3-68d3ab4c5bd5",
+            "token0_info": {
+                "id": "371f0de6-bc04-46d7-a49a-9eed51e58511",
+                "address": "2118592438692976300771526183183732field",
+                "name": "ETH",
+                "symbol": "ETH",
+                "decimals": 18,
+                "image": null,
+                "amm_token_program": "test_arc20_eth.aleo",
+                "underlying_program": "test_arc20_eth.aleo",
+                "underlying_token_id": "2118592438692976300771526183183732field"
+            },
+            "token1_info": {
+                "id": "7f4ebbd0-438f-41bf-957c-62d5245629f7",
+                "address": "212707628815602939926313406778312270053663804591730917421274098438979020915field",
+                "name": "USDCx",
+                "symbol": "USDCx",
+                "decimals": 6,
+                "image": null,
+                "amm_token_program": "shield_swap_arc20_wrapped_usdcx.aleo",
+                "underlying_program": "test_usdcx_stablecoin.aleo",
+                "underlying_token_id": "161367108178681754800154536922102733562196220142964field"
+            },
+            "display_flipped": false,
+            "base_token": {
+                "id": "371f0de6-bc04-46d7-a49a-9eed51e58511",
+                "address": "2118592438692976300771526183183732field",
+                "name": "ETH",
+                "symbol": "ETH",
+                "decimals": 18,
+                "image": null,
+                "amm_token_program": "test_arc20_eth.aleo",
+                "underlying_program": "test_arc20_eth.aleo",
+                "underlying_token_id": "2118592438692976300771526183183732field"
+            },
+            "quote_token": {
+                "id": "7f4ebbd0-438f-41bf-957c-62d5245629f7",
+                "address": "212707628815602939926313406778312270053663804591730917421274098438979020915field",
+                "name": "USDCx",
+                "symbol": "USDCx",
+                "decimals": 6,
+                "image": null,
+                "amm_token_program": "shield_swap_arc20_wrapped_usdcx.aleo",
+                "underlying_program": "test_usdcx_stablecoin.aleo",
+                "underlying_token_id": "161367108178681754800154536922102733562196220142964field"
+            }
+        },
+        {
+            "id": "7258e700-e4e9-4208-89dd-bece7ab103a3",
+            "key": "4893250659656889246983527897014734417939413618372988821054001413773444600836field",
+            "token0": "724721105858008932013114020280511843613117371369744086165619field",
+            "token1": "212707628815602939926313406778312270053663804591730917421274098438979020915field",
+            "enabled": true,
+            "creator": "aleo1z3zwzgpgakk89xpknync5rtklkjkyv33g7cvaqe0gku64zs3lv9qyux0qc",
+            "fee_percent": "30",
+            "created_at": "2026-07-24T11:12:13",
+            "init_tx": "9a3fc387-de50-406e-a084-978001f004d9",
+            "token0_info": {
+                "id": "e6a82bab-b762-4e6a-a714-3b6bc6720bf0",
+                "address": "724721105858008932013114020280511843613117371369744086165619field",
+                "name": "Aleo",
+                "symbol": "ALEO",
+                "decimals": 6,
+                "image": null,
+                "amm_token_program": "shield_swap_arc20_credits.aleo",
+                "underlying_program": "credits.aleo",
+                "underlying_token_id": "32497618326483555field"
+            },
+            "token1_info": {
+                "id": "7f4ebbd0-438f-41bf-957c-62d5245629f7",
+                "address": "212707628815602939926313406778312270053663804591730917421274098438979020915field",
+                "name": "USDCx",
+                "symbol": "USDCx",
+                "decimals": 6,
+                "image": null,
+                "amm_token_program": "shield_swap_arc20_wrapped_usdcx.aleo",
+                "underlying_program": "test_usdcx_stablecoin.aleo",
+                "underlying_token_id": "161367108178681754800154536922102733562196220142964field"
+            },
+            "display_flipped": false,
+            "base_token": {
+                "id": "e6a82bab-b762-4e6a-a714-3b6bc6720bf0",
+                "address": "724721105858008932013114020280511843613117371369744086165619field",
+                "name": "Aleo",
+                "symbol": "ALEO",
+                "decimals": 6,
+                "image": null,
+                "amm_token_program": "shield_swap_arc20_credits.aleo",
+                "underlying_program": "credits.aleo",
+                "underlying_token_id": "32497618326483555field"
+            },
+            "quote_token": {
+                "id": "7f4ebbd0-438f-41bf-957c-62d5245629f7",
+                "address": "212707628815602939926313406778312270053663804591730917421274098438979020915field",
+                "name": "USDCx",
+                "symbol": "USDCx",
+                "decimals": 6,
+                "image": null,
+                "amm_token_program": "shield_swap_arc20_wrapped_usdcx.aleo",
+                "underlying_program": "test_usdcx_stablecoin.aleo",
+                "underlying_token_id": "161367108178681754800154536922102733562196220142964field"
+            }
+        }
+    ],
+    "pagination": {
+        "total": 5,
+        "limit": 20,
+        "offset": 0
+    }
 }

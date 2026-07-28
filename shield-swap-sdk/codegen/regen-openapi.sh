@@ -2,7 +2,9 @@
 # Refetch the DEX API's OpenAPI spec and regenerate the response models.
 set -euo pipefail
 cd "$(dirname "$0")"
-BASE="${1:-https://amm-api.dev.provable.com}"
+# Staging serves the migrated shield_swap.aleo stack; the old dev host still
+# serves the pre-migration deployment — never mix the two.
+BASE="${1:-https://amm-api-staging.dev.provable.com}"
 PYTHON="${PYTHON:-python3}"
 curl -sf "${BASE}/openapi.json" | "$PYTHON" -m json.tool > amm_api.openapi.json
 "$PYTHON" -m datamodel_code_generator \

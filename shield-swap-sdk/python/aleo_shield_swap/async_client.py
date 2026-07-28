@@ -263,7 +263,11 @@ class AsyncShieldSwap:
         if addr is None:
             raise ValueError("No address: pass address= or set aleo.default_account")
         tokens = await self.api.get_tokens()
-        by_program = {t.wrapper_program: t for t in tokens if t.wrapper_program}
+        # Spendable private records live in the record-funding program: the
+        # UNDERLYING program for wrapped assets, the ARC-20 itself for plain.
+        by_program = {t.underlying_program or t.amm_token_program: t
+                      for t in tokens
+                      if t.underlying_program or t.amm_token_program}
         private = await self.get_private_balances(list(by_program), account=acct)
         out: dict[str, dict[str, Any]] = {}
         for bal in await self.api.get_public_balances(addr):

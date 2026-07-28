@@ -51,7 +51,6 @@ class AccessRedeemRequest:
 class AccessRedeemResponse:
     code: str
     status: str
-    token: str
 
 
 @dataclass
@@ -70,16 +69,31 @@ class AccessStatusResponseDoc:
 
 
 @dataclass
+class ActiveSessionPayload:
+    current: bool
+    expires_at: int
+    last_refreshed_at: int
+    session_id: str
+    started_at: int
+    user_agent: str | None = None
+
+
+@dataclass
+class ActiveSessionsResponseDoc:
+    data: list[ActiveSessionPayload]
+
+
+@dataclass
 class AirdropRequest:
     address: str
 
 
 @dataclass
 class AirdropResult:
+    amm_token_program: str
     amount: str
     status: str
     symbol: str
-    wrapper_program: str
     error: str | None = None
     tx_id: str | None = None
 
@@ -135,6 +149,7 @@ class ApiTokenRow:
 
 @dataclass
 class AuthTokenPayload:
+    expires_at: int
     token: str
 
 
@@ -145,6 +160,7 @@ class AuthTokenResponseDoc:
 
 @dataclass
 class ChallengePayload:
+    challenge_id: str
     message: str
     nonce: str
 
@@ -165,7 +181,7 @@ class CreateTokenRequestDoc:
     decimals: int
     name: str
     symbol: str
-    wrapper_program: str | None = None
+    amm_token_program: str | None = None
 
 
 @dataclass
@@ -191,11 +207,18 @@ class ErrorResponseDoc:
 
 
 @dataclass
+class FeeBinding:
+    fee_tier: int
+    tick_spacing: int
+
+
+@dataclass
 class FeeTierDoc:
     created_at: str
     fee_tier: int
     id: str
     transaction: str
+    tick_spacing: int | None = None
 
 
 @dataclass
@@ -225,11 +248,53 @@ class InitializedTicksResponseDoc:
     data: list[int]
 
 
+class LiveCompatibilityFailureCode(Enum):
+    cache_unavailable = 'cache_unavailable'
+    edition_mismatch = 'edition_mismatch'
+    edition_unavailable = 'edition_unavailable'
+    rate_limited = 'rate_limited'
+    rpc_unavailable = 'rpc_unavailable'
+    source_mismatch = 'source_mismatch'
+    source_unavailable = 'source_unavailable'
+    verification_timeout = 'verification_timeout'
+
+
+class LiveCompatibilityStatus(Enum):
+    compatible = 'compatible'
+    incompatible = 'incompatible'
+    unavailable = 'unavailable'
+
+
+@dataclass
+class LogoutAllResponse:
+    address: str
+    ended: bool
+    ok: bool
+    session_version: int
+
+
+@dataclass
+class LogoutAllResponseDoc:
+    data: LogoutAllResponse
+
+
+@dataclass
+class LogoutResponse:
+    ended: bool
+    ok: bool
+    session_id: str | None = None
+
+
+@dataclass
+class LogoutResponseDoc:
+    data: LogoutResponse
+
+
 @dataclass
 class MintTokenRequest:
+    amm_token_program: str
     amount: str
     recipient: str
-    wrapper_program: str
 
 
 @dataclass
@@ -276,10 +341,12 @@ class PendingSwapOutputDoc:
     recipient: str
     token_in: str
     token_out: str
-    amount_remaining_1: str | None = None
-    amount_remaining_2: str | None = None
-    token_in_1: str | None = None
-    token_in_2: str | None = None
+
+
+@dataclass
+class PoolFeeProtocol:
+    fee_protocol: int
+    pool_key: str
 
 
 @dataclass
@@ -287,18 +354,21 @@ class PoolStateDoc:
     created_at: str
     creator: str
     enabled: bool
-    fee: str
+    fee_percent: str
     id: str
     init_tx: str
     key: str
-    scale0: str
-    scale1: str
     token0: str
     token1: str
 
 
 @dataclass
 class PoolStats24hDoc:
+    display_flipped: bool
+    display_high_24h: str
+    display_low_24h: str
+    display_open_24h: str
+    display_price: str
     high_24h: str
     liquidity: str
     low_24h: str
@@ -307,6 +377,7 @@ class PoolStats24hDoc:
     price_reversed: str
     volume_24h: str
     change_24h_pct: str | None = None
+    display_change_24h_pct: str | None = None
 
 
 @dataclass
@@ -317,8 +388,8 @@ class PoolStats24hResponseDoc:
 @dataclass
 class PoolStatsDoc:
     active_tick: int
-    fee_growth_global0_x_64: str
-    fee_growth_global1_x_64: str
+    fee_growth_global0_x_128: str
+    fee_growth_global1_x_128: str
     fee_protocol: int
     id: str
     liquidity: str
@@ -357,12 +428,14 @@ class PositionDoc:
     amount0: str
     amount1: str
     created_at: str
-    fee_growth_inside0_last_64: str
-    fee_growth_inside1_last_64: str
+    created_transaction: str
+    fee_growth_inside0_last_x_128: str
+    fee_growth_inside1_last_x_128: str
     id: str
     is_burned: bool
     is_frozen: bool
     is_private: bool
+    last_transaction: str
     liquidity: str
     pool: str
     tick_lower: int
@@ -370,10 +443,10 @@ class PositionDoc:
     token_id: str
     tokens_owed0: str
     tokens_owed1: str
-    transaction: str
     user: str
+    created_transaction_hash: str | None = None
     frozen_at: str | None = None
-    transaction_hash: str | None = None
+    last_transaction_hash: str | None = None
 
 
 @dataclass
@@ -385,6 +458,54 @@ class PositionListResponseDoc:
 @dataclass
 class PositionResponseDoc:
     data: PositionDoc
+
+
+@dataclass
+class ProtocolCapabilities:
+    debug_api: bool
+    faucet: bool
+    freezelist_proofs: str
+    protocol_config_websocket: bool
+    token_admin: bool
+
+
+@dataclass
+class ProtocolFeeConfiguration:
+    pool_fee_protocols: list[PoolFeeProtocol]
+    registered_fee_tiers: list[int]
+    registered_tick_spacings: list[int]
+    valid_bindings: list[FeeBinding]
+
+
+@dataclass
+class ProtocolFreshness:
+    ready_for_entry: bool
+    confirmed_head: int | None = None
+    indexed_block: int | None = None
+    lag_blocks: int | None = None
+    updated_at: str | None = None
+
+
+@dataclass
+class ProtocolPair:
+    token0: str
+    token1: str
+
+
+@dataclass
+class ProtocolProgram:
+    program_id: str
+    role: str
+    source_sha256: str
+    edition: int | None = None
+
+
+@dataclass
+class ProtocolRevisionPending:
+    code: str
+    current_revision: int
+    error: str
+    minimum_revision: int
 
 
 @dataclass
@@ -461,7 +582,6 @@ class ReferralRedeemRequest:
 class ReferralRedeemResponse:
     code: str
     status: str
-    token: str
 
 
 @dataclass
@@ -499,6 +619,34 @@ class ReferralUpdateSettingsRequest:
 
 
 @dataclass
+class RevokeSessionPayload:
+    current: bool
+    ok: bool
+    revoked: bool
+
+
+@dataclass
+class RevokeSessionResponseDoc:
+    data: RevokeSessionPayload
+
+
+@dataclass
+class RevokeSessionsRequest:
+    address: str
+
+
+@dataclass
+class RevokeSessionsResponse:
+    refresh_tokens_revoked: int
+    session_version: int
+
+
+@dataclass
+class RevokeSessionsResponseDoc:
+    data: RevokeSessionsResponse
+
+
+@dataclass
 class RouteHopDoc:
     fee: str
     initialized_ticks: list[int]
@@ -516,9 +664,11 @@ class RouteHopDoc:
 @dataclass
 class RouteResultDoc:
     hops: list[RouteHopDoc]
+    protocol_revision: int
     token_in: str
     token_out: str
     estimated_amount_out: str | None = None
+    protocol_config_observed_block: int | None = None
 
 
 @dataclass
@@ -528,6 +678,20 @@ class SchemaField:
     type: str
     visibility: str
     fields: list[SchemaField] | None = None
+
+
+@dataclass
+class SessionPayload:
+    address: str
+    csrf_token: str
+    expires_at: int
+    session_version: int
+    session_id: str | None = None
+
+
+@dataclass
+class SessionResponseDoc:
+    data: SessionPayload
 
 
 @dataclass
@@ -585,8 +749,10 @@ class TokenDoc:
     id: str
     name: str
     symbol: str
+    amm_token_program: str | None = None
     image: str | None = None
-    wrapper_program: str | None = None
+    underlying_program: str | None = None
+    underlying_token_id: str | None = None
 
 
 @dataclass
@@ -602,6 +768,7 @@ class TokenResponseDoc:
 @dataclass
 class VerifyRequestDoc:
     address: str
+    challenge_id: str
     signature: str
 
 
@@ -664,6 +831,12 @@ class LiquidityDistributionResponseDoc:
 
 
 @dataclass
+class LiveCompatibilityFailure:
+    code: LiveCompatibilityFailureCode
+    program_id: str | None = None
+
+
+@dataclass
 class MintTokenResponseDoc:
     data: MintTokenResult
 
@@ -702,6 +875,9 @@ class PoolDebugResponseDoc:
 
 @dataclass
 class PoolResponseDoc(PoolStateDoc):
+    display_flipped: bool
+    base_token: TokenDoc | None = None
+    quote_token: TokenDoc | None = None
     token0_info: TokenDoc | None = None
     token1_info: TokenDoc | None = None
 
@@ -730,6 +906,9 @@ class PoolTradesResponseDoc:
 
 @dataclass
 class PoolWithStatsDoc(PoolStateDoc):
+    display_flipped: bool
+    base_token: TokenDoc | None = None
+    quote_token: TokenDoc | None = None
     stats: PoolStatsDoc | None = None
     token0_info: TokenDoc | None = None
     token1_info: TokenDoc | None = None
@@ -742,18 +921,44 @@ class PoolWithStatsResponseDoc:
 
 @dataclass
 class PositionWithOwedDoc:
+    is_frozen: bool
     is_private: bool
     pool: str
-    scale0: str
-    scale1: str
     tick_lower: int
     tick_upper: int
     token_id: str
     tokens_owed0: str
     tokens_owed1: str
+    frozen_at: str | None = None
+    last_transaction_hash: str | None = None
     token0_info: TokenDoc | None = None
     token1_info: TokenDoc | None = None
-    transaction_hash: str | None = None
+
+
+@dataclass
+class ProtocolControls:
+    allowed_tokens: list[str]
+    disabled_pools: list[str]
+    global_paused: bool
+    paused_pairs: list[ProtocolPair]
+    paused_tokens: list[str]
+    pool_creation_is_open: bool
+
+
+@dataclass
+class ProtocolDeployment:
+    abi_version: int
+    amm_start_block: int
+    contract_ref: str
+    contract_repository: str
+    deployment_fingerprint: str
+    freezelist_proof_version: str
+    math_version: str
+    network: str
+    profile: str
+    programs: dict[str, ProtocolProgram]
+    protocol_version: int
+    verified_at: str
 
 
 @dataclass
@@ -764,8 +969,6 @@ class RouteResponseDoc:
 @dataclass
 class SwapDoc:
     amount_remaining: str
-    amount_remaining_1: str
-    amount_remaining_2: str
     executed_at: str
     hops: list[SwapHopDoc]
     id: str
@@ -784,8 +987,6 @@ class SwapDoc:
     claimed_at: str | None = None
     input_token_info: TokenDoc | None = None
     output_token_info: TokenDoc | None = None
-    token_in_1: str | None = None
-    token_in_2: str | None = None
     trade: str | None = None
 
 
@@ -827,6 +1028,27 @@ class UnclaimedResponseDoc:
 
 
 @dataclass
+class LiveCompatibility:
+    artifacts_checked: int
+    checked_at: str
+    failures: list[LiveCompatibilityFailure]
+    status: LiveCompatibilityStatus
+
+
+@dataclass
 class PoolListResponseDoc:
     data: list[PoolResponseDoc]
     pagination: PaginationMeta
+
+
+@dataclass
+class ProtocolStateResponse:
+    capabilities: ProtocolCapabilities
+    controls: ProtocolControls
+    deployment: ProtocolDeployment
+    fee_configuration: ProtocolFeeConfiguration
+    freshness: ProtocolFreshness
+    live_compatibility: LiveCompatibility
+    revision: int
+    changed_at: str | None = None
+    observed_block: int | None = None

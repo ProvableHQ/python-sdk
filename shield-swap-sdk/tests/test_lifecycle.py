@@ -8,8 +8,9 @@ from aleo_shield_swap.profile import Profile
 
 
 class _Tok:
-    def __init__(self, wrapper_program):
-        self.wrapper_program = wrapper_program
+    def __init__(self, program):
+        self.amm_token_program = program
+        self.underlying_program = program
 
 
 class _StubApi:

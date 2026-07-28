@@ -39,12 +39,12 @@ def test_get_pools_parses_models_and_token_info():
     assert s.calls[0][1] == "https://x/pools"
     entry = pools[0]
     assert entry.key.endswith("field")            # delegation to PoolStateDoc
-    assert entry.token0_info.wrapper_program.endswith(".aleo")
+    assert entry.token0_info.amm_token_program.endswith(".aleo")
 
 
 def test_get_route_stringifies_amount():
     payload = {"data": {"hops": [], "token_in": "1field", "token_out": "2field",
-                        "estimated_amount_out": "42.5"}}
+                        "protocol_revision": 1, "estimated_amount_out": "42.5"}}
     s = _Session([_Resp(200, payload)])
     route = ApiClient(base_url="https://x", session=s).get_route(
         token_in="1field", token_out="2field", amount_in=10**18)
@@ -121,20 +121,21 @@ def test_access_status():
     assert s.calls[0][:2] == ("GET", "https://x/access/status")
 
 
-def test_redeem_code_adopts_new_token():
-    api, s = _lifecycle_client(_Resp(200, {"data": {"code": "C", "status": "redeemed",
-                                                    "token": "fresh-jwt"}}))
+def test_redeem_code_no_longer_returns_a_token():
+    # Staging moved sessions to /auth/* — redeem returns code/status only
+    # and the client keeps its existing credential.
+    api, s = _lifecycle_client(_Resp(200, {"data": {"code": "C", "status": "redeemed"}}))
     out = api.redeem_code("C")
     assert out.status == "redeemed"
     assert s.calls[0][2] == {"code": "C"}
-    assert api._token == "fresh-jwt"
+    assert api._token == "t"
 
 
 def test_request_airdrop_and_poll():
     api, s = _lifecycle_client(
         _Resp(200, {"data": {"job_id": "j1", "status": "running"}}),
         _Resp(200, {"data": {"status": "complete", "total": 3, "results": [
-            {"symbol": "wALEO", "wrapper_program": "waleo.aleo",
+            {"symbol": "wALEO", "amm_token_program": "waleo.aleo",
              "amount": "1000000", "status": "accepted",
              "tx_id": "at1...", "error": None}]}}),
     )
@@ -187,19 +188,19 @@ async def test_async_lifecycle_endpoints():
     from aleo_shield_swap.errors import AirdropRateLimitedError
     c = _AsyncClient([
         _AsyncResp(200, {"data": {"has_access": False}}),
-        _AsyncResp(200, {"data": {"code": "C", "status": "redeemed", "token": "t2"}}),
+        _AsyncResp(200, {"data": {"code": "C", "status": "redeemed"}}),
         _AsyncResp(200, {"data": {"job_id": "j1", "status": "running"}}),
         _AsyncResp(200, {"data": {"status": "complete", "total": 1, "results": [
-            {"symbol": "wETH", "wrapper_program": "weth.aleo",
+            {"symbol": "wETH", "amm_token_program": "weth.aleo",
              "amount": "5", "status": "accepted"}]}}),
         _AsyncResp(429, {"error": "already claimed"}),
     ])
     api = AsyncApiClient(base_url="https://x", client=c, token="t")
     assert (await api.access_status()).has_access is False
-    assert (await api.redeem_code("C")).token == "t2"
-    assert api._token == "t2"
+    assert (await api.redeem_code("C")).status == "redeemed"
+    assert api._token == "t"          # redeem no longer rotates the credential
     assert (await api.request_airdrop("aleo1a")).job_id == "j1"
     job = await api.get_airdrop_job("j1")
-    assert job.results[0].wrapper_program == "weth.aleo"
+    assert job.results[0].amm_token_program == "weth.aleo"
     with pytest.raises(AirdropRateLimitedError):
         await api.request_airdrop("aleo1a")

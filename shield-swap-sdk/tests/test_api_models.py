@@ -33,7 +33,11 @@ def test_token_doc_parses_undocumented_token_info():
     info = POOLS["data"][0]["token0_info"]
     tok = _filtered(m.TokenDoc, info)
     assert tok.decimals >= 0
-    assert tok.wrapper_program is not None and tok.wrapper_program.endswith(".aleo")
+    assert tok.amm_token_program is not None and tok.amm_token_program.endswith(".aleo")
+    # The staging registry names the record-funding program per token:
+    # underlying for wrapped assets, the ARC-20 itself for plain tokens.
+    assert tok.underlying_program is not None and tok.underlying_program.endswith(".aleo")
+    assert tok.underlying_token_id is not None
 
 
 def test_route_models_exist():

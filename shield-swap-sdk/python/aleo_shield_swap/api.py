@@ -10,6 +10,7 @@ token info is surfaced through :class:`PoolEntry`.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, fields
 from typing import Any, Optional, TypeVar
 
@@ -44,7 +45,11 @@ def _check(resp: Any) -> None:
         raise AirdropRateLimitedError(text)
     raise DexApiError(code, text)
 
-DEFAULT_API_URL = "https://amm-api.dev.provable.com"
+# Staging serves the migrated shield_swap.aleo stack (the old
+# amm-api.dev.provable.com host still serves the pre-migration deployment).
+# Override with SHIELD_SWAP_API_URL when the host moves again.
+DEFAULT_API_URL = os.environ.get("SHIELD_SWAP_API_URL",
+                                 "https://amm-api-staging.dev.provable.com")
 _TIMEOUT = 30.0
 
 T = TypeVar("T")
@@ -61,7 +66,8 @@ def _build(cls: type[T], d: Any) -> T:
 @dataclass(frozen=True)
 class PoolEntry:
     """One ``/pools`` entry: the documented pool state plus the undocumented
-    per-token info (which carries the load-bearing ``wrapper_program``).
+    per-token info (which carries the load-bearing ``amm_token_program`` /
+    ``underlying_program`` pair).
     Delegates attribute access to the pool state, so ``entry.key`` works."""
 
     pool: models.PoolStateDoc
@@ -146,11 +152,17 @@ class ApiClient:
                       self._get("/access/status")["data"])
 
     def redeem_code(self, code: str) -> models.AccessRedeemResponse:
-        """Redeem an invite code; adopts the fresh token the API returns."""
+        """Redeem an invite code.
+
+        The staging API no longer returns a session token here (sessions
+        moved to the ``/auth/*`` endpoints) — re-authenticate after
+        redeeming.  A token is still adopted if the API resurrects one.
+        """
         out = _build(models.AccessRedeemResponse,
                      self._post("/access/redeem", {"code": code})["data"])
-        if out.token:
-            self._token = out.token
+        token = getattr(out, "token", None)
+        if token:
+            self._token = token
         return out
 
     def request_airdrop(self, address: str) -> models.AirdropStartResult:
@@ -289,11 +301,12 @@ class AsyncApiClient:
                       (await self._get("/access/status"))["data"])
 
     async def redeem_code(self, code: str) -> models.AccessRedeemResponse:
-        """Redeem an invite code; adopts the fresh token the API returns."""
+        """Redeem an invite code — see :meth:`ApiClient.redeem_code`."""
         out = _build(models.AccessRedeemResponse,
                      (await self._post("/access/redeem", {"code": code}))["data"])
-        if out.token:
-            self._token = out.token
+        token = getattr(out, "token", None)
+        if token:
+            self._token = token
         return out
 
     async def request_airdrop(self, address: str) -> models.AirdropStartResult:

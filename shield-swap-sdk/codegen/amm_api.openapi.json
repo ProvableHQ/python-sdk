@@ -1,10 +1,10 @@
 {
     "openapi": "3.1.0",
     "info": {
-        "title": "Aleo AMM API",
-        "description": "REST API for the Aleo concentrated-liquidity AMM. Serves indexed pool / position / swap data, routing, swap quotes, swap-settlement status, and on-chain input schemas for building transactions against the deployment-configured shield_swap program and `token_registry.aleo`.\n\n## Numeric wire format\n\nExact financial values are JSON strings, not JSON numbers. Unsigned decimal inputs use ASCII digits and an optional `.` fraction, for example `\"1234.50\"`; base-unit integers use ASCII digits only. Grouping separators, localized decimal commas, signs, exponent notation, whitespace, Unicode digits, and redundant leading zeros are not accepted for those inputs. Signed response metrics may include a leading `-`. Clients should localize only for display and convert user input back to this canonical form before sending it.\n\n## Authentication\n\nExcept for `/health`, `/metrics`, `/auth/*`, `/compliance*`, `GET /tokens*`, and the pool metadata reads (`GET /pools`, `GET /pools/stats`, `GET /pools/{key}`), every endpoint requires `Authorization: Bearer <credential>` from an invited wallet. The credential is either a session JWT from `/auth/verify` (24h) or a long-lived API token (`ss_\u2026`) minted at `POST /api-tokens`. API tokens cover the data and trading surface; token management, code redemption, and admin endpoints accept JWTs only.\n\n## Real-time WebSocket feed\n\nLive updates are pushed over a WebSocket served by the **indexer** service at `GET /ws` (a WebSocket upgrade \u2014 a separate service from this REST API, not one of the paths below). Clients manage subscriptions with JSON frames:\n\n```json\n{\"action\": \"authenticate\", \"token\": \"<wallet-jwt>\"}\n{\"action\": \"subscribe\", \"room\": \"trades:<pool_key>\"}\n{\"action\": \"unsubscribe\", \"room\": \"trades:<pool_key>\"}\n```\n\nThe authentication frame must be first. Balance rooms are restricted to the JWT subject.\n\nRooms:\n- `pool_launches` \u2014 newly created pools\n- `pool_stats:<pool_key>` \u2014 price & liquidity updates\n- `ohlcv:<pool_key>` \u2014 candle updates\n- `trades:<pool_key>` \u2014 swaps / mints / burns\n- `balances:<address>` \u2014 balance-change hints for an address\n\nEach pushed message is `{\"type\": <event>, \"data\": { \u2026 }}`, where `type` is one of `PoolLaunch`, `PoolStats`, `Ohlcv`, `Trade`, `BalanceChange`. Financial fields use the same exact string format.",
+        "title": "Shield Swap API",
+        "description": "Shield Swap REST API for pools, positions, swaps, routes, quotes, settlement status, and transaction input schemas. Transactions target the configured shield_swap program and `token_registry.aleo`.\n\n## Numeric wire format\n\nExact financial values are JSON strings, not JSON numbers. Unsigned decimal inputs use ASCII digits and an optional `.` fraction, for example `\"1234.50\"`; base-unit integers use ASCII digits only. Grouping separators, localized decimal commas, signs, exponent notation, whitespace, Unicode digits, and redundant leading zeros are not accepted for those inputs. Signed response metrics may include a leading `-`. Clients should localize only for display and convert user input back to this canonical form before sending it.\n\n## Authentication\n\nMost endpoints require credentials from an invited wallet. Public routes are `/health`, `/ready`, `/metrics`, `/auth/*`, `/protocol/state`, `/compliance*`, `GET /tokens*`, `GET /pools`, `GET /pools/stats`, and `GET /pools/{key}`.\n\nBrowsers use HTTP-only session cookies issued by `/auth/verify`. Access sessions last 15 minutes and are renewed through `/auth/refresh`. Programmatic clients use a long-lived token from `POST /api-tokens` as `Authorization: Bearer ss_\u2026`. API tokens cover data and trading routes and can request WebSocket tickets. Token management, code redemption, and admin routes require a browser session.\n\n## WebSocket feed\n\nThe live feed runs on the separate websocket gateway at `GET /ws`.\n\n1. Request a ticket from `GET /auth/ws-ticket` using a browser session or API token.\n2. Open the socket and send the `authenticate` frame within 5 seconds.\n3. Subscribe to each required room.\n4. Before the 60-second ticket expires, request a new ticket and send another `authenticate` frame.\n\nThe socket accepts WebSocket tickets only. Session JWTs and API tokens are rejected.\n\n```json\n{\"action\": \"authenticate\", \"token\": \"<ticket from /auth/ws-ticket>\"}\n{\"action\": \"subscribe\", \"room\": \"trades:<pool_key>\"}\n{\"action\": \"unsubscribe\", \"room\": \"<room>\"}\n{\"action\": \"synchronize\"}\n```\n\nAfter reconnecting, resend subscriptions and then send `synchronize`. The gateway replies `{\"control\": \"synchronized\"}` when those subscriptions are active. Refetch any REST data that depends on the stream after receiving the reply.\n\nEach connection allows 32 rooms, 240 client frames per minute, and 2 KB per frame. A client may subscribe only to the balance room for its ticket subject.\n\nRooms:\n- `pool_launches` \u2014 newly created pools\n- `pool_stats:<pool_key>` \u2014 price & liquidity updates\n- `ohlcv:<pool_key>` \u2014 candle updates\n- `trades:<pool_key>` \u2014 swaps / mints / burns\n- `balances:<address>` \u2014 balance-change hints for an address\n\n- `protocol_config` \u2014 revisioned protocol-configuration invalidations\n\nServer messages are either events (`{\"type\": <event>, \"data\": { \u2026 }}`) or control messages (`{\"control\": <value>}`). Event types are `PoolLaunch`, `PoolStats`, `Ohlcv`, `Trade`, `BalanceChange`, and `ProtocolConfigChanged`. Its data contains `revision`, `observed_block`, and the changed `scope`/`key` pairs. Financial fields use the numeric format described above.\n\nTreat `ProtocolConfigChanged` as an invalidation, not as the new configuration. Fetch `GET /protocol/state?minimum_revision=<revision>`; retry a `503 protocol_revision_pending` after the advertised `Retry-After`; and discard or requote any `/route` result whose `protocol_revision` is older. Subscribe to `pool_stats:<pool_key>` separately when live price and liquidity updates matter.\n\nThe gateway currently sends `synchronized` and `resync_required` controls. `resync_required` means the stream may have missed updates, so refetch affected data over REST. Ignore unknown control values.\n\nEvent delivery is at most once. Treat REST as the source of truth. During a deployment the gateway may close the socket with code 1012 (service restart); reconnect and restore the subscriptions.",
         "contact": {
-            "name": "Aleo AMM"
+            "name": "Shield Swap"
         },
         "license": {
             "name": ""
@@ -350,13 +350,118 @@
                 ]
             }
         },
+        "/admin/sessions/revoke": {
+            "post": {
+                "tags": [
+                    "auth"
+                ],
+                "operationId": "admin_revoke_sessions",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RevokeSessionsRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "All of the wallet's sessions revoked",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/RevokeSessionsResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Malformed JSON or invalid address",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Authentication required",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Administrator authorization required",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "413": {
+                        "description": "Request body too large",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "415": {
+                        "description": "Content-Type must be application/json",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Request body does not match schema",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_auth": []
+                    }
+                ]
+            }
+        },
         "/airdrop": {
             "post": {
                 "tags": [
                     "airdrop"
                 ],
                 "summary": "POST /airdrop",
-                "description": "Delivers ~$10 worth each of wALEO, wUSDCx, and wETH to the given address as\nprivate records via `transfer_public_to_private`, spent from the\ntreasury's wrapped public balance in each program. One claim per\nrecipient address per 15 minutes (429 after that).\n\nProving each token takes ~15-30s, so this returns immediately with\n`status: \"running\"` + a `job_id`. The transfers run in a detached worker\n(capped concurrency, per-token timeout); poll `GET /airdrop/{job_id}` until\n`status == \"complete\"` to read per-token results.\n\nRequired env: `DEPLOYER_PRIVATE_KEY` (the treasury key whose public wrapped\nbalance funds every airdrop; `AIRDROP_PRIVATE_KEY` honored as a fallback),\n`RPC_URLS` (first entry used).",
+                "description": "Delivers ~$10 worth each of ALEO, USDCx, and ETH to the given address as\nprivate records via `transfer_public_to_private`, spent from the\ntreasury's public balance in each target's underlying program. One claim\nper recipient address per 15 minutes (429 after that).\n\nProving each token takes ~15-30s, so this returns immediately with\n`status: \"running\"` + a `job_id`. The transfers run in a detached worker\n(capped concurrency, per-token timeout); poll `GET /airdrop/{job_id}` until\n`status == \"complete\"` to read per-token results.\n\nRequired env: `DEPLOYER_PRIVATE_KEY` (the treasury key whose public balances\nfund every airdrop; `AIRDROP_PRIVATE_KEY` honored as a fallback),\n`RPC_URLS` (first entry used).",
                 "operationId": "airdrop",
                 "requestBody": {
                     "content": {
@@ -870,6 +975,397 @@
                 }
             }
         },
+        "/auth/logout": {
+            "post": {
+                "tags": [
+                    "auth"
+                ],
+                "operationId": "logout",
+                "responses": {
+                    "200": {
+                        "description": "Presented refresh-token family ended",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/LogoutResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid session binding",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Missing or invalid CSRF token",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Session identity changed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limit exceeded",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/logout-all": {
+            "post": {
+                "tags": [
+                    "auth"
+                ],
+                "operationId": "logout_all",
+                "responses": {
+                    "200": {
+                        "description": "Every wallet session revoked",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/LogoutAllResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "No valid session",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Missing or invalid CSRF token",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Session identity changed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Session revocation state unavailable",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/refresh": {
+            "post": {
+                "tags": [
+                    "auth"
+                ],
+                "operationId": "refresh",
+                "responses": {
+                    "200": {
+                        "description": "Refresh token rotated; fresh access + refresh cookies set",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SessionResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing, invalid, expired, or revoked refresh token",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Session identity changed or a concurrent refresh already rotated this token",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limit exceeded",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/session": {
+            "get": {
+                "tags": [
+                    "auth"
+                ],
+                "operationId": "session",
+                "responses": {
+                    "200": {
+                        "description": "Current session identity + access expiry; re-seeds the CSRF token",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SessionResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "No valid session",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Session revocation state unavailable",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/sessions": {
+            "get": {
+                "tags": [
+                    "auth"
+                ],
+                "operationId": "list_sessions",
+                "responses": {
+                    "200": {
+                        "description": "Active sessions for the signed-in wallet",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ActiveSessionsResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid session",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Session management rate limit exceeded",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Session lookup failed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Session validation unavailable",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/sessions/{session_id}/revoke": {
+            "post": {
+                "tags": [
+                    "auth"
+                ],
+                "operationId": "revoke_session",
+                "parameters": [
+                    {
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Session revoked, or already inactive",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/RevokeSessionResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid session",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Missing or mismatched CSRF token",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Session management rate limit exceeded",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Revocation failed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Session validation unavailable",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/auth/verify": {
             "post": {
                 "tags": [
@@ -888,11 +1384,11 @@
                 },
                 "responses": {
                     "200": {
-                        "description": "JWT bearer token",
+                        "description": "Session established via httpOnly cookies; body carries the CSRF token",
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/AuthTokenResponseDoc"
+                                    "$ref": "#/components/schemas/SessionResponseDoc"
                                 }
                             }
                         }
@@ -909,6 +1405,16 @@
                     },
                     "401": {
                         "description": "Invalid / expired signature",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Session state changed during verification",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -959,6 +1465,86 @@
                     },
                     "500": {
                         "description": "Internal error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/ws-ticket": {
+            "get": {
+                "tags": [
+                    "auth"
+                ],
+                "operationId": "ws_ticket",
+                "responses": {
+                    "200": {
+                        "description": "Short-lived (60s) JWT the WebSocket client presents in its authenticate frame",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/AuthTokenResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid identity binding",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "No valid session or API token",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Credential identity changed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "API token rate limit exceeded",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Session revocation state unavailable",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -1209,7 +1795,7 @@
                 "operationId": "list_fee_tiers",
                 "responses": {
                     "200": {
-                        "description": "Registered fee tiers",
+                        "description": "Registered fee tiers and current tick-spacing bindings",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -1550,6 +2136,15 @@
                             "type": "integer",
                             "format": "int64"
                         }
+                    },
+                    {
+                        "name": "orientation",
+                        "in": "query",
+                        "description": "`raw` (default) keeps stored token1-per-token0 prices; `display` inverts candles when the pool's canonical display orientation is flipped",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
                     }
                 ],
                 "responses": {
@@ -1883,6 +2478,63 @@
                         "bearer_auth": []
                     }
                 ]
+            }
+        },
+        "/protocol/state": {
+            "get": {
+                "tags": [
+                    "protocol"
+                ],
+                "operationId": "get_protocol_state",
+                "parameters": [
+                    {
+                        "name": "minimum_revision",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": [
+                                "integer",
+                                "null"
+                            ],
+                            "format": "int64"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Canonical versioned protocol state",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProtocolStateResponse"
+                                }
+                            }
+                        }
+                    },
+                    "304": {
+                        "description": "Protocol state matches If-None-Match"
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "The requested protocol revision has not been indexed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProtocolRevisionPending"
+                                }
+                            }
+                        }
+                    }
+                }
             }
         },
         "/referral/admin": {
@@ -2552,7 +3204,7 @@
                         }
                     },
                     "503": {
-                        "description": "Routing dependencies are temporarily unavailable or the quote candidate set exceeds the safe limit",
+                        "description": "The live deployment is incompatible, routing dependencies are unavailable, or the quote candidate set exceeds the safe limit",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -2608,7 +3260,7 @@
                     {
                         "name": "id",
                         "in": "path",
-                        "description": "Operation ID (swap, mint, create_pool, burn, collect, decrease_liquidity, swap_multi_hop, claim_swap_output, claim_multi_hop_output, register_token, mint_public, mint_private, transfer_public_to_private, add_fee_tier, add_tick_spacing, set_pool_enabled)",
+                        "description": "Operation ID (swap, mint, create_pool, burn, collect, decrease_liquidity, swap_multi_hop, claim_swap_output, register_token, mint_public, mint_private, transfer_public_to_private, add_fee_tier, add_tick_spacing, bind_fee_to_tick_spacing, set_pool_enabled)",
                         "required": true,
                         "schema": {
                             "type": "string"
@@ -2980,7 +3632,7 @@
                     "tokens"
                 ],
                 "summary": "POST /tokens/deploy",
-                "description": "Deploys a fresh self-contained ARC-20 token (the treasury/deployer key is its\nbaked-in admin) and mints the initial supply to the creator (`recipient`),\nthen registers it (with `wrapper_program`) so it is swap- and airdrop-ready.\n\nDeploy + mint are two on-chain txs that take minutes, so this returns\nimmediately with `status: \"deploying\"` and finishes in the background. Poll\n`GET /tokens` for a row whose `wrapper_program` equals the returned\n`program_id` to know it completed.\n\nRequired env: `DEPLOYER_PRIVATE_KEY` (treasury/admin; `AIRDROP_PRIVATE_KEY`\nhonored as fallback), `RPC_URLS`. `leo` must be on the server PATH.",
+                "description": "Deploys a fresh self-contained ARC-20 token (the treasury/deployer key is its\nbaked-in admin) and mints the initial supply to the creator (`recipient`),\nthen registers it (with `amm_token_program`) so it is swap- and airdrop-ready.\n\nDeploy + mint are two on-chain txs that take minutes, so this returns\nimmediately with `status: \"deploying\"` and finishes in the background. Poll\n`GET /tokens` for a row whose `amm_token_program` equals the returned\n`program_id` to know it completed.\n\nRequired env: `DEPLOYER_PRIVATE_KEY` (treasury/admin; `AIRDROP_PRIVATE_KEY`\nhonored as fallback), `RPC_URLS`. `leo` must be on the server PATH.",
                 "operationId": "deploy_token",
                 "requestBody": {
                     "content": {
@@ -3087,7 +3739,7 @@
                     "tokens"
                 ],
                 "summary": "POST /tokens/mint",
-                "description": "Admin-mints `amount` (base units) of an existing wrapper to `recipient`,\nsigned by the treasury/deployer key (the token's admin). Synchronous \u2014 a\nsingle mint tx. Reuses scripts/airdrop-helper.mjs (which calls mint_public).",
+                "description": "Admin-mints `amount` (base units) of an existing AMM token to `recipient`.",
                 "operationId": "mint_token",
                 "requestBody": {
                     "content": {
@@ -3409,17 +4061,13 @@
                 "type": "object",
                 "required": [
                     "code",
-                    "status",
-                    "token"
+                    "status"
                 ],
                 "properties": {
                     "code": {
                         "type": "string"
                     },
                     "status": {
-                        "type": "string"
-                    },
-                    "token": {
                         "type": "string"
                     }
                 }
@@ -3454,6 +4102,57 @@
                 "properties": {
                     "data": {
                         "$ref": "#/components/schemas/AccessStatusResponse"
+                    }
+                }
+            },
+            "ActiveSessionPayload": {
+                "type": "object",
+                "required": [
+                    "session_id",
+                    "started_at",
+                    "last_refreshed_at",
+                    "expires_at",
+                    "current"
+                ],
+                "properties": {
+                    "current": {
+                        "type": "boolean"
+                    },
+                    "expires_at": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "last_refreshed_at": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "session_id": {
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    "started_at": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "user_agent": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                }
+            },
+            "ActiveSessionsResponseDoc": {
+                "type": "object",
+                "required": [
+                    "data"
+                ],
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ActiveSessionPayload"
+                        }
                     }
                 }
             },
@@ -3508,11 +4207,14 @@
                 "type": "object",
                 "required": [
                     "symbol",
-                    "wrapper_program",
+                    "amm_token_program",
                     "amount",
                     "status"
                 ],
                 "properties": {
+                    "amm_token_program": {
+                        "type": "string"
+                    },
                     "amount": {
                         "type": "string",
                         "description": "Base-unit amount delivered."
@@ -3535,9 +4237,6 @@
                             "string",
                             "null"
                         ]
-                    },
-                    "wrapper_program": {
-                        "type": "string"
                     }
                 }
             },
@@ -3729,9 +4428,14 @@
             "AuthTokenPayload": {
                 "type": "object",
                 "required": [
-                    "token"
+                    "token",
+                    "expires_at"
                 ],
                 "properties": {
+                    "expires_at": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
                     "token": {
                         "type": "string"
                     }
@@ -3765,10 +4469,14 @@
             "ChallengePayload": {
                 "type": "object",
                 "required": [
+                    "challenge_id",
                     "nonce",
                     "message"
                 ],
                 "properties": {
+                    "challenge_id": {
+                        "type": "string"
+                    },
                     "message": {
                         "type": "string"
                     },
@@ -3812,6 +4520,13 @@
                         "type": "string",
                         "description": "Aleo field ID (e.g. `1234567890field`)."
                     },
+                    "amm_token_program": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "Program for the token representation used by the AMM; the wrapper program for wrapped assets."
+                    },
                     "decimals": {
                         "type": "integer",
                         "format": "int32",
@@ -3823,13 +4538,6 @@
                     },
                     "symbol": {
                         "type": "string"
-                    },
-                    "wrapper_program": {
-                        "type": [
-                            "string",
-                            "null"
-                        ],
-                        "description": "Deployed ARC-20 wrapper program ID (e.g. `mtk_a1b2c3.aleo`). Optional."
                     }
                 }
             },
@@ -3888,14 +4596,14 @@
                 "properties": {
                     "program_id": {
                         "type": "string",
-                        "description": "`<symbol>_<rand>.aleo` \u2014 the deployed wrapper program id."
+                        "description": "`<symbol>_<rand>.aleo` \u2014 the deployed AMM token program id."
                     },
                     "recipient": {
                         "type": "string"
                     },
                     "status": {
                         "type": "string",
-                        "description": "Always `\"deploying\"`. Deploy + initial mint run in the background\n(minutes); poll `GET /tokens` until a token with this `wrapper_program`\nappears to know it finished and was registered."
+                        "description": "Always `\"deploying\"`. Deploy + initial mint run in the background\n(minutes); poll `GET /tokens` until a token with this `amm_token_program`\nappears to know it finished and was registered."
                     }
                 }
             },
@@ -3913,6 +4621,23 @@
                             "string",
                             "null"
                         ]
+                    }
+                }
+            },
+            "FeeBinding": {
+                "type": "object",
+                "required": [
+                    "fee_tier",
+                    "tick_spacing"
+                ],
+                "properties": {
+                    "fee_tier": {
+                        "type": "integer",
+                        "format": "int32"
+                    },
+                    "tick_spacing": {
+                        "type": "integer",
+                        "format": "int32"
                     }
                 }
             },
@@ -3938,6 +4663,14 @@
                     "id": {
                         "type": "string"
                     },
+                    "tick_spacing": {
+                        "type": [
+                            "integer",
+                            "null"
+                        ],
+                        "format": "int32",
+                        "description": "Current binding, or null when the registered fee has not been bound."
+                    },
                     "transaction": {
                         "type": "string"
                     }
@@ -3959,7 +4692,7 @@
             },
             "FunctionSchema": {
                 "type": "object",
-                "description": "Full schema for a single trading / liquidity operation on the Aleo AMM.",
+                "description": "Input schema for one Shield Swap operation.",
                 "required": [
                     "id",
                     "program",
@@ -4073,14 +4806,152 @@
                     }
                 }
             },
+            "LiveCompatibility": {
+                "type": "object",
+                "required": [
+                    "status",
+                    "checked_at",
+                    "artifacts_checked",
+                    "failures"
+                ],
+                "properties": {
+                    "artifacts_checked": {
+                        "type": "integer",
+                        "minimum": 0
+                    },
+                    "checked_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "failures": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/LiveCompatibilityFailure"
+                        }
+                    },
+                    "status": {
+                        "$ref": "#/components/schemas/LiveCompatibilityStatus"
+                    }
+                }
+            },
+            "LiveCompatibilityFailure": {
+                "type": "object",
+                "required": [
+                    "code"
+                ],
+                "properties": {
+                    "code": {
+                        "$ref": "#/components/schemas/LiveCompatibilityFailureCode"
+                    },
+                    "program_id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                }
+            },
+            "LiveCompatibilityFailureCode": {
+                "type": "string",
+                "enum": [
+                    "cache_unavailable",
+                    "edition_mismatch",
+                    "edition_unavailable",
+                    "rate_limited",
+                    "rpc_unavailable",
+                    "source_mismatch",
+                    "source_unavailable",
+                    "verification_timeout"
+                ]
+            },
+            "LiveCompatibilityStatus": {
+                "type": "string",
+                "enum": [
+                    "compatible",
+                    "incompatible",
+                    "unavailable"
+                ]
+            },
+            "LogoutAllResponse": {
+                "type": "object",
+                "required": [
+                    "ok",
+                    "ended",
+                    "address",
+                    "session_version"
+                ],
+                "properties": {
+                    "address": {
+                        "type": "string"
+                    },
+                    "ended": {
+                        "type": "boolean"
+                    },
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "session_version": {
+                        "type": "integer",
+                        "format": "int64"
+                    }
+                }
+            },
+            "LogoutAllResponseDoc": {
+                "type": "object",
+                "required": [
+                    "data"
+                ],
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/LogoutAllResponse"
+                    }
+                }
+            },
+            "LogoutResponse": {
+                "type": "object",
+                "required": [
+                    "ok",
+                    "ended"
+                ],
+                "properties": {
+                    "ended": {
+                        "type": "boolean"
+                    },
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "session_id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "format": "uuid"
+                    }
+                }
+            },
+            "LogoutResponseDoc": {
+                "type": "object",
+                "required": [
+                    "data"
+                ],
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/LogoutResponse"
+                    }
+                }
+            },
             "MintTokenRequest": {
                 "type": "object",
                 "required": [
-                    "wrapper_program",
+                    "amm_token_program",
                     "recipient",
                     "amount"
                 ],
                 "properties": {
+                    "amm_token_program": {
+                        "type": "string",
+                        "description": "Program for the token representation used by the AMM."
+                    },
                     "amount": {
                         "type": "string",
                         "description": "Amount in BASE units (already scaled by 10^decimals), as a string."
@@ -4088,10 +4959,6 @@
                     "recipient": {
                         "type": "string",
                         "description": "Recipient Aleo address (`aleo1...`)."
-                    },
-                    "wrapper_program": {
-                        "type": "string",
-                        "description": "The token's wrapper program id (e.g. `mtk_a1b2c3.aleo`)."
                     }
                 }
             },
@@ -4138,22 +5005,22 @@
                 "properties": {
                     "c": {
                         "type": "string",
-                        "description": "Last normalized token1-per-token0 price; execution price after migration 0028, preserved legacy baseline before it."
+                        "description": "Last raw atomic token1-per-token0 execution price."
                     },
                     "granularity": {
                         "$ref": "#/components/schemas/GranularityDoc"
                     },
                     "h": {
                         "type": "string",
-                        "description": "Highest normalized token1-per-token0 price; execution price after migration 0028, preserved legacy baseline before it."
+                        "description": "Highest raw atomic token1-per-token0 execution price."
                     },
                     "l": {
                         "type": "string",
-                        "description": "Lowest normalized token1-per-token0 price; execution price after migration 0028, preserved legacy baseline before it."
+                        "description": "Lowest raw atomic token1-per-token0 execution price."
                     },
                     "o": {
                         "type": "string",
-                        "description": "First normalized token1-per-token0 price; execution price after migration 0028, preserved legacy baseline before it."
+                        "description": "First raw atomic token1-per-token0 execution price."
                     },
                     "pool": {
                         "type": "string"
@@ -4164,7 +5031,7 @@
                     },
                     "v": {
                         "type": "string",
-                        "description": "Raw token0 volume; exact consumed units after migration 0028, preserved legacy baseline before it."
+                        "description": "Raw token0 units consumed."
                     }
                 }
             },
@@ -4297,35 +5164,11 @@
                     "amount_remaining": {
                         "type": "string"
                     },
-                    "amount_remaining_1": {
-                        "type": [
-                            "string",
-                            "null"
-                        ]
-                    },
-                    "amount_remaining_2": {
-                        "type": [
-                            "string",
-                            "null"
-                        ]
-                    },
                     "recipient": {
                         "type": "string"
                     },
                     "token_in": {
                         "type": "string"
-                    },
-                    "token_in_1": {
-                        "type": [
-                            "string",
-                            "null"
-                        ]
-                    },
-                    "token_in_2": {
-                        "type": [
-                            "string",
-                            "null"
-                        ]
                     },
                     "token_out": {
                         "type": "string"
@@ -4392,6 +5235,22 @@
                     }
                 }
             },
+            "PoolFeeProtocol": {
+                "type": "object",
+                "required": [
+                    "pool_key",
+                    "fee_protocol"
+                ],
+                "properties": {
+                    "fee_protocol": {
+                        "type": "integer",
+                        "format": "int32"
+                    },
+                    "pool_key": {
+                        "type": "string"
+                    }
+                }
+            },
             "PoolListResponseDoc": {
                 "type": "object",
                 "required": [
@@ -4417,7 +5276,35 @@
                     },
                     {
                         "type": "object",
+                        "required": [
+                            "display_flipped"
+                        ],
                         "properties": {
+                            "base_token": {
+                                "oneOf": [
+                                    {
+                                        "type": "null"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/TokenDoc",
+                                        "description": "token0_info/token1_info reordered so the quote (denominator) token is\nalways `quote_token` (priority: USD stables > ETH > BTC > ALEO)."
+                                    }
+                                ]
+                            },
+                            "display_flipped": {
+                                "type": "boolean",
+                                "description": "True when the canonical display orientation is (token1, token0)."
+                            },
+                            "quote_token": {
+                                "oneOf": [
+                                    {
+                                        "type": "null"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/TokenDoc"
+                                    }
+                                ]
+                            },
                             "token0_info": {
                                 "oneOf": [
                                     {
@@ -4451,11 +5338,9 @@
                     "token1",
                     "enabled",
                     "creator",
-                    "fee",
+                    "fee_percent",
                     "created_at",
-                    "init_tx",
-                    "scale0",
-                    "scale1"
+                    "init_tx"
                 ],
                 "properties": {
                     "created_at": {
@@ -4467,7 +5352,7 @@
                     "enabled": {
                         "type": "boolean"
                     },
-                    "fee": {
+                    "fee_percent": {
                         "type": "string"
                     },
                     "id": {
@@ -4477,12 +5362,6 @@
                         "type": "string"
                     },
                     "key": {
-                        "type": "string"
-                    },
-                    "scale0": {
-                        "type": "string"
-                    },
-                    "scale1": {
                         "type": "string"
                     },
                     "token0": {
@@ -4519,7 +5398,12 @@
                     "open_24h",
                     "high_24h",
                     "low_24h",
-                    "volume_24h"
+                    "volume_24h",
+                    "display_flipped",
+                    "display_price",
+                    "display_open_24h",
+                    "display_high_24h",
+                    "display_low_24h"
                 ],
                 "properties": {
                     "change_24h_pct": {
@@ -4528,20 +5412,44 @@
                             "null"
                         ]
                     },
+                    "display_change_24h_pct": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    },
+                    "display_flipped": {
+                        "type": "boolean",
+                        "description": "True when display fields are inverted relative to token0/token1 order."
+                    },
+                    "display_high_24h": {
+                        "type": "string",
+                        "description": "Inverted windows swap extremes: display_high = 1 / low_24h."
+                    },
+                    "display_low_24h": {
+                        "type": "string"
+                    },
+                    "display_open_24h": {
+                        "type": "string"
+                    },
+                    "display_price": {
+                        "type": "string",
+                        "description": "Current price in canonical display orientation (quote per base)."
+                    },
                     "high_24h": {
                         "type": "string",
-                        "description": "Highest normalized price; execution price after migration 0028, preserved legacy baseline before it."
+                        "description": "Highest raw atomic execution price."
                     },
                     "liquidity": {
                         "type": "string"
                     },
                     "low_24h": {
                         "type": "string",
-                        "description": "Lowest normalized price; execution price after migration 0028, preserved legacy baseline before it."
+                        "description": "Lowest raw atomic execution price."
                     },
                     "open_24h": {
                         "type": "string",
-                        "description": "Earliest normalized price; execution price after migration 0028, preserved legacy baseline before it."
+                        "description": "Earliest raw atomic execution price."
                     },
                     "price": {
                         "type": "string"
@@ -4551,7 +5459,7 @@
                     },
                     "volume_24h": {
                         "type": "string",
-                        "description": "Raw token0 volume; exact consumed units after migration 0028, preserved legacy baseline before it."
+                        "description": "Raw token0 units consumed."
                     }
                 }
             },
@@ -4579,8 +5487,8 @@
                     "fee_protocol",
                     "protocol_fees0",
                     "protocol_fees1",
-                    "fee_growth_global0_x_64",
-                    "fee_growth_global1_x_64",
+                    "fee_growth_global0_x_128",
+                    "fee_growth_global1_x_128",
                     "max_liquidity_per_tick",
                     "next_init_below",
                     "next_init_above"
@@ -4590,10 +5498,10 @@
                         "type": "integer",
                         "format": "int32"
                     },
-                    "fee_growth_global0_x_64": {
+                    "fee_growth_global0_x_128": {
                         "type": "string"
                     },
-                    "fee_growth_global1_x_64": {
+                    "fee_growth_global1_x_128": {
                         "type": "string"
                     },
                     "fee_protocol": {
@@ -4721,7 +5629,34 @@
                     },
                     {
                         "type": "object",
+                        "required": [
+                            "display_flipped"
+                        ],
                         "properties": {
+                            "base_token": {
+                                "oneOf": [
+                                    {
+                                        "type": "null"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/TokenDoc"
+                                    }
+                                ]
+                            },
+                            "display_flipped": {
+                                "type": "boolean",
+                                "description": "True when the canonical display orientation is (token1, token0)."
+                            },
+                            "quote_token": {
+                                "oneOf": [
+                                    {
+                                        "type": "null"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/TokenDoc"
+                                    }
+                                ]
+                            },
                             "stats": {
                                 "oneOf": [
                                     {
@@ -4780,10 +5715,11 @@
                     "user",
                     "pool",
                     "created_at",
-                    "transaction",
+                    "created_transaction",
+                    "last_transaction",
                     "is_burned",
-                    "fee_growth_inside0_last_64",
-                    "fee_growth_inside1_last_64",
+                    "fee_growth_inside0_last_x_128",
+                    "fee_growth_inside1_last_x_128",
                     "tokens_owed0",
                     "tokens_owed1",
                     "is_private",
@@ -4799,10 +5735,19 @@
                     "created_at": {
                         "type": "string"
                     },
-                    "fee_growth_inside0_last_64": {
+                    "created_transaction": {
                         "type": "string"
                     },
-                    "fee_growth_inside1_last_64": {
+                    "created_transaction_hash": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    },
+                    "fee_growth_inside0_last_x_128": {
+                        "type": "string"
+                    },
+                    "fee_growth_inside1_last_x_128": {
                         "type": "string"
                     },
                     "frozen_at": {
@@ -4822,6 +5767,15 @@
                     },
                     "is_private": {
                         "type": "boolean"
+                    },
+                    "last_transaction": {
+                        "type": "string"
+                    },
+                    "last_transaction_hash": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
                     },
                     "liquidity": {
                         "type": "string"
@@ -4845,15 +5799,6 @@
                     },
                     "tokens_owed1": {
                         "type": "string"
-                    },
-                    "transaction": {
-                        "type": "string"
-                    },
-                    "transaction_hash": {
-                        "type": [
-                            "string",
-                            "null"
-                        ]
                     },
                     "user": {
                         "type": "string"
@@ -4898,21 +5843,29 @@
                     "tick_upper",
                     "tokens_owed0",
                     "tokens_owed1",
-                    "scale0",
-                    "scale1",
-                    "is_private"
+                    "is_private",
+                    "is_frozen"
                 ],
                 "properties": {
+                    "frozen_at": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    },
+                    "is_frozen": {
+                        "type": "boolean"
+                    },
                     "is_private": {
                         "type": "boolean"
                     },
+                    "last_transaction_hash": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    },
                     "pool": {
-                        "type": "string"
-                    },
-                    "scale0": {
-                        "type": "string"
-                    },
-                    "scale1": {
                         "type": "string"
                     },
                     "tick_lower": {
@@ -4951,12 +5904,336 @@
                     },
                     "tokens_owed1": {
                         "type": "string"
+                    }
+                }
+            },
+            "ProtocolCapabilities": {
+                "type": "object",
+                "required": [
+                    "faucet",
+                    "token_admin",
+                    "debug_api",
+                    "freezelist_proofs",
+                    "protocol_config_websocket"
+                ],
+                "properties": {
+                    "debug_api": {
+                        "type": "boolean"
                     },
-                    "transaction_hash": {
+                    "faucet": {
+                        "type": "boolean"
+                    },
+                    "freezelist_proofs": {
+                        "type": "string"
+                    },
+                    "protocol_config_websocket": {
+                        "type": "boolean"
+                    },
+                    "token_admin": {
+                        "type": "boolean"
+                    }
+                }
+            },
+            "ProtocolControls": {
+                "type": "object",
+                "required": [
+                    "global_paused",
+                    "pool_creation_is_open",
+                    "allowed_tokens",
+                    "paused_tokens",
+                    "paused_pairs",
+                    "disabled_pools"
+                ],
+                "properties": {
+                    "allowed_tokens": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "disabled_pools": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "global_paused": {
+                        "type": "boolean"
+                    },
+                    "paused_pairs": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ProtocolPair"
+                        }
+                    },
+                    "paused_tokens": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "pool_creation_is_open": {
+                        "type": "boolean"
+                    }
+                }
+            },
+            "ProtocolDeployment": {
+                "type": "object",
+                "required": [
+                    "profile",
+                    "network",
+                    "verified_at",
+                    "amm_start_block",
+                    "contract_repository",
+                    "contract_ref",
+                    "protocol_version",
+                    "abi_version",
+                    "math_version",
+                    "freezelist_proof_version",
+                    "deployment_fingerprint",
+                    "programs"
+                ],
+                "properties": {
+                    "abi_version": {
+                        "type": "integer",
+                        "format": "int32",
+                        "minimum": 0
+                    },
+                    "amm_start_block": {
+                        "type": "integer",
+                        "format": "int64",
+                        "minimum": 0
+                    },
+                    "contract_ref": {
+                        "type": "string"
+                    },
+                    "contract_repository": {
+                        "type": "string"
+                    },
+                    "deployment_fingerprint": {
+                        "type": "string"
+                    },
+                    "freezelist_proof_version": {
+                        "type": "string"
+                    },
+                    "math_version": {
+                        "type": "string"
+                    },
+                    "network": {
+                        "type": "string"
+                    },
+                    "profile": {
+                        "type": "string"
+                    },
+                    "programs": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "$ref": "#/components/schemas/ProtocolProgram"
+                        },
+                        "propertyNames": {
+                            "type": "string"
+                        }
+                    },
+                    "protocol_version": {
+                        "type": "integer",
+                        "format": "int32",
+                        "minimum": 0
+                    },
+                    "verified_at": {
+                        "type": "string"
+                    }
+                }
+            },
+            "ProtocolFeeConfiguration": {
+                "type": "object",
+                "required": [
+                    "registered_fee_tiers",
+                    "registered_tick_spacings",
+                    "valid_bindings",
+                    "pool_fee_protocols"
+                ],
+                "properties": {
+                    "pool_fee_protocols": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/PoolFeeProtocol"
+                        }
+                    },
+                    "registered_fee_tiers": {
+                        "type": "array",
+                        "items": {
+                            "type": "integer",
+                            "format": "int32"
+                        }
+                    },
+                    "registered_tick_spacings": {
+                        "type": "array",
+                        "items": {
+                            "type": "integer",
+                            "format": "int32"
+                        }
+                    },
+                    "valid_bindings": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/FeeBinding"
+                        }
+                    }
+                }
+            },
+            "ProtocolFreshness": {
+                "type": "object",
+                "required": [
+                    "ready_for_entry"
+                ],
+                "properties": {
+                    "confirmed_head": {
+                        "type": [
+                            "integer",
+                            "null"
+                        ],
+                        "format": "int64"
+                    },
+                    "indexed_block": {
+                        "type": [
+                            "integer",
+                            "null"
+                        ],
+                        "format": "int64"
+                    },
+                    "lag_blocks": {
+                        "type": [
+                            "integer",
+                            "null"
+                        ],
+                        "format": "int64"
+                    },
+                    "ready_for_entry": {
+                        "type": "boolean"
+                    },
+                    "updated_at": {
                         "type": [
                             "string",
                             "null"
-                        ]
+                        ],
+                        "format": "date-time"
+                    }
+                }
+            },
+            "ProtocolPair": {
+                "type": "object",
+                "required": [
+                    "token0",
+                    "token1"
+                ],
+                "properties": {
+                    "token0": {
+                        "type": "string"
+                    },
+                    "token1": {
+                        "type": "string"
+                    }
+                }
+            },
+            "ProtocolProgram": {
+                "type": "object",
+                "required": [
+                    "program_id",
+                    "role",
+                    "source_sha256"
+                ],
+                "properties": {
+                    "edition": {
+                        "type": [
+                            "integer",
+                            "null"
+                        ],
+                        "format": "int32",
+                        "minimum": 0
+                    },
+                    "program_id": {
+                        "type": "string"
+                    },
+                    "role": {
+                        "type": "string"
+                    },
+                    "source_sha256": {
+                        "type": "string"
+                    }
+                }
+            },
+            "ProtocolRevisionPending": {
+                "type": "object",
+                "required": [
+                    "error",
+                    "code",
+                    "minimum_revision",
+                    "current_revision"
+                ],
+                "properties": {
+                    "code": {
+                        "type": "string"
+                    },
+                    "current_revision": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "error": {
+                        "type": "string"
+                    },
+                    "minimum_revision": {
+                        "type": "integer",
+                        "format": "int64"
+                    }
+                }
+            },
+            "ProtocolStateResponse": {
+                "type": "object",
+                "required": [
+                    "revision",
+                    "freshness",
+                    "live_compatibility",
+                    "deployment",
+                    "controls",
+                    "fee_configuration",
+                    "capabilities"
+                ],
+                "properties": {
+                    "capabilities": {
+                        "$ref": "#/components/schemas/ProtocolCapabilities"
+                    },
+                    "changed_at": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "format": "date-time"
+                    },
+                    "controls": {
+                        "$ref": "#/components/schemas/ProtocolControls"
+                    },
+                    "deployment": {
+                        "$ref": "#/components/schemas/ProtocolDeployment"
+                    },
+                    "fee_configuration": {
+                        "$ref": "#/components/schemas/ProtocolFeeConfiguration"
+                    },
+                    "freshness": {
+                        "$ref": "#/components/schemas/ProtocolFreshness"
+                    },
+                    "live_compatibility": {
+                        "$ref": "#/components/schemas/LiveCompatibility"
+                    },
+                    "observed_block": {
+                        "type": [
+                            "integer",
+                            "null"
+                        ],
+                        "format": "int64"
+                    },
+                    "revision": {
+                        "type": "integer",
+                        "format": "int64"
                     }
                 }
             },
@@ -5161,17 +6438,13 @@
                 "type": "object",
                 "required": [
                     "code",
-                    "status",
-                    "token"
+                    "status"
                 ],
                 "properties": {
                     "code": {
                         "type": "string"
                     },
                     "status": {
-                        "type": "string"
-                    },
-                    "token": {
                         "type": "string"
                     }
                 }
@@ -5269,6 +6542,76 @@
                     }
                 }
             },
+            "RevokeSessionPayload": {
+                "type": "object",
+                "required": [
+                    "ok",
+                    "revoked",
+                    "current"
+                ],
+                "properties": {
+                    "current": {
+                        "type": "boolean"
+                    },
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "revoked": {
+                        "type": "boolean"
+                    }
+                }
+            },
+            "RevokeSessionResponseDoc": {
+                "type": "object",
+                "required": [
+                    "data"
+                ],
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/RevokeSessionPayload"
+                    }
+                }
+            },
+            "RevokeSessionsRequest": {
+                "type": "object",
+                "required": [
+                    "address"
+                ],
+                "properties": {
+                    "address": {
+                        "type": "string"
+                    }
+                }
+            },
+            "RevokeSessionsResponse": {
+                "type": "object",
+                "required": [
+                    "session_version",
+                    "refresh_tokens_revoked"
+                ],
+                "properties": {
+                    "refresh_tokens_revoked": {
+                        "type": "integer",
+                        "format": "int64",
+                        "minimum": 0
+                    },
+                    "session_version": {
+                        "type": "integer",
+                        "format": "int64"
+                    }
+                }
+            },
+            "RevokeSessionsResponseDoc": {
+                "type": "object",
+                "required": [
+                    "data"
+                ],
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/RevokeSessionsResponse"
+                    }
+                }
+            },
             "RouteHopDoc": {
                 "type": "object",
                 "required": [
@@ -5352,7 +6695,8 @@
                 "required": [
                     "hops",
                     "token_in",
-                    "token_out"
+                    "token_out",
+                    "protocol_revision"
                 ],
                 "properties": {
                     "estimated_amount_out": {
@@ -5366,6 +6710,17 @@
                         "items": {
                             "$ref": "#/components/schemas/RouteHopDoc"
                         }
+                    },
+                    "protocol_config_observed_block": {
+                        "type": [
+                            "integer",
+                            "null"
+                        ],
+                        "format": "int64"
+                    },
+                    "protocol_revision": {
+                        "type": "integer",
+                        "format": "int64"
                     },
                     "token_in": {
                         "type": "string"
@@ -5413,6 +6768,50 @@
                     }
                 }
             },
+            "SessionPayload": {
+                "type": "object",
+                "description": "Session identity returned on verify/refresh/session. The access + refresh\ntokens are set as httpOnly cookies (not in the body); `csrf_token` is held in\nmemory by the SPA and echoed in the `X-CSRF-Token` header.",
+                "required": [
+                    "address",
+                    "expires_at",
+                    "csrf_token",
+                    "session_version"
+                ],
+                "properties": {
+                    "address": {
+                        "type": "string"
+                    },
+                    "csrf_token": {
+                        "type": "string"
+                    },
+                    "expires_at": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "session_id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "format": "uuid"
+                    },
+                    "session_version": {
+                        "type": "integer",
+                        "format": "int64"
+                    }
+                }
+            },
+            "SessionResponseDoc": {
+                "type": "object",
+                "required": [
+                    "data"
+                ],
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/SessionPayload"
+                    }
+                }
+            },
             "SwapDoc": {
                 "type": "object",
                 "required": [
@@ -5430,18 +6829,10 @@
                     "executed_at",
                     "amount_remaining",
                     "transaction",
-                    "amount_remaining_1",
-                    "amount_remaining_2",
                     "is_private"
                 ],
                 "properties": {
                     "amount_remaining": {
-                        "type": "string"
-                    },
-                    "amount_remaining_1": {
-                        "type": "string"
-                    },
-                    "amount_remaining_2": {
                         "type": "string"
                     },
                     "claim_tx": {
@@ -5516,18 +6907,6 @@
                     },
                     "swap_id": {
                         "type": "string"
-                    },
-                    "token_in_1": {
-                        "type": [
-                            "string",
-                            "null"
-                        ]
-                    },
-                    "token_in_2": {
-                        "type": [
-                            "string",
-                            "null"
-                        ]
                     },
                     "trade": {
                         "type": [
@@ -5736,6 +7115,13 @@
                     "address": {
                         "type": "string"
                     },
+                    "amm_token_program": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "Program for the token representation used by the AMM; the wrapper program for wrapped assets."
+                    },
                     "decimals": {
                         "type": "integer",
                         "format": "int32"
@@ -5755,7 +7141,13 @@
                     "symbol": {
                         "type": "string"
                     },
-                    "wrapper_program": {
+                    "underlying_program": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    },
+                    "underlying_token_id": {
                         "type": [
                             "string",
                             "null"
@@ -5849,10 +7241,14 @@
                 "type": "object",
                 "required": [
                     "address",
-                    "signature"
+                    "signature",
+                    "challenge_id"
                 ],
                 "properties": {
                     "address": {
+                        "type": "string"
+                    },
+                    "challenge_id": {
                         "type": "string"
                     },
                     "signature": {
@@ -5866,7 +7262,7 @@
                 "type": "http",
                 "scheme": "bearer",
                 "bearerFormat": "JWT",
-                "description": "Session JWT from `POST /auth/verify` (24h), or a long-lived API token (`ss_\u2026`) minted at `POST /api-tokens`. API tokens work on data and trading endpoints; token management and admin endpoints accept session JWTs only."
+                "description": "Session JWT (browsers receive it as an httpOnly cookie from `POST /auth/verify`; 15 min, silently renewed via `POST /auth/refresh`), or a long-lived API token (`ss_\u2026`) minted at `POST /api-tokens`. API tokens work on data and trading endpoints and can request WebSocket tickets; token management and admin endpoints accept session JWTs only."
             }
         }
     },
@@ -5877,7 +7273,7 @@
         },
         {
             "name": "auth",
-            "description": "Wallet signature challenge / JWT verification"
+            "description": "Wallet sign-in, sessions, logout, and WebSocket tickets"
         },
         {
             "name": "access",
@@ -5929,7 +7325,7 @@
         },
         {
             "name": "airdrop",
-            "description": "Faucet \u2014 sends ~$10 each of wALEO, wUSDCx, and wETH to a user address as private records, once per address per 15 min"
+            "description": "Faucet \u2014 sends ~$10 each of ALEO, USDCx, and ETH to a user address as private records, once per address per 15 min"
         },
         {
             "name": "unclaimed",
