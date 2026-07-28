@@ -16,7 +16,7 @@ from typing import Any, Optional
 from aleo.codegen.runtime import parse_plaintext
 
 from .errors import InsufficientRecordsError
-from .tick_math import MAX_SQRT_PRICE, MIN_SQRT_PRICE, Q64
+from .tick_math import MAX_SQRT_RATIO_X128, MIN_SQRT_RATIO_X128, u256_to_int
 
 
 @dataclass(frozen=True)
@@ -41,55 +41,40 @@ def resolve_swap_params(
 ) -> ResolvedSwap:
     """Resolve a swap intent against live pool state.
 
-    Determines direction from the pool's token ordering, validates the
-    amount against the contract's no-dust rule, and computes
-    ``amount_out_min`` from the slippage tolerance.  Without *expected_out*
-    a spot estimate from ``slot.sqrt_price`` is used — it ignores price
-    impact and fees, so pass a real quote for anything beyond a tiny trade.
-    Pure and local.
+    Amounts are raw native token units end to end — the new AMM does no
+    decimal scaling and has no dust rule.  Without *expected_out* a spot
+    estimate from the Q128.128 ``slot.sqrt_price`` is used — it ignores
+    price impact and fees, so pass a real quote for anything beyond a tiny
+    trade.  Pure and local.
     """
     if not 0 <= slippage_bps <= 10_000:
         raise ValueError(f"slippage_bps must be within [0, 10000], got {slippage_bps}")
 
     token0, token1 = str(pool.token0), str(pool.token1)
-    scale0, scale1 = int(pool.scale0), int(pool.scale1)
-
     zero_for_one = token_in_id == token0
     if not zero_for_one and token_in_id != token1:
         raise ValueError(f"Token {token_in_id} is not in this pool ({token0} / {token1})")
     token_out_id = token1 if zero_for_one else token0
 
-    # The contract normalizes amounts by the token's scale and asserts
-    # raw % scale == 0 — reject dust here instead of paying for a revert.
-    scale_in = scale0 if zero_for_one else scale1
-    if amount_in % scale_in != 0:
-        raise ValueError(
-            f"amount_in {amount_in} is not a multiple of the token's scale "
-            f"{scale_in} — the contract rejects amounts with non-zero dust digits"
-        )
-
     expected = expected_out
     if expected is None:
-        # Spot estimate in normalized units: price = (sqrtP/Q64)^2 token1/token0.
-        scale_out = scale1 if zero_for_one else scale0
-        norm_in = amount_in // scale_in
-        sq = int(slot.sqrt_price)
+        # Spot estimate: price = (sqrt_price / 2^128)^2 token1-per-token0.
+        sq = u256_to_int(slot.sqrt_price)
         if zero_for_one:
-            norm_out = (norm_in * sq * sq) // (Q64 * Q64)
+            expected = (amount_in * sq * sq) >> 256
         else:
-            norm_out = (norm_in * Q64 * Q64) // (sq * sq)
-        expected = norm_out * scale_out
+            expected = (amount_in << 256) // (sq * sq)
 
     amount_out_min = (expected * (10_000 - slippage_bps)) // 10_000
 
     # Default price bound: the directional extreme — amount_out_min is the
     # real protection; a tight sqrt limit turns into partial fills instead.
-    default_limit = MIN_SQRT_PRICE if zero_for_one else MAX_SQRT_PRICE
+    default_limit = MIN_SQRT_RATIO_X128 if zero_for_one else MAX_SQRT_RATIO_X128
     limit = sqrt_price_limit if sqrt_price_limit is not None else default_limit
-    if not MIN_SQRT_PRICE <= limit <= MAX_SQRT_PRICE:
+    if not MIN_SQRT_RATIO_X128 <= limit <= MAX_SQRT_RATIO_X128:
         raise ValueError(
             f"sqrt_price_limit {limit} outside the contract's accepted range "
-            f"[{MIN_SQRT_PRICE}, {MAX_SQRT_PRICE}]"
+            f"[{MIN_SQRT_RATIO_X128}, {MAX_SQRT_RATIO_X128}]"
         )
 
     return ResolvedSwap(zero_for_one, token_out_id, amount_out_min, limit)
@@ -113,6 +98,23 @@ def generate_field_nonce() -> str:
     """Random field literal for ``mint`` (hashed into the position id).
     248 bits keeps the value below the field modulus."""
     return f"{secrets.randbits(248)}field"
+
+
+# ── Freezelist proofs ────────────────────────────────────────────────────────
+#
+# mint / claim_swap_output / collect prove signer (and recipient/withdrawal)
+# non-inclusion in the AMM freezelist; routed calls additionally carry
+# wrapper-freezelist proofs.  While a freezelist is empty, the contract
+# accepts two copies of the empty-tree proof below (the credits wrapper
+# ignores its proof input entirely).  Building real proofs against a
+# populated tree is deferred until a list is non-empty.
+
+EMPTY_MERKLE_PROOF = "{ siblings: [" + ", ".join(["0field"] * 16) + "], leaf_index: 1u32 }"
+
+
+def default_merkle_proofs() -> str:
+    """The ``[MerkleProof; 2]`` literal accepted while the freezelist is empty."""
+    return f"[{EMPTY_MERKLE_PROOF}, {EMPTY_MERKLE_PROOF}]"
 
 
 # ── Shared pure helpers (sync + async clients) ───────────────────────────────
@@ -148,6 +150,8 @@ def pick_covering_record(records: Any, *, min_amount: int,
         info = parse_token_record_info(plaintext)
         if info is None or info["amount"] < min_amount:
             continue
+        if info["recipient_bound"]:
+            continue          # bound wrapper records unwrap only to their bound recipient
         if token_id is not None and "token_id" in info and info["token_id"] != token_id:
             continue
         candidates.append((info["amount"], plaintext))
@@ -269,19 +273,27 @@ def ensure_programs(aleo: Any, program_ids: list[str],
 # ── Token record selection ───────────────────────────────────────────────────
 
 def parse_token_record_info(plaintext: str) -> Optional[dict[str, Any]]:
-    """Decode a token record's ``amount`` (and ``token_id`` when present).
+    """Decode a token record's spendable amount (and ``token_id`` when present).
 
-    Handles both registry-token records (``owner``, ``amount``, ``token_id``,
-    …) and ARC-20 wrapper-program records (``owner``, ``amount`` only).
-    Returns ``None`` when the plaintext has no ``amount`` — not a token record.
+    Handles registry-token records (``owner, amount, token_id, …``), ARC-20
+    wrapper/underlying records (``owner, amount``), and native credits
+    records (``owner, microcredits``).  Recipient-bound wrapper records are
+    flagged — they can only be unwrapped to their bound recipient, never
+    spent freely.  Returns ``None`` when neither amount field is present.
     """
     try:
         decoded = parse_plaintext(plaintext)
     except (ValueError, TypeError):
         return None
-    if not isinstance(decoded, dict) or not isinstance(decoded.get("amount"), int):
+    if not isinstance(decoded, dict):
         return None
-    info: dict[str, Any] = {"amount": decoded["amount"]}
+    amount = decoded.get("amount")
+    if not isinstance(amount, int):
+        amount = decoded.get("microcredits")
+    if not isinstance(amount, int):
+        return None
+    info: dict[str, Any] = {"amount": amount,
+                            "recipient_bound": decoded.get("recipient_bound") is True}
     if isinstance(decoded.get("token_id"), str):
         info["token_id"] = decoded["token_id"]
     return info
