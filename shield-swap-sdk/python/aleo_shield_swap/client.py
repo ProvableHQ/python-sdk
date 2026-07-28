@@ -274,7 +274,8 @@ class ShieldSwap:
         registered, what do I hold, what is in flight" from the profile,
         journal, chain, and API without changing anything.
         """
-        authenticated = getattr(self.api, "_token", None) is not None
+        authenticated = bool(getattr(self.api, "is_authenticated", False)
+                             or getattr(self.api, "_token", None))
         has_access: Optional[bool] = None
         if authenticated:
             try:

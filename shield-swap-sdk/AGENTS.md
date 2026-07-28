@@ -218,7 +218,14 @@ the stages use:
 
 ### `api.authenticate(self, address: 'str', sign: 'Any') -> 'str'`
 
-Challenge/verify handshake; stores and returns the JWT.
+Challenge/verify handshake; establishes the session.
+
+The staging API issues the session as httpOnly cookies on this
+client's HTTP session plus a CSRF token (stored and echoed as
+``X-CSRF-Token``); older deployments return a bearer JWT in the
+body — both are handled.  Returns the stored credential (CSRF token
+or JWT).  Sessions are short-lived — mint a durable ``ss_…`` token
+via :meth:`create_api_token` for anything long-running.
 
 *sign* is a callable taking the challenge message string and
 returning an Aleo signature literal (``sign1…``) — e.g.::

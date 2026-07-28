@@ -1,8 +1,9 @@
 """Live proof of the full agent lifecycle — fresh profile to collected swap.
 
 Opt in: python -m pytest tests/integration/test_agent_lifecycle_live.py -m live
-Env:    ALEO_E2E_PRIVATE_KEY     mints a fresh invite code (or set
-                                 SHIELD_SWAP_INVITE_CODE explicitly)
+Env:    SHIELD_SWAP_INVITE_CODE   a fresh, unredeemed invite code — codes
+                                  are single-use and human-supplied by
+                                  design; the SDK never generates them.
 Provable + DEX API credentials self-provision during onboarding.
 
 One ordered test: onboarding a fresh account is rate-limited and slow, so
@@ -19,31 +20,23 @@ import pytest
 
 pytestmark = pytest.mark.live
 
-_HAS_CODE_SOURCE = bool(os.environ.get("SHIELD_SWAP_INVITE_CODE")
-                        or os.environ.get("ALEO_E2E_PRIVATE_KEY"))
-
 
 def _invite_code() -> str:
-    explicit = os.environ.get("SHIELD_SWAP_INVITE_CODE")
-    if explicit:
-        return explicit
-    import aleo
-
-    from aleo_shield_swap import ApiClient
-
-    pk = aleo.testnet.PrivateKey.from_string(os.environ["ALEO_E2E_PRIVATE_KEY"])
-    api = ApiClient()
-    api.authenticate(str(pk.address), lambda m: str(pk.sign(m.encode())))
-    return api._post("/access/generate", {"count": 1})["data"]["codes"][0]
+    return os.environ["SHIELD_SWAP_INVITE_CODE"]
 
 
-@pytest.mark.skipif(not _HAS_CODE_SOURCE,
-                    reason="no invite code source (SHIELD_SWAP_INVITE_CODE "
-                           "or ALEO_E2E_PRIVATE_KEY)")
+@pytest.mark.skipif(not os.environ.get("SHIELD_SWAP_INVITE_CODE"),
+                    reason="SHIELD_SWAP_INVITE_CODE not set — paste a fresh, "
+                           "unredeemed invite code to run the lifecycle")
 def test_full_lifecycle_from_fresh_profile(tmp_path, monkeypatch):
-    # Prove the participant path: credentials must SELF-provision.
+    # Prove the participant path: credentials must SELF-provision and the
+    # profile key must be genuinely fresh (a developer shell may carry
+    # SHIELD_SWAP_PRIVATE_KEY, which would import a funded, already-redeemed
+    # account and void every "fresh account" assertion below).
     monkeypatch.delenv("ALEO_E2E_API_KEY", raising=False)
     monkeypatch.delenv("ALEO_E2E_CONSUMER_ID", raising=False)
+    monkeypatch.delenv("SHIELD_SWAP_PRIVATE_KEY", raising=False)
+    monkeypatch.delenv("SHIELD_SWAP_PRIVATE_KEY_FILE", raising=False)
     from aleo_shield_swap import ShieldSwap
 
     # ── Startup: fresh key material, full registration, airdrop ────────────

@@ -97,14 +97,25 @@ class ApiClient:
         self.base_url = base_url.rstrip("/")
         self._session = session or requests.Session()
         self._token = token
+        self._csrf: str | None = None     # cookie-session CSRF (authenticate())
 
     def __repr__(self) -> str:
         return f"ApiClient({self.base_url!r})"
+
+    @property
+    def is_authenticated(self) -> bool:
+        """True when a credential is loaded: an ``ss_…``/JWT bearer token or
+        a cookie session from :meth:`authenticate`."""
+        return bool(self._token or self._csrf)
 
     def _headers(self) -> dict[str, str]:
         headers = {"accept": "application/json"}
         if self._token:
             headers["authorization"] = f"Bearer {self._token}"
+        if self._csrf:
+            # Cookie sessions: the access token rides as an httpOnly cookie
+            # on self._session; state-changing calls must echo the CSRF.
+            headers["x-csrf-token"] = self._csrf
         return headers
 
     def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
@@ -122,7 +133,14 @@ class ApiClient:
     # ── Auth ───────────────────────────────────────────────────────────────
 
     def authenticate(self, address: str, sign: Any) -> str:
-        """Challenge/verify handshake; stores and returns the JWT.
+        """Challenge/verify handshake; establishes the session.
+
+        The staging API issues the session as httpOnly cookies on this
+        client's HTTP session plus a CSRF token (stored and echoed as
+        ``X-CSRF-Token``); older deployments return a bearer JWT in the
+        body — both are handled.  Returns the stored credential (CSRF token
+        or JWT).  Sessions are short-lived — mint a durable ``ss_…`` token
+        via :meth:`create_api_token` for anything long-running.
 
         *sign* is a callable taking the challenge message string and
         returning an Aleo signature literal (``sign1…``) — e.g.::
@@ -131,12 +149,19 @@ class ApiClient:
             api.authenticate(str(pk.address),
                              lambda msg: str(pk.sign(msg.encode())))
         """
-        challenge = self._post("/auth/challenge", {"address": address})
-        signature = sign(challenge["data"]["message"])
-        verified = self._post("/auth/verify",
-                              {"address": address, "signature": str(signature)})
-        self._token = verified["data"]["token"]
-        return self._token
+        challenge = self._post("/auth/challenge", {"address": address})["data"]
+        signature = sign(challenge["message"])
+        body = {"address": address, "signature": str(signature)}
+        # Staging binds the verify to its challenge; older deployments don't
+        # return an id — send it only when the challenge carried one.
+        if challenge.get("challenge_id"):
+            body["challenge_id"] = challenge["challenge_id"]
+        data = self._post("/auth/verify", body)["data"]
+        if data.get("token"):             # legacy body-JWT deployments
+            self._token = data["token"]
+            return self._token
+        self._csrf = data["csrf_token"]
+        return self._csrf
 
     def set_token(self, token: str) -> None:
         """Adopt a previously issued JWT."""
@@ -259,14 +284,21 @@ class AsyncApiClient:
             client = httpx.AsyncClient(timeout=_TIMEOUT)
         self._client = client
         self._token = token
+        self._csrf: str | None = None     # cookie-session CSRF (authenticate())
 
     def __repr__(self) -> str:
         return f"AsyncApiClient({self.base_url!r})"
+
+    @property
+    def is_authenticated(self) -> bool:
+        return bool(self._token or self._csrf)
 
     def _headers(self) -> dict[str, str]:
         headers = {"accept": "application/json"}
         if self._token:
             headers["authorization"] = f"Bearer {self._token}"
+        if self._csrf:
+            headers["x-csrf-token"] = self._csrf
         return headers
 
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
@@ -283,12 +315,17 @@ class AsyncApiClient:
 
     async def authenticate(self, address: str, sign: Any) -> str:
         """Async challenge/verify handshake; stores and returns the JWT."""
-        challenge = await self._post("/auth/challenge", {"address": address})
-        signature = sign(challenge["data"]["message"])
-        verified = await self._post("/auth/verify",
-                                    {"address": address, "signature": str(signature)})
-        self._token = verified["data"]["token"]
-        return self._token
+        challenge = (await self._post("/auth/challenge", {"address": address}))["data"]
+        signature = sign(challenge["message"])
+        body = {"address": address, "signature": str(signature)}
+        if challenge.get("challenge_id"):
+            body["challenge_id"] = challenge["challenge_id"]
+        data = (await self._post("/auth/verify", body))["data"]
+        if data.get("token"):             # legacy body-JWT deployments
+            self._token = data["token"]
+            return self._token
+        self._csrf = data["csrf_token"]
+        return self._csrf
 
     def set_token(self, token: str) -> None:
         self._token = token

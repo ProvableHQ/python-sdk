@@ -95,17 +95,24 @@ def provision_provable_credentials(endpoint: str, username: str) -> tuple[str, s
     """Create a Provable API consumer + key (``POST /consumers``, keyless).
 
     Returns ``(api_key, consumer_id)`` — the pair the scanner and delegated
-    proving authenticate with.
+    proving authenticate with.  Usernames are labels with a UNIQUE
+    constraint server-side; on a 409 collision, retry once with a random
+    suffix (the key/id pair is what matters, not the name).
     """
+    import secrets
+
     import requests
 
-    resp = requests.post(f"{endpoint.rstrip('/')}/consumers",
-                         json={"username": username}, timeout=30.0)
-    if not 200 <= resp.status_code < 300:
-        raise CredentialsMissingError(
-            f"POST /consumers -> {resp.status_code}: {resp.text[:120]}")
-    data = resp.json()
-    return data["key"], data["consumer"]["id"]
+    for name in (username, f"{username}-{secrets.token_hex(4)}"):
+        resp = requests.post(f"{endpoint.rstrip('/')}/consumers",
+                             json={"username": name}, timeout=30.0)
+        if 200 <= resp.status_code < 300:
+            data = resp.json()
+            return data["key"], data["consumer"]["id"]
+        if resp.status_code != 409:
+            break
+    raise CredentialsMissingError(
+        f"POST /consumers -> {resp.status_code}: {resp.text[:120]}")
 
 
 def _creds_done(ctx: _Ctx) -> bool:
