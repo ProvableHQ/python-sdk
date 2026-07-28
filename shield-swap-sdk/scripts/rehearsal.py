@@ -59,11 +59,10 @@ def main() -> int:
     results.append(("collection", f"{len(collected.claimed)} claimed, "
                                   f"{len(collected.still_pending)} pending"))
 
-    state = dex.get_pool(pools[0].key)
     lo, hi = dex.get_slot(pools[0].key).tick_range(width=4)
     minted = dex.mint(pool_key=pools[0].key, tick_lower=lo, tick_upper=hi,
-                      amount0_desired=100 * int(state.scale0),
-                      amount1_desired=100 * int(state.scale1)).delegate()
+                      amount0_desired=10**5,       # raw native units — no scaling
+                      amount1_desired=10**5).delegate()
     pos = dex._position_state(minted.position_token_id)
     from aleo_shield_swap._core import find_position_plaintext
     import time

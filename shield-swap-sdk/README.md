@@ -21,6 +21,16 @@ handle = dex.swap(pool_key=pools[0].key,
 out = dex.claim_swap_output(handle).delegate()   # broadcasts; spends funds
 ```
 
+Targets the deployed `shield_swap.aleo` stack on testnet. Amounts are raw
+native token units (the AMM does no decimal scaling); prices are Q128.128.
+Wrapped assets (ALEO/USAD/USDCx) **route automatically** through the swap/LP
+routers — fund them with *underlying* records (`credits.aleo` / stablecoin);
+you never handle wrapper records. `mint` stores an immutable `withdrawal`
+address on the position NFT (defaults to the recipient) and `collect` always
+pays it — decide the payout wallet at mint time. The off-chain API default is
+the staging host `https://amm-api-staging.dev.provable.com` (override with
+`SHIELD_SWAP_API_URL`).
+
 ## Install
 
 ```bash
@@ -170,7 +180,7 @@ ALEO_DEVNODE_UNPROVEN=1 \
 python -m pytest -m devnode            # full AMM lifecycle on a local aleo-devnode
 ```
 
-The devnode tier deploys the vendored `shield_swap_v3.aleo` stack and drives
+The devnode tier deploys the vendored `shield_swap.aleo` stack and drives
 pool creation, liquidity, swaps, and burn end-to-end, hermetically. It needs
 the `aleo-devnode` binary (`ALEO_DEVNODE_BIN` or on `PATH`) and skips
 otherwise. Deployments are proofless (dummy verifying keys — the devnode

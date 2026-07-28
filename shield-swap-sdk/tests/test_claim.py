@@ -22,7 +22,7 @@ SWAP_OUTPUT_TEXT = (
 def _handle(**over):
     base = dict(swap_id="77field", blinding_factor="11field", blinded_address="aleo1blinded",
                 token_in_id="1field", token_out_id="2field", pool_key="5field",
-                amount_in=10**9, transaction_id="at1req", program="shield_swap_v3.aleo")
+                amount_in=10**9, transaction_id="at1req", program="shield_swap.aleo")
     base.update(over)
     return SwapHandle(**base)
 

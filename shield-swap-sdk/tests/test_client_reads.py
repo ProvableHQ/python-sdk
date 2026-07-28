@@ -36,14 +36,14 @@ def test_get_swap_output_absent_raises(stub_aleo):
 def test_get_swap_output_accepts_handle(stub_aleo):
     handle = SwapHandle(swap_id="9field", blinding_factor=None, blinded_address=None,
                         token_in_id="1field", token_out_id="2field", pool_key="5field",
-                        amount_in=1, transaction_id="at1x", program="shield_swap_v3.aleo")
+                        amount_in=1, transaction_id="at1x", program="shield_swap.aleo")
     with pytest.raises(SwapOutputNotFinalizedError):   # resolved to the id
         ShieldSwap(stub_aleo).get_swap_output(handle)
     with pytest.raises(ValueError, match="no swap_id"):
         ShieldSwap(stub_aleo).get_swap_output(
             SwapHandle(swap_id=None, blinding_factor=None, blinded_address=None,
                        token_in_id="1field", token_out_id="2field", pool_key="5field",
-                       amount_in=1, transaction_id="at1x", program="shield_swap_v3.aleo"))
+                       amount_in=1, transaction_id="at1x", program="shield_swap.aleo"))
 
 
 def test_uninitialized_pool_distinct_from_missing(stub_aleo):

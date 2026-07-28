@@ -8,7 +8,7 @@ from aleo_shield_swap.types import SwapHandle
 def _handle(swap_id="s1", **kw):
     base = dict(swap_id=swap_id, blinding_factor="bf", blinded_address="ba",
                 token_in_id="t0", token_out_id="t1", pool_key="pk",
-                amount_in=5, transaction_id="tx1", program="shield_swap_v3.aleo")
+                amount_in=5, transaction_id="tx1", program="shield_swap.aleo")
     base.update(kw)
     return SwapHandle(**base)
 

@@ -59,7 +59,7 @@ def _fake_swap_factory(fail_counters=()):
                                   token_in_id=token_in_id, token_out_id="t1",
                                   pool_key=pool_key, amount_in=amount_in,
                                   transaction_id=f"tx{identity.counter}",
-                                  program="shield_swap_v3.aleo")
+                                  program="shield_swap.aleo")
         return _Call()
 
     return fake_swap, calls

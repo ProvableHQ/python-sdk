@@ -151,8 +151,12 @@ them):
   the token registry; pass `imports=`/`token_*_program=` to override).
 - **Tokens are private records**: spendable balances do not appear in
   public reads; one covering record funds an amount — no aggregation.
-- **Amounts obey the no-dust rule** both directions (`amount % scale == 0`);
-  quote in canonical decimals, transact in raw base units, display human.
+- **Amounts are raw native units end to end** (the AMM does no decimal
+  scaling); quote in canonical decimals, transact in raw base units,
+  display human.
+- **Wrapped assets route automatically** (swap/claim/LP verbs dispatch to
+  the routers per token shape) — fund them with UNDERLYING records; never
+  hand wrapper records around.
 - **A `SwapHandle` is the only key to a swap's output** — persist before
   anything else (the journal does this); claim after finalize with retry.
 - **Concurrency needs partitioned blinded-identity counters AND disjoint
