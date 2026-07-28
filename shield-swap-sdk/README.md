@@ -39,7 +39,7 @@ pip install -e "shield-swap-sdk[async]"        # + AsyncShieldSwap (httpx)
 pip install -e "shield-swap-sdk[mcp]"          # + the MCP server
 ```
 
-Requires `aleo-sdk>=0.2` (this repo's SDK; imports as `aleo`) and Python 3.10+.
+Requires `aleo-sdk>=0.3` (this repo's SDK; imports as `aleo`) and Python 3.10+.
 
 ## Agents
 
@@ -108,14 +108,28 @@ from the chain or the service.
 
 Quote before you swap: pass `expected_out` from `dex.api.get_route(...)` —
 without it a spot estimate is used, which ignores fees and price impact.
+On busy pools leave slippage headroom: prices move between quote and
+finalize, and a too-tight `amount_out_min` rejects safely at finalize.
 Amounts are `u128` base units of the token; fees are microcredits.
+
+Two liquidity behaviors worth knowing (both verified live): `mint` walks
+the pool's on-chain tick list to compute its insertion hints
+(`find_tick_predecessor`) — pass `tick_*_hint=` only if you know better.
+And when a pool side is **wrapped**, routed `mint`/`increase` amounts for
+that side must be *exactly* what the range consumes (the router burns the
+wrapper change record) — single-sided ranges make this deterministic;
+in-range wrapped amounts depend on the live price.
 
 **DEX API** (`dex.api`, standalone as `ApiClient`): `get_pools`,
 `get_tokens`, `get_route`, `get_swap`, `get_ohlcv`, `get_public_balances`.
 Route quoting, OHLCV, and balances are auth-gated — call
 `api.authenticate(address, sign)` once (challenge/verify by signature, no
-funds required); some deployments additionally gate them behind an invite
-code.
+funds required; the session rides as httpOnly cookies + a CSRF header and
+is short-lived — mint a durable `ss_…` token via `create_api_token` for
+anything long-running). Accounts additionally need a one-time invite:
+`redeem_code` takes the **referral code** a human pasted; access codes are
+a separate programmatic self-registration tier
+(`generate_access_codes` / `redeem_access_code`).
 
 ## Privacy
 
