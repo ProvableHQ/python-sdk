@@ -177,14 +177,25 @@ class ApiClient:
                       self._get("/access/status")["data"])
 
     def redeem_code(self, code: str) -> models.AccessRedeemResponse:
-        """Redeem an invite code.
+        """Redeem an invite — access codes and referral codes both work.
+
+        ``/access/redeem`` takes admin-minted access codes; user-shared
+        invites are REFERRAL codes served by ``/referral/redeem`` (same
+        wire shape, same effect on ``access_status``).  Callers paste
+        whichever they were given — an "invalid access code" 400 falls
+        through to the referral endpoint.
 
         The staging API no longer returns a session token here (sessions
         moved to the ``/auth/*`` endpoints) — re-authenticate after
         redeeming.  A token is still adopted if the API resurrects one.
         """
-        out = _build(models.AccessRedeemResponse,
-                     self._post("/access/redeem", {"code": code})["data"])
+        try:
+            data = self._post("/access/redeem", {"code": code})["data"]
+        except DexApiError as exc:
+            if exc.status != 400 or "invalid access code" not in (exc.body or ""):
+                raise
+            data = self._post("/referral/redeem", {"code": code})["data"]
+        out = _build(models.AccessRedeemResponse, data)
         token = getattr(out, "token", None)
         if token:
             self._token = token
@@ -339,8 +350,13 @@ class AsyncApiClient:
 
     async def redeem_code(self, code: str) -> models.AccessRedeemResponse:
         """Redeem an invite code — see :meth:`ApiClient.redeem_code`."""
-        out = _build(models.AccessRedeemResponse,
-                     (await self._post("/access/redeem", {"code": code}))["data"])
+        try:
+            data = (await self._post("/access/redeem", {"code": code}))["data"]
+        except DexApiError as exc:
+            if exc.status != 400 or "invalid access code" not in (exc.body or ""):
+                raise
+            data = (await self._post("/referral/redeem", {"code": code}))["data"]
+        out = _build(models.AccessRedeemResponse, data)
         token = getattr(out, "token", None)
         if token:
             self._token = token

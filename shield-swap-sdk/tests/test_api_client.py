@@ -204,3 +204,25 @@ async def test_async_lifecycle_endpoints():
     assert job.results[0].amm_token_program == "weth.aleo"
     with pytest.raises(AirdropRateLimitedError):
         await api.request_airdrop("aleo1a")
+
+
+def test_redeem_code_falls_back_to_referral_endpoint():
+    # User-shared invites are referral codes: /access/redeem rejects them
+    # with 400 "invalid access code" and the client retries /referral/redeem.
+    api, s = _lifecycle_client(
+        _Resp(400, {"error": "invalid access code"}),
+        _Resp(200, {"data": {"code": "XPC6", "status": "redeemed"}}),
+    )
+    out = api.redeem_code("XPC6")
+    assert out.status == "redeemed"
+    assert [c[1] for c in s.calls] == ["https://x/access/redeem",
+                                       "https://x/referral/redeem"]
+
+
+def test_redeem_code_other_errors_do_not_fall_back():
+    import pytest
+    from aleo_shield_swap.errors import DexApiError
+    api, s = _lifecycle_client(_Resp(400, {"error": "code already redeemed"}))
+    with pytest.raises(DexApiError, match="already redeemed"):
+        api.redeem_code("XPC6")
+    assert len(s.calls) == 1

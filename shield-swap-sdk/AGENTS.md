@@ -240,7 +240,13 @@ Whether this authenticated account has redeemed an invite code.
 
 ### `api.redeem_code(self, code: 'str') -> 'models.AccessRedeemResponse'`
 
-Redeem an invite code.
+Redeem an invite — access codes and referral codes both work.
+
+``/access/redeem`` takes admin-minted access codes; user-shared
+invites are REFERRAL codes served by ``/referral/redeem`` (same
+wire shape, same effect on ``access_status``).  Callers paste
+whichever they were given — an "invalid access code" 400 falls
+through to the referral endpoint.
 
 The staging API no longer returns a session token here (sessions
 moved to the ``/auth/*`` endpoints) — re-authenticate after
