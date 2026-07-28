@@ -240,17 +240,17 @@ Whether this authenticated account has redeemed an invite code.
 
 ### `api.redeem_code(self, code: 'str') -> 'models.AccessRedeemResponse'`
 
-Redeem an invite — access codes and referral codes both work.
+Redeem a pasted invite — always a REFERRAL code.
 
-``/access/redeem`` takes admin-minted access codes; user-shared
-invites are REFERRAL codes served by ``/referral/redeem`` (same
-wire shape, same effect on ``access_status``).  Callers paste
-whichever they were given — an "invalid access code" 400 falls
-through to the referral endpoint.
+User-shared invites are referral codes (``/referral/redeem``);
+that is the ONLY kind a person pastes.  Access codes are a
+programmatic self-registration flow — see
+:meth:`generate_access_codes` / :meth:`redeem_access_code` —
+never routed through here.
 
-The staging API no longer returns a session token here (sessions
-moved to the ``/auth/*`` endpoints) — re-authenticate after
-redeeming.  A token is still adopted if the API resurrects one.
+Sessions moved to the ``/auth/*`` endpoints, so no token comes
+back — re-authenticate if needed (one is still adopted if the API
+resurrects the legacy body-JWT).
 
 ### `api.request_airdrop(self, address: 'str') -> 'models.AirdropStartResult'`
 

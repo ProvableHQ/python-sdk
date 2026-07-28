@@ -177,29 +177,37 @@ class ApiClient:
                       self._get("/access/status")["data"])
 
     def redeem_code(self, code: str) -> models.AccessRedeemResponse:
-        """Redeem an invite — access codes and referral codes both work.
+        """Redeem a pasted invite — always a REFERRAL code.
 
-        ``/access/redeem`` takes admin-minted access codes; user-shared
-        invites are REFERRAL codes served by ``/referral/redeem`` (same
-        wire shape, same effect on ``access_status``).  Callers paste
-        whichever they were given — an "invalid access code" 400 falls
-        through to the referral endpoint.
+        User-shared invites are referral codes (``/referral/redeem``);
+        that is the ONLY kind a person pastes.  Access codes are a
+        programmatic self-registration flow — see
+        :meth:`generate_access_codes` / :meth:`redeem_access_code` —
+        never routed through here.
 
-        The staging API no longer returns a session token here (sessions
-        moved to the ``/auth/*`` endpoints) — re-authenticate after
-        redeeming.  A token is still adopted if the API resurrects one.
+        Sessions moved to the ``/auth/*`` endpoints, so no token comes
+        back — re-authenticate if needed (one is still adopted if the API
+        resurrects the legacy body-JWT).
         """
-        try:
-            data = self._post("/access/redeem", {"code": code})["data"]
-        except DexApiError as exc:
-            if exc.status != 400 or "invalid access code" not in (exc.body or ""):
-                raise
-            data = self._post("/referral/redeem", {"code": code})["data"]
+        data = self._post("/referral/redeem", {"code": code})["data"]
         out = _build(models.AccessRedeemResponse, data)
         token = getattr(out, "token", None)
         if token:
             self._token = token
         return out
+
+    def generate_access_codes(self, count: int = 1) -> list[str]:
+        """Mint access codes (``POST /access/generate``) — the
+        self-registration tier for operators/services; requires an
+        account with generate rights."""
+        return list(self._post("/access/generate", {"count": count})["data"]["codes"])
+
+    def redeem_access_code(self, code: str) -> models.AccessRedeemResponse:
+        """Redeem a programmatically minted access code
+        (``POST /access/redeem``) — the self-registration counterpart of
+        :meth:`generate_access_codes`; not for human-pasted invites."""
+        data = self._post("/access/redeem", {"code": code})["data"]
+        return _build(models.AccessRedeemResponse, data)
 
     def request_airdrop(self, address: str) -> models.AirdropStartResult:
         """Start the test-token airdrop job for *address* (private records).
@@ -349,18 +357,23 @@ class AsyncApiClient:
                       (await self._get("/access/status"))["data"])
 
     async def redeem_code(self, code: str) -> models.AccessRedeemResponse:
-        """Redeem an invite code — see :meth:`ApiClient.redeem_code`."""
-        try:
-            data = (await self._post("/access/redeem", {"code": code}))["data"]
-        except DexApiError as exc:
-            if exc.status != 400 or "invalid access code" not in (exc.body or ""):
-                raise
-            data = (await self._post("/referral/redeem", {"code": code}))["data"]
+        """Redeem a pasted (referral) invite — see :meth:`ApiClient.redeem_code`."""
+        data = (await self._post("/referral/redeem", {"code": code}))["data"]
         out = _build(models.AccessRedeemResponse, data)
         token = getattr(out, "token", None)
         if token:
             self._token = token
         return out
+
+    async def generate_access_codes(self, count: int = 1) -> list[str]:
+        """Mint access codes — see :meth:`ApiClient.generate_access_codes`."""
+        return list((await self._post("/access/generate",
+                                      {"count": count}))["data"]["codes"])
+
+    async def redeem_access_code(self, code: str) -> models.AccessRedeemResponse:
+        """Redeem an access code — see :meth:`ApiClient.redeem_access_code`."""
+        data = (await self._post("/access/redeem", {"code": code}))["data"]
+        return _build(models.AccessRedeemResponse, data)
 
     async def request_airdrop(self, address: str) -> models.AirdropStartResult:
         """Start the airdrop job for *address* — see :meth:`ApiClient.request_airdrop`."""

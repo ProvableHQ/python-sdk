@@ -121,14 +121,15 @@ def test_access_status():
     assert s.calls[0][:2] == ("GET", "https://x/access/status")
 
 
-def test_redeem_code_no_longer_returns_a_token():
-    # Staging moved sessions to /auth/* — redeem returns code/status only
-    # and the client keeps its existing credential.
+def test_redeem_code_targets_referral_endpoint_only():
+    # Pasted invites are ALWAYS referral codes; access codes belong to the
+    # programmatic self-registration flow and are never routed through here.
     api, s = _lifecycle_client(_Resp(200, {"data": {"code": "C", "status": "redeemed"}}))
     out = api.redeem_code("C")
     assert out.status == "redeemed"
+    assert s.calls[0][1] == "https://x/referral/redeem"
     assert s.calls[0][2] == {"code": "C"}
-    assert api._token == "t"
+    assert api._token == "t"          # sessions moved to /auth/* — no rotation
 
 
 def test_request_airdrop_and_poll():
@@ -206,23 +207,16 @@ async def test_async_lifecycle_endpoints():
         await api.request_airdrop("aleo1a")
 
 
-def test_redeem_code_falls_back_to_referral_endpoint():
-    # User-shared invites are referral codes: /access/redeem rejects them
-    # with 400 "invalid access code" and the client retries /referral/redeem.
+def test_access_code_self_registration_flow():
+    # Operators mint access codes and redeem them programmatically —
+    # a separate surface from the human referral-paste path.
     api, s = _lifecycle_client(
-        _Resp(400, {"error": "invalid access code"}),
-        _Resp(200, {"data": {"code": "XPC6", "status": "redeemed"}}),
+        _Resp(200, {"data": {"codes": ["ACODE12CHARS"]}}),
+        _Resp(200, {"data": {"code": "ACODE12CHARS", "status": "redeemed"}}),
     )
-    out = api.redeem_code("XPC6")
+    codes = api.generate_access_codes()
+    assert codes == ["ACODE12CHARS"]
+    out = api.redeem_access_code(codes[0])
     assert out.status == "redeemed"
-    assert [c[1] for c in s.calls] == ["https://x/access/redeem",
-                                       "https://x/referral/redeem"]
-
-
-def test_redeem_code_other_errors_do_not_fall_back():
-    import pytest
-    from aleo_shield_swap.errors import DexApiError
-    api, s = _lifecycle_client(_Resp(400, {"error": "code already redeemed"}))
-    with pytest.raises(DexApiError, match="already redeemed"):
-        api.redeem_code("XPC6")
-    assert len(s.calls) == 1
+    assert [c[1] for c in s.calls] == ["https://x/access/generate",
+                                       "https://x/access/redeem"]
