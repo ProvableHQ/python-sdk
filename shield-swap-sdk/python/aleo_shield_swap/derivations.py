@@ -64,15 +64,16 @@ def derive_tick_key(pool: str, tick: int, *, network: str = "testnet") -> str:
 
 # ── Blinded identity ─────────────────────────────────────────────────────────
 #
-# Port of amm-v3-tests src/client/amm-client.ts (feat/q128) via the TS SDK's
-# utils/blinding/identity.ts.  The domain separators are pinned from the
-# reference client; CLAIM_OR_SWAP_DOMAIN must match the literal the program
-# hashes in verify_blinded_address.
+# Port of the reference client in amm-v3 ts-tests/src/client/amm-client.ts
+# (@ development) via the TS SDK's utils/blinding/identity.ts.  The domain
+# separators are pinned from the reference client; CLAIM_OR_SWAP_DOMAIN must
+# match the literal the program hashes in verify_blinded_address (confirmed
+# unchanged in the deployed shield_swap.aleo bytecode).
 
 BLINDING_FACTOR_DOMAIN = "42815354924796718559205719970686750292466968495484257field"
 CLAIM_OR_SWAP_DOMAIN = "11835072102227764468342786961086432175093421716844963782363567713633field"
 
-DEFAULT_PROGRAM = "shield_swap_v3.aleo"
+DEFAULT_PROGRAM = "shield_swap.aleo"
 
 
 @dataclass(frozen=True)

@@ -2,7 +2,7 @@
 
 The generated ``_generated.py`` classes carry the wire shapes; the classes
 here carry meaning: the persistable swap handle, typed verb results, and a
-``Slot`` view with Q64 price math and range helpers.
+``Slot`` view with Q128.128 price math and range helpers.
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from decimal import Decimal
 from typing import Optional
 
 from ._generated import Slot
-from .tick_math import Q64, round_tick_to_spacing
+from .tick_math import Q128, round_tick_to_spacing, u256_to_int
 
 
 @dataclass(frozen=True)
@@ -70,8 +70,8 @@ class TxResult:
 class SlotView:
     """A :class:`~aleo_shield_swap._generated.Slot` plus meaning.
 
-    Delegates every field to the wrapped slot and adds the Q64 fixed-point
-    conversions callers would otherwise re-derive subtly wrong.
+    Delegates every field to the wrapped slot and adds the Q128.128
+    fixed-point conversions callers would otherwise re-derive subtly wrong.
     """
 
     def __init__(self, slot: Slot) -> None:
@@ -90,13 +90,12 @@ class SlotView:
     def price(self, decimals0: int, decimals1: int) -> Decimal:
         """Spot price of token1 per 1.0 token0, decimal-adjusted.
 
-        ``sqrt_price`` encodes ``sqrt(token1_norm / token0_norm)`` in Q64
-        over the contract's 9-decimal-normalized units; the human price
-        re-applies ``10^(min(d0,9) - min(d1,9))``.
+        ``sqrt_price`` encodes ``sqrt(token1_raw / token0_raw)`` in Q128.128
+        over raw native units; the human price re-applies
+        ``10^(decimals0 - decimals1)``.
         """
-        sqrt = Decimal(self._slot.sqrt_price) / Decimal(Q64)
-        shift = Decimal(10) ** (min(decimals0, 9) - min(decimals1, 9))
-        return sqrt * sqrt * shift
+        sqrt = Decimal(u256_to_int(self._slot.sqrt_price)) / Decimal(Q128)
+        return sqrt * sqrt * Decimal(10) ** (decimals0 - decimals1)
 
     def tick_range(self, width: int) -> tuple[int, int]:
         """A spacing-aligned mint range of ±*width* spacings around the
