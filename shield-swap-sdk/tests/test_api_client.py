@@ -220,3 +220,29 @@ def test_access_code_self_registration_flow():
     assert out.status == "redeemed"
     assert [c[1] for c in s.calls] == ["https://x/access/generate",
                                        "https://x/access/redeem"]
+
+
+def test_cookie_session_outranks_bearer():
+    # With both credentials loaded, requests ride the cookie session (CSRF
+    # header, no Authorization) — the server honors Authorization first and
+    # ss_ tokens don't cover the /access tier.
+    s = _Session([_Resp(200, {"data": []})])
+    api = ApiClient(base_url="https://x", session=s, token="ss_durable")
+    api._csrf = "csrf-1"
+    api._get("/access/status")
+    headers = s.calls[0][3]
+    assert headers["x-csrf-token"] == "csrf-1"
+    assert "authorization" not in headers
+
+
+def test_expired_cookie_session_falls_back_to_bearer():
+    s = _Session([
+        _Resp(401, {"error": "session expired"}),
+        _Resp(200, {"data": []}),
+    ])
+    api = ApiClient(base_url="https://x", session=s, token="ss_durable")
+    api._csrf = "csrf-1"
+    api._get("/route")
+    assert api._csrf is None                         # session dropped
+    assert s.calls[0][3]["x-csrf-token"] == "csrf-1"
+    assert s.calls[1][3]["authorization"] == "Bearer ss_durable"

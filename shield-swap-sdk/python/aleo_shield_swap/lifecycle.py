@@ -60,9 +60,12 @@ class Stage:
 # ── Stages ────────────────────────────────────────────────────────────────────
 
 def _auth_done(ctx: _Ctx) -> bool:
-    if getattr(ctx.dex.api, "_token", None) is None:
+    # A credential may be a bearer token OR a cookie session (staging).
+    authed = getattr(ctx.dex.api, "is_authenticated",
+                     getattr(ctx.dex.api, "_token", None) is not None)
+    if not authed:
         return False
-    try:                                  # a stored-but-expired JWT is not auth
+    try:                                  # a stored-but-expired credential is not auth
         ctx.dex.api.access_status()
         return True
     except NotAuthenticatedError:
@@ -73,10 +76,16 @@ def _auth_run(ctx: _Ctx) -> str:
     import aleo
     net = getattr(aleo, ctx.profile.network)
     pk = net.PrivateKey.from_string(ctx.profile.private_key)
-    jwt = ctx.dex.api.authenticate(ctx.profile.address,
-                                   lambda msg: str(pk.sign(msg.encode())))
-    ctx.profile.save_credentials(jwt=jwt)
-    return "authenticated (24h JWT)"
+    ctx.dex.api.authenticate(ctx.profile.address,
+                             lambda msg: str(pk.sign(msg.encode())))
+    # Only a body-JWT (legacy deployments) is worth persisting — a cookie
+    # session's CSRF token is useless in a new process and would shadow the
+    # durable ss_ token if saved as "jwt".
+    jwt = getattr(ctx.dex.api, "_token", None)
+    if jwt:
+        ctx.profile.save_credentials(jwt=jwt)
+        return "authenticated (JWT)"
+    return "authenticated (cookie session)"
 
 
 def _redeem_done(ctx: _Ctx) -> bool:
@@ -87,7 +96,9 @@ def _redeem_run(ctx: _Ctx) -> str:
     if not ctx.invite_code:
         raise NotRedeemedError()
     out = ctx.dex.api.redeem_code(ctx.invite_code)
-    ctx.profile.save_credentials(jwt=getattr(out, "token", None))
+    token = getattr(out, "token", None)
+    if token:                             # legacy deployments only
+        ctx.profile.save_credentials(jwt=token)
     return f"invite redeemed ({out.status})"
 
 

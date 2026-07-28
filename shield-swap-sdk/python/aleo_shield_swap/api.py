@@ -110,23 +110,40 @@ class ApiClient:
 
     def _headers(self) -> dict[str, str]:
         headers = {"accept": "application/json"}
-        if self._token:
-            headers["authorization"] = f"Bearer {self._token}"
         if self._csrf:
-            # Cookie sessions: the access token rides as an httpOnly cookie
-            # on self._session; state-changing calls must echo the CSRF.
+            # A live cookie session outranks a bearer credential: it covers
+            # every tier (ss_ tokens are data/trading-only) and the server
+            # honors the Authorization header over cookies when both are
+            # sent.  The access token rides as an httpOnly cookie on
+            # self._session; requests echo the CSRF.
             headers["x-csrf-token"] = self._csrf
+        elif self._token:
+            headers["authorization"] = f"Bearer {self._token}"
         return headers
+
+    def _expired_session(self, resp: Any) -> bool:
+        """A 401 while riding a cookie session with a bearer in reserve:
+        the (15-min) session expired — drop it and retry as bearer."""
+        if resp.status_code == 401 and self._csrf and self._token:
+            self._csrf = None
+            return True
+        return False
 
     def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
         resp = self._session.get(f"{self.base_url}{path}", params=params,
                                  headers=self._headers(), timeout=_TIMEOUT)
+        if self._expired_session(resp):
+            resp = self._session.get(f"{self.base_url}{path}", params=params,
+                                     headers=self._headers(), timeout=_TIMEOUT)
         _check(resp)
         return resp.json()
 
     def _post(self, path: str, body: dict[str, Any]) -> Any:
         resp = self._session.post(f"{self.base_url}{path}", json=body,
                                   headers=self._headers(), timeout=_TIMEOUT)
+        if self._expired_session(resp):
+            resp = self._session.post(f"{self.base_url}{path}", json=body,
+                                      headers=self._headers(), timeout=_TIMEOUT)
         _check(resp)
         return resp.json()
 
@@ -314,21 +331,34 @@ class AsyncApiClient:
 
     def _headers(self) -> dict[str, str]:
         headers = {"accept": "application/json"}
-        if self._token:
-            headers["authorization"] = f"Bearer {self._token}"
         if self._csrf:
+            # Cookie session outranks bearer — see ApiClient._headers.
             headers["x-csrf-token"] = self._csrf
+        elif self._token:
+            headers["authorization"] = f"Bearer {self._token}"
         return headers
+
+    def _expired_session(self, resp: Any) -> bool:
+        if resp.status_code == 401 and self._csrf and self._token:
+            self._csrf = None
+            return True
+        return False
 
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
         resp = await self._client.get(f"{self.base_url}{path}", params=params,
                                       headers=self._headers())
+        if self._expired_session(resp):
+            resp = await self._client.get(f"{self.base_url}{path}", params=params,
+                                          headers=self._headers())
         _check(resp)
         return resp.json()
 
     async def _post(self, path: str, body: dict[str, Any]) -> Any:
         resp = await self._client.post(f"{self.base_url}{path}", json=body,
                                        headers=self._headers())
+        if self._expired_session(resp):
+            resp = await self._client.post(f"{self.base_url}{path}", json=body,
+                                           headers=self._headers())
         _check(resp)
         return resp.json()
 
