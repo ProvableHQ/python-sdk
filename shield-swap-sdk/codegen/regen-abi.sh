@@ -3,7 +3,7 @@
 # Run from anywhere; requires the aleo + aleo-contract-abi-generator packages on python3's path.
 set -euo pipefail
 cd "$(dirname "$0")"
-PROGRAM="${1:-shield_swap_v3.aleo}"
+PROGRAM="${1:-shield_swap.aleo}"
 PYTHON="${PYTHON:-python3}"
 "$PYTHON" - "$PROGRAM" <<'EOF'
 import json

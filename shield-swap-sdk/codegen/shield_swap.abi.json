@@ -1,6 +1,29 @@
 {
- "program": "shield_swap_v3.aleo",
+ "program": "shield_swap.aleo",
  "structs": [
+  {
+   "path": [
+    "U256__8JquwLopp8"
+   ],
+   "fields": [
+    {
+     "name": "hi",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "lo",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    }
+   ]
+  },
   {
    "path": [
     "SwapRequest"
@@ -37,8 +60,11 @@
     {
      "name": "sqrt_price_limit",
      "ty": {
-      "Primitive": {
-       "UInt": "U128"
+      "Struct": {
+       "path": [
+        "U256__8JquwLopp8"
+       ],
+       "program": "shield_swap.aleo"
       }
      }
     },
@@ -86,8 +112,11 @@
     {
      "name": "sqrt_price_limit",
      "ty": {
-      "Primitive": {
-       "UInt": "U128"
+      "Struct": {
+       "path": [
+        "U256__8JquwLopp8"
+       ],
+       "program": "shield_swap.aleo"
       }
      }
     }
@@ -139,7 +168,7 @@
        "path": [
         "SwapHop"
        ],
-       "program": "shield_swap_v3.aleo"
+       "program": "shield_swap.aleo"
       }
      }
     },
@@ -150,7 +179,7 @@
        "path": [
         "SwapHop"
        ],
-       "program": "shield_swap_v3.aleo"
+       "program": "shield_swap.aleo"
       }
      }
     },
@@ -161,7 +190,7 @@
        "path": [
         "SwapHop"
        ],
-       "program": "shield_swap_v3.aleo"
+       "program": "shield_swap.aleo"
       }
      }
     },
@@ -276,6 +305,32 @@
   },
   {
    "path": [
+    "MerkleProof"
+   ],
+   "fields": [
+    {
+     "name": "siblings",
+     "ty": {
+      "Array": {
+       "element": {
+        "Primitive": "Field"
+       },
+       "length": 16
+      }
+     }
+    },
+    {
+     "name": "leaf_index",
+     "ty": {
+      "Primitive": {
+       "UInt": "U32"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "path": [
     "PoolState"
    ],
    "fields": [
@@ -304,22 +359,6 @@
      "ty": {
       "Primitive": "Boolean"
      }
-    },
-    {
-     "name": "scale0",
-     "ty": {
-      "Primitive": {
-       "UInt": "U128"
-      }
-     }
-    },
-    {
-     "name": "scale1",
-     "ty": {
-      "Primitive": {
-       "UInt": "U128"
-      }
-     }
     }
    ]
   },
@@ -347,8 +386,11 @@
     {
      "name": "sqrt_price",
      "ty": {
-      "Primitive": {
-       "UInt": "U128"
+      "Struct": {
+       "path": [
+        "U256__8JquwLopp8"
+       ],
+       "program": "shield_swap.aleo"
       }
      }
     },
@@ -369,34 +411,24 @@
      }
     },
     {
-     "name": "fee_growth_global0_x_64",
+     "name": "fee_growth_global0_x_128",
      "ty": {
-      "Primitive": {
-       "UInt": "U128"
+      "Struct": {
+       "path": [
+        "U256__8JquwLopp8"
+       ],
+       "program": "shield_swap.aleo"
       }
      }
     },
     {
-     "name": "fee_growth_global1_x_64",
+     "name": "fee_growth_global1_x_128",
      "ty": {
-      "Primitive": {
-       "UInt": "U128"
-      }
-     }
-    },
-    {
-     "name": "fee_residual0_x_64",
-     "ty": {
-      "Primitive": {
-       "UInt": "U128"
-      }
-     }
-    },
-    {
-     "name": "fee_residual1_x_64",
-     "ty": {
-      "Primitive": {
-       "UInt": "U128"
+      "Struct": {
+       "path": [
+        "U256__8JquwLopp8"
+       ],
+       "program": "shield_swap.aleo"
       }
      }
     },
@@ -478,18 +510,24 @@
      }
     },
     {
-     "name": "fee_growth_outside0_64",
+     "name": "fee_growth_outside0_x_128",
      "ty": {
-      "Primitive": {
-       "UInt": "U128"
+      "Struct": {
+       "path": [
+        "U256__8JquwLopp8"
+       ],
+       "program": "shield_swap.aleo"
       }
      }
     },
     {
-     "name": "fee_growth_outside1_64",
+     "name": "fee_growth_outside1_x_128",
      "ty": {
-      "Primitive": {
-       "UInt": "U128"
+      "Struct": {
+       "path": [
+        "U256__8JquwLopp8"
+       ],
+       "program": "shield_swap.aleo"
       }
      }
     },
@@ -553,18 +591,24 @@
      }
     },
     {
-     "name": "fee_growth_inside0_last_64",
+     "name": "fee_growth_inside0_last_x_128",
      "ty": {
-      "Primitive": {
-       "UInt": "U128"
+      "Struct": {
+       "path": [
+        "U256__8JquwLopp8"
+       ],
+       "program": "shield_swap.aleo"
       }
      }
     },
     {
-     "name": "fee_growth_inside1_last_64",
+     "name": "fee_growth_inside1_last_x_128",
      "ty": {
-      "Primitive": {
-       "UInt": "U128"
+      "Struct": {
+       "path": [
+        "U256__8JquwLopp8"
+       ],
+       "program": "shield_swap.aleo"
       }
      }
     },
@@ -619,8 +663,11 @@
     {
      "name": "lim",
      "ty": {
-      "Primitive": {
-       "UInt": "U128"
+      "Struct": {
+       "path": [
+        "U256__8JquwLopp8"
+       ],
+       "program": "shield_swap.aleo"
       }
      }
     },
@@ -643,16 +690,22 @@
     {
      "name": "slot_fg0",
      "ty": {
-      "Primitive": {
-       "UInt": "U128"
+      "Struct": {
+       "path": [
+        "U256__8JquwLopp8"
+       ],
+       "program": "shield_swap.aleo"
       }
      }
     },
     {
      "name": "slot_fg1",
      "ty": {
-      "Primitive": {
-       "UInt": "U128"
+      "Struct": {
+       "path": [
+        "U256__8JquwLopp8"
+       ],
+       "program": "shield_swap.aleo"
       }
      }
     }
@@ -666,8 +719,11 @@
     {
      "name": "sp",
      "ty": {
-      "Primitive": {
-       "UInt": "U128"
+      "Struct": {
+       "path": [
+        "U256__8JquwLopp8"
+       ],
+       "program": "shield_swap.aleo"
       }
      }
     },
@@ -690,8 +746,11 @@
     {
      "name": "fg",
      "ty": {
-      "Primitive": {
-       "UInt": "U128"
+      "Struct": {
+       "path": [
+        "U256__8JquwLopp8"
+       ],
+       "program": "shield_swap.aleo"
       }
      }
     },
@@ -738,14 +797,6 @@
      "ty": {
       "Primitive": {
        "Int": "I32"
-      }
-     }
-    },
-    {
-     "name": "resid",
-     "ty": {
-      "Primitive": {
-       "UInt": "U128"
       }
      }
     }
@@ -795,34 +846,6 @@
        "UInt": "U128"
       }
      }
-    },
-    {
-     "name": "token_in_1",
-     "ty": {
-      "Primitive": "Field"
-     }
-    },
-    {
-     "name": "amount_remaining_1",
-     "ty": {
-      "Primitive": {
-       "UInt": "U128"
-      }
-     }
-    },
-    {
-     "name": "token_in_2",
-     "ty": {
-      "Primitive": "Field"
-     }
-    },
-    {
-     "name": "amount_remaining_2",
-     "ty": {
-      "Primitive": {
-       "UInt": "U128"
-      }
-     }
     }
    ]
   }
@@ -839,6 +862,13 @@
       "Primitive": "Address"
      },
      "mode": "Public"
+    },
+    {
+     "name": "withdrawal",
+     "ty": {
+      "Primitive": "Address"
+     },
+     "mode": "Private"
     },
     {
      "name": "token_id",
@@ -928,13 +958,20 @@
        "path": [
         "SwapRequest"
        ],
-       "program": "shield_swap_v3.aleo"
+       "program": "shield_swap.aleo"
       }
      },
      "mode": "Private"
     },
     {
      "name": "caller",
+     "ty": {
+      "Primitive": "Address"
+     },
+     "mode": "Private"
+    },
+    {
+     "name": "signer",
      "ty": {
       "Primitive": "Address"
      },
@@ -975,13 +1012,20 @@
        "path": [
         "SwapMultiHopRequest"
        ],
-       "program": "shield_swap_v3.aleo"
+       "program": "shield_swap.aleo"
       }
      },
      "mode": "Private"
     },
     {
      "name": "caller",
+     "ty": {
+      "Primitive": "Address"
+     },
+     "mode": "Private"
+    },
+    {
+     "name": "signer",
      "ty": {
       "Primitive": "Address"
      },
@@ -1030,13 +1074,20 @@
      "mode": "Private"
     },
     {
+     "name": "nonce",
+     "ty": {
+      "Primitive": "Field"
+     },
+     "mode": "Private"
+    },
+    {
      "name": "request",
      "ty": {
       "Struct": {
        "path": [
         "MintPositionRequest"
        ],
-       "program": "shield_swap_v3.aleo"
+       "program": "shield_swap.aleo"
       }
      },
      "mode": "Private"
@@ -1049,7 +1100,21 @@
      "mode": "Private"
     },
     {
+     "name": "signer",
+     "ty": {
+      "Primitive": "Address"
+     },
+     "mode": "Private"
+    },
+    {
      "name": "recipient",
+     "ty": {
+      "Primitive": "Address"
+     },
+     "mode": "Private"
+    },
+    {
+     "name": "withdrawal",
      "ty": {
       "Primitive": "Address"
      },
@@ -1069,7 +1134,7 @@
      "path": [
       "PoolState"
      ],
-     "program": "shield_swap_v3.aleo"
+     "program": "shield_swap.aleo"
     }
    }
   },
@@ -1083,7 +1148,7 @@
      "path": [
       "Slot"
      ],
-     "program": "shield_swap_v3.aleo"
+     "program": "shield_swap.aleo"
     }
    }
   },
@@ -1097,7 +1162,7 @@
      "path": [
       "Tick"
      ],
-     "program": "shield_swap_v3.aleo"
+     "program": "shield_swap.aleo"
     }
    }
   },
@@ -1155,7 +1220,7 @@
      "path": [
       "Position"
      ],
-     "program": "shield_swap_v3.aleo"
+     "program": "shield_swap.aleo"
     }
    }
   },
@@ -1169,7 +1234,7 @@
      "path": [
       "SwapOutput"
      ],
-     "program": "shield_swap_v3.aleo"
+     "program": "shield_swap.aleo"
     }
    }
   },
@@ -1198,17 +1263,6 @@
    },
    "value": {
     "Primitive": "Boolean"
-   }
-  },
-  {
-   "name": "token_decimals",
-   "key": {
-    "Primitive": "Field"
-   },
-   "value": {
-    "Primitive": {
-     "UInt": "U8"
-    }
    }
   },
   {
@@ -1254,7 +1308,7 @@
      "path": [
       "PairKey"
      ],
-     "program": "shield_swap_v3.aleo"
+     "program": "shield_swap.aleo"
     }
    },
    "value": {
@@ -1270,6 +1324,24 @@
     "Primitive": {
      "UInt": "U32"
     }
+   }
+  },
+  {
+   "name": "from_wrapper_token_id",
+   "key": {
+    "Primitive": "Field"
+   },
+   "value": {
+    "Primitive": "Field"
+   }
+  },
+  {
+   "name": "to_wrapper_token_id",
+   "key": {
+    "Primitive": "Field"
+   },
+   "value": {
+    "Primitive": "Field"
    }
   }
  ],
@@ -1363,32 +1435,6 @@
    ]
   },
   {
-   "name": "set_token_decimals",
-   "inputs": [
-    {
-     "Plaintext": {
-      "ty": {
-       "Primitive": "Field"
-      },
-      "mode": "Public"
-     }
-    },
-    {
-     "Plaintext": {
-      "ty": {
-       "Primitive": {
-        "UInt": "U8"
-       }
-      },
-      "mode": "Public"
-     }
-    }
-   ],
-   "outputs": [
-    "Final"
-   ]
-  },
-  {
    "name": "set_pool_enabled",
    "inputs": [
     {
@@ -1447,6 +1493,14 @@
   {
    "name": "allow_token",
    "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
     {
      "Plaintext": {
       "ty": {
@@ -1666,8 +1720,11 @@
     {
      "Plaintext": {
       "ty": {
-       "Primitive": {
-        "UInt": "U128"
+       "Struct": {
+        "path": [
+         "U256__8JquwLopp8"
+        ],
+        "program": "shield_swap.aleo"
        }
       },
       "mode": "Public"
@@ -1738,11 +1795,19 @@
     {
      "Plaintext": {
       "ty": {
+       "Primitive": "Address"
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
        "Struct": {
         "path": [
          "MintPositionRequest"
         ],
-        "program": "shield_swap_v3.aleo"
+        "program": "shield_swap.aleo"
        }
       },
       "mode": "Public"
@@ -1763,6 +1828,60 @@
       },
       "mode": "Public"
      }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
     }
    ],
    "outputs": [
@@ -1779,7 +1898,7 @@
       "path": [
        "PositionNFT"
       ],
-      "program": "shield_swap_v3.aleo"
+      "program": "shield_swap.aleo"
      }
     },
     "DynamicRecord",
@@ -1789,7 +1908,7 @@
       "path": [
        "MintComplianceRecord"
       ],
-      "program": "shield_swap_v3.aleo"
+      "program": "shield_swap.aleo"
      }
     },
     "Final"
@@ -1803,7 +1922,7 @@
       "path": [
        "PositionNFT"
       ],
-      "program": "shield_swap_v3.aleo"
+      "program": "shield_swap.aleo"
      }
     },
     {
@@ -1851,7 +1970,7 @@
       "path": [
        "PositionNFT"
       ],
-      "program": "shield_swap_v3.aleo"
+      "program": "shield_swap.aleo"
      }
     },
     "Final"
@@ -1865,7 +1984,7 @@
       "path": [
        "PositionNFT"
       ],
-      "program": "shield_swap_v3.aleo"
+      "program": "shield_swap.aleo"
      }
     },
     "DynamicRecord",
@@ -1961,7 +2080,7 @@
       "path": [
        "PositionNFT"
       ],
-      "program": "shield_swap_v3.aleo"
+      "program": "shield_swap.aleo"
      }
     },
     "DynamicRecord",
@@ -1977,7 +2096,7 @@
       "path": [
        "PositionNFT"
       ],
-      "program": "shield_swap_v3.aleo"
+      "program": "shield_swap.aleo"
      }
     },
     {
@@ -2019,7 +2138,35 @@
     {
      "Plaintext": {
       "ty": {
-       "Primitive": "Address"
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap.aleo"
+         }
+        },
+        "length": 2
+       }
       },
       "mode": "Private"
      }
@@ -2031,7 +2178,7 @@
       "path": [
        "PositionNFT"
       ],
-      "program": "shield_swap_v3.aleo"
+      "program": "shield_swap.aleo"
      }
     },
     "DynamicRecord",
@@ -2047,7 +2194,7 @@
       "path": [
        "PositionNFT"
       ],
-      "program": "shield_swap_v3.aleo"
+      "program": "shield_swap.aleo"
      }
     }
    ],
@@ -2056,14 +2203,6 @@
      "Plaintext": {
       "ty": {
        "Primitive": "Field"
-      },
-      "mode": "Public"
-     }
-    },
-    {
-     "Plaintext": {
-      "ty": {
-       "Primitive": "Address"
       },
       "mode": "Public"
      }
@@ -2130,8 +2269,11 @@
     {
      "Plaintext": {
       "ty": {
-       "Primitive": {
-        "UInt": "U128"
+       "Struct": {
+        "path": [
+         "U256__8JquwLopp8"
+        ],
+        "program": "shield_swap.aleo"
        }
       },
       "mode": "Public"
@@ -2189,7 +2331,7 @@
       "path": [
        "SwapComplianceRecord"
       ],
-      "program": "shield_swap_v3.aleo"
+      "program": "shield_swap.aleo"
      }
     },
     "Final"
@@ -2256,6 +2398,24 @@
        }
       },
       "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
      }
     }
    ],
@@ -2328,7 +2488,7 @@
         "path": [
          "SwapHop"
         ],
-        "program": "shield_swap_v3.aleo"
+        "program": "shield_swap.aleo"
        }
       },
       "mode": "Public"
@@ -2341,7 +2501,7 @@
         "path": [
          "SwapHop"
         ],
-        "program": "shield_swap_v3.aleo"
+        "program": "shield_swap.aleo"
        }
       },
       "mode": "Public"
@@ -2354,7 +2514,7 @@
         "path": [
          "SwapHop"
         ],
-        "program": "shield_swap_v3.aleo"
+        "program": "shield_swap.aleo"
        }
       },
       "mode": "Public"
@@ -2406,124 +2566,16 @@
       "path": [
        "MultiHopSwapComplianceRecord"
       ],
-      "program": "shield_swap_v3.aleo"
+      "program": "shield_swap.aleo"
      }
     },
-    "Final"
-   ]
-  },
-  {
-   "name": "claim_multi_hop_output",
-   "inputs": [
-    {
-     "Plaintext": {
-      "ty": {
-       "Primitive": "Field"
-      },
-      "mode": "Private"
-     }
-    },
-    {
-     "Plaintext": {
-      "ty": {
-       "Primitive": "Address"
-      },
-      "mode": "Public"
-     }
-    },
-    {
-     "Plaintext": {
-      "ty": {
-       "Primitive": "Field"
-      },
-      "mode": "Public"
-     }
-    },
-    {
-     "Plaintext": {
-      "ty": {
-       "Primitive": "Field"
-      },
-      "mode": "Public"
-     }
-    },
-    {
-     "Plaintext": {
-      "ty": {
-       "Primitive": "Field"
-      },
-      "mode": "Public"
-     }
-    },
-    {
-     "Plaintext": {
-      "ty": {
-       "Primitive": {
-        "UInt": "U128"
-       }
-      },
-      "mode": "Public"
-     }
-    },
-    {
-     "Plaintext": {
-      "ty": {
-       "Primitive": {
-        "UInt": "U128"
-       }
-      },
-      "mode": "Public"
-     }
-    },
-    {
-     "Plaintext": {
-      "ty": {
-       "Primitive": "Field"
-      },
-      "mode": "Public"
-     }
-    },
-    {
-     "Plaintext": {
-      "ty": {
-       "Primitive": {
-        "UInt": "U128"
-       }
-      },
-      "mode": "Public"
-     }
-    },
-    {
-     "Plaintext": {
-      "ty": {
-       "Primitive": "Field"
-      },
-      "mode": "Public"
-     }
-    },
-    {
-     "Plaintext": {
-      "ty": {
-       "Primitive": {
-        "UInt": "U128"
-       }
-      },
-      "mode": "Public"
-     }
-    }
-   ],
-   "outputs": [
-    "DynamicRecord",
-    "DynamicRecord",
-    "DynamicRecord",
-    "DynamicRecord",
     "Final"
    ]
   }
  ],
  "views": [
   {
-   "name": "view_sqrt_price_at_tick",
+   "name": "view_sqrt_price_at_tick_x128",
    "inputs": [
     {
      "Plaintext": {
@@ -2540,8 +2592,11 @@
     {
      "Plaintext": {
       "ty": {
-       "Primitive": {
-        "UInt": "U128"
+       "Struct": {
+        "path": [
+         "U256__8JquwLopp8"
+        ],
+        "program": "shield_swap.aleo"
        }
       },
       "mode": "Public"
@@ -2550,13 +2605,178 @@
    ]
   },
   {
-   "name": "view_amounts_for_liquidity",
+   "name": "view_mul_div",
    "inputs": [
     {
      "Plaintext": {
       "ty": {
+       "Struct": {
+        "path": [
+         "U256__8JquwLopp8"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "U256__8JquwLopp8"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "U256__8JquwLopp8"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Boolean"
+      },
+      "mode": "Public"
+     }
+    }
+   ],
+   "outputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "U256__8JquwLopp8"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    }
+   ]
+  },
+  {
+   "name": "view_swap_iteration",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "SwapIterCfg"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
        "Primitive": {
-        "UInt": "U128"
+        "Int": "I32"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "U256__8JquwLopp8"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "Tick"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "SwapIterState"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    }
+   ],
+   "outputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "SwapIterState"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "Tick"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    }
+   ]
+  },
+  {
+   "name": "view_bounded_partial",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "U256__8JquwLopp8"
+        ],
+        "program": "shield_swap.aleo"
        }
       },
       "mode": "Public"
@@ -2587,6 +2807,202 @@
       "ty": {
        "Primitive": {
         "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "U256__8JquwLopp8"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "U256__8JquwLopp8"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "U256__8JquwLopp8"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U32"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U8"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Boolean"
+      },
+      "mode": "Public"
+     }
+    }
+   ],
+   "outputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "U256__8JquwLopp8"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "U256__8JquwLopp8"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "Int": "I32"
+       }
+      },
+      "mode": "Public"
+     }
+    }
+   ]
+  },
+  {
+   "name": "resolve_stored_tick",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "U256__8JquwLopp8"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "Int": "I32"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "U256__8JquwLopp8"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "Int": "I32"
        }
       },
       "mode": "Public"
@@ -2606,166 +3022,7 @@
      "Plaintext": {
       "ty": {
        "Primitive": {
-        "UInt": "U128"
-       }
-      },
-      "mode": "Public"
-     }
-    },
-    {
-     "Plaintext": {
-      "ty": {
-       "Primitive": {
-        "UInt": "U128"
-       }
-      },
-      "mode": "Public"
-     }
-    }
-   ]
-  },
-  {
-   "name": "view_liquidity_for_amounts",
-   "inputs": [
-    {
-     "Plaintext": {
-      "ty": {
-       "Primitive": {
-        "UInt": "U128"
-       }
-      },
-      "mode": "Public"
-     }
-    },
-    {
-     "Plaintext": {
-      "ty": {
-       "Primitive": {
-        "UInt": "U128"
-       }
-      },
-      "mode": "Public"
-     }
-    },
-    {
-     "Plaintext": {
-      "ty": {
-       "Primitive": {
-        "UInt": "U128"
-       }
-      },
-      "mode": "Public"
-     }
-    },
-    {
-     "Plaintext": {
-      "ty": {
-       "Primitive": {
-        "UInt": "U128"
-       }
-      },
-      "mode": "Public"
-     }
-    },
-    {
-     "Plaintext": {
-      "ty": {
-       "Primitive": {
-        "UInt": "U128"
-       }
-      },
-      "mode": "Public"
-     }
-    }
-   ],
-   "outputs": [
-    {
-     "Plaintext": {
-      "ty": {
-       "Primitive": {
-        "UInt": "U128"
-       }
-      },
-      "mode": "Public"
-     }
-    }
-   ]
-  },
-  {
-   "name": "view_swap_iteration",
-   "inputs": [
-    {
-     "Plaintext": {
-      "ty": {
-       "Struct": {
-        "path": [
-         "SwapIterCfg"
-        ],
-        "program": "shield_swap_v3.aleo"
-       }
-      },
-      "mode": "Public"
-     }
-    },
-    {
-     "Plaintext": {
-      "ty": {
-       "Primitive": {
         "Int": "I32"
-       }
-      },
-      "mode": "Public"
-     }
-    },
-    {
-     "Plaintext": {
-      "ty": {
-       "Struct": {
-        "path": [
-         "Tick"
-        ],
-        "program": "shield_swap_v3.aleo"
-       }
-      },
-      "mode": "Public"
-     }
-    },
-    {
-     "Plaintext": {
-      "ty": {
-       "Struct": {
-        "path": [
-         "SwapIterState"
-        ],
-        "program": "shield_swap_v3.aleo"
-       }
-      },
-      "mode": "Public"
-     }
-    }
-   ],
-   "outputs": [
-    {
-     "Plaintext": {
-      "ty": {
-       "Struct": {
-        "path": [
-         "SwapIterState"
-        ],
-        "program": "shield_swap_v3.aleo"
-       }
-      },
-      "mode": "Public"
-     }
-    },
-    {
-     "Plaintext": {
-      "ty": {
-       "Struct": {
-        "path": [
-         "Tick"
-        ],
-        "program": "shield_swap_v3.aleo"
        }
       },
       "mode": "Public"
