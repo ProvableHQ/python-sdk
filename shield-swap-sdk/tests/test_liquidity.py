@@ -86,9 +86,10 @@ def test_mint_inputs_rounding_and_request():
     assert "tick_lower: -4080i32" in args[5]
     assert "tick_upper: 4020i32" in args[5]
     assert "amount0_desired: 1000000000u128" in args[5]
-    # slot neighbors: below=3960, above=4080; lower hint for -4080 (< tick) is 3960?
-    # pick_insert_hint(-4080 <= 4055) -> next_init_below = 3960
-    assert "tick_lower_hint: 3960i32" in args[5]
+    # Empty ticks mapping = fresh pool: the lower hint anchors at the MIN
+    # sentinel and the upper tick's predecessor is the just-inserted lower.
+    assert "tick_lower_hint: -400001i32" in args[5]
+    assert "tick_upper_hint: -4080i32" in args[5]
     assert args[6] == "1field" and args[7] == "2field"
     proofs = default_merkle_proofs()
     assert args[8] == proofs and args[9] == proofs and args[10] == proofs
@@ -266,3 +267,35 @@ def test_decrease_and_burn_always_direct():
     assert stub.last_program == "shield_swap.aleo"
     dex.burn(pool_key="5field")
     assert stub.last_program == "shield_swap.aleo"
+
+
+def _tick_text(pool, tick, prev, nxt):
+    return (f"{{ pool: {pool}, liquidity_net: 0i128, liquidity_gross: 1u128, "
+            f"tick: {tick}i32, "
+            "fee_growth_outside0_x_128: { hi: 0u128, lo: 0u128 }, "
+            "fee_growth_outside1_x_128: { hi: 0u128, lo: 0u128 }, "
+            f"prev: {prev}i32, next: {nxt}i32 }}")
+
+
+def test_find_tick_predecessor_walks_the_chain_list():
+    from aleo_shield_swap.tick_math import MIN_TICK_SENTINEL
+    stub = _stub()
+    dex = ShieldSwap(stub)
+    # Populated list: sentinel -> -1200 -> 300 -> MAX sentinel.
+    ticks = {
+        dex.derive_tick_key("5field", MIN_TICK_SENTINEL):
+            _tick_text("5field", MIN_TICK_SENTINEL, MIN_TICK_SENTINEL, -1200),
+        dex.derive_tick_key("5field", -1200):
+            _tick_text("5field", -1200, MIN_TICK_SENTINEL, 300),
+        dex.derive_tick_key("5field", 300):
+            _tick_text("5field", 300, -1200, 400001),
+    }
+    stub.programs._mappings["ticks"] = ticks
+    assert dex.find_tick_predecessor("5field", -4080) == MIN_TICK_SENTINEL
+    assert dex.find_tick_predecessor("5field", -600) == -1200
+    assert dex.find_tick_predecessor("5field", 500) == 300
+    # A tick already in the list returns itself (validation is skipped).
+    assert dex.find_tick_predecessor("5field", 300) == 300
+    # Fresh pool (no sentinel entry) anchors at the sentinel.
+    stub.programs._mappings["ticks"] = {}
+    assert dex.find_tick_predecessor("5field", 0) == MIN_TICK_SENTINEL

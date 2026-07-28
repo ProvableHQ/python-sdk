@@ -70,6 +70,7 @@ from .tick_hints import pick_insert_hint
 from .tick_math import (
     MAX_TICK,
     MIN_TICK,
+    MIN_TICK_SENTINEL,
     get_sqrt_price_at_tick_x128,
     int_to_u256_plaintext,
     round_tick_to_spacing,
@@ -319,6 +320,34 @@ class ShieldSwap:
 
     def derive_tick_key(self, pool_key: str, tick: int) -> str:
         return _derive_tick_key(pool_key, tick, network=self._aleo.network_name)
+
+    def find_tick_predecessor(self, pool_key: str, new_tick: int,
+                              max_hops: int = 128) -> int:
+        """Predecessor of *new_tick* in the pool's initialized-tick list.
+
+        The contract keeps ticks in an on-chain doubly-linked list and
+        ``mint`` asserts its hints are the true insertion neighbours —
+        static/slot-derived hints only work for a pool's FIRST position.
+        Walks from the MIN sentinel; an empty list (fresh pool) anchors at
+        the sentinel itself.  For a tick already in the list, returns that
+        tick (the contract skips hint validation for initialized ticks).
+        """
+        cur = MIN_TICK_SENTINEL
+        for _ in range(max_hops):
+            raw = self._mapping_value("ticks", self.derive_tick_key(pool_key, cur))
+            if raw is None:
+                if cur == MIN_TICK_SENTINEL:
+                    return MIN_TICK_SENTINEL      # no list yet — fresh pool
+                raise ShieldSwapError(
+                    f"tick {cur} missing from the initialized-tick list of "
+                    f"pool {pool_key} — inconsistent chain state?")
+            nxt = int(g.Tick.from_plaintext(raw).next)
+            if nxt > new_tick:
+                return cur
+            cur = nxt
+        raise ShieldSwapError(
+            f"tick-list walk exceeded {max_hops} hops for pool {pool_key} — "
+            "pass tick_lower_hint=/tick_upper_hint= explicitly.")
 
     # ── Balances ─────────────────────────────────────────────────────────────
 
@@ -943,8 +972,12 @@ class ShieldSwap:
         if lo >= hi:
             raise ValueError(f"Empty tick range after spacing alignment: [{lo}, {hi})")
 
-        lo_hint = tick_lower_hint if tick_lower_hint is not None else pick_insert_hint(slot, lo)
-        upper_pred = tick_upper_hint if tick_upper_hint is not None else pick_insert_hint(slot, hi)
+        # Hints must be the ticks' true list predecessors (walked on-chain) —
+        # slot-derived hints only validate for a pool's first position.
+        lo_hint = (tick_lower_hint if tick_lower_hint is not None
+                   else self.find_tick_predecessor(pool_key, lo))
+        upper_pred = (tick_upper_hint if tick_upper_hint is not None
+                      else self.find_tick_predecessor(pool_key, hi))
         # The finalize inserts tick_lower before validating the upper hint, so
         # when nothing initialized sits between the bounds, the upper tick's
         # predecessor is the just-inserted lower tick.

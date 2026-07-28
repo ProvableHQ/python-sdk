@@ -11,6 +11,9 @@ from typing import Any
 Q128 = 1 << 128
 MIN_TICK = -400000
 MAX_TICK = 400000
+# Sentinel ticks anchoring the contract's initialized-tick linked list.
+MIN_TICK_SENTINEL = -400001
+MAX_TICK_SENTINEL = 400001
 # sqrt price at MIN_TICK / MAX_TICK — the bounds the swap finalize accepts.
 MIN_SQRT_RATIO_X128 = 702075911466779181339691826087
 MAX_SQRT_RATIO_X128 = 484680305 * Q128 + 8756686347225649145659787327114459760
