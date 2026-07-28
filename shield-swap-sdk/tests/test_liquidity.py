@@ -1,20 +1,25 @@
-"""Liquidity verbs — exact input orders per the TS actions:
-create_pool: [token0, token1, fee u16, sqrt_price u128, spacing u32, tick i32]
-mint:        [nonce field, record0, record1, recipient, MintPositionRequest, token0, token1]
+"""Liquidity verbs — exact input orders per the deployed shield_swap.aleo:
+create_pool: [token0, token1, fee u16, sqrt_price U256, spacing u32, tick i32]
+mint:        [nonce field, record0, record1, recipient, withdrawal,
+              MintPositionRequest, token0, token1, signer_proofs,
+              recipient_proofs, withdrawal_proofs]
 increase:    [position, record0, record1, a0 u128, a1 u128, a0min u128, a1min u128,
               token0, token1, lo_hint i32, hi_hint i32]
 decrease:    [position, liquidity u128, a0min u128, a1min u128]
-collect:     [position, a0req u128, a1req u128, token0, token1, recipient]
+collect:     [position, a0req u128, a1req u128, token0, token1,
+              owner_proofs, withdrawal_proofs]
 burn:        [position]"""
 import pytest
 
+from aleo_shield_swap._core import default_merkle_proofs
 from aleo_shield_swap.client import ShieldSwap
 from aleo_shield_swap.errors import InsufficientRecordsError, InvalidFeeTierError
-from aleo_shield_swap.tick_math import get_sqrt_price_at_tick
+from aleo_shield_swap.tick_math import get_sqrt_price_at_tick_x128, int_to_u256_plaintext
 
 from .conftest import POOL_TEXT, SIGNER, SLOT_TEXT, StubAleo
 
-POSITION_TEXT = ("{ owner: aleo1me.private, token_id: 42field.private, "
+POSITION_TEXT = ("{ owner: aleo1me.private, withdrawal: aleo1me.private, "
+                 "token_id: 42field.private, "
                  "token0_id: 1field.private, token1_id: 2field.private, "
                  "pool: 5field.private, tick_lower: -4080i32.private, "
                  "tick_upper: 4080i32.private, liquidity: 500u128.private, "
@@ -45,7 +50,8 @@ def test_create_pool_inputs_and_validation():
     fn, args = stub.last_call
     assert fn == "create_pool"
     assert args == ["1field", "2field", "3000u16",
-                    f"{get_sqrt_price_at_tick(0)}u128", "60u32", "0i32"]
+                    int_to_u256_plaintext(get_sqrt_price_at_tick_x128(0)),
+                    "60u32", "0i32"]
     assert result.transaction_id == "at1stubtx"
 
     with pytest.raises(InvalidFeeTierError):
@@ -71,18 +77,32 @@ def test_mint_inputs_rounding_and_request():
              nonce="9field")
     fn, args = stub.last_call
     assert fn == "mint"
-    assert len(args) == 7
+    assert len(args) == 11
     assert args[0] == "9field"
     assert args[1] == TOKEN0_RECORD and args[2] == TOKEN0_RECORD
     assert args[3] == SIGNER                       # recipient defaults to signer
+    assert args[4] == SIGNER                       # withdrawal defaults to recipient
     # ticks rounded to spacing 60: -4055 -> -4080, 4055 -> 4020
-    assert "tick_lower: -4080i32" in args[4]
-    assert "tick_upper: 4020i32" in args[4]
-    assert "amount0_desired: 1000000000u128" in args[4]
+    assert "tick_lower: -4080i32" in args[5]
+    assert "tick_upper: 4020i32" in args[5]
+    assert "amount0_desired: 1000000000u128" in args[5]
     # slot neighbors: below=3960, above=4080; lower hint for -4080 (< tick) is 3960?
     # pick_insert_hint(-4080 <= 4055) -> next_init_below = 3960
-    assert "tick_lower_hint: 3960i32" in args[4]
-    assert args[5] == "1field" and args[6] == "2field"
+    assert "tick_lower_hint: 3960i32" in args[5]
+    assert args[6] == "1field" and args[7] == "2field"
+    proofs = default_merkle_proofs()
+    assert args[8] == proofs and args[9] == proofs and args[10] == proofs
+
+
+def test_mint_explicit_withdrawal_address():
+    stub = _stub()
+    ShieldSwap(stub).mint(pool_key="5field", tick_lower=-4080, tick_upper=4080,
+                          amount0_desired=10**9, amount1_desired=100,
+                          token0_program="tok0.aleo", token1_program="tok1.aleo",
+                          withdrawal="aleo1coldwallet")
+    _, args = stub.last_call
+    assert args[3] == SIGNER                       # recipient still the signer
+    assert args[4] == "aleo1coldwallet"            # immutable payout address
 
 
 def test_mint_default_nonce_is_generated():
@@ -127,9 +147,15 @@ def test_decrease_collect_burn_inputs():
     result = dex.collect(pool_key="5field", amount0_requested=7,
                          amount1_requested=8).transact()
     fn, args = stub.last_call
+    proofs = default_merkle_proofs()
     assert (fn, args) == ("collect", [POSITION_TEXT, "7u128", "8u128",
-                                      "1field", "2field", SIGNER])
+                                      "1field", "2field", proofs, proofs])
     assert result.position_token_id is None        # collect re-issues privately
+
+    # The payout goes to nft.withdrawal — there is no recipient input anymore.
+    with pytest.raises(TypeError):
+        dex.collect(pool_key="5field", amount0_requested=1,
+                    amount1_requested=1, recipient=SIGNER)
 
     dex.burn(pool_key="5field")
     assert stub.last_call == ("burn", [POSITION_TEXT])

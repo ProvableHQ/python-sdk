@@ -282,7 +282,7 @@ Use with journal-reserved counters for concurrent swaps;
 :func:`next_blinded_identity` (probe-based) remains the recovery path
 when no journal exists.
 
-### `next_blinded_identity(aleo: 'Any', account: 'Any', program: 'str' = 'shield_swap_v3.aleo', *, start_counter: 'int' = 0, max_scan: 'int' = 64) -> 'BlindedIdentity'`
+### `next_blinded_identity(aleo: 'Any', account: 'Any', program: 'str' = 'shield_swap.aleo', *, start_counter: 'int' = 0, max_scan: 'int' = 64) -> 'BlindedIdentity'`
 
 First unused single-use identity for *account*.
 
@@ -333,12 +333,14 @@ The fee tier must be registered with the program (validated before
 submission); tick spacing defaults to the tier's on-chain binding and
 the opening price to the tick's sqrt price.
 
-### `mint(self, *, pool_key: 'str', tick_lower: 'int', tick_upper: 'int', amount0_desired: 'int', amount1_desired: 'int', amount0_min: 'int' = 0, amount1_min: 'int' = 0, token0_program: 'Optional[str]' = None, token1_program: 'Optional[str]' = None, token0_record: 'Optional[str]' = None, token1_record: 'Optional[str]' = None, tick_lower_hint: 'Optional[int]' = None, tick_upper_hint: 'Optional[int]' = None, recipient: 'Optional[str]' = None, nonce: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[MintResult]'`
+### `mint(self, *, pool_key: 'str', tick_lower: 'int', tick_upper: 'int', amount0_desired: 'int', amount1_desired: 'int', amount0_min: 'int' = 0, amount1_min: 'int' = 0, token0_program: 'Optional[str]' = None, token1_program: 'Optional[str]' = None, token0_record: 'Optional[str]' = None, token1_record: 'Optional[str]' = None, tick_lower_hint: 'Optional[int]' = None, tick_upper_hint: 'Optional[int]' = None, recipient: 'Optional[str]' = None, withdrawal: 'Optional[str]' = None, nonce: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[MintResult]'`
 
 Mint a concentrated-liquidity position as a private PositionNFT.
 
 Tick bounds are rounded to the pool's spacing; insert hints derive
-from the slot's neighbors unless given explicitly.
+from the slot's neighbors unless given explicitly.  *withdrawal* is
+the immutable payout address stored on the NFT — ``collect`` always
+pays it and it can never be changed; defaults to *recipient*.
 
 ### `increase_liquidity(self, *, pool_key: 'str', amount0_desired: 'int', amount1_desired: 'int', amount0_min: 'int' = 0, amount1_min: 'int' = 0, token0_program: 'Optional[str]' = None, token1_program: 'Optional[str]' = None, token0_record: 'Optional[str]' = None, token1_record: 'Optional[str]' = None, position_record: 'Optional[str]' = None, tick_lower_hint: 'Optional[int]' = None, tick_upper_hint: 'Optional[int]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[TxResult]'`
 
@@ -348,9 +350,12 @@ Add funds to an existing position (range fixed at mint).
 
 Remove liquidity from a position; owed amounts become collectable.
 
-### `collect(self, *, pool_key: 'str', amount0_requested: 'int', amount1_requested: 'int', recipient: 'Optional[str]' = None, position_record: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[TxResult]'`
+### `collect(self, *, pool_key: 'str', amount0_requested: 'int', amount1_requested: 'int', position_record: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[TxResult]'`
 
 Collect owed token amounts from a position.
+
+The payout always goes to the position's immutable ``withdrawal``
+address — set at mint, not redirectable here.
 
 ### `burn(self, *, pool_key: 'str', position_record: 'Optional[str]' = None, account: 'Any' = None) -> 'DexCall[TxResult]'`
 

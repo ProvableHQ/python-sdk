@@ -14,6 +14,7 @@ from aleo.codegen.runtime import parse_plaintext
 
 from . import _generated as g
 from ._core import (
+    default_merkle_proofs,
     ensure_programs,
     find_position_plaintext,
     pick_covering_record,
@@ -62,7 +63,8 @@ from .tick_hints import pick_insert_hint
 from .tick_math import (
     MAX_TICK,
     MIN_TICK,
-    get_sqrt_price_at_tick,
+    get_sqrt_price_at_tick_x128,
+    int_to_u256_plaintext,
     round_tick_to_spacing,
 )
 
@@ -454,7 +456,7 @@ class ShieldSwap:
             resolved.zero_for_one,
             f"{amount_in}u128",
             f"{resolved.amount_out_min}u128",
-            f"{resolved.sqrt_price_limit}u128",
+            int_to_u256_plaintext(resolved.sqrt_price_limit),
             f"{swap_nonce}u64",
             f"{deadline}u32",
             pool.token0,
@@ -532,6 +534,7 @@ class ShieldSwap:
             out.token_out,
             f"{out.amount_out}u128",
             f"{out.amount_remaining}u128",
+            default_merkle_proofs(),
         ]
         bound = self._aleo.programs.get(self.program).functions.claim_swap_output(*inputs)
 
@@ -712,13 +715,12 @@ class ShieldSwap:
             pos = self._position_state(view.position_token_id)
             if pos is None or (pos.tokens_owed0 == 0 and pos.tokens_owed1 == 0):
                 continue
-            pool = self.get_pool(view.pool_key)
-            # The contract asserts requested <= owed and requested % scale == 0;
-            # owed is stored in scaled units, so request exactly owed * scale.
+            # The contract asserts requested <= owed; owed is stored in raw
+            # native units, so request exactly what the chain reports.
             res = self.collect(
                 pool_key=view.pool_key,
-                amount0_requested=pos.tokens_owed0 * pool.scale0,
-                amount1_requested=pos.tokens_owed1 * pool.scale1,
+                amount0_requested=pos.tokens_owed0,
+                amount1_requested=pos.tokens_owed1,
                 account=acct,
             ).delegate(acct)
             fees.append({"position_token_id": view.position_token_id,
@@ -761,14 +763,14 @@ class ShieldSwap:
                 )
             spacing = int(raw.removesuffix("u32"))
         sqrt_price = (initial_sqrt_price if initial_sqrt_price is not None
-                      else get_sqrt_price_at_tick(initial_tick))
+                      else get_sqrt_price_at_tick_x128(initial_tick))
         self._ensure([], imports)
 
         inputs = [
             token0_id,
             token1_id,
             f"{fee}u16",
-            f"{sqrt_price}u128",
+            int_to_u256_plaintext(sqrt_price),
             f"{spacing}u32",
             f"{initial_tick}i32",
         ]
@@ -810,6 +812,7 @@ class ShieldSwap:
         tick_lower_hint: Optional[int] = None,
         tick_upper_hint: Optional[int] = None,
         recipient: Optional[str] = None,
+        withdrawal: Optional[str] = None,
         nonce: Optional[str] = None,
         imports: Optional[dict[str, str]] = None,
         account: Any = None,
@@ -817,7 +820,9 @@ class ShieldSwap:
         """Mint a concentrated-liquidity position as a private PositionNFT.
 
         Tick bounds are rounded to the pool's spacing; insert hints derive
-        from the slot's neighbors unless given explicitly.
+        from the slot's neighbors unless given explicitly.  *withdrawal* is
+        the immutable payout address stored on the NFT — ``collect`` always
+        pays it and it can never be changed; defaults to *recipient*.
         """
 
         acct = self._account(account)
@@ -855,8 +860,11 @@ class ShieldSwap:
 
         field_nonce = nonce if nonce is not None else generate_field_nonce()
         to = recipient or str(acct.address)
+        payout = withdrawal or to
+        proofs = default_merkle_proofs()
 
-        inputs = [field_nonce, record0, record1, to, request, pool.token0, pool.token1]
+        inputs = [field_nonce, record0, record1, to, payout, request,
+                  pool.token0, pool.token1, proofs, proofs, proofs]
         bound = self._aleo.programs.get(self.program).functions.mint(*inputs)
 
         base_build = self._position_result(MintResult)
@@ -947,12 +955,15 @@ class ShieldSwap:
         pool_key: str,
         amount0_requested: int,
         amount1_requested: int,
-        recipient: Optional[str] = None,
         position_record: Optional[str] = None,
         imports: Optional[dict[str, str]] = None,
         account: Any = None,
     ) -> DexCall[TxResult]:
-        """Collect owed token amounts from a position."""
+        """Collect owed token amounts from a position.
+
+        The payout always goes to the position's immutable ``withdrawal``
+        address — set at mint, not redirectable here.
+        """
         acct = self._account(account)
         pool = self.get_pool(pool_key)
         position = position_record or self._select_position_record(pool_key, acct)
@@ -965,9 +976,9 @@ class ShieldSwap:
             except ValueError:
                 pass
         self._ensure(token_programs, imports)
-        to = recipient or str(acct.address)
+        proofs = default_merkle_proofs()
         inputs = [position, f"{amount0_requested}u128", f"{amount1_requested}u128",
-                  pool.token0, pool.token1, to]
+                  pool.token0, pool.token1, proofs, proofs]
         bound = self._aleo.programs.get(self.program).functions.collect(*inputs)
         # collect's first output is the re-issued PositionNFT record, not a
         # public field — there is no positional id to read back.

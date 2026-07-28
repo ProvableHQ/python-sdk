@@ -1,13 +1,13 @@
 """swap() against the stubbed facade — asserts the exact positional input
-list (order from the TS reference src/actions/swap/swap.ts):
+list (order from the deployed shield_swap.aleo bytecode):
 [record, blinding_factor, blinded_address, pool_key, zero_for_one,
- amount_in u128, amount_out_min u128, sqrt_price_limit u128, nonce u64,
+ amount_in u128, amount_out_min u128, sqrt_price_limit U256, nonce u64,
  deadline u32, token0, token1]"""
 import pytest
 
 from aleo_shield_swap.client import ShieldSwap
 from aleo_shield_swap.errors import InsufficientRecordsError
-from aleo_shield_swap.tick_math import MIN_SQRT_PRICE
+from aleo_shield_swap.tick_math import MIN_SQRT_RATIO_X128, int_to_u256_plaintext
 from aleo_shield_swap.types import SwapHandle
 
 from .conftest import (
@@ -40,14 +40,14 @@ def test_swap_builds_exact_inputs(stub_aleo):
     assert args[4] is True                            # zero_for_one
     assert args[5] == f"{10**9}u128"
     assert args[6] == f"{1_000_000 * 9950 // 10000}u128"   # slippage applied
-    assert args[7] == f"{MIN_SQRT_PRICE}u128"         # directional default
+    assert args[7] == int_to_u256_plaintext(MIN_SQRT_RATIO_X128)  # directional default
     assert args[8] == "123u64"
     assert args[9] == "11000u32"                      # height 1000 + 10_000 (DPS latency)
     assert args[10] == "1field" and args[11] == "2field"
     assert len(args) == 12
     # Dynamic dispatch: the DEX program and the token wrapper program must be
     # registered with the process before authorization.
-    assert "shield_swap_v3.aleo" in stub_aleo.registered_programs
+    assert "shield_swap.aleo" in stub_aleo.registered_programs
     assert "tok.aleo" in stub_aleo.registered_programs
 
 

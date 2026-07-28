@@ -3,6 +3,7 @@
  amount_out u128, amount_remaining u128]"""
 import pytest
 
+from aleo_shield_swap._core import default_merkle_proofs
 from aleo_shield_swap.client import ShieldSwap
 from aleo_shield_swap.errors import SwapOutputNotFinalizedError
 from aleo_shield_swap.types import ClaimResult, SwapHandle
@@ -39,7 +40,8 @@ def test_claim_builds_exact_inputs_and_result():
     fn, args = stub.last_call
     assert fn == "claim_swap_output"
     assert args == ["11field", "aleo1blinded", "77field",
-                    "1field", "2field", "990000u128", "0u128"]
+                    "1field", "2field", "990000u128", "0u128",
+                    default_merkle_proofs()]
     assert result == ClaimResult("at1stubtx", 990000, 0)
 
 

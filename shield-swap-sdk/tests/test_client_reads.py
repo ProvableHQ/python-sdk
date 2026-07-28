@@ -20,7 +20,7 @@ def test_get_slot_returns_slotview(stub_aleo):
 def test_get_pool_returns_poolstate(stub_aleo):
     pool = ShieldSwap(stub_aleo).get_pool("5field")
     assert pool.token0 == "1field" and pool.fee == 3000
-    assert pool.scale0 == 10**9
+    assert pool.enabled is True
 
 
 def test_missing_pool_raises(stub_aleo):

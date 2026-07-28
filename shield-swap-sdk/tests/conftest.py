@@ -10,28 +10,28 @@ from __future__ import annotations
 
 import pytest
 
-from aleo_shield_swap.tick_math import Q64
-
-SLOT_TEXT = ("{ tick: 4055i32, tick_spacing: 60i32, sqrt_price: " + str(Q64) + "u128, "
-             "fee_protocol: 0u8, liquidity: 1000u128, fee_growth_global0_x_64: 0u128, "
-             "fee_growth_global1_x_64: 0u128, fee_residual0_x_64: 0u128, "
-             "fee_residual1_x_64: 0u128, max_liquidity_per_tick: 0u128, "
+SLOT_TEXT = ("{ tick: 4055i32, tick_spacing: 60u32, "
+             "sqrt_price: { hi: 1u128, lo: 0u128 }, "
+             "fee_protocol: 0u8, liquidity: 1000u128, "
+             "fee_growth_global0_x_128: { hi: 0u128, lo: 0u128 }, "
+             "fee_growth_global1_x_128: { hi: 0u128, lo: 0u128 }, "
+             "max_liquidity_per_tick: 0u128, "
              "protocol_fees0: 0u128, protocol_fees1: 0u128, "
              "next_init_below: 3960i32, next_init_above: 4080i32 }")
 
-POOL_TEXT = ("{ token0: 1field, token1: 2field, fee: 3000u16, enabled: true, "
-             "scale0: 1000000000u128, scale1: 1u128 }")
+POOL_TEXT = "{ token0: 1field, token1: 2field, fee: 3000u16, enabled: true }"
 
 RECORD_TEXT = ("{ owner: aleo1me.private, amount: 2000000000u128.private, "
                "_nonce: 7group.public }")
 
-# Vector account from test_blinding.py — next_blinded_identity derives real values.
+# Vector account from test_blinding.py — next_blinded_identity derives real
+# values.  Counter-0 identity pinned for shield_swap.aleo.
 VIEW_KEY_SCALAR = "334926304971763782347498121479281870911723639068413954564748091722770623877scalar"
 SIGNER = "aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px"
-BLINDING_FACTOR_0 = "4588552248780721950435785476596782217652350429588181106944985529417784595808field"
-BLINDED_ADDRESS_0 = "aleo1tucdl48jvu54emu9atq3vf0rslwtdpze83zcc2jrc8zxema0r5gq3zd76l"
+BLINDING_FACTOR_0 = "1084832000575072863530983109046262857691989153364570676666410266416291033880field"
+BLINDED_ADDRESS_0 = "aleo15mstsvdtzqf5nw8rfzx8mrllwxt907amfpt8nx3p8cskj4wd3uxq4uywn9"
 
-PROGRAM_ID = "shield_swap_v3.aleo"
+PROGRAM_ID = "shield_swap.aleo"
 
 # A decoy child transition emitting a field output — root-scoped harvesting
 # must NEVER pick this up.
