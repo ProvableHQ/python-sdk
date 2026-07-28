@@ -12,7 +12,7 @@ from __future__ import annotations
 import keyword
 import re
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 _PROGRAM_ID_RE = re.compile(r"[a-zA-Z0-9_.]+")
 
@@ -140,7 +140,7 @@ _IMPORTS = (
 )
 
 
-def _iter_struct_refs(ty: Any):
+def _iter_struct_refs(ty: Any) -> "Iterator[dict[str, Any]]":
     """Yield every ``{"Struct": ...}`` reference in a ty tree (arrays included)."""
     if isinstance(ty, dict) and "Struct" in ty:
         yield ty

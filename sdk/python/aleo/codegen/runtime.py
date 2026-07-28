@@ -19,7 +19,7 @@ with a clear message instead of on-chain.
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Callable, cast
 
 _INT_RE = re.compile(r"^(-?\d+)(u8|u16|u32|u64|u128|i8|i16|i32|i64|i128)$")
 _MODE_RE = re.compile(r"\.(private|public|constant)$")
@@ -158,10 +158,11 @@ def fmt_address(v: object) -> str:
     return v
 
 
-def fmt_array(v: object, encode_one: Any, length: int) -> str:
+def fmt_array(v: object, encode_one: Callable[[Any], str], length: int) -> str:
     """Format a fixed-length list as an Aleo array literal."""
     if not isinstance(v, list):
         raise ValueError(f"Expected a list of length {length}, got {type(v).__name__}")
-    if len(v) != length:
-        raise ValueError(f"Expected a list of length {length}, got length {len(v)}")
-    return "[" + ", ".join(encode_one(x) for x in v) + "]"
+    items = cast("list[Any]", v)
+    if len(items) != length:
+        raise ValueError(f"Expected a list of length {length}, got length {len(items)}")
+    return "[" + ", ".join(encode_one(x) for x in items) + "]"
