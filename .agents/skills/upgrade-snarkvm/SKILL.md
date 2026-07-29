@@ -34,6 +34,9 @@ continue.
 
 ## 2. Study the changeset
 
+Use an existing local snarkVM clone if one is available (fetch its tags
+first); otherwise clone to a scratch dir:
+
 ```bash
 git clone --filter=blob:none https://github.com/ProvableHQ/snarkVM /tmp/snarkvm-upgrade-src
 cd /tmp/snarkvm-upgrade-src
@@ -75,14 +78,15 @@ Check whether leo's default branch has picked up $NEW:
 curl -s https://raw.githubusercontent.com/ProvableHQ/leo/HEAD/Cargo.toml | grep -m1 '^snarkvm '
 ```
 
-- If it pins `tag = "$NEW"`: get the rev
+- If leo's pin resolves to $NEW — either `tag = "$NEW"` or crates.io
+  `version = "X.Y.Z"` matching $NEW without the `v` (leo migrated to the
+  crates.io form around v4.8.1): get the rev
   (`git ls-remote https://github.com/ProvableHQ/leo HEAD`), then in
-  `sdk-abi/Cargo.toml` update EVERY leo crate's `rev = "..."` to that rev and
-  the snarkvm `tag = "..."` to $NEW. Keep the feature list verbatim
-  (`test_consensus_heights`, `dev_skip_checks`, `test_targets`, `history`) —
-  unless leo's own snarkvm line changed features, in which case mirror
-  leo's exactly.
-- If leo still pins an older tag: leave `sdk-abi/` entirely untouched
+  `sdk-abi/Cargo.toml` update EVERY leo crate's `rev = "..."` to that rev
+  and **mirror leo's snarkvm dep line exactly** — same form (tag or
+  version), same feature list. Type-coupling means matching leo's source,
+  whatever shape it takes.
+- If leo still pins an older snarkvm: leave `sdk-abi/` entirely untouched
   (sdk and sdk-abi are separate build graphs; version skew is fine) and
   record "sdk-abi held back at $CUR — leo hasn't adopted $NEW" for the PR
   body.
