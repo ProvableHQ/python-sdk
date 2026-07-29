@@ -1,0 +1,79 @@
+# Daily snarkVM upgrade check. On a new upstream release, a Claude session
+# runs the /upgrade-snarkvm skill (.agents/skills/upgrade-snarkvm/SKILL.md)
+# to bump, adapt, validate, and open a PR.
+#
+# One-time setup (repo secrets):
+#   ANTHROPIC_API_KEY    — for claude-code-action
+#   SNARKVM_UPGRADE_PAT  — classic PAT or app token with repo scope; used for
+#                          checkout/push/gh so the created PR triggers
+#                          on:pull_request CI (default GITHUB_TOKEN PRs don't)
+name: snarkVM Upgrade
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_from_tag:
+        description: "Pretend the SDK is pinned at this tag (testing, e.g. v4.8.0)"
+        required: false
+        default: ""
+  schedule:
+    - cron: "0 15 * * *"  # 08:00 PDT (07:00 PST — GitHub cron is UTC-only)
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      current: ${{ steps.check.outputs.current }}
+      latest: ${{ steps.check.outputs.latest }}
+      needs_upgrade: ${{ steps.check.outputs.needs_upgrade }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          args=()
+          if [ -n "${{ inputs.force_from_tag }}" ]; then
+            args=(--current "${{ inputs.force_from_tag }}")
+          fi
+          bash .github/scripts/snarkvm_check.sh "${args[@]}"
+
+  upgrade:
+    needs: check
+    if: needs.check.outputs.needs_upgrade == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.SNARKVM_UPGRADE_PAT }}
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            sdk
+            sdk-abi
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # SRS/proving parameters — same cache key as sdk.yml so it's warm.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.aleo
+          key: aleo-parameters-${{ runner.os }}-v1
+      - uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ secrets.SNARKVM_UPGRADE_PAT }}
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.SNARKVM_UPGRADE_PAT }}
+          prompt: "/upgrade-snarkvm — upgrading ${{ needs.check.outputs.current }} -> ${{ needs.check.outputs.latest }}. You are in CI: work non-interactively to completion."
+          claude_args: |
+            --allowedTools "Bash,Read,Edit,Write,Glob,Grep"
