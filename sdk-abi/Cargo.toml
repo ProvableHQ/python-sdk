@@ -24,7 +24,7 @@ leo-disassembler = { git = "https://github.com/ProvableHQ/leo", rev = "ba2c01722
 leo-span = { git = "https://github.com/ProvableHQ/leo", rev = "ba2c01722a48f84b4d90b93aeaf8305b7c03dbce", package = "leo-span" }
 # Same tag + feature set leo pins, so `Process<N>`/`Program<N>` are the same
 # types leo-disassembler's signatures expect.
-snarkvm = { git = "https://github.com/ProvableHQ/snarkVM", tag = "v4.8.1", features = ["test_consensus_heights", "dev_skip_checks", "test_targets", "history"] }
+snarkvm = { git = "https://github.com/ProvableHQ/snarkVM", tag = "v4.8.0", features = ["test_consensus_heights", "dev_skip_checks", "test_targets", "history"] }
 
 [profile.release]
 opt-level = 3
