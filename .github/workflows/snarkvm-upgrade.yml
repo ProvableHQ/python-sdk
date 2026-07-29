@@ -19,6 +19,13 @@ on:
   schedule:
     - cron: "0 15 * * *"  # 08:00 PDT (07:00 PST — GitHub cron is UTC-only)
 
+# One upgrade attempt at a time: a manual dispatch overlapping the cron would
+# otherwise put two agents on the same snarkvm-upgrade/<tag> branch. Queue
+# rather than cancel — a mid-flight run has real work in progress.
+concurrency:
+  group: snarkvm-upgrade
+  cancel-in-progress: false
+
 permissions:
   contents: write
   pull-requests: write

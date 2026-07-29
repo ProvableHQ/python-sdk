@@ -22,7 +22,9 @@ current=""
 if [[ "${1:-}" == "--current" ]]; then
   current="${2:?--current requires a tag argument}"
 else
-  dep_line=$(grep -m1 '^snarkvm = {' "$CARGO_TOML")
+  # Fail-soft the grep so the parse error below reports the real problem
+  # rather than set -e killing the script with a bare exit 1.
+  dep_line=$(grep -m1 '^snarkvm = {' "$CARGO_TOML" || true)
   if [[ $dep_line =~ tag\ =\ \"(v[0-9]+\.[0-9]+\.[0-9]+)\" ]]; then
     current="${BASH_REMATCH[1]}"
   elif [[ $dep_line =~ version\ =\ \"([0-9]+\.[0-9]+\.[0-9]+)\" ]]; then
@@ -37,7 +39,7 @@ latest=$(git ls-remote --tags "$REPO_URL" \
   | awk '{print $2}' \
   | sed 's|^refs/tags/||; s|\^{}$||' \
   | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
-  | sort -uV | tail -1)
+  | sort -uV | tail -1 || true)
 if [[ -z "$latest" ]]; then
   echo "error: no vX.Y.Z release tags found on $REPO_URL" >&2
   exit 1
@@ -77,7 +79,10 @@ if [[ -n "$devnode_latest" ]]; then
   devnode_dep=$(curl -fsS \
     "https://raw.githubusercontent.com/ProvableHQ/aleo-devnode/${devnode_latest}/Cargo.toml" \
     2>/dev/null | grep -m1 '^snarkvm ' || true)
-  if [[ $devnode_dep =~ tag\ =\ \"(v[0-9]+\.[0-9]+\.[0-9]+)\" ]]; then
+  # The devnode tracks testnet tags as often as mainnet ones, so keep any
+  # testnet-/canary- prefix verbatim — "testnet-v4.9.0" != "v4.9.0" and the
+  # PR body should say which line the devnode is on.
+  if [[ $devnode_dep =~ tag\ =\ \"((testnet-|canary-)?v[0-9]+\.[0-9]+\.[0-9]+)\" ]]; then
     devnode_snarkvm="${BASH_REMATCH[1]}"
   elif [[ $devnode_dep =~ version\ =\ \"([0-9]+\.[0-9]+\.[0-9]+)\" ]]; then
     devnode_snarkvm="v${BASH_REMATCH[1]}"

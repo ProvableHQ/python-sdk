@@ -13,10 +13,17 @@ adapt the SDK. Same procedure interactively and in CI.
 - Plain commit messages — NO Co-Authored-By trailers, NO "Generated with"
   footers.
 - Every version number comes from a command output. Never guess one.
-- `sdk-abi`'s snarkvm dep is type-coupled to leo: it stays in git-tag form
-  with the exact tag and feature set leo's pinned rev uses, or
-  `Process<N>`/`Program<N>` in leo-disassembler's signatures become distinct
-  types. Never give sdk-abi a crates.io-form snarkvm dep.
+- Dependency form follows one policy: prefer the crates.io release when its
+  version equals the latest GitHub tag; otherwise pin the git tag. The
+  pre-check's `crates_io` output already answers this — don't re-derive it.
+- `sdk-abi` carries an extra constraint on top of that policy: its snarkvm
+  dep must resolve to the **same source** as leo's. Cargo compiles the same
+  crate from two different sources twice, so registry `4.8.1` and
+  `tag = "v4.8.1"` are distinct crates and `Process<N>`/`Program<N>` in
+  leo-disassembler's signatures stop unifying with the SDK's. Mirror leo's
+  snarkvm dep line exactly — same source, version/tag, and features — and
+  never pick sdk-abi's form independently. Verify after building:
+  `grep -c '^name = "snarkvm"' sdk-abi/Cargo.lock` must be 1.
 - Validate seriously before giving up: on failures, re-read the changeset,
   fix, and re-run. Only after several genuine fix attempts do you fall back
   to the draft-PR path in step 8.
@@ -59,7 +66,9 @@ BEFORE editing anything.
 
 ## 3. Bump the pin in sdk/
 
-In `sdk/Cargo.toml`, replace the `snarkvm = {` line:
+In `sdk/Cargo.toml`, replace the `snarkvm = {` line. CRATES_IO=true means
+crates.io publishes a release whose version equals $NEW; false means the tag
+is ahead of the registry, so the git tag is the only way to get $NEW.
 
 - If CRATES_IO=true — switch to the crates.io form, keeping the feature list
   verbatim:
@@ -137,6 +146,8 @@ pip install --force-reinstall dist/aleo_contract_abi_generator-*.whl
 ( cd sdk && python -m pytest python/tests/test_abi_hook.py -v )
 # Build-graph isolation canary — leo feature flags must not leak into sdk:
 test "$(grep -c dev_skip_checks sdk/Cargo.lock || true)" = "0"
+# Source-identity canary — one snarkvm copy, or leo's types won't unify:
+test "$(grep -c '^name = "snarkvm"' sdk-abi/Cargo.lock || true)" = "1"
 ```
 
 On any failure: diagnose against the changeset inventory, fix, re-run the
