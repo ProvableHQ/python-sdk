@@ -7,6 +7,9 @@
 #   latest=v4.8.1         newest bare vX.Y.Z tag upstream (no testnet-/canary-)
 #   crates_io=true|false  is `latest` published on crates.io?
 #   needs_upgrade=true|false
+#   devnode_latest=v0.2.0     newest aleo-devnode release (informational —
+#   devnode_snarkvm=v4.8.1    the SDK carries no devnode pin; this tells the
+#                             upgrade PR whether the devnode will skew)
 #
 # Usage: snarkvm_check.sh [--current vX.Y.Z]
 #   --current overrides pin detection (testing / workflow force_from_tag).
@@ -60,10 +63,34 @@ if [[ "$current" != "$latest" && "$pr_open" == "0" ]]; then
   needs_upgrade=true
 fi
 
+# aleo-devnode compatibility (informational only — never gates the upgrade).
+# Which snarkvm does the latest devnode release pin? Handles both git-tag and
+# crates.io dep forms; fail-soft to "unknown" on network/parse trouble.
+DEVNODE_URL="https://github.com/ProvableHQ/aleo-devnode"
+devnode_latest=$(git ls-remote --tags "$DEVNODE_URL" 2>/dev/null \
+  | awk '{print $2}' \
+  | sed 's|^refs/tags/||; s|\^{}$||' \
+  | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+  | sort -uV | tail -1 || true)
+devnode_snarkvm=unknown
+if [[ -n "$devnode_latest" ]]; then
+  devnode_dep=$(curl -fsS \
+    "https://raw.githubusercontent.com/ProvableHQ/aleo-devnode/${devnode_latest}/Cargo.toml" \
+    2>/dev/null | grep -m1 '^snarkvm ' || true)
+  if [[ $devnode_dep =~ tag\ =\ \"(v[0-9]+\.[0-9]+\.[0-9]+)\" ]]; then
+    devnode_snarkvm="${BASH_REMATCH[1]}"
+  elif [[ $devnode_dep =~ version\ =\ \"([0-9]+\.[0-9]+\.[0-9]+)\" ]]; then
+    devnode_snarkvm="v${BASH_REMATCH[1]}"
+  fi
+fi
+devnode_latest="${devnode_latest:-unknown}"
+
 out="current=$current
 latest=$latest
 crates_io=$crates_io
-needs_upgrade=$needs_upgrade"
+needs_upgrade=$needs_upgrade
+devnode_latest=$devnode_latest
+devnode_snarkvm=$devnode_snarkvm"
 echo "$out"
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   echo "$out" >> "$GITHUB_OUTPUT"

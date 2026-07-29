@@ -32,6 +32,11 @@ exists for it — check `gh pr list --head "snarkvm-upgrade/<latest>"`) and
 STOP. Otherwise set CUR=<current>, NEW=<latest>, CRATES_IO=<crates_io> and
 continue.
 
+Also note `devnode_latest`/`devnode_snarkvm`: which snarkvm the newest
+aleo-devnode release pins. Purely informational — the SDK carries no devnode
+pin (the binary comes from PATH and `-m devnode` tests skip in CI) — but the
+PR body must say whether the devnode matches $NEW (step 8).
+
 ## 2. Study the changeset
 
 Use an existing local snarkVM clone if one is available (fetch its tags
@@ -166,7 +171,10 @@ git push -u origin "snarkvm-upgrade/$NEW" --force-with-lease
 - All green → `gh pr create --title "deps: upgrade snarkvm to $NEW" --body ...`
   with: the breaking-change inventory, what was adapted, dep-form decision
   (crates.io vs git, sdk-abi held back or not), validation evidence (which
-  suites ran, pass counts), and the version bumps.
+  suites ran, pass counts), the version bumps, and a devnode-compatibility
+  line: "aleo-devnode <devnode_latest> pins snarkvm <devnode_snarkvm> —
+  matches $NEW" or "— lags $NEW: local `-m devnode` e2e tests may skip on
+  fee/consensus skew until a devnode release adopts it".
 - Genuinely stuck after repeated fix attempts → same but
   `gh pr create --draft`, body additionally lists exact failing tests with
   output excerpts and what was attempted.
