@@ -1,6 +1,7 @@
-# Daily snarkVM upgrade check. On a new upstream release, a Claude session
-# runs the /upgrade-snarkvm skill (.agents/skills/upgrade-snarkvm/SKILL.md)
-# to bump, adapt, validate, and open a PR.
+# Daily upstream-dependency check for snarkvm (sdk/) and leo (sdk-abi/). When
+# either is behind its latest release, a Claude session runs the
+# /upgrade-snarkvm skill (.agents/skills/upgrade-snarkvm/SKILL.md) to bump,
+# adapt, validate, and open a PR.
 #
 # One-time setup (repo secrets):
 #   ANTHROPIC_API_KEY    — for claude-code-action
@@ -13,7 +14,11 @@ on:
   workflow_dispatch:
     inputs:
       force_from_tag:
-        description: "Pretend the SDK is pinned at this tag (testing, e.g. v4.8.0)"
+        description: "Pretend sdk/ pins this snarkvm tag (testing, e.g. v4.8.0)"
+        required: false
+        default: ""
+      force_leo_from_version:
+        description: "Pretend sdk-abi/ pins this leo version (testing, e.g. 4.3.2)"
         required: false
         default: ""
   schedule:
@@ -36,16 +41,32 @@ jobs:
     outputs:
       current: ${{ steps.check.outputs.current }}
       latest: ${{ steps.check.outputs.latest }}
+      leo_current: ${{ steps.check.outputs.leo_current }}
+      leo_latest: ${{ steps.check.outputs.leo_latest }}
+      snarkvm_needs_upgrade: ${{ steps.check.outputs.snarkvm_needs_upgrade }}
+      leo_needs_upgrade: ${{ steps.check.outputs.leo_needs_upgrade }}
+      branch: ${{ steps.check.outputs.branch }}
       needs_upgrade: ${{ steps.check.outputs.needs_upgrade }}
     steps:
       - uses: actions/checkout@v4
       - id: check
+        # Dispatch inputs come through env, not ${{ }} interpolation into the
+        # script body, so a crafted value is data rather than shell syntax.
         env:
           GH_TOKEN: ${{ github.token }}
+          FORCE_TAG: ${{ inputs.force_from_tag }}
+          FORCE_LEO: ${{ inputs.force_leo_from_version }}
         run: |
           args=()
-          if [ -n "${{ inputs.force_from_tag }}" ]; then
-            args=(--current "${{ inputs.force_from_tag }}")
+          if [ -n "$FORCE_TAG" ]; then
+            [[ $FORCE_TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+              || { echo "::error::force_from_tag must look like v4.8.0"; exit 1; }
+            args+=(--current "$FORCE_TAG")
+          fi
+          if [ -n "$FORCE_LEO" ]; then
+            [[ $FORCE_LEO =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+              || { echo "::error::force_leo_from_version must look like 4.3.2"; exit 1; }
+            args+=(--leo-current "$FORCE_LEO")
           fi
           bash .github/scripts/snarkvm_check.sh "${args[@]}"
 
@@ -81,6 +102,6 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.SNARKVM_UPGRADE_PAT }}
-          prompt: "/upgrade-snarkvm — upgrading ${{ needs.check.outputs.current }} -> ${{ needs.check.outputs.latest }}. You are in CI: work non-interactively to completion."
+          prompt: "/upgrade-snarkvm — snarkvm ${{ needs.check.outputs.current }} -> ${{ needs.check.outputs.latest }} (needed: ${{ needs.check.outputs.snarkvm_needs_upgrade }}); leo ${{ needs.check.outputs.leo_current }} -> ${{ needs.check.outputs.leo_latest }} (needed: ${{ needs.check.outputs.leo_needs_upgrade }}); branch ${{ needs.check.outputs.branch }}. Re-run the pre-check yourself for the full outputs. You are in CI: work non-interactively to completion."
           claude_args: |
             --allowedTools "Bash,Read,Edit,Write,Glob,Grep"
