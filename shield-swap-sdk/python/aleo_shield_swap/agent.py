@@ -2,7 +2,7 @@
 
 ``shield_swap_tools()`` returns tool definitions in the Claude API ``tools=``
 shape (name / description / input_schema) — they plug into any framework
-that speaks JSON-schema tools.  ``dispatch_tool(dex, name, args)`` executes
+that accepts JSON-schema tools.  ``dispatch_tool(dex, name, args)`` executes
 one against a :class:`~aleo_shield_swap.client.ShieldSwap` (write methods run
 ``.delegate()``) and returns a JSON-serializable result.  The surface is the
 curated lifecycle set — swap handles and counters live in the profile

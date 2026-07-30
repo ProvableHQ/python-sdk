@@ -734,8 +734,8 @@ class ShieldSwap:
                             amount_in: int) -> Optional[int]:
         """Base-unit expected output for a trade, via the route quote.
 
-        The route endpoint speaks canonical decimal amounts, the contract
-        speaks base units — this converts in both directions using the
+        The route endpoint returns canonical decimal amounts, the contract
+        takes base units — this converts in both directions using the
         token registry's decimals.  None (spot fallback) when either token
         is unknown or no route is quotable.
         """

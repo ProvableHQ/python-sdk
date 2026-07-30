@@ -74,6 +74,22 @@ instruction, or delete it.
 reading a field rather than assuming a default."""
 ```
 
+### Plain verbs
+
+Say what the code does, not what it is like. A service or object does not
+"speak", "know", "want", or "see" — it returns, accepts, requires, stores,
+decrypts. Figurative verbs read as style and cost the reader a translation step.
+
+```python
+# Bad — figurative
+"""The API speaks decimal amounts; the contract speaks base units."""
+"""Every pool the indexer knows."""
+
+# Good — plain
+"""The API returns decimal amounts; the contract takes base units."""
+"""Every pool the DEX lists."""
+```
+
 ## Naming in prose and examples
 
 - Use the Pythonic surface: properties (`key.address`, not `key.address()`),

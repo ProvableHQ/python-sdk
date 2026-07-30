@@ -274,7 +274,7 @@ management still require a session JWT.
 
 ### `api.get_pools(self) -> 'list[PoolEntry]'`
 
-Every pool the indexer knows, each with its two tokens' metadata.
+Every pool the DEX lists, each with its two tokens' metadata.
 
 An entry exposes the pool's own fields directly — ``entry.key`` is the
 ``pool_key`` that ``swap``, ``mint``, and ``collect`` take.  Its
@@ -286,11 +286,10 @@ before reading.
 
 Every token the DEX lists, with its id, symbol, and decimals.
 
-``decimals`` converts between the two amount conventions in play: this
-API quotes and accepts canonical decimal amounts (``"1.5"``), while the
-on-chain methods — ``swap(amount_in=…)``, ``mint``, ``collect`` — take
-raw base units.  Scale by ``10 ** decimals`` per token; the value differs
-between tokens, so it cannot be assumed.
+``decimals`` converts between the two amount conventions.
+The API returns canonical decimal amounts (``"1.5"``), if using this
+value to call on-chain methods — ``swap(amount_in=…)``, ``mint``,
+``collect`` — conversion to raw base units is necessary.
 
 ### `api.get_route(self, *, token_in: 'str', token_out: 'str', amount_in: 'Any' = None) -> 'models.RouteResultDoc'`
 
