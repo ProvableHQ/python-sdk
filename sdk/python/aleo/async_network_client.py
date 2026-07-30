@@ -200,8 +200,7 @@ class AsyncAleoNetworkClient:
         """Point record scanning at a specific scanner host.
 
         The current network name is appended for you, so pass the base without
-        it. Note that delegating a scan shares your view key with the service —
-        run your own scanner if that tradeoff is unacceptable.
+        it. Note that delegating a scan shares your view key with the service.
 
         Args:
             record_scanner_uri: Scanner base without the network suffix, e.g.

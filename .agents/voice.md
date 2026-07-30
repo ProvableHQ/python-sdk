@@ -90,4 +90,6 @@ reading a field rather than assuming a default."""
 This is a privacy chain. Do not document or add affordances that link
 signatures to signer addresses (no `recover`-style verb). When a feature shares
 secret material with a service (e.g. delegated record scanning shares the view
-key), state that tradeoff plainly and point to the self-hosted alternative.
+key), state that tradeoff plainly. Do not offer self-hosting as the remedy — it
+is not advice anyone acts on; point to the supported extension point instead
+(e.g. assigning a custom ``RecordProvider``).

@@ -22,9 +22,8 @@ class RecordProvider(Protocol):
     The default implementation is :class:`~aleo.facade.records.RecordsModule`
     (``aleo.records``), which wraps a delegated :class:`~aleo.record_scanner.RecordScanner`.
     Any object that satisfies this Protocol can be assigned to
-    ``aleo.record_provider`` — e.g. a self-hosted scanner wrapper — so callers
-    who do not want to share their view key with a hosted scanning service can
-    plug in their own source of records.
+    ``aleo.record_provider``, so callers who do not want to share their view key
+    with a hosted scanning service can plug in their own source of records.
 
     Implementations are consumed by :meth:`~aleo.facade.call.BoundCall.build_transaction`
     (and the rest of the verb ladder) to auto-source a credits record for a

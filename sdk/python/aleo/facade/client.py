@@ -121,10 +121,9 @@ class Aleo:
         """The :class:`~aleo._facade_common.RecordProvider` used to auto-source records.
 
         Defaults to :attr:`records` (``aleo.records``), which wraps a delegated
-        record scanner.  Assign a custom provider (e.g. a self-hosted scanner
-        wrapper) to keep your view key private, or set it to ``None`` to disable
-        automatic record sourcing (private fees then require an explicit
-        ``fee_record``).
+        record scanner.  Assign a custom provider to keep your view key out of
+        that service, or set it to ``None`` to disable automatic record sourcing
+        (private fees then require an explicit ``fee_record``).
         """
         return self._record_provider
 
