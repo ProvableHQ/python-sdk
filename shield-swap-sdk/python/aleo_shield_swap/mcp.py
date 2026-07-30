@@ -90,6 +90,12 @@ def _build_dex() -> Any:
 
 
 def main() -> None:
+    """Serve the shield_swap MCP tools over stdio until the client disconnects.
+
+    Builds a DEX client first, which binds a key from ``ALEO_PRIVATE_KEY`` or
+    else creates/loads the local participant profile on disk. Blocks for the
+    lifetime of the server; requires the ``[mcp]`` extra.
+    """
     import anyio
     from mcp.server.stdio import stdio_server
 

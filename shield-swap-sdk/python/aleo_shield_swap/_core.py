@@ -239,6 +239,12 @@ def register_program_sources(aleo: Any, sources: dict[str, str]) -> None:
     added: set[str] = set()
 
     def add(pid: str) -> None:
+        """Register *pid* and its imports, dependencies first.
+
+        Skips ``credits.aleo`` (already seeded), programs handled in this pass,
+        anything absent from *sources*, and programs the process already holds —
+        so repeated calls are cheap and safe.
+        """
         if pid == "credits.aleo" or pid in added or pid not in sources:
             return
         added.add(pid)

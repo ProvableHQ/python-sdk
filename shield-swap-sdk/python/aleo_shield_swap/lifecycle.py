@@ -46,12 +46,24 @@ class _Ctx:
         return self._wrappers
 
     def funded(self) -> bool:
+        """True once any wrapper-underlying program holds a private balance.
+
+        Reads private balances, so it needs the account's view key and costs a
+        record scan per wrapper program. Any non-zero balance counts as funded.
+        """
         balances = self.dex.get_private_balances(self.wrapper_programs())
         return any(v > 0 for v in balances.values())
 
 
 @dataclass
 class Stage:
+    """One resumable step of registration: how to tell it is done, and how to do it.
+
+    ``is_done`` is checked before ``run``, so a stage already satisfied is skipped
+    — that is what makes onboarding idempotent across sessions. Both receive the
+    shared context; ``run`` returns a one-line detail for the journal.
+    """
+
     name: str
     is_done: Callable[[_Ctx], bool]
     run: Callable[[_Ctx], str]          # returns a one-line detail

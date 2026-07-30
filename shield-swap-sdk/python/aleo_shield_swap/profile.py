@@ -62,6 +62,10 @@ class Profile:
 
     @staticmethod
     def default_home() -> Path:
+        """Where profiles live by default: ``$SHIELD_SWAP_HOME`` or ``~/.shield-swap``.
+
+        Local only — returns the path whether or not it exists.
+        """
         env = os.environ.get("SHIELD_SWAP_HOME")
         return Path(env) if env else Path.home() / ".shield-swap"
 
@@ -69,6 +73,25 @@ class Profile:
     def load_or_create(cls, home: "Path | str | None" = None, *,
                        network: str = "testnet",
                        endpoint: str = DEFAULT_ENDPOINT) -> "Profile":
+        """Load the profile at *home*, creating one with fresh keys if absent.
+
+        Creating a profile writes a private key to disk at mode 600; an existing
+        profile file has its mode tightened to 600 on load, healing a loose one.
+        The key comes from ``SHIELD_SWAP_PRIVATE_KEY`` (or the file named by
+        ``SHIELD_SWAP_PRIVATE_KEY_FILE``) when set, so a user with an existing
+        account supplies it out-of-band rather than pasting it into a chat.
+
+        *network* and *endpoint* apply only when creating — they are ignored for an
+        existing profile, which keeps the values it was created with.
+
+        Args:
+            home: Profile directory; defaults to :meth:`default_home`.
+            network: Network to bind a NEW profile to.
+            endpoint: API endpoint to record on a NEW profile.
+
+        Returns:
+            The loaded or newly created profile.
+        """
         home = Path(home) if home is not None else cls.default_home()
         path = home / _PROFILE
         if path.exists():
@@ -85,24 +108,44 @@ class Profile:
 
     @property
     def address(self) -> str:
+        """The profile's Aleo address (``aleo1…``) — the public half of its key."""
         return self._data["address"]
 
     @property
     def private_key(self) -> str:
+        """The profile's private key, read from disk.
+
+        Whoever holds this controls the account and can decrypt its records — do
+        not log it, echo it into a conversation, or send it to a service.
+        """
         return self._data["private_key"]
 
     @property
     def network(self) -> str:
+        """Network this profile is bound to; fixed when the profile was created.
+
+        Key derivations are network-scoped, so reusing a profile against the other
+        network yields keys that do not match anything on chain.
+        """
         return self._data["network"]
 
     @property
     def endpoint(self) -> str:
+        """API endpoint recorded for this profile, or the package default.
+
+        Older profiles predate the stored field and fall back to the default.
+        """
         return self._data.get("endpoint", DEFAULT_ENDPOINT)
 
     # ── Credentials ──────────────────────────────────────────────────────────
 
     @property
     def credentials(self) -> dict[str, str]:
+        """DEX credentials saved for this profile — API tokens and session data.
+
+        Re-read from disk on every access, so a value written by another process
+        is picked up. A missing file reads as an empty dict rather than raising.
+        """
         path = self.home / _CREDENTIALS
         return json.loads(path.read_text()) if path.exists() else {}
 
@@ -113,4 +156,9 @@ class Profile:
 
     @property
     def journal_path(self) -> Path:
+        """Where this profile's :class:`~aleo_shield_swap.journal.Journal` lives.
+
+        Returns the path whether or not the file exists — the journal creates it
+        on first append.
+        """
         return self.home / "journal.jsonl"

@@ -110,6 +110,18 @@ class RecordsModule:
 
     @scanner.setter
     def scanner(self, scanner: Any) -> None:
+        """Replace the underlying record scanner.
+
+        Assigning here bypasses the lazy default, so the client's provider config
+        is not consulted afterwards.
+
+        Parameters
+        ----------
+        scanner:
+            A pre-configured :class:`~aleo.record_scanner.RecordScanner`.  Point
+            it at a self-hosted endpoint to keep your view key off the hosted
+            service.
+        """
         self._scanner = scanner
 
     # ── Registration / lifecycle ─────────────────────────────────────────────

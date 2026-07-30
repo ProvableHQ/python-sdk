@@ -99,6 +99,14 @@ class Aleo:
 
     @default_account.setter
     def default_account(self, account: Any) -> None:
+        """Set the account verbs fall back to when no signer is passed.
+
+        Parameters
+        ----------
+        account:
+            The account to sign with by default.  Set to ``None`` to require an
+            explicit signer on every verb.
+        """
         self._default_account = account
 
     # ── Record provider ──────────────────────────────────────────────────────
@@ -117,6 +125,16 @@ class Aleo:
 
     @record_provider.setter
     def record_provider(self, provider: Any) -> None:
+        """Replace the provider that auto-sources records for private fees.
+
+        Parameters
+        ----------
+        provider:
+            A :class:`~aleo._facade_common.RecordProvider`.  Assign a self-hosted
+            wrapper to avoid sharing your view key with the hosted scanner, or
+            ``None`` to disable automatic sourcing — private fees then require an
+            explicit ``fee_record``.
+        """
         self._record_provider = provider
 
     # ── Network identity ───────────────────────────────────────────────────

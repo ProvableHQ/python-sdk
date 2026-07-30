@@ -133,10 +133,20 @@ class Devnode:
 
     @property
     def socket_addr(self) -> str:
+        """The node's ``host:port``, as passed to the binary's ``--socket-addr``.
+
+        Loopback only — the devnode is never reachable off this machine. Reads the
+        resolved port, so it is meaningful only once the node has started.
+        """
         return f"127.0.0.1:{self.port}"
 
     @property
     def base_url(self) -> str:
+        """The node's REST root, ready to hand to ``HTTPProvider`` or a client.
+
+        Plain HTTP on loopback. Treated as a literal read base rather than the
+        hosted API, so no delegated prover or scanner is wired up against it.
+        """
         return f"http://{self.socket_addr}"
 
     # ── Lifecycle ───────────────────────────────────────────────────────────

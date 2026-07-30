@@ -229,6 +229,13 @@ class ShieldSwap:
         return g.SwapOutput.from_plaintext(raw)
 
     def is_pool_initialized(self, pool_key: str) -> bool:
+        """True once *pool_key* has been initialized on chain. Reads a mapping.
+
+        A pool must be initialized before it will accept swaps or liquidity, so
+        check this before quoting against a key you derived rather than listed.
+        An absent mapping entry reads as False, which is also what an unknown key
+        gives you — this does not distinguish the two.
+        """
         raw = self._mapping_value("initialized_pools", pool_key)
         return raw is not None and "true" in raw
 
@@ -315,10 +322,25 @@ class ShieldSwap:
     # ── Pure derivations (no network) ────────────────────────────────────────
 
     def derive_pool_key(self, token0: str, token1: str, fee: int) -> str:
+        """Compute the pool key for a token pair and fee tier. Local — no network.
+
+        Deriving a key never implies the pool exists; pass the result to
+        :meth:`is_pool_initialized` before quoting or trading against it.  The
+        derivation is sensitive to token order and is network-scoped, so swapping
+        *token0* and *token1*, or reusing a key across mainnet and testnet, yields
+        a valid-looking ``field`` that matches nothing on chain.  *fee* is the
+        contract's ``u16`` fee tier.
+        """
         return _derive_pool_key(token0, token1, fee,
                                 network=self._aleo.network_name)
 
     def derive_tick_key(self, pool_key: str, tick: int) -> str:
+        """Compute the key of one tick within a pool. Local — no network.
+
+        *tick* is a signed index, and the returned ``field`` is what reads that
+        tick's on-chain state — the initialized-tick list ``mint`` validates its
+        hints against.  Network-scoped like :meth:`derive_pool_key`.
+        """
         return _derive_tick_key(pool_key, tick, network=self._aleo.network_name)
 
     def find_tick_predecessor(self, pool_key: str, new_tick: int,
@@ -544,6 +566,12 @@ class ShieldSwap:
                         route.function)(*inputs)
 
         def build_result(tx_id: str, outputs: list[Any]) -> SwapHandle:
+            """Assemble the swap handle, carrying the blinding secret forward.
+
+            The first public ``field`` output is the swap id; it stays ``None`` if
+            the transition published none, which leaves the handle unclaimable
+            until the id is recovered from the transaction.
+            """
             swap_id = next(
                 (o for o in outputs if isinstance(o, str) and o.endswith("field")),
                 None,
@@ -635,6 +663,11 @@ class ShieldSwap:
                         route.function)(*inputs)
 
         def build_result(tx_id: str, outputs: list[Any]) -> ClaimResult:
+            """Pair the claim's transaction id with the amounts read pre-flight.
+
+            The amounts come from the finalized swap output fetched before
+            building, not from *outputs* — the claim transition publishes none.
+            """
             return ClaimResult(tx_id, out.amount_out, out.amount_remaining)
 
         return DexCall(self._aleo, bound, build_result)
@@ -913,6 +946,11 @@ class ShieldSwap:
         bound = self._aleo.programs.get(self.program).functions.create_pool(*inputs)
 
         def build_result(tx_id: str, outputs: list[Any]) -> TxResult:
+            """Pull the new pool's key out of the transition's public outputs.
+
+            The first ``field`` output is the key; it stays ``None`` if the
+            transition published none.
+            """
             key = next((o for o in outputs if isinstance(o, str) and o.endswith("field")), None)
             return TxResult(position_token_id=key, transaction_id=tx_id)
 
@@ -1025,6 +1063,12 @@ class ShieldSwap:
         base_build = self._position_result(MintResult)
 
         def build_result(tx_id: str, outputs: list[Any]) -> MintResult:
+            """Build the mint result and journal the new position.
+
+            Journaling is what lets a later session find this position without a
+            record scan; it is skipped when no journal is configured, or when the
+            transition published no position id to key it by.
+            """
             result = base_build(tx_id, outputs)
             if self.journal is not None and result.position_token_id:
                 self.journal.record_position(result.position_token_id,
@@ -1185,6 +1229,12 @@ class ShieldSwap:
         base_build = self._position_result(TxResult)
 
         def build_result(tx_id: str, outputs: list[Any]) -> TxResult:
+            """Build the burn result and mark the position closed in the journal.
+
+            Uses the id parsed from the spent position record rather than the
+            transition outputs, so the journal is updated even when the burn
+            publishes nothing.
+            """
             result = base_build(tx_id, outputs)
             if self.journal is not None and pid:
                 self.journal.record_position_burned(pid, tx_id)
@@ -1196,6 +1246,11 @@ class ShieldSwap:
     def _position_result(result_cls: Any) -> Any:
         """Result builder: first public ``field`` output is the position id."""
         def build(tx_id: str, outputs: list[Any]) -> Any:
+            """Construct *result_cls* from the position id and transaction id.
+
+            The position id is the first public ``field`` output, or ``None`` if
+            the transition published none.
+            """
             pid = next((o for o in outputs if isinstance(o, str) and o.endswith("field")), None)
             return result_cls(pid, tx_id)
         return build

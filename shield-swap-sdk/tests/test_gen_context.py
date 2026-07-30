@@ -42,6 +42,8 @@ def test_committed_page_is_current():
 
 
 def test_page_stays_compact():
-    # ~5k tokens — cheap context, enforced.  Raised 20k → 22k with the
-    # router-dispatch surface (wrapper_proofs / withdrawal params).
-    assert len(_render()) < 22_000
+    # ~6k tokens — cheap context, enforced.  Raised 20k → 22k with the
+    # router-dispatch surface (wrapper_proofs / withdrawal params); 22k → 24k
+    # when get_pools/get_tokens/derive_pool_key/derive_tick_key picked up full
+    # docstrings (they rendered blank before).
+    assert len(_render()) < 24_000

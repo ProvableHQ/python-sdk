@@ -36,10 +36,29 @@ class SwapHandle:
     program: str
 
     def to_json(self) -> str:
+        """Serialize the handle to JSON for storage or hand-off.
+
+        Includes the blinding factor, so the output is secret-bearing — treat it
+        like a key. Round-trips through :meth:`from_json`.
+        """
         return json.dumps(asdict(self))
 
     @classmethod
     def from_json(cls, s: str) -> "SwapHandle":
+        """Rebuild a handle from :meth:`to_json` output.
+
+        Args:
+            s: JSON produced by :meth:`to_json`.
+
+        Returns:
+            The restored handle, ready to claim.
+
+        Raises:
+            json.JSONDecodeError: If *s* is not valid JSON.
+            TypeError: If the JSON omits a field or carries an unknown one — the
+                handle is rebuilt strictly, so a partial object fails loudly
+                rather than producing an unclaimable handle.
+        """
         return cls(**json.loads(s))
 
 
@@ -54,6 +73,12 @@ class ClaimResult:
 
 @dataclass(frozen=True)
 class MintResult:
+    """Outcome of a mint: the new position's id and the transaction that made it.
+
+    ``position_token_id`` is ``None`` when the transition published no id, which
+    leaves the position discoverable only by a record scan.
+    """
+
     position_token_id: Optional[str]
     transaction_id: str
 
@@ -85,6 +110,11 @@ class SlotView:
 
     @property
     def raw(self) -> Slot:
+        """The wrapped slot (escape hatch), with no fixed-point interpretation.
+
+        Prefer :meth:`price` and the other helpers — reading ``sqrt_price`` off
+        this directly means re-deriving the Q128.128 conversion yourself.
+        """
         return self._slot
 
     def price(self, decimals0: int, decimals1: int) -> Decimal:

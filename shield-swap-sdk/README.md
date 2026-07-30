@@ -128,8 +128,8 @@ funds required; the session rides as httpOnly cookies + a CSRF header and
 is short-lived — mint a durable `ss_…` token via `create_api_token` for
 anything long-running). Accounts additionally need a one-time invite:
 `redeem_code` takes the **referral code** a human pasted; access codes are
-a separate programmatic self-registration tier
-(`generate_access_codes` / `redeem_access_code`).
+a separate programmatic tier (`redeem_access_code`). Minting invite or access
+codes is deliberately not exposed by this SDK — obtain a code out-of-band.
 
 ## Privacy
 

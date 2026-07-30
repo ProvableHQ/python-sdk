@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from aleo_shield_swap.api import ApiClient
+from aleo_shield_swap.api import ApiClient, AsyncApiClient
 from aleo_shield_swap.errors import DexApiError
 
 POOLS = json.loads((Path(__file__).parent / "fixtures" / "pools_response.json").read_text())
@@ -207,19 +207,22 @@ async def test_async_lifecycle_endpoints():
         await api.request_airdrop("aleo1a")
 
 
-def test_access_code_self_registration_flow():
-    # Operators mint access codes and redeem them programmatically —
-    # a separate surface from the human referral-paste path.
+def test_access_code_redeem_flow():
+    # Access codes are redeemed programmatically — a separate surface from the
+    # human referral-paste path.  Minting is deliberately not exposed by the
+    # SDK, so a code arrives out-of-band from an operator.
     api, s = _lifecycle_client(
-        _Resp(200, {"data": {"codes": ["ACODE12CHARS"]}}),
         _Resp(200, {"data": {"code": "ACODE12CHARS", "status": "redeemed"}}),
     )
-    codes = api.generate_access_codes()
-    assert codes == ["ACODE12CHARS"]
-    out = api.redeem_access_code(codes[0])
+    out = api.redeem_access_code("ACODE12CHARS")
     assert out.status == "redeemed"
-    assert [c[1] for c in s.calls] == ["https://x/access/generate",
-                                       "https://x/access/redeem"]
+    assert [c[1] for c in s.calls] == ["https://x/access/redeem"]
+
+
+def test_minting_access_codes_is_not_exposed():
+    # Guard the removal: the SDK must not offer a way to mint invites.
+    for cls in (ApiClient, AsyncApiClient):
+        assert not hasattr(cls, "generate_access_codes"), cls.__name__
 
 
 def test_cookie_session_outranks_bearer():

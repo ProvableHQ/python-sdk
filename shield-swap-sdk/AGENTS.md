@@ -243,10 +243,9 @@ Whether this authenticated account has redeemed an invite code.
 Redeem a pasted invite — always a REFERRAL code.
 
 User-shared invites are referral codes (``/referral/redeem``);
-that is the ONLY kind a person pastes.  Access codes are a
-programmatic self-registration flow — see
-:meth:`generate_access_codes` / :meth:`redeem_access_code` —
-never routed through here.
+that is the ONLY kind a person pastes.  Access codes are a separate
+programmatic tier — see :meth:`redeem_access_code` — never routed
+through here.
 
 Sessions moved to the ``/auth/*`` endpoints, so no token comes
 back — re-authenticate if needed (one is still adopted if the API
@@ -275,11 +274,23 @@ management still require a session JWT.
 
 ### `api.get_pools(self) -> 'list[PoolEntry]'`
 
+Every pool the indexer knows, with its two tokens' metadata.
 
+Each :class:`PoolEntry` pairs the pool state with ``token0_info`` /
+``token1_info`` and delegates attribute access to the state, so
+``entry.key`` gives the ``pool_key`` every trading and liquidity verb
+takes.  Those two info fields are undocumented API extras — either may be
+``None`` if the deployment stops sending them, so reach for them
+defensively when routing wrapped assets off ``amm_token_program`` /
+``underlying_program``.
 
 ### `api.get_tokens(self) -> 'list[models.TokenDoc]'`
 
+Every token the DEX lists, with its id, symbol, and decimals.
 
+``decimals`` is the bridge between the two amount conventions in play:
+the API quotes canonical decimal amounts (``1.5``), while the on-chain
+verbs take raw base units.  Convert with it rather than assuming 6.
 
 ### `api.get_route(self, *, token_in: 'str', token_out: 'str', amount_in: 'Any' = None) -> 'models.RouteResultDoc'`
 
@@ -428,9 +439,20 @@ privately).  Requires a configured record provider.
 
 ### `derive_pool_key(self, token0: 'str', token1: 'str', fee: 'int') -> 'str'`
 
+Compute the pool key for a token pair and fee tier. Local — no network.
 
+Deriving a key never implies the pool exists; pass the result to
+:meth:`is_pool_initialized` before quoting or trading against it.  The
+derivation is sensitive to token order and is network-scoped, so swapping
+*token0* and *token1*, or reusing a key across mainnet and testnet, yields
+a valid-looking ``field`` that matches nothing on chain.  *fee* is the
+contract's ``u16`` fee tier.
 
 ### `derive_tick_key(self, pool_key: 'str', tick: 'int') -> 'str'`
 
+Compute the key of one tick within a pool. Local — no network.
 
+*tick* is a signed index, and the returned ``field`` is what reads that
+tick's on-chain state — the initialized-tick list ``mint`` validates its
+hints against.  Network-scoped like :meth:`derive_pool_key`.
 

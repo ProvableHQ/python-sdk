@@ -53,6 +53,15 @@ SDK_HEADERS: set[str] = {"x-aleo-sdk-version", "x-aleo-environment", "x-aleo-met
 
 
 def package_version() -> str:
+    """Return the installed SDK version, for the telemetry headers.
+
+    Checks the current distribution name first, then the pre-0.2 name, so older
+    installs still report their real version.
+
+    Returns:
+        The version string, or ``"0.0.0"`` when the package metadata cannot be
+        read (a source tree that was never installed).
+    """
     from importlib.metadata import version
 
     # "aleo" is the pre-0.2 distribution name; keep it as a fallback so
@@ -78,6 +87,13 @@ def user_agent() -> str:
 
 
 def make_default_headers() -> dict[str, str]:
+    """Build the SDK's baseline telemetry headers for a new client.
+
+    Returns:
+        The version and environment headers every default-transport request
+        carries. Callers who pass their own ``headers`` replace these outright,
+        and a custom transport strips them — see :func:`method_headers`.
+    """
     return {
         "X-Aleo-SDK-Version": package_version(),
         "X-Aleo-environment": "python",
@@ -94,6 +110,19 @@ def method_headers(
     method: str,
     has_custom_transport: bool,
 ) -> dict[str, str]:
+    """Build the headers for one request, honouring custom-transport mode.
+
+    Args:
+        headers: The client's configured headers.
+        method: SDK method name, sent as ``X-ALEO-METHOD`` so calls can be
+            attributed server-side.
+        has_custom_transport: True when the caller owns the HTTP layer, in which
+            case every SDK-internal header — including the method name and
+            ``User-Agent`` — is withheld so the caller controls the wire format.
+
+    Returns:
+        The headers to send.
+    """
     if has_custom_transport:
         return user_headers(headers)
     return {**headers, "X-ALEO-METHOD": method, "User-Agent": user_agent()}
@@ -106,6 +135,11 @@ def jwt_origin(host: str) -> str:
 
 
 def now_ms() -> int:
+    """Return the current wall-clock time in epoch milliseconds.
+
+    Matches the unit JWT expiries are stored in, so the two compare directly.
+    Wall-clock, not monotonic — do not use it to measure elapsed time.
+    """
     return int(time.time() * 1000)
 
 
@@ -118,6 +152,16 @@ def jwt_expired(jwt_data: dict[str, Any]) -> bool:
 
 
 def validate_block_range(start: int, end: int) -> None:
+    """Reject a block range the node would refuse, before sending it.
+
+    Args:
+        start: First height of the range.
+        end: Last height of the range.
+
+    Raises:
+        ValueError: If *start* is negative, exceeds *end*, or the span is wider
+            than the 50-block per-request cap.
+    """
     if start < 0:
         raise ValueError("start must be >= 0")
     if start > end:
