@@ -47,6 +47,12 @@ def _initial_key(network: str) -> tuple[str, str]:
 class Profile:
     """A participant's persistent identity and credentials.
 
+    Holds exactly one Aleo address, generated on first use and reused every
+    session after.  For several addresses, create a profile per address — each
+    needs its own home directory (``SHIELD_SWAP_HOME``, or *home* on
+    :meth:`load_or_create`), since the journal and credentials are per-profile
+    too.
+
     Load with :meth:`load_or_create`; the profile is created (with fresh key
     material) when the home directory has none yet.
     """
