@@ -27,7 +27,35 @@ _HANDLE_FIELDS = ("swap_id", "blinding_factor", "blinded_address",
 
 
 class Journal:
-    """Event log at *path* (created on first append)."""
+    """A participant's durable record of swaps, positions, and counters.
+
+    Backs the JSONL file at *path* (created on first append).  It holds the two
+    things the chain cannot give back:
+
+    * every swap's ``blinding_factor`` — the secret
+      :meth:`~aleo_shield_swap.client.ShieldSwap.claim_swap_output` proves
+      knowledge of.  A swap whose handle is lost cannot be claimed by
+      anyone, which is the point of blinding it.
+    * which blinding counters this account has spent, so no two swaps derive
+      the same blinded address.  :meth:`reserve_counters` issues each one once
+      under a file lock, and a failed swap burns its counter rather than
+      recycling it.
+
+    Nothing is stored as state — every event is appended and the views are
+    replayed from the log, so a crash between append and action leaves an event
+    whose action never happened rather than a corrupt file.  Read it through
+    :meth:`pending_claims`, :meth:`open_positions`, and :meth:`counter_cursor`
+    rather than :meth:`events`.
+
+    ``ShieldSwap.from_profile()`` wires one up per profile; ``swap_many`` and
+    ``collect_all`` require it and raise without one.  Treat the file as key
+    material — it carries every blinding factor the account has used.
+
+    Args:
+        path: Where the log lives, usually ``Profile.journal_path``.  Its
+            parent is created on first append, alongside a ``.lock`` sibling
+            used to serialize writers.
+    """
 
     def __init__(self, path: "Path | str") -> None:
         self.path = Path(path)
