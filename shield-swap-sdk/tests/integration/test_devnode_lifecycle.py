@@ -1,4 +1,4 @@
-"""Full AMM lifecycle on a devnode, through the ShieldSwap verbs.
+"""Full AMM lifecycle on a devnode, through the ShieldSwap methods.
 
 Python analog of the TS suite's ``devnodeLifecycle.actions.e2e.test.ts``: a
 non-admin user creates two pools (same pair, two fee tiers), mints and

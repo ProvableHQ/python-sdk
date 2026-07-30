@@ -9,9 +9,9 @@ installed version):
     python -m aleo_shield_swap
 
 Follow its Tier 1 lifecycle and conversation pattern. Write Python against
-the SDK; don't re-implement flows the verbs already provide, and don't read
+the SDK; don't re-implement flows the methods already provide, and don't read
 SDK source unless the guide genuinely lacks the answer. Preconditions are
-enforced in code — on error, read the exception message; it names the verb
+enforced in code — on error, read the exception message; it names the method
 that fixes it.
 
 To install this skill into a Claude Code project, copy this directory to

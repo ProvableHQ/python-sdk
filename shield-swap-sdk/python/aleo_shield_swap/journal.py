@@ -3,7 +3,7 @@
 One JSONL file per profile.  State (pending claims, open positions, the
 counter cursor) is always derived by replaying events, so a crash between
 append and action never corrupts anything; the worst case is an event whose
-action never happened, which downstream verbs tolerate (a claim of a swap
+action never happened, which downstream methods tolerate (a claim of a swap
 that never landed just reports not-finalized).
 
 Counter reservation is the concurrency-critical piece: blinded identities

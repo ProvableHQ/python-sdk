@@ -123,7 +123,7 @@ class ShieldSwap:
             # DPS api key, which the credentials stage provisions.
             aleo.records.register(aleo.default_account)
         except Exception:
-            pass  # offline or scanner down — record verbs will surface it
+            pass  # offline or scanner down — record methods will surface it
         dex = cls(aleo)
         dex.profile = profile
         dex.journal = Journal(profile.journal_path)
@@ -492,7 +492,7 @@ class ShieldSwap:
         Resolves the intent against live pool state, derives a single-use
         blinded identity from the signer's view key, selects an unspent token
         record (or takes *token_record* verbatim), and returns a prepared
-        call.  The terminal verb (``transact``/``delegate``) returns a
+        call.  The terminal method (``transact``/``delegate``) returns a
         :class:`~aleo_shield_swap.types.SwapHandle` — persist it if the
         process might die before the claim.
 

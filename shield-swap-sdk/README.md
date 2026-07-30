@@ -3,7 +3,7 @@
 Typed Python client for the **shield_swap** AMM on Aleo. Sits on top of the
 Aleo Python SDK's facade (`aleo.Aleo`): signer, record provider, proving
 configuration, and network all come from the client you bind — this package
-adds the DEX verbs, the typed results, and the off-chain DEX API, nothing
+adds the DEX methods, the typed results, and the off-chain DEX API, nothing
 else.
 
 ```python
@@ -44,7 +44,7 @@ Requires `aleo-sdk>=0.3` (this repo's SDK; imports as `aleo`) and Python 3.10+.
 ## Agents
 
 `AGENTS.md` (generated from the SDK's docstrings — always current) is the
-one page an agent needs: the five-verb lifecycle, the conversation pattern,
+one page an agent needs: the five-method lifecycle, the conversation pattern,
 and the building-block reference. It ships in the wheel:
 
 ```bash
@@ -59,7 +59,7 @@ can run the same lifecycle through `python -m aleo_shield_swap.mcp`.
 ## How calls work
 
 Every read returns a value immediately. Every write returns a prepared
-`DexCall` — nothing touches the network until you invoke a terminal verb:
+`DexCall` — nothing touches the network until you invoke a terminal method:
 
 ```python
 call = dex.swap(pool_key=key, token_in_id=token, amount_in=10**9)
@@ -69,7 +69,7 @@ call.transact(account)      # proves locally, broadcasts, pays the fee
 call.delegate(account)      # proves via the delegated proving service
 ```
 
-`transact` and `delegate` return the verb's *typed result* (a `SwapHandle`,
+`transact` and `delegate` return the method's *typed result* (a `SwapHandle`,
 `MintResult`, `ClaimResult`, …) built from the transaction's root-transition
 outputs — not a bare transaction id. Local proving downloads SNARK parameters
 on first use and takes minutes for the larger entrypoints; `delegate` is the
@@ -80,7 +80,7 @@ Chain reads and writes live directly on `ShieldSwap`; the off-chain DEX API
 is namespaced under `.api`, so a call site always shows whether a value came
 from the chain or the service.
 
-## The verb surface
+## The method surface
 
 **Chain reads** (node REST API):
 
@@ -150,7 +150,7 @@ Two conveniences trade secret material for service:
 
 ## Async
 
-`AsyncShieldSwap` / `AsyncApiClient` mirror the sync surface verb-for-verb on
+`AsyncShieldSwap` / `AsyncApiClient` mirror the sync surface method-for-method on
 `aleo.AsyncAleo` (install the `[async]` extra):
 
 ```python
@@ -163,7 +163,7 @@ handle = await (await dex.swap(pool_key=key, token_in_id=token,
 
 ## Agent tools and MCP
 
-`shield_swap_tools()` returns JSON-schema tool definitions for the whole verb
+`shield_swap_tools()` returns JSON-schema tool definitions for the whole method
 surface; `dispatch_tool(dex, name, args)` executes one. For MCP hosts, the
 `[mcp]` extra ships a stdio server over the same definitions:
 

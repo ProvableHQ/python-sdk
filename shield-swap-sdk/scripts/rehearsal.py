@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stress-test rehearsal: the four flows, end to end, via the tier-1 verbs.
+"""Stress-test rehearsal: the four flows, end to end, via the tier-1 methods.
 
 Usage: python scripts/rehearsal.py [--code INVITE] [--home DIR]
 Needs: network access.  ``--code`` takes a REFERRAL code (human-pasted by

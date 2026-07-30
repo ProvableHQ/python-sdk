@@ -2,7 +2,7 @@
 
 Reads, balances, and the two-transaction private-swap flow of
 :class:`~aleo_shield_swap.client.ShieldSwap`, with every I/O method
-``async``.  Liquidity verbs are sync-client-only for now.  Pure logic is
+``async``.  Liquidity methods are sync-client-only for now.  Pure logic is
 shared from ``_core``/``derivations`` — only the I/O differs.
 """
 from __future__ import annotations
@@ -381,7 +381,7 @@ class AsyncShieldSwap:
         Resolves the intent against live pool state, derives a single-use
         blinded identity from the signer's view key, selects an unspent token
         record (or takes *token_record* verbatim), and returns a prepared
-        call.  The terminal verb (``transact``/``delegate``) returns a
+        call.  The terminal method (``transact``/``delegate``) returns a
         :class:`~aleo_shield_swap.types.SwapHandle` — persist it if the
         process might die before the claim.
 

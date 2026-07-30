@@ -1,7 +1,7 @@
 """Semantic layer over the generated wire classes.
 
 The generated ``_generated.py`` classes carry the wire shapes; the classes
-here carry meaning: the persistable swap handle, typed verb results, and a
+here carry meaning: the persistable swap handle, typed method results, and a
 ``Slot`` view with Q128.128 price math and range helpers.
 """
 from __future__ import annotations
@@ -85,7 +85,7 @@ class MintResult:
 
 @dataclass(frozen=True)
 class TxResult:
-    """Result of a liquidity verb; ``position_token_id`` when the verb
+    """Result of a liquidity method; ``position_token_id`` when the method
     re-issues/identifies a position, else ``None``."""
 
     position_token_id: Optional[str]
