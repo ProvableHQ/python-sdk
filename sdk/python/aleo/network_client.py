@@ -389,7 +389,7 @@ class AleoNetworkClient:
     # ── Block endpoints ───────────────────────────────────────────────────
 
     def get_block(self, height: int) -> Any:
-        """Fetch the block at *height*. Hits the network.
+        """Fetch the block at *height*.
 
         Args:
             height: Block height to read.
@@ -404,7 +404,7 @@ class AleoNetworkClient:
         return self._get(f"/block/{height}", "getBlock")
 
     def get_block_by_hash(self, block_hash: str) -> Any:
-        """Fetch a block by its hash. Hits the network.
+        """Fetch a block by its hash.
 
         Args:
             block_hash: Block hash (``ab1…``).
@@ -418,11 +418,7 @@ class AleoNetworkClient:
         return self._get(f"/block/{block_hash}", "getBlockByHash")
 
     def get_block_range(self, start: int, end: int) -> list[Any]:
-        """Fetch a range of blocks in one request. Hits the network.
-
-        Whether the block at *end* is included varies by node build — do not
-        rely on the last element being present; ask for one more height than you
-        need, or check the heights you got back.
+        """Fetch a range of blocks in one request.
 
         Args:
             start: First height to fetch; must be non-negative.
@@ -441,7 +437,7 @@ class AleoNetworkClient:
         return self._get(f"/blocks?start={start}&end={end}", "getBlockRange")
 
     def get_latest_block(self) -> Any:
-        """Fetch the newest block the node has. Hits the network.
+        """Fetch the newest block the node has.
 
         Returns:
             The latest block as decoded JSON.
@@ -452,7 +448,7 @@ class AleoNetworkClient:
         return self._get("/block/latest", "getLatestBlock")
 
     def get_latest_height(self) -> int:
-        """Fetch the current chain tip height. Hits the network.
+        """Fetch the current chain tip height.
 
         Cheaper than :meth:`get_latest_block` when you only need the number.
 
@@ -465,7 +461,7 @@ class AleoNetworkClient:
         return int(self._get("/block/height/latest", "getLatestHeight"))
 
     def get_latest_block_hash(self) -> str:
-        """Fetch the hash of the newest block. Hits the network.
+        """Fetch the hash of the newest block.
 
         Returns:
             The latest block hash (``ab1…``).
@@ -476,7 +472,7 @@ class AleoNetworkClient:
         return str(self._get("/block/hash/latest", "getLatestBlockHash"))
 
     def get_latest_committee(self) -> Any:
-        """Fetch the current validator committee. Hits the network.
+        """Fetch the current validator committee.
 
         Returns:
             The committee — members and their stake — as decoded JSON.
@@ -487,7 +483,7 @@ class AleoNetworkClient:
         return self._get("/committee/latest", "getLatestCommittee")
 
     def get_committee_by_height(self, height: int) -> Any:
-        """Fetch the validator committee as of *height*. Hits the network.
+        """Fetch the validator committee as of *height*.
 
         Args:
             height: Block height whose committee you want.
@@ -502,7 +498,7 @@ class AleoNetworkClient:
         return self._get(f"/committee/{height}", "getCommitteeByHeight")
 
     def get_state_root(self) -> str:
-        """Fetch the latest global state root. Hits the network.
+        """Fetch the latest global state root.
 
         The state root pins the chain state an offline query is built against —
         see :class:`OfflineQuery`.
@@ -516,7 +512,7 @@ class AleoNetworkClient:
         return str(self._get("/stateRoot/latest", "getStateRoot"))
 
     def get_state_paths(self, commitments: list[str]) -> list[Any]:
-        """Fetch inclusion proofs for record commitments. Hits the network.
+        """Fetch inclusion proofs for record commitments.
 
         State paths are what let a proof assert that a record was in the global
         state tree without revealing which one — needed to execute offline.
@@ -538,7 +534,7 @@ class AleoNetworkClient:
     # ── Program endpoints ─────────────────────────────────────────────────
 
     def get_program(self, program_id: str, edition: int | None = None) -> str:
-        """Fetch a program's Aleo instructions source. Hits the network.
+        """Fetch a program's Aleo instructions source.
 
         Args:
             program_id: Program to read, e.g. ``"credits.aleo"``.
@@ -556,7 +552,7 @@ class AleoNetworkClient:
         return self._get(f"/program/{program_id}", "getProgramVersion")
 
     def get_latest_program_edition(self, program_id: str) -> int:
-        """Fetch the newest edition number for a program. Hits the network.
+        """Fetch the newest edition number for a program.
 
         Pass the result to :meth:`get_program` to pin a read to the edition you
         checked, rather than racing a later amendment.
@@ -574,7 +570,7 @@ class AleoNetworkClient:
         return int(json.loads(raw))
 
     def get_program_amendment_count(self, program_id: str) -> Any:
-        """Fetch how many times a program has been amended. Hits the network.
+        """Fetch how many times a program has been amended.
 
         Args:
             program_id: Program to read, e.g. ``"credits.aleo"``.
@@ -589,7 +585,7 @@ class AleoNetworkClient:
         return json.loads(raw)
 
     def get_program_object(self, program_id: str, edition: int | None = None) -> Any:
-        """Fetch a program and parse it into a ``Program``. Hits the network.
+        """Fetch a program and parse it into a ``Program``.
 
         Use this over :meth:`get_program` when you want to inspect functions,
         mappings, or imports rather than hold the raw text. The result belongs to
@@ -659,7 +655,7 @@ class AleoNetworkClient:
         return imports
 
     def get_program_import_names(self, program_id: str) -> list[str]:
-        """Fetch the names a program imports directly. Hits the network once.
+        """Fetch the names a program imports directly.
 
         Unlike :meth:`get_program_imports` this does not recurse and does not
         fetch the imported sources — one request, names only.
@@ -679,7 +675,7 @@ class AleoNetworkClient:
         return [str(imp) for imp in prog.imports]
 
     def get_program_mapping_names(self, program_id: str) -> list[str]:
-        """Fetch the names of a program's mappings. Hits the network.
+        """Fetch the names of a program's mappings.
 
         Args:
             program_id: Program whose mappings to list.
@@ -695,7 +691,7 @@ class AleoNetworkClient:
     def get_program_mapping_value(
         self, program_id: str, mapping_name: str, key: str
     ) -> str:
-        """Read one entry out of a program mapping. Hits the network.
+        """Read one entry out of a program mapping.
 
         Args:
             program_id: Program that owns the mapping, e.g. ``"credits.aleo"``.
@@ -723,7 +719,7 @@ class AleoNetworkClient:
 
         Use this over :meth:`get_program_mapping_value` when the value is a struct
         or record and you want to index into it instead of parsing the string
-        yourself. Hits the network.
+        yourself.
 
         Args:
             program_id: Program that owns the mapping.
@@ -746,7 +742,7 @@ class AleoNetworkClient:
         return Plaintext.from_string(json.loads(raw))
 
     def get_public_balance(self, address: str) -> int:
-        """Read an address's public ``credits.aleo`` balance. Hits the network.
+        """Read an address's public ``credits.aleo`` balance.
 
         Public balance only — credits held privately in records are invisible
         here, so a funded account can legitimately report 0.
@@ -768,7 +764,7 @@ class AleoNetworkClient:
     # ── Transaction endpoints ─────────────────────────────────────────────
 
     def get_transaction(self, tx_id: str) -> Any:
-        """Fetch a transaction by ID. Hits the network.
+        """Fetch a transaction by ID.
 
         Returns the transaction whether or not it has been confirmed; use
         :meth:`get_confirmed_transaction` when you need its on-chain outcome.
@@ -785,7 +781,7 @@ class AleoNetworkClient:
         return self._get(f"/transaction/{tx_id}", "getTransaction")
 
     def get_confirmed_transaction(self, tx_id: str) -> Any:
-        """Fetch a transaction along with its confirmed outcome. Hits the network.
+        """Fetch a transaction along with its confirmed outcome.
 
         Args:
             tx_id: Transaction ID (``at1…``).
@@ -804,7 +800,7 @@ class AleoNetworkClient:
         """Fetch a transaction and parse it into a ``Transaction``.
 
         Use this over :meth:`get_transaction` when you want to walk transitions,
-        inputs, or outputs as typed objects. Hits the network.
+        inputs, or outputs as typed objects.
 
         Args:
             tx_id: Transaction ID (``at1…``).
@@ -822,7 +818,7 @@ class AleoNetworkClient:
         return Transaction.from_json(raw)
 
     def get_transactions(self, block_height: int) -> list[Any]:
-        """Fetch every transaction in one block. Hits the network.
+        """Fetch every transaction in one block.
 
         Args:
             block_height: Height of the block to read.
@@ -840,7 +836,7 @@ class AleoNetworkClient:
         """Fetch the transactions this node is holding unconfirmed.
 
         Mempool contents are per-node and change constantly — a transaction
-        missing here may still be in flight elsewhere. Hits the network.
+        missing here may still be in flight elsewhere.
 
         Returns:
             The node's pending transactions as decoded JSON.
@@ -853,8 +849,6 @@ class AleoNetworkClient:
 
     def get_transition_id(self, input_or_output_id: str) -> str:
         """Find which transition produced or consumed an input/output ID.
-
-        Hits the network.
 
         Args:
             input_or_output_id: A transition input or output ID to trace.
@@ -870,7 +864,7 @@ class AleoNetworkClient:
         )
 
     def get_deployment_transaction_id_for_program(self, program_id: str) -> str:
-        """Find the transaction that deployed a program. Hits the network.
+        """Find the transaction that deployed a program.
 
         Args:
             program_id: Deployed program, e.g. ``"credits.aleo"``.
