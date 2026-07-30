@@ -55,6 +55,25 @@ Why it fails: filler ("easily", "powerfully", "seamless"); restates types; says
 "a result" instead of what you get and what you do with it; no side-effect or
 error information.
 
+### Phrasings to avoid
+
+Beyond the filler above, these are banned outright. Each one reads like guidance
+while leaving the caller with nothing to act on — replace it with the concrete
+instruction, or delete it.
+
+- **"reach for"** — never use it. Say what to call and when.
+- **"defensively"**, **"as appropriate"**, **"where necessary"** — name the
+  actual condition instead.
+
+```python
+# Bad — sounds like advice, gives none
+"""… either may be ``None``, so reach for them defensively."""
+
+# Good — states the check and what it protects
+"""… treat both as optional — guard with ``if entry.token0_info`` before
+reading a field rather than assuming a default."""
+```
+
 ## Naming in prose and examples
 
 - Use the Pythonic surface: properties (`key.address`, not `key.address()`),
