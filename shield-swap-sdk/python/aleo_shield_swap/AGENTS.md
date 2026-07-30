@@ -274,22 +274,15 @@ management still require a session JWT.
 
 ### `api.get_pools(self) -> 'list[PoolEntry]'`
 
-Every pool the indexer knows, with its two tokens' metadata.
+Every pool the indexer knows, each with its two tokens' metadata.
 
-:class:`PoolEntry` forwards unknown attributes to the pool state, so
-``entry.key`` is the ``pool_key`` that ``swap``, ``mint``, and
-``collect`` take.
-
-``token0_info`` / ``token1_info`` carry each token's ``symbol``,
-``decimals``, ``amm_token_program``, and ``underlying_program``.  They
-are absent from the API's published schema, so treat both as optional —
-guard with ``if entry.token0_info`` before reading a field rather than
-assuming a default.
-
-This metadata is for display and decimal scaling only.  It does not
-decide routing: ``ShieldSwap`` determines whether a token is wrapped by
-reading the AMM's ``from_wrapper_token_id`` mapping on chain, which stays
-correct even when these fields are missing.
+An entry exposes the pool's own fields directly — ``entry.key`` is the
+``pool_key`` that ``swap``, ``mint``, and ``collect`` take.  Its
+``token0_info`` / ``token1_info`` carry that token's ``symbol`` and
+``decimals``.  Those two are extras the live API happens to return but
+its schema does not promise, so a deployment can stop sending them
+without breaking spec — either can be ``None``, and reading a field off
+one without checking is how that surfaces as an ``AttributeError``.
 
 ### `api.get_tokens(self) -> 'list[models.TokenDoc]'`
 
