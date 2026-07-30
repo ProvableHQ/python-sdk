@@ -301,8 +301,10 @@ class ApiClient:
     def get_swap(self, swap_id: str) -> models.SwapDoc:
         """The indexer's record of one swap, by its id.
 
-        Reflects what the indexer has ingested, so a just-broadcast swap may not
-        be visible yet — raises :class:`DexApiError` (404) until it is.
+        Note: The API may lag slightly behind chain state, so a recently
+        broadcast swap may not be visible immediately and can be retried if a
+        caller has confirmed a swap on chain — raises :class:`DexApiError` (404)
+        until it is.
         """
         return _build(models.SwapDoc, self._get(f"/swaps/{swap_id}")["data"])
 
@@ -322,11 +324,11 @@ class ApiClient:
     # ── Balances ───────────────────────────────────────────────────────────
 
     def get_public_balances(self, user: str) -> list[models.TokenBalanceDoc]:
-        """Public token balances for *user*, as the indexer sees them.
+        """Public token balances for an address, as the API sees them.
 
         Public only — tokens held privately in records are invisible here, so this
         understates a shielded account. Use ``ShieldSwap.get_private_balances``
-        for those. Naming an address to the API also links it to your session.
+        to get private balances.
         """
         return [_build(models.TokenBalanceDoc, b)
                 for b in self._get("/balances", {"user": user})["data"]]
