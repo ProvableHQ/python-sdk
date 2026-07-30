@@ -279,10 +279,8 @@ Every pool the indexer knows, each with its two tokens' metadata.
 An entry exposes the pool's own fields directly — ``entry.key`` is the
 ``pool_key`` that ``swap``, ``mint``, and ``collect`` take.  Its
 ``token0_info`` / ``token1_info`` carry that token's ``symbol`` and
-``decimals``.  Those two are extras the live API happens to return but
-its schema does not promise, so a deployment can stop sending them
-without breaking spec — either can be ``None``, and reading a field off
-one without checking is how that surfaces as an ``AttributeError``.
+``decimals``, but the API does not guarantee them — check for ``None``
+before reading.
 
 ### `api.get_tokens(self) -> 'list[models.TokenDoc]'`
 
