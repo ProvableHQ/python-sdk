@@ -136,8 +136,8 @@ class OwnedRecordsResponseFilter(TypedDict, total=False):
 class OwnedFilter(TypedDict, total=False):
     """Narrows an owned-record query for one registered UUID.
 
-    ``uuid`` picks which registration to read; it defaults to the scanner's own
-    UUID when omitted. ``unspent`` drops already-spent records, ``nonces``
+    ``uuid`` picks which registration to read; it defaults to the scanner object's
+    configured UUID when omitted. ``unspent`` drops already-spent records, ``nonces``
     restricts to specific record nonces, and ``decrypt`` asks the service to
     return plaintext — which requires it to hold your view key. Prefer local
     decryption (see ``set_decrypt_enabled``) to keep the plaintext off the wire.
