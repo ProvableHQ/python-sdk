@@ -53,6 +53,13 @@ class UUIDError(AleoError):
 # ---------------------------------------------------------------------------
 
 class RecordsResponseFilter(TypedDict, total=False):
+    """Selects which fields the scanner returns for each encrypted record.
+
+    Set a key to True to include that field. Every key is optional; omitting all
+    of them lets the service pick its defaults. Narrowing the projection is the
+    cheapest way to cut response size on a wide scan.
+    """
+
     block_height: bool
     block_timestamp: bool
     checksum: bool
@@ -72,6 +79,19 @@ class RecordsResponseFilter(TypedDict, total=False):
 
 
 class RecordsFilter(TypedDict, total=False):
+    """Narrows an encrypted-record query by range, program, and paging.
+
+    Every key is optional and they compose as an AND. ``start``/``end`` bound the
+    block range; ``programs``/``records``/``functions`` filter by origin (with
+    ``program``/``record`` as the singular forms); ``page`` and
+    ``results_per_page`` walk large result sets; ``spent`` selects by spend
+    status. ``response`` controls which fields come back — see
+    :class:`RecordsResponseFilter`.
+
+    Note that the scanner applies this filter server-side, so its contents tell
+    the service what you are looking for.
+    """
+
     commitments: list[str]
     response: RecordsResponseFilter
     start: int
@@ -87,6 +107,14 @@ class RecordsFilter(TypedDict, total=False):
 
 
 class OwnedRecordsResponseFilter(TypedDict, total=False):
+    """Selects which fields the scanner returns for each owned record.
+
+    Set a key to True to include that field. Differs from
+    :class:`RecordsResponseFilter` by carrying the ownership-derived ``tag`` and
+    ``spent`` fields, which only exist once a record has been matched to a
+    registered view key.
+    """
+
     commitment: bool
     owner: bool
     tag: bool
@@ -106,6 +134,17 @@ class OwnedRecordsResponseFilter(TypedDict, total=False):
 
 
 class OwnedFilter(TypedDict, total=False):
+    """Narrows an owned-record query for one registered UUID.
+
+    ``uuid`` picks which registration to read; it defaults to the scanner object's
+    configured UUID when omitted. ``unspent`` drops already-spent records, ``nonces``
+    restricts to specific record nonces, and ``decrypt`` asks the service to
+    return plaintext — which requires it to hold your view key. Prefer local
+    decryption (see ``set_decrypt_enabled``) to keep the plaintext off the wire.
+
+    ``filter`` and ``responseFilter`` nest the query and projection controls.
+    """
+
     uuid: str
     unspent: bool
     decrypt: bool
@@ -115,6 +154,14 @@ class OwnedFilter(TypedDict, total=False):
 
 
 class OwnedRecord(TypedDict, total=False):
+    """One record the scanner matched to a registered view key.
+
+    Which keys are present depends on the projection requested via
+    :class:`OwnedRecordsResponseFilter`, so treat every field as optional and read
+    it with ``.get``. ``record_plaintext`` appears only once the record has been
+    decrypted — either locally or by the service.
+    """
+
     block_height: int
     block_timestamp: int
     commitment: str

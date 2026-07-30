@@ -23,11 +23,11 @@ def test_tier1_lifecycle_and_conversation_pattern():
 
 def test_tier2_covers_building_blocks_and_stages():
     page = _render()
-    for verb in ("swap_many", "claim_swap_output", "collect_all",
+    for method in ("swap_many", "claim_swap_output", "collect_all",
                  "increase_liquidity", "decrease_liquidity",
                  "derive_pool_key", "simulate", "blinded_identity_at",
                  "redeem_code", "request_airdrop"):
-        assert verb in page, verb
+        assert method in page, method
     # stages rendered FROM the list, not hand-written
     from aleo_shield_swap.lifecycle import REGISTRATION_STAGES
     for stage in REGISTRATION_STAGES:
@@ -42,6 +42,8 @@ def test_committed_page_is_current():
 
 
 def test_page_stays_compact():
-    # ~5k tokens — cheap context, enforced.  Raised 20k → 22k with the
-    # router-dispatch surface (wrapper_proofs / withdrawal params).
-    assert len(_render()) < 22_000
+    # ~6k tokens — cheap context, enforced.  Raised 20k → 22k with the
+    # router-dispatch surface (wrapper_proofs / withdrawal params); 22k → 24k
+    # when get_pools/get_tokens/derive_pool_key/derive_tick_key picked up full
+    # docstrings (they rendered blank before).
+    assert len(_render()) < 24_000

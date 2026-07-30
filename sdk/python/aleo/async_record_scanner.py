@@ -124,18 +124,78 @@ class AsyncRecordScanner:
     # ── Mutators ─────────────────────────────────────────────────────────
 
     def set_api_key(self, api_key: str | tuple[str, str] | dict[str, str]) -> None:
+        """Set the API key used to mint and refresh JWTs.
+
+        Paired with :meth:`set_consumer_id`; with both set the scanner refreshes
+        its own JWT as needed. Local only — no request is made here.
+
+        Parameters
+        ----------
+        api_key:
+            The key as a bare string, a ``(header, value)`` pair, or a
+            ``{"header": ..., "value": ...}`` dict. A bare string uses the
+            default Provable API-key header.
+        """
         self._api_key = normalize_api_key(api_key)
 
     def set_consumer_id(self, consumer_id: str) -> None:
+        """Set the consumer whose JWTs this scanner mints.
+
+        Note that the scanner and the delegated prover share one consumer, and the
+        auth server keeps a single active JWT per consumer — so minting here can
+        invalidate the prover's cached JWT, and vice versa. Both sides re-mint on
+        rejection, so this self-heals.
+
+        Parameters
+        ----------
+        consumer_id:
+            The consumer ID registered with the auth service.
+        """
         self.consumer_id = consumer_id
 
     def set_jwt_data(self, jwt_data: dict[str, Any] | None) -> None:
+        """Install a pre-minted JWT, skipping the next refresh.
+
+        Parameters
+        ----------
+        jwt_data:
+            ``{"jwt": str, "expiration": int}`` with the expiry in epoch
+            milliseconds. A JWT within five minutes of expiring is treated as
+            already expired and refreshed. Pass ``None`` to clear the cached
+            token and force a fresh mint on the next call.
+        """
         self.jwt_data = jwt_data
 
     def set_auto_re_register(self, enabled: bool) -> None:
+        """Choose whether a dropped registration is silently re-established.
+
+        When enabled, a 422 — the service reporting this UUID is not registered —
+        triggers a re-register and one retry, which re-sends the view key to the
+        service.
+
+        Parameters
+        ----------
+        enabled:
+            True to re-register and retry, False to surface the 422 as an error.
+        """
         self.auto_re_register = enabled
 
     def set_decrypt_enabled(self, enabled: bool) -> None:
+        """Choose whether fetched records are decrypted in place.
+
+        Decryption is local, using a stored view key — enabling it sends nothing
+        extra to the service. :meth:`owned` decrypts opportunistically, silently
+        leaving records encrypted when no view key is stored for the UUID;
+        :meth:`find_credits_record` and :meth:`find_credits_records` instead
+        require this to be on.
+
+        Parameters
+        ----------
+        enabled:
+            True to decrypt in place. While False, the ``find_credits_record*``
+            helpers raise :exc:`DecryptionNotEnabledError` rather than returning
+            ciphertext they cannot search.
+        """
         self.decrypt_enabled = enabled
 
     def add_view_key(self, view_key: Any) -> None:
@@ -144,6 +204,18 @@ class AsyncRecordScanner:
         self._view_keys[str(uuid_field)] = view_key
 
     def remove_view_key(self, uuid: str) -> None:
+        """Forget a stored view key, so it can no longer decrypt records.
+
+        Only drops the local copy — a registration already lodged with the hosted
+        scanner still holds that view key; call ``revoke()`` to withdraw it.
+        Unknown UUIDs are ignored.
+
+        Parameters
+        ----------
+        uuid:
+            UUID string the key was stored under, as computed by
+            :meth:`add_view_key`.
+        """
         self._view_keys.pop(uuid, None)
 
     def set_uuid(self, key_material: Any) -> None:

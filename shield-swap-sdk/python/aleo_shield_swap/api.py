@@ -197,10 +197,9 @@ class ApiClient:
         """Redeem a pasted invite — always a REFERRAL code.
 
         User-shared invites are referral codes (``/referral/redeem``);
-        that is the ONLY kind a person pastes.  Access codes are a
-        programmatic self-registration flow — see
-        :meth:`generate_access_codes` / :meth:`redeem_access_code` —
-        never routed through here.
+        that is the ONLY kind a person pastes.  Access codes are a separate
+        programmatic tier — see :meth:`redeem_access_code` — never routed
+        through here.
 
         Sessions moved to the ``/auth/*`` endpoints, so no token comes
         back — re-authenticate if needed (one is still adopted if the API
@@ -213,16 +212,13 @@ class ApiClient:
             self._token = token
         return out
 
-    def generate_access_codes(self, count: int = 1) -> list[str]:
-        """Mint access codes (``POST /access/generate``) — the
-        self-registration tier for operators/services; requires an
-        account with generate rights."""
-        return list(self._post("/access/generate", {"count": count})["data"]["codes"])
-
     def redeem_access_code(self, code: str) -> models.AccessRedeemResponse:
         """Redeem a programmatically minted access code
-        (``POST /access/redeem``) — the self-registration counterpart of
-        :meth:`generate_access_codes`; not for human-pasted invites."""
+        (``POST /access/redeem``) — not for human-pasted invites, which are
+        referral codes and go through :meth:`redeem_code`.
+
+        Minting these is deliberately not exposed by this SDK; obtain a code
+        out-of-band from an operator."""
         data = self._post("/access/redeem", {"code": code})["data"]
         return _build(models.AccessRedeemResponse, data)
 
@@ -262,6 +258,14 @@ class ApiClient:
     # ── Pools & tokens ─────────────────────────────────────────────────────
 
     def get_pools(self) -> list[PoolEntry]:
+        """Every pool the DEX lists, each with its two tokens' metadata.
+
+        An entry exposes the pool's own fields directly — ``entry.key`` is the
+        ``pool_key`` that ``swap``, ``mint``, and ``collect`` take.  Its
+        ``token0_info`` / ``token1_info`` carry that token's ``symbol`` and
+        ``decimals``, but the API does not guarantee them — check for ``None``
+        before reading.
+        """
         entries = self._get("/pools")["data"]
         return [
             PoolEntry(
@@ -273,6 +277,13 @@ class ApiClient:
         ]
 
     def get_tokens(self) -> list[models.TokenDoc]:
+        """Every token the DEX lists, with its id, symbol, and decimals.
+
+        ``decimals`` converts between the two amount conventions.
+        The API returns canonical decimal amounts (``"1.5"``), if using this
+        value to call on-chain methods — ``swap(amount_in=…)``, ``mint``,
+        ``collect`` — conversion to raw base units is necessary.
+        """
         return [_build(models.TokenDoc, t) for t in self._get("/tokens")["data"]]
 
     # ── Trading ────────────────────────────────────────────────────────────
@@ -288,10 +299,24 @@ class ApiClient:
         return _build(models.RouteResultDoc, self._get("/route", params)["data"])
 
     def get_swap(self, swap_id: str) -> models.SwapDoc:
+        """The indexer's record of one swap, by its id.
+
+        Note: The API may lag slightly behind chain state, so a recently
+        broadcast swap may not be visible immediately and can be retried if a
+        caller has confirmed a swap on chain — raises :class:`DexApiError` (404)
+        until it is.
+        """
         return _build(models.SwapDoc, self._get(f"/swaps/{swap_id}")["data"])
 
     def get_ohlcv(self, pool_key: str, *, granularity: str,
                   from_ts: str, to_ts: str) -> list[models.OhlcvDoc]:
+        """Candles for one pool over a time window.
+
+        *granularity* is one of ``"1m"``, ``"5m"``, ``"15m"``, ``"30m"``,
+        ``"1h"``, ``"6h"``, ``"12h"``, ``"1d"``.  *from_ts* and *to_ts* are unix
+        seconds — *from_ts* inclusive, *to_ts* exclusive.  Anything else raises
+        :class:`DexApiError`.
+        """
         data = self._get(f"/pools/{pool_key}/ohlcv",
                          {"granularity": granularity, "from": from_ts, "to": to_ts})["data"]
         return [_build(models.OhlcvDoc, o) for o in data]
@@ -299,6 +324,12 @@ class ApiClient:
     # ── Balances ───────────────────────────────────────────────────────────
 
     def get_public_balances(self, user: str) -> list[models.TokenBalanceDoc]:
+        """Public token balances for an address, as the API sees them.
+
+        Public only — tokens held privately in records are invisible here, so this
+        understates a shielded account. Use ``ShieldSwap.get_private_balances``
+        to get private balances.
+        """
         return [_build(models.TokenBalanceDoc, b)
                 for b in self._get("/balances", {"user": user})["data"]]
 
@@ -327,6 +358,11 @@ class AsyncApiClient:
 
     @property
     def is_authenticated(self) -> bool:
+        """True once a credential is held — a cookie-session CSRF token or a JWT.
+
+        Reflects only that a credential was stored, not that it is still valid;
+        an expired session shows True here and fails on the next call.
+        """
         return bool(self._token or self._csrf)
 
     def _headers(self) -> dict[str, str]:
@@ -377,6 +413,7 @@ class AsyncApiClient:
         return self._csrf
 
     def set_token(self, token: str) -> None:
+        """Adopt a previously issued JWT — see :meth:`ApiClient.set_token`."""
         self._token = token
 
     # ── Lifecycle (async mirror of ApiClient) ──────────────────────────────
@@ -394,11 +431,6 @@ class AsyncApiClient:
         if token:
             self._token = token
         return out
-
-    async def generate_access_codes(self, count: int = 1) -> list[str]:
-        """Mint access codes — see :meth:`ApiClient.generate_access_codes`."""
-        return list((await self._post("/access/generate",
-                                      {"count": count}))["data"]["codes"])
 
     async def redeem_access_code(self, code: str) -> models.AccessRedeemResponse:
         """Redeem an access code — see :meth:`ApiClient.redeem_access_code`."""
@@ -428,6 +460,7 @@ class AsyncApiClient:
                       (await self._post("/api-tokens", body))["data"])
 
     async def get_pools(self) -> list[PoolEntry]:
+        """Every pool with its tokens' metadata — see :meth:`ApiClient.get_pools`."""
         entries = (await self._get("/pools"))["data"]
         return [
             PoolEntry(
@@ -439,25 +472,34 @@ class AsyncApiClient:
         ]
 
     async def get_tokens(self) -> list[models.TokenDoc]:
+        """Every listed token — see :meth:`ApiClient.get_tokens`."""
         return [_build(models.TokenDoc, t) for t in (await self._get("/tokens"))["data"]]
 
     async def get_route(self, *, token_in: str, token_out: str,
                         amount_in: int | None = None) -> models.RouteResultDoc:
+        """Best route between two tokens — see :meth:`ApiClient.get_route`.
+
+        As on the sync client, *amount_in* is stringified onto the query and the
+        API reads it as a canonical decimal amount, not base units.
+        """
         params: dict[str, Any] = {"token_in": token_in, "token_out": token_out}
         if amount_in is not None:
             params["amount_in"] = str(amount_in)
         return _build(models.RouteResultDoc, (await self._get("/route", params))["data"])
 
     async def get_swap(self, swap_id: str) -> models.SwapDoc:
+        """One swap by id — see :meth:`ApiClient.get_swap`."""
         return _build(models.SwapDoc, (await self._get(f"/swaps/{swap_id}"))["data"])
 
     async def get_ohlcv(self, pool_key: str, *, granularity: str,
                         from_ts: str, to_ts: str) -> list[models.OhlcvDoc]:
+        """Candles for one pool — see :meth:`ApiClient.get_ohlcv`."""
         data = (await self._get(f"/pools/{pool_key}/ohlcv",
                                 {"granularity": granularity, "from": from_ts,
                                  "to": to_ts}))["data"]
         return [_build(models.OhlcvDoc, o) for o in data]
 
     async def get_public_balances(self, user: str) -> list[models.TokenBalanceDoc]:
+        """Public balances for *user* — see :meth:`ApiClient.get_public_balances`."""
         return [_build(models.TokenBalanceDoc, b)
                 for b in (await self._get("/balances", {"user": user}))["data"]]

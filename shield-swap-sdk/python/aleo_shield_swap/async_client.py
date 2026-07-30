@@ -2,7 +2,7 @@
 
 Reads, balances, and the two-transaction private-swap flow of
 :class:`~aleo_shield_swap.client.ShieldSwap`, with every I/O method
-``async``.  Liquidity verbs are sync-client-only for now.  Pure logic is
+``async``.  Liquidity methods are sync-client-only for now.  Pure logic is
 shared from ``_core``/``derivations`` — only the I/O differs.
 """
 from __future__ import annotations
@@ -53,10 +53,20 @@ class AsyncDexCall(Generic[R]):
         self._build = build_result
 
     def simulate(self, account: Any = None) -> Any:
-        # AsyncBoundCall.simulate is synchronous (local authorization).
+        """Local authorization — no proof, no send; inspect before spending.
+
+        Synchronous even on the async client: ``AsyncBoundCall.simulate`` only
+        authorizes locally, so there is nothing to await.
+        """
         return self._bound.simulate(account)
 
     async def transact(self, account: Any = None, **fee_kwargs: Any) -> R:
+        """Prove locally, broadcast, and build the typed result.
+
+        Root-transition outputs are harvested from the built transaction
+        before broadcast, so the result is complete without waiting for
+        confirmation.
+        """
         tx = await self._bound.build_transaction(account, **fee_kwargs)
         outputs = root_outputs(tx.decoded(), self._bound.program_id,
                                self._bound.function_name)
@@ -64,6 +74,14 @@ class AsyncDexCall(Generic[R]):
         return self._build(tx.id, outputs)
 
     async def delegate(self, account: Any = None, **fee_kwargs: Any) -> R:
+        """Delegate proving to the DPS (fee master pays by default) and build
+        the typed result from the root transition.
+
+        Outputs are harvested from the DPS payload itself when it carries
+        the full transaction, so ``wait=False`` returns as soon as the
+        broadcast is accepted — callers that read chain state later (e.g.
+        ``collect_all``) don't need to block on confirmation here.
+        """
         payload = await self._bound.delegate(account, **fee_kwargs)
         tx_id = extract_tx_id(payload)
         await self._aleo.network.wait_for_transaction(tx_id)
@@ -103,12 +121,18 @@ class AsyncShieldSwap:
     # ── Chain reads ──────────────────────────────────────────────────────────
 
     async def get_pool(self, pool_key: str) -> g.PoolState:
+        """Static pool configuration (token pair, fee, decimal scales)."""
         raw = await self._mapping_value("pools", pool_key)
         if raw is None:
             raise PoolNotFoundError(pool_key)
         return g.PoolState.from_plaintext(raw)
 
     async def get_slot(self, pool_key: str) -> SlotView:
+        """Live trading state (sqrt price, tick, in-range liquidity).
+
+        Raises :class:`PoolNotFoundError` when the pool does not exist, or
+        :class:`PoolNotInitializedError` when it exists but has no slot yet.
+        """
         raw = await self._mapping_value("slots", pool_key)
         if raw is None:
             if await self._mapping_value("pools", pool_key) is not None:
@@ -117,6 +141,12 @@ class AsyncShieldSwap:
         return SlotView(g.Slot.from_plaintext(raw))
 
     async def get_swap_output(self, swap: "SwapHandle | str") -> g.SwapOutput:
+        """Chain-computed output of a finalized swap request.
+
+        Accepts the :class:`SwapHandle` from ``swap()`` or a bare swap id.
+        Raises :class:`SwapOutputNotFinalizedError` when the entry is absent —
+        not finalized yet (retry after a few blocks) or already claimed.
+        """
         swap_id = swap.swap_id if isinstance(swap, SwapHandle) else swap
         if not swap_id:
             raise ValueError("SwapHandle has no swap_id yet — wait for the "
@@ -127,15 +157,47 @@ class AsyncShieldSwap:
         return g.SwapOutput.from_plaintext(raw)
 
     async def is_pool_initialized(self, pool_key: str) -> bool:
+        """True once *pool_key* has been initialized on chain. Reads a mapping.
+
+        A pool must be initialized before it will accept swaps or liquidity, so
+        check this before quoting against a key you derived rather than listed.
+        An absent mapping entry reads as False, which is also what an unknown key
+        gives you — this does not distinguish the two.
+        """
         raw = await self._mapping_value("initialized_pools", pool_key)
         return raw is not None and "true" in raw
 
     # ── Pure derivations (sync — no I/O) ─────────────────────────────────────
 
     def derive_pool_key(self, token0: str, token1: str, fee: int) -> str:
+        """Compute the pool key for a token pair and fee tier. Local — no network.
+
+        Deriving a key does not mean the pool exists; pass the result to
+        :meth:`is_pool_initialized` before trading against it. The token order
+        matters, and the derivation is network-scoped, so a key computed for one
+        network will not match the other.
+
+        Args:
+            token0: First token id of the pair.
+            token1: Second token id of the pair.
+            fee: Fee tier in the contract's ``u16`` units.
+
+        Returns:
+            The pool key as a ``field`` literal.
+        """
         return _derive_pool_key(token0, token1, fee, network=self._aleo.network_name)
 
     def derive_tick_key(self, pool_key: str, tick: int) -> str:
+        """Compute the key of one tick within a pool. Local — no network.
+
+        Args:
+            pool_key: Pool the tick belongs to.
+            tick: Signed tick index.
+
+        Returns:
+            The tick key as a ``field`` literal, usable to read the tick's
+            on-chain state.
+        """
         return _derive_tick_key(pool_key, tick, network=self._aleo.network_name)
 
     # ── Async record/identity/imports helpers ───────────────────────────────
@@ -243,6 +305,9 @@ class AsyncShieldSwap:
 
     async def get_private_balances(self, programs: list[str],
                                    account: Any = None) -> dict[str, int]:
+        """Sum of unspent record amounts per wrapper program (spendable
+        privately).  Requires a configured record provider.
+        """
         provider = self._aleo.record_provider
         out: dict[str, int] = {}
         for program in programs:
@@ -258,6 +323,15 @@ class AsyncShieldSwap:
 
     async def get_balances(self, address: Optional[str] = None,
                            account: Any = None) -> dict[str, dict[str, Any]]:
+        """Public + private + total per token id, joined via the API's
+        token registry.  Defaults to the bound account's address; returns
+        only tokens actually held.
+
+        Private balances can only be scanned for the bound account's view
+        key — when *address* names someone else, ``private`` is 0 for every
+        token (their records are not scannable) rather than silently mixing
+        in the caller's own private holdings.
+        """
         acct = account if account is not None else self._aleo.default_account
         addr = address or (str(acct.address) if acct is not None else None)
         if addr is None:
@@ -299,6 +373,26 @@ class AsyncShieldSwap:
                    wrapper_proofs: Optional[str] = None,
                    imports: Optional[dict[str, str]] = None,
                    account: Any = None) -> AsyncDexCall[SwapHandle]:
+        """Request a private swap — phase one of the two-transaction flow.
+
+        Wrapped inputs route via the swap router automatically; fund them
+        with UNDERLYING records — the deposit happens in-transaction.
+
+        Resolves the intent against live pool state, derives a single-use
+        blinded identity from the signer's view key, selects an unspent token
+        record (or takes *token_record* verbatim), and returns a prepared
+        call.  The terminal method (``transact``/``delegate``) returns a
+        :class:`~aleo_shield_swap.types.SwapHandle` — persist it if the
+        process might die before the claim.
+
+        Quote first (``dex.api.get_route``) and pass *expected_out*: without
+        it a spot estimate is used, which ignores fees and price impact.
+        Pass *identity* (from journal-reserved counters) to skip the
+        on-chain probe — required for concurrent swaps.  The default
+        *deadline_offset_blocks* (~8h at ~3s blocks) absorbs delegated-
+        proving latency; a tight deadline aborts at finalize when proving
+        outlives it.
+        """
         acct = self._account(account)
         pool = await self.get_pool(pool_key)
         slot = await self.get_slot(pool_key)
@@ -347,6 +441,12 @@ class AsyncShieldSwap:
         bound = getattr(prog.functions, route.function)(*inputs)
 
         def build_result(tx_id: str, outputs: list[Any]) -> SwapHandle:
+            """Assemble the swap handle, carrying the blinding secret forward.
+
+            The first public ``field`` output is the swap id; it stays ``None`` if
+            the transition published none, which leaves the handle unclaimable
+            until the id is recovered from the transaction.
+            """
             swap_id = next((o for o in outputs
                             if isinstance(o, str) and o.endswith("field")), None)
             return SwapHandle(
@@ -363,6 +463,21 @@ class AsyncShieldSwap:
                                 wrapper_proofs: Optional[str] = None,
                                 imports: Optional[dict[str, str]] = None,
                                 account: Any = None) -> AsyncDexCall[ClaimResult]:
+        """Claim a private swap's output — phase two of the lifecycle.
+
+        Reads the chain-computed result from ``swap_outputs`` (never an
+        off-chain service — these amounts gate money movement), proves
+        ownership of the blinded identity, and claims.  A wrapped output or
+        refund routes automatically through the router, which unwraps to
+        the signer in the same transaction — even for swaps that started
+        as direct core calls.  The output and any refund arrive as private
+        records owned by the signer (output first, refund second); the
+        mapping entry is consumed.
+
+        Raises :class:`SwapOutputNotFinalizedError` **at prepare time** when
+        the output is not readable yet (retry after a few blocks) or was
+        already claimed.
+        """
         self._account(account)
         if not handle.swap_id:
             raise ValueError("handle.swap_id is not set — recover it from the "

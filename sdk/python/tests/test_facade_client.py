@@ -4,6 +4,8 @@ All tests are mocked — no live network required.
 """
 from __future__ import annotations
 
+from decimal import Decimal
+
 import pytest
 import responses as resp_lib
 
@@ -310,6 +312,54 @@ def test_unit_conversion_round_trip() -> None:
     a = Aleo(HTTPProvider(BASE))
     original = 2.25
     assert a.from_microcredits(a.to_microcredits(original)) == original
+
+
+# Precision: these amounts silently lost value when the conversion went
+# through binary floating point (1.005 truncated to 1_004_999), and a
+# microcredit round-trip was not the identity for ~1.4% of values.
+
+
+def test_to_microcredits_does_not_lose_a_microcredit() -> None:
+    a = Aleo(HTTPProvider(BASE))
+    # float * 1e6 lands on 1004999.9999999999; int() then truncates down
+    assert a.to_microcredits(1.005) == 1_005_000
+    assert a.to_microcredits("1.005") == 1_005_000
+    assert a.to_microcredits(Decimal("1.005")) == 1_005_000
+
+
+def test_to_microcredits_rejects_sub_microcredit_precision() -> None:
+    a = Aleo(HTTPProvider(BASE))
+    with pytest.raises(ValueError, match="finer than the chain"):
+        a.to_microcredits(0.9999999)
+    # opt in to the old truncating behaviour explicitly
+    assert a.to_microcredits(0.9999999, allow_rounding=True) == 999_999
+
+
+def test_to_microcredits_rejects_nonsense() -> None:
+    a = Aleo(HTTPProvider(BASE))
+    for bad in ("abc", float("nan"), float("inf")):
+        with pytest.raises(ValueError):
+            a.to_microcredits(bad)
+
+
+def test_from_microcredits_is_exact_past_float_range() -> None:
+    a = Aleo(HTTPProvider(BASE))
+    # microcredits are u64; beyond 2**53 a float cannot hold the integer
+    for micro in (2**53 + 1, 2**64 - 1):
+        assert a.to_microcredits(a.from_microcredits(micro)) == micro
+
+
+def test_microcredit_round_trip_is_identity() -> None:
+    a = Aleo(HTTPProvider(BASE))
+    # 2884 of these failed when from_microcredits returned a float
+    for micro in range(0, 5_000):
+        assert a.to_microcredits(a.from_microcredits(micro)) == micro
+
+
+def test_from_microcredits_still_compares_equal_to_float() -> None:
+    a = Aleo(HTTPProvider(BASE))
+    assert a.from_microcredits(1_500_000) == 1.5
+    assert float(a.from_microcredits(1_500_000)) == 1.5
 
 
 # ---------------------------------------------------------------------------

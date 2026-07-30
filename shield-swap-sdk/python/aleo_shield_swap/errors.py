@@ -28,12 +28,24 @@ class SwapOutputNotFinalizedError(ShieldSwapError):
 
 
 class PoolNotFoundError(ShieldSwapError):
+    """No pool exists at this key.
+
+    Usually a key derived for the wrong token order, fee tier, or network — the
+    derivation succeeds regardless, so a bad key only surfaces on the first read.
+    """
+
     def __init__(self, pool_key: str) -> None:
         super().__init__(f"Pool {pool_key} does not exist on-chain.")
         self.pool_key = pool_key
 
 
 class PoolNotInitializedError(ShieldSwapError):
+    """The pool exists but has no slot yet, so it cannot quote or trade.
+
+    Distinct from :class:`PoolNotFoundError`: the pool was created but never
+    initialized. Trading against it only works once someone initializes it.
+    """
+
     def __init__(self, pool_key: str) -> None:
         super().__init__(f"Pool {pool_key} exists but is not initialized.")
         self.pool_key = pool_key

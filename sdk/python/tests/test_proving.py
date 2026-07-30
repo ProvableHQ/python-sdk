@@ -12,7 +12,7 @@ Slow tests (`@pytest.mark.slow`) require:
 Run them locally with: python -m pytest python/tests -v -m slow
 They are excluded from CI via -m "not slow".
 
-Endpoint note (verified empirically): Query.rest() wants the BASE url
+Endpoint note (verified empirically): Query.rest() requires the BASE url
 `https://api.explorer.provable.com/v2` — snarkvm's REST query appends the
 network path (`/mainnet/stateRoot/latest`) itself; passing `.../v2/mainnet`
 would double the network segment.

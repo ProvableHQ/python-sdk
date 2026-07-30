@@ -1,4 +1,4 @@
-"""Liquidity verbs — exact input orders per the deployed shield_swap.aleo:
+"""Liquidity methods — exact input orders per the deployed shield_swap.aleo:
 create_pool: [token0, token1, fee u16, sqrt_price U256, spacing u32, tick i32]
 mint:        [nonce field, record0, record1, recipient, withdrawal,
               MintPositionRequest, token0, token1, signer_proofs,

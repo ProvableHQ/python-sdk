@@ -24,6 +24,20 @@ def _generate(abi_path: Path, out_path: Path) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run the codegen CLI, writing generated modules to disk.
+
+    Args:
+        argv: Command-line arguments; defaults to ``sys.argv[1:]``.
+
+    Returns:
+        A process exit status — 0 on success, 1 if an ABI was unreadable or a
+        struct reference could not be resolved. Those failures are printed to
+        stderr rather than raised.
+
+    Raises:
+        SystemExit: If neither ``--config`` nor both of ``--abi``/``--out`` were
+            given; argparse reports the usage error and exits.
+    """
     p = argparse.ArgumentParser(prog="aleo.codegen")
     p.add_argument("--abi", type=Path, help="path to ABI JSON")
     p.add_argument("--out", type=Path, help="output .py path")

@@ -100,7 +100,7 @@ business, not the user's):
 1. **Their own playbook.**  Ask whether they have instructions of their
    own — a strategy file, notes, a memory store, output from a previous
    session.  If so, read it and treat it as the plan: their document
-   decides what to do, the verbs here describe how each step works.
+   decides what to do, the methods here describe how each step works.
 
 2. **A suggested journey.**  Frame the setting first — Shield Swap is a
    private exchange on Aleo's test network: trading uses test tokens, and
@@ -135,7 +135,7 @@ business, not the user's):
    and the integration checklist.
 
 4. **A free-form prompt.**  Whatever they describe, map it onto the
-   verbs and journeys above before improvising against the SDK.
+   methods and journeys above before improvising against the SDK.
 
 ### While acting
 
@@ -166,21 +166,21 @@ where the signing keys live:
 | Browser dApp (wallet-signed) | The TypeScript stack: `@provablehq/shield-swap-sdk` + Veil react hooks — not this package | The user's wallet signs and proves. |
 
 What every integration must handle (each enforced or automated by the
-verbs above — this list is the review checklist for code that bypasses
+methods above — this list is the review checklist for code that bypasses
 them):
 
 - **Auth is layered**: a bearer credential (24h session JWT from the
   challenge/verify handshake, or a durable `ss_…` API token — data/trading
   endpoints only) AND a one-time invite redemption per account.
 - **Dynamic-dispatch imports**: every record-spending write must register
-  the involved token programs with the prover (the verbs resolve this via
+  the involved token programs with the prover (the methods resolve this via
   the token registry; pass `imports=`/`token_*_program=` to override).
 - **Tokens are private records**: spendable balances do not appear in
   public reads; one covering record funds an amount — no aggregation.
 - **Amounts are raw native units end to end** (the AMM does no decimal
   scaling); quote in canonical decimals, transact in raw base units,
   display human.
-- **Wrapped assets route automatically** (swap/claim/LP verbs dispatch to
+- **Wrapped assets route automatically** (swap/claim/LP methods dispatch to
   the routers per token shape) — fund them with UNDERLYING records; never
   hand wrapper records around.
 - **A `SwapHandle` is the only key to a swap's output** — persist before
@@ -191,13 +191,13 @@ them):
 
 Suggested path for a new integrator: (1) `onboard()` a profile — it
 doubles as a test fixture; (2) walk swap → `collect_all()` once with the
-Tier 1 verbs so the mechanics are concrete; (3) read the reference below
+Tier 1 methods so the mechanics are concrete; (3) read the reference below
 for the surface your app needs; (4) `tests/integration/` and
 `scripts/rehearsal.py` in the repo are working reference implementations
 of the full journey.
 
-Every write verb returns a prepared `DexCall`: nothing touches the
-network until a terminal verb — `.simulate()` (local, free),
+Every write method returns a prepared `DexCall`: nothing touches the
+network until a terminal method — `.simulate()` (local, free),
 `.transact()` (local proving, slow), or `.delegate()` (delegated
 proving — the practical path).
 
@@ -243,10 +243,9 @@ Whether this authenticated account has redeemed an invite code.
 Redeem a pasted invite — always a REFERRAL code.
 
 User-shared invites are referral codes (``/referral/redeem``);
-that is the ONLY kind a person pastes.  Access codes are a
-programmatic self-registration flow — see
-:meth:`generate_access_codes` / :meth:`redeem_access_code` —
-never routed through here.
+that is the ONLY kind a person pastes.  Access codes are a separate
+programmatic tier — see :meth:`redeem_access_code` — never routed
+through here.
 
 Sessions moved to the ``/auth/*`` endpoints, so no token comes
 back — re-authenticate if needed (one is still adopted if the API
@@ -275,11 +274,22 @@ management still require a session JWT.
 
 ### `api.get_pools(self) -> 'list[PoolEntry]'`
 
+Every pool the DEX lists, each with its two tokens' metadata.
 
+An entry exposes the pool's own fields directly — ``entry.key`` is the
+``pool_key`` that ``swap``, ``mint``, and ``collect`` take.  Its
+``token0_info`` / ``token1_info`` carry that token's ``symbol`` and
+``decimals``, but the API does not guarantee them — check for ``None``
+before reading.
 
 ### `api.get_tokens(self) -> 'list[models.TokenDoc]'`
 
+Every token the DEX lists, with its id, symbol, and decimals.
 
+``decimals`` converts between the two amount conventions.
+The API returns canonical decimal amounts (``"1.5"``), if using this
+value to call on-chain methods — ``swap(amount_in=…)``, ``mint``,
+``collect`` — conversion to raw base units is necessary.
 
 ### `api.get_route(self, *, token_in: 'str', token_out: 'str', amount_in: 'Any' = None) -> 'models.RouteResultDoc'`
 
@@ -311,7 +321,7 @@ Derives at ``start_counter, +1, …`` and probes the program's
 ``used_blinded_addresses`` mapping until one is free.  ``max_scan`` fails
 fast when something is systematically wrong (e.g. wrong program).
 
-### Chain verbs
+### Chain methods
 
 ### `swap(self, *, pool_key: 'str', token_in_id: 'str', amount_in: 'int', slippage_bps: 'int' = 50, expected_out: 'Optional[int]' = None, sqrt_price_limit: 'Optional[int]' = None, deadline_offset_blocks: 'int' = 10000, nonce: 'Optional[int]' = None, identity: 'Optional[BlindedIdentity]' = None, token_in_program: 'Optional[str]' = None, token_record: 'Optional[str]' = None, wrapper_proofs: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[SwapHandle]'`
 
@@ -323,7 +333,7 @@ with UNDERLYING records — the deposit happens in-transaction.
 Resolves the intent against live pool state, derives a single-use
 blinded identity from the signer's view key, selects an unspent token
 record (or takes *token_record* verbatim), and returns a prepared
-call.  The terminal verb (``transact``/``delegate``) returns a
+call.  The terminal method (``transact``/``delegate``) returns a
 :class:`~aleo_shield_swap.types.SwapHandle` — persist it if the
 process might die before the claim.
 
@@ -428,9 +438,20 @@ privately).  Requires a configured record provider.
 
 ### `derive_pool_key(self, token0: 'str', token1: 'str', fee: 'int') -> 'str'`
 
+Compute the pool key for a token pair and fee tier. Local — no network.
 
+Deriving a key never implies the pool exists; pass the result to
+:meth:`is_pool_initialized` before quoting or trading against it.  The
+derivation is sensitive to token order and is network-scoped, so swapping
+*token0* and *token1*, or reusing a key across mainnet and testnet, yields
+a valid-looking ``field`` that matches nothing on chain.  *fee* is the
+contract's ``u16`` fee tier.
 
 ### `derive_tick_key(self, pool_key: 'str', tick: 'int') -> 'str'`
 
+Compute the key of one tick within a pool. Local — no network.
 
+*tick* is a signed index, and the returned ``field`` is what reads that
+tick's on-chain state — the initialized-tick list ``mint`` validates its
+hints against.  Network-scoped like :meth:`derive_pool_key`.
 

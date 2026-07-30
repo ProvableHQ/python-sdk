@@ -163,6 +163,11 @@ def _toposort(structs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     seen: set[str] = set()
 
     def visit(name: str) -> None:
+        """Append *name* after its dependencies, skipping repeats.
+
+        Names absent from this ABI are ignored — cross-program references are
+        rejected earlier, by ``_check_struct_refs``.
+        """
         if name in seen or name not in by_name:
             return
         seen.add(name)
@@ -224,6 +229,17 @@ def _check_struct_refs(abi: dict[str, Any]) -> None:
     local = set(names)
 
     def check(ty: Any, context: str) -> None:
+        """Assert every struct *ty* references is defined in this program.
+
+        Args:
+            ty: An ABI type to walk for struct references.
+            context: Where the type came from, quoted in the error so a failure
+                names the offending field.
+
+        Raises:
+            ValueError: If a reference is undefined or points at another program —
+                the generated class would not exist.
+        """
         for entry in _iter_struct_refs(ty):
             ref = entry["Struct"]
             name, prog = ref["path"][-1], ref.get("program", program)
