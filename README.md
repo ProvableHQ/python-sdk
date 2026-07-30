@@ -203,7 +203,7 @@ credits.functions.transfer_private(record, str(recipient.address), 1) \
     .delegate(account)
 ```
 
-`aleo.record_provider` is swappable: set it to your own object implementing the `RecordProvider` protocol (`get_unspent_credits_record` / `find`) — e.g. a self-hosted scanner — and the whole facade (including private-fee auto-sourcing) uses it, with no view-key sharing.
+`aleo.record_provider` is swappable: set it to your own object implementing the `RecordProvider` protocol (`get_unspent_credits_record` / `find`), and the whole facade (including private-fee auto-sourcing) uses it, with no view-key sharing.
 
 ## Async (`AsyncAleo`)
 

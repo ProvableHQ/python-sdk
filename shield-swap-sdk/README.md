@@ -147,7 +147,6 @@ Two conveniences trade secret material for service:
 - The hosted record scanner behind `get_private_balances` /
   `aleo.records.register` shares the account's **view key** with the
   scanning service, which can then see everything the account owns.
-  Self-host the scanner if that is unacceptable.
 
 ## Async
 
