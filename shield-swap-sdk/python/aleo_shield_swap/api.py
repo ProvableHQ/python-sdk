@@ -260,13 +260,20 @@ class ApiClient:
     def get_pools(self) -> list[PoolEntry]:
         """Every pool the indexer knows, with its two tokens' metadata.
 
-        Each :class:`PoolEntry` pairs the pool state with ``token0_info`` /
-        ``token1_info`` and delegates attribute access to the state, so
-        ``entry.key`` gives the ``pool_key`` every trading and liquidity verb
-        takes.  Those two info fields are undocumented API extras — either may be
-        ``None`` if the deployment stops sending them, so reach for them
-        defensively when routing wrapped assets off ``amm_token_program`` /
-        ``underlying_program``.
+        :class:`PoolEntry` forwards unknown attributes to the pool state, so
+        ``entry.key`` is the ``pool_key`` that ``swap``, ``mint``, and
+        ``collect`` take.
+
+        ``token0_info`` / ``token1_info`` carry each token's ``symbol``,
+        ``decimals``, ``amm_token_program``, and ``underlying_program``.  They
+        are absent from the API's published schema, so treat both as optional —
+        guard with ``if entry.token0_info`` before reading a field rather than
+        assuming a default.
+
+        This metadata is for display and decimal scaling only.  It does not
+        decide routing: ``ShieldSwap`` determines whether a token is wrapped by
+        reading the AMM's ``from_wrapper_token_id`` mapping on chain, which stays
+        correct even when these fields are missing.
         """
         entries = self._get("/pools")["data"]
         return [
@@ -281,9 +288,11 @@ class ApiClient:
     def get_tokens(self) -> list[models.TokenDoc]:
         """Every token the DEX lists, with its id, symbol, and decimals.
 
-        ``decimals`` is the bridge between the two amount conventions in play:
-        the API quotes canonical decimal amounts (``1.5``), while the on-chain
-        verbs take raw base units.  Convert with it rather than assuming 6.
+        ``decimals`` converts between the two amount conventions in play: this
+        API quotes and accepts canonical decimal amounts (``"1.5"``), while the
+        on-chain methods — ``swap(amount_in=…)``, ``mint``, ``collect`` — take
+        raw base units.  Scale by ``10 ** decimals`` per token; the value differs
+        between tokens, so it cannot be assumed.
         """
         return [_build(models.TokenDoc, t) for t in self._get("/tokens")["data"]]
 
