@@ -32,10 +32,15 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+from decimal import Decimal
 from typing import Any, AsyncGenerator
 
 from .._client_common import AleoNetworkError
-from .._facade_common import credits_to_microcredits, microcredits_to_credits
+from .._facade_common import (
+    CreditsAmount,
+    credits_to_microcredits,
+    microcredits_to_credits,
+)
 from .._scanner_common import OwnedRecord, RecordNotFoundError
 from .errors import (
     ExecutionError,
@@ -1238,20 +1243,34 @@ class AsyncAleo:
 
     # ── Unit conversions (sync) ─────────────────────────────────────────────
 
-    def to_microcredits(self, credits: float | int) -> int:
-        """Convert a credits amount to integer microcredits.
+    def to_microcredits(
+        self, credits: CreditsAmount, *, allow_rounding: bool = False
+    ) -> int:
+        """Convert a credits amount to integer microcredits, exactly.
 
-        ``1 credit == 1_000_000 microcredits``
+        Local and synchronous.  See :meth:`Aleo.to_microcredits` — computed in
+        decimal, so ``1.005`` gives 1_005_000 rather than 1_004_999.
 
         Parameters
         ----------
         credits:
-            Credits amount as a float or integer (e.g. ``1.5``).
-        """
-        return credits_to_microcredits(credits)
+            Credits amount; ``str`` and ``Decimal`` are exact.
+        allow_rounding:
+            Permit input finer than one microcredit, truncating toward zero.
 
-    def from_microcredits(self, microcredits: int) -> float:
-        """Convert an integer microcredits amount to credits.
+        Raises
+        ------
+        ValueError
+            If *credits* is finer than a microcredit and *allow_rounding* is
+            False, or is not a usable number.
+        """
+        return credits_to_microcredits(credits, allow_rounding=allow_rounding)
+
+    def from_microcredits(self, microcredits: int) -> Decimal:
+        """Convert an integer microcredits amount to credits, exactly.
+
+        Local and synchronous.  Returns a :class:`~decimal.Decimal` — see
+        :meth:`Aleo.from_microcredits` for why a float will not do.
 
         Parameters
         ----------
