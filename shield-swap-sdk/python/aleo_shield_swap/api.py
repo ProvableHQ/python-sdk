@@ -312,10 +312,10 @@ class ApiClient:
                   from_ts: str, to_ts: str) -> list[models.OhlcvDoc]:
         """Candles for one pool over a time window.
 
-        *granularity* is the API's bucket name (e.g. ``"1h"``) and *from_ts* /
-        *to_ts* are the window bounds as the API's timestamp strings — they go on
-        the wire as ``from``/``to`` unchanged, so a format the deployment rejects
-        surfaces as :class:`DexApiError`.
+        *granularity* is one of ``"1m"``, ``"5m"``, ``"15m"``, ``"30m"``,
+        ``"1h"``, ``"6h"``, ``"12h"``, ``"1d"``.  *from_ts* and *to_ts* are unix
+        seconds — *from_ts* inclusive, *to_ts* exclusive.  Anything else raises
+        :class:`DexApiError`.
         """
         data = self._get(f"/pools/{pool_key}/ohlcv",
                          {"granularity": granularity, "from": from_ts, "to": to_ts})["data"]
