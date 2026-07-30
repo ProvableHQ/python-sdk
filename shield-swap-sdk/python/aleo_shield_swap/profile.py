@@ -54,7 +54,26 @@ class Profile:
     too.
 
     Load with :meth:`load_or_create`; the profile is created (with fresh key
-    material) when the home directory has none yet.
+    material) when the home directory has none yet.  The same call does both,
+    so callers never branch on whether one exists::
+
+        from pathlib import Path
+        from aleo_shield_swap import Profile
+
+        # First run: generates a key and writes it owner-only.
+        profile = Profile.load_or_create()
+        print(profile.address)                  # aleo1…
+
+        # Every run after: the same call returns that key, unchanged.
+        assert Profile.load_or_create().address == profile.address
+
+        # A second address needs its own home.  Pass a resolved path — ``~``
+        # is not expanded, so a "~/..." string creates a literal ``~`` dir.
+        other = Profile.load_or_create(Path.home() / ".shield-swap-alt")
+
+    That last call generates a fresh key only when no key is being imported;
+    with ``SHIELD_SWAP_PRIVATE_KEY`` set, every new home adopts that one key
+    instead, so all of them share an address.
     """
 
     def __init__(self, home: Path, data: dict[str, Any]) -> None:
