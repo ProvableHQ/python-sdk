@@ -118,9 +118,7 @@ class RecordsModule:
         Parameters
         ----------
         scanner:
-            A pre-configured :class:`~aleo.record_scanner.RecordScanner`.  Point
-            it at a self-hosted endpoint to keep your view key off the hosted
-            service.
+            A pre-configured :class:`~aleo.record_scanner.RecordScanner`.
         """
         self._scanner = scanner
 

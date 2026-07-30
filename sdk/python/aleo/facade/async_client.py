@@ -272,8 +272,7 @@ class AsyncRecordsModule:
         ----------
         scanner:
             A pre-configured
-            :class:`~aleo.async_record_scanner.AsyncRecordScanner`.  Point it at a
-            self-hosted endpoint to keep your view key off the hosted service.
+            :class:`~aleo.async_record_scanner.AsyncRecordScanner`.
         """
         self._scanner = scanner
 
@@ -1183,9 +1182,8 @@ class AsyncAleo:
         ----------
         provider:
             An async record provider — its ``get_unspent_credits_record`` must be
-            ``async def``.  Assign a self-hosted wrapper to avoid sharing your view
-            key with the hosted scanner, or ``None`` to disable automatic sourcing,
-            which makes private fees require an explicit ``fee_record``.
+            ``async def``.  ``None`` disables automatic sourcing, which makes
+            private fees require an explicit ``fee_record``.
         """
         self._record_provider = provider
 

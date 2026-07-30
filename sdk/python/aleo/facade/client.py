@@ -135,10 +135,9 @@ class Aleo:
         Parameters
         ----------
         provider:
-            A :class:`~aleo._facade_common.RecordProvider`.  Assign a self-hosted
-            wrapper to avoid sharing your view key with the hosted scanner, or
-            ``None`` to disable automatic sourcing — private fees then require an
-            explicit ``fee_record``.
+            A :class:`~aleo._facade_common.RecordProvider`, or ``None`` to disable
+            automatic sourcing — private fees then require an explicit
+            ``fee_record``.
         """
         self._record_provider = provider
 
