@@ -662,8 +662,9 @@ class ShieldSwap:
         # serialized by the journal's file lock, so it cannot collide.
         counter: Optional[int] = None
         if identity is None and track and self.journal is not None:
-            counter = self.journal.reserve_counters(1)[0]
-            identity = blinded_identity_at(self._aleo, acct, self.program, counter)
+            reserved = int(self.journal.reserve_counters(1)[0])
+            counter = reserved
+            identity = blinded_identity_at(self._aleo, acct, self.program, reserved)
         elif identity is None:
             identity = next_blinded_identity(self._aleo, acct, self.program)
 
