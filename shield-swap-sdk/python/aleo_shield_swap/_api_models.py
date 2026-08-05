@@ -766,6 +766,17 @@ class TokenResponseDoc:
 
 
 @dataclass
+class UsdcUsdQuote:
+    corroborated: bool
+    decimals: int
+    price: str
+    publishTime: int
+    serverTime: int
+    source: str
+    validUntil: int
+
+
+@dataclass
 class VerifyRequestDoc:
     address: str
     challenge_id: str
@@ -1039,6 +1050,7 @@ class LiveCompatibility:
 class PoolListResponseDoc:
     data: list[PoolResponseDoc]
     pagination: PaginationMeta
+    valuation: UsdcUsdQuote | None = None
 
 
 @dataclass
