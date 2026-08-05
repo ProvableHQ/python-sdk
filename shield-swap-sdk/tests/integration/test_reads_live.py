@@ -62,9 +62,11 @@ def test_api_get_tokens(live_dex_module):
 
 
 def test_api_get_route_quotes_both_directions(live_dex_module, pool):
-    scale = 10 ** (pool.token0_info.decimals if pool.token0_info else 6)
+    # amount_in is a CANONICAL decimal amount — "1" means one whole token, not
+    # 10**decimals base units. Passing base units quotes a trade 10**decimals
+    # too large and returns a price from deep in the book.
     fwd = skip_if_access_gated(lambda: live_dex_module.api.get_route(
-        token_in=pool.token0, token_out=pool.token1, amount_in=scale))
+        token_in=pool.token0, token_out=pool.token1, amount_in="1"))
     assert fwd.token_in == pool.token0 and fwd.token_out == pool.token1
     assert fwd.hops, "route has no hops"
     rev = live_dex_module.api.get_route(

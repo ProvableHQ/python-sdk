@@ -67,10 +67,12 @@ def test_private_swap_roundtrip():
     if amount_in == 0:
         pytest.skip(f"account holds no private {program_in} records to swap")
 
-    route = dex.api.get_route(token_in=token_in, token_out=pool.token1,
-                              amount_in=amount_in)
-    expected = (int(float(route.estimated_amount_out) * 10 ** pool.token1_info.decimals)
-                if route.estimated_amount_out else None)
+    # Use the SDK's own quote conversion rather than reimplementing it: the
+    # route endpoint takes a CANONICAL decimal amount, so passing raw base
+    # units quotes a trade 10**decimals too large and yields an
+    # amount_out_min the pool cannot pay — proved, broadcast, rejected.
+    expected = dex._quote_expected_out(
+        token_in_id=token_in, token_out_id=pool.token1, amount_in=amount_in)
 
     handle = _with_retry(lambda: dex.swap(
         pool_key=pool.key, token_in_id=token_in, amount_in=amount_in,
