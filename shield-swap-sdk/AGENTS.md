@@ -21,13 +21,25 @@ report = dex.swap_many(pool_key=pools[0].key, token_in_id=pools[0].token0,
 dex.collect_all()                        # any session, any time
 ```
 
-### `from_profile(home: 'Any' = None) -> "'ShieldSwap'"`
+### `from_profile(home: 'Any' = None, *, network: 'Optional[str]' = None, endpoint: 'Optional[str]' = None) -> "'ShieldSwap'"`
 
 The client for the local participant profile (created on first use).
 
 Wires endpoint, network, signer, and (when present) delegated-proving
 credentials from ``$SHIELD_SWAP_HOME``/``~/.shield-swap``.  Run
 ``onboard()`` next on a fresh profile.
+
+*network* and *endpoint* apply only when the profile is being created —
+an existing one keeps what it was created with, because its derived pool
+keys and blinded identities are network-scoped and would not transfer.
+Give each network its own home directory.
+
+Args:
+    home: Profile directory; defaults to ``$SHIELD_SWAP_HOME`` or
+        ``~/.shield-swap``.
+    network: ``"mainnet"`` or ``"testnet"`` for a NEW profile; defaults
+        to testnet.
+    endpoint: Node API origin for a NEW profile.
 
 ### `onboard(self, invite_code: 'Optional[str]' = None) -> 'OnboardReport'`
 

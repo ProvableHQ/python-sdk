@@ -111,16 +111,35 @@ class ShieldSwap:
         return f"ShieldSwap(program={self.program!r}, api={self.api.base_url!r})"
 
     @classmethod
-    def from_profile(cls, home: Any = None) -> "ShieldSwap":
+    def from_profile(cls, home: Any = None, *,
+                     network: Optional[str] = None,
+                     endpoint: Optional[str] = None) -> "ShieldSwap":
         """The client for the local participant profile (created on first use).
 
         Wires endpoint, network, signer, and (when present) delegated-proving
         credentials from ``$SHIELD_SWAP_HOME``/``~/.shield-swap``.  Run
         ``onboard()`` next on a fresh profile.
+
+        *network* and *endpoint* apply only when the profile is being created —
+        an existing one keeps what it was created with, because its derived pool
+        keys and blinded identities are network-scoped and would not transfer.
+        Give each network its own home directory.
+
+        Args:
+            home: Profile directory; defaults to ``$SHIELD_SWAP_HOME`` or
+                ``~/.shield-swap``.
+            network: ``"mainnet"`` or ``"testnet"`` for a NEW profile; defaults
+                to testnet.
+            endpoint: Node API origin for a NEW profile.
         """
         from aleo import Aleo, HTTPProvider
 
-        profile = Profile.load_or_create(home)
+        kwargs: dict[str, Any] = {}
+        if network is not None:
+            kwargs["network"] = network
+        if endpoint is not None:
+            kwargs["endpoint"] = endpoint
+        profile = Profile.load_or_create(home, **kwargs)
         creds = profile.credentials
         provider = HTTPProvider(profile.endpoint, network=profile.network,
                                 api_key=creds.get("dps_api_key"),
