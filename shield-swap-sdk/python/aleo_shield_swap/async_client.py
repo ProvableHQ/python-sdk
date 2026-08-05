@@ -23,7 +23,7 @@ from ._core import (
     resolve_swap_params,
 )
 from ._routing import claim_route, swap_route
-from .api import AsyncApiClient, DEFAULT_API_URL
+from .api import AsyncApiClient, api_url_for
 from .tick_math import int_to_u256_plaintext
 from .derivations import (
     BlindedIdentity,
@@ -100,10 +100,11 @@ class AsyncShieldSwap:
     """Typed async client for the shield_swap AMM over ``AsyncAleo``."""
 
     def __init__(self, aleo: Any, *, program: str = g.PROGRAM_ID,
-                 api_url: str = DEFAULT_API_URL) -> None:
+                 api_url: Optional[str] = None) -> None:
         self._aleo = aleo
         self.program = program
-        self.api = AsyncApiClient(api_url)
+        # Resolve the API from the bound client's network (see api_url_for).
+        self.api = AsyncApiClient(api_url or api_url_for(aleo.network_name))
         # allow_token relationships are immutable — cache probes for the
         # client's lifetime.
         self._wrapped_cache: dict[str, bool] = {}

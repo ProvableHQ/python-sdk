@@ -45,11 +45,47 @@ def _check(resp: Any) -> None:
         raise AirdropRateLimitedError(text)
     raise DexApiError(code, text)
 
-# Staging serves the migrated shield_swap.aleo stack (the old
-# amm-api.dev.provable.com host still serves the pre-migration deployment).
-# Override with SHIELD_SWAP_API_URL when the host moves again.
-DEFAULT_API_URL = os.environ.get("SHIELD_SWAP_API_URL",
-                                 "https://amm-api-staging.dev.provable.com")
+#: DEX API host per network.  The API is deployed per network and the two are
+#: not interchangeable: pool keys and blinded identities are network-scoped, so
+#: a testnet key means nothing to the mainnet indexer.
+SHIELD_SWAP_API_URLS: dict[str, str] = {
+    "mainnet": "https://api.swap.shield.fi",
+    "testnet": "https://api.testnet.swap.shield.fi",
+}
+
+
+def api_url_for(network: str) -> str:
+    """The DEX API base for *network*.
+
+    ``ShieldSwap`` calls this with its bound client's network, so the API
+    always matches the chain being read.  ``SHIELD_SWAP_API_URL`` overrides
+    every network — set it to point at a local or staging deployment.
+
+    Args:
+        network: ``"mainnet"`` or ``"testnet"``.
+
+    Returns:
+        The base URL, without a trailing slash.
+
+    Raises:
+        ValueError: If no host is known for *network* and no override is set —
+            better than silently querying the wrong chain's indexer.
+    """
+    override = os.environ.get("SHIELD_SWAP_API_URL")
+    if override:
+        return override.rstrip("/")
+    try:
+        return SHIELD_SWAP_API_URLS[network]
+    except KeyError:
+        raise ValueError(
+            f"No DEX API host known for network {network!r} — expected one of "
+            f"{sorted(SHIELD_SWAP_API_URLS)}, or set SHIELD_SWAP_API_URL."
+        ) from None
+
+
+#: Fallback for a standalone :class:`ApiClient` built without a network.  Points
+#: at testnet deliberately: an accidental default must not reach mainnet.
+DEFAULT_API_URL = api_url_for("testnet")
 _TIMEOUT = 30.0
 
 T = TypeVar("T")

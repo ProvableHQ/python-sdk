@@ -27,7 +27,7 @@ from ._core import (
     resolve_swap_params,
     select_token_record,
 )
-from .api import ApiClient, DEFAULT_API_URL
+from .api import ApiClient, api_url_for
 from .derivations import (
     BlindedIdentity,
     blinded_identity_at,
@@ -88,10 +88,12 @@ class ShieldSwap:
     """
 
     def __init__(self, aleo: Any, *, program: str = g.PROGRAM_ID,
-                 api_url: str = DEFAULT_API_URL) -> None:
+                 api_url: Optional[str] = None) -> None:
         self._aleo = aleo
         self.program = program
-        self.api = ApiClient(api_url)
+        # Resolve the API from the bound client's network so the off-chain
+        # indexer always matches the chain being read.
+        self.api = ApiClient(api_url or api_url_for(aleo.network_name))
         self.profile: Any = None          # set by from_profile()
         self.journal: Any = None          # set by from_profile()
         # allow_token relationships are immutable — cache probes for the
