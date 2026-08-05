@@ -351,12 +351,14 @@ process might die before the claim.
 
 Quote first (``dex.api.get_route``) and pass *expected_out*: without
 it a spot estimate is used, which ignores fees and price impact.
-On a profile-bound client the blinding counter is reserved from the
-journal and the resulting handle is recorded once the broadcast is
-accepted, so concurrent swaps cannot collide and a crash before the
-claim does not lose the secret.  Pass ``track=False`` to opt out (the
-counter then comes from an on-chain probe, which races), or *identity*
-to supply your own.  Without a journal the probe is all there is.
+**Building is not free with a journal.**  The blinded address is a
+transition input, so a counter is reserved *here*, not at the terminal
+method — discarding the call, or only simulating, still spends it.  That
+reservation is what makes concurrent swaps safe: it serializes under a
+file lock where the probe it replaces could hand two callers the same
+counter.  The handle is journaled once the broadcast is accepted, so a
+crash before the claim keeps the blinding factor.  ``track=False`` builds
+on the racing probe instead; *identity* supplies your own.
 
 The default
 *deadline_offset_blocks* (~8h at ~3s blocks) absorbs delegated-

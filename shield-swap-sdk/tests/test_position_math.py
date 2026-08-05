@@ -154,3 +154,9 @@ def test_u256_of_accepts_struct_or_int():
         hi, lo = 3, 5
     assert u256_of(_S()) == _u256(3, 5)
     assert u256_of(42) == 42
+
+
+def test_zero_sqrt_price_raises_rather_than_silently_returning():
+    """A zero bound divides by zero in the contract too — surface it."""
+    with pytest.raises(ZeroDivisionError):
+        amount0_delta(0, 4 * Q128, 10**6)

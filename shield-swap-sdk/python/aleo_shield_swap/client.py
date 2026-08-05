@@ -14,6 +14,7 @@ from aleo.codegen.runtime import parse_plaintext
 
 from . import _generated as g
 from ._core import (
+    decode_position_record,
     default_merkle_proofs,
     ensure_programs,
     find_position_plaintext,
@@ -381,13 +382,15 @@ class ShieldSwap:
         return g.Tick.from_plaintext(raw) if raw is not None else None
 
     def _owned_position_state(self, pool_key: str, position: "g.Position",
-                              ) -> Optional[OwnedPositionState]:
+                              slot: Any) -> Optional[OwnedPositionState]:
         """Join a position against the pool's slot and its two boundary ticks.
+
+        *slot* is passed in rather than read here so one slot read serves every
+        position in the same pool.
 
         Returns None when either boundary tick is missing, which means the
         range is not initialized on chain and no amounts can be derived.
         """
-        slot = self.get_slot(pool_key).raw
         lower = self._tick_info(pool_key, int(position.tick_lower))
         upper = self._tick_info(pool_key, int(position.tick_upper))
         if lower is None or upper is None:
@@ -420,23 +423,29 @@ class ShieldSwap:
             tokens_owed0=owed0, tokens_owed1=owed1,
         )
 
-    def _owned_from_record(self, plaintext: str) -> Optional[OwnedPosition]:
+    def _owned_from_record(self, plaintext: str,
+                           slots: Optional[dict[str, Any]] = None
+                           ) -> Optional[OwnedPosition]:
         """Build an :class:`OwnedPosition` from one PositionNFT record plaintext.
 
         Returns None for a record that is not a PositionNFT, so a mixed record
-        set from the program can be filtered in one pass.
+        set from the program can be filtered in one pass.  *slots* is an
+        optional per-call cache of ``pool_key -> slot`` so a batch of positions
+        in one pool costs one slot read.
         """
-        try:
-            decoded = parse_plaintext(plaintext)
-        except (ValueError, TypeError):
-            return None
-        if not isinstance(decoded, dict) or "tick_lower" not in decoded:
+        decoded = decode_position_record(plaintext)
+        if decoded is None:
             return None
         token_id = str(decoded["token_id"])
         pool_key = str(decoded["pool"])
         raw = self._mapping_value("positions", token_id)
-        state = (self._owned_position_state(pool_key, g.Position.from_plaintext(raw))
-                 if raw is not None else None)
+        state = None
+        if raw is not None:
+            cache = slots if slots is not None else {}
+            if pool_key not in cache:
+                cache[pool_key] = self.get_slot(pool_key).raw
+            state = self._owned_position_state(
+                pool_key, g.Position.from_plaintext(raw), cache[pool_key])
         return OwnedPosition(
             position_token_id=token_id,
             pool_key=pool_key,
@@ -473,11 +482,12 @@ class ShieldSwap:
         records = self._aleo.record_provider.find(
             acct, program=self.program, unspent=True)
         out: list[OwnedPosition] = []
+        slots: dict[str, Any] = {}        # one slot read per pool, not per position
         for rec in records:
             plaintext = record_plaintext(rec)
             if not plaintext:
                 continue
-            owned = self._owned_from_record(plaintext)
+            owned = self._owned_from_record(plaintext, slots)
             if owned is None:
                 continue
             if pool_key is not None and owned.pool_key != pool_key:
@@ -674,12 +684,14 @@ class ShieldSwap:
 
         Quote first (``dex.api.get_route``) and pass *expected_out*: without
         it a spot estimate is used, which ignores fees and price impact.
-        On a profile-bound client the blinding counter is reserved from the
-        journal and the resulting handle is recorded once the broadcast is
-        accepted, so concurrent swaps cannot collide and a crash before the
-        claim does not lose the secret.  Pass ``track=False`` to opt out (the
-        counter then comes from an on-chain probe, which races), or *identity*
-        to supply your own.  Without a journal the probe is all there is.
+        **Building is not free with a journal.**  The blinded address is a
+        transition input, so a counter is reserved *here*, not at the terminal
+        method — discarding the call, or only simulating, still spends it.  That
+        reservation is what makes concurrent swaps safe: it serializes under a
+        file lock where the probe it replaces could hand two callers the same
+        counter.  The handle is journaled once the broadcast is accepted, so a
+        crash before the claim keeps the blinding factor.  ``track=False`` builds
+        on the racing probe instead; *identity* supplies your own.
 
         The default
         *deadline_offset_blocks* (~8h at ~3s blocks) absorbs delegated-

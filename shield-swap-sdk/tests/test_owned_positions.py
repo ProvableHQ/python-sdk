@@ -144,3 +144,31 @@ def test_fee_owed_contribution_is_reproducible():
     # with all outside/last counters zero, inside growth == global growth
     slot = dex.get_slot("5field").raw
     assert accrued0 == fee_owed(u256_of(slot.fee_growth_global0_x_128), 0, 500)
+
+
+def test_one_slot_read_per_pool_not_per_position():
+    """Ten positions in one pool must not cost ten slot reads."""
+    records = [{"record_plaintext": POSITION_RECORD} for _ in range(10)]
+    stub = _stub(records=records)
+    dex = ShieldSwap(stub)
+    calls = {"n": 0}
+    real = dex.get_slot
+
+    def counting(pool_key):
+        calls["n"] += 1
+        return real(pool_key)
+
+    dex.get_slot = counting
+    assert len(dex.get_owned_positions()) == 10
+    assert calls["n"] == 1, f"slot read {calls['n']} times for one pool"
+
+
+def test_a_record_sharing_one_field_is_not_a_position():
+    """Detection checks the whole PositionNFT field set, so a future record
+    type that happens to carry tick_lower is not misread as a position."""
+    impostor = ("{ owner: aleo1me.private, tick_lower: -60i32.private, "
+                "amount: 5u128.private, _nonce: 9group.public }")
+    stub = _stub(records=[{"record_plaintext": impostor},
+                          {"record_plaintext": POSITION_RECORD}])
+    owned = ShieldSwap(stub).get_owned_positions()
+    assert [p.position_token_id for p in owned] == ["42field"]

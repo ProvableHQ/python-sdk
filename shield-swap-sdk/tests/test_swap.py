@@ -201,3 +201,25 @@ def test_without_a_journal_swap_still_works(stub_aleo):
     dex = ShieldSwap(stub_aleo)
     assert dex.journal is None
     assert _swap_call_on(dex).transact().blinded_address
+
+
+def test_building_a_call_reserves_even_if_never_executed(tmp_path, stub_aleo):
+    """Documented cost of tracking: the blinded address is a transition input,
+    so the counter is spent at build time, not at the terminal method."""
+    dex = _journalled_dex(tmp_path, stub_aleo)
+    _swap_call_on(dex)                       # built, never transacted
+    assert dex.journal.counter_cursor() == 1
+
+
+def test_simulate_also_spends_a_counter(tmp_path, stub_aleo):
+    dex = _journalled_dex(tmp_path, stub_aleo)
+    _swap_call_on(dex).simulate()
+    assert dex.journal.counter_cursor() == 1
+    assert dex.journal.pending_claims() == []   # nothing broadcast, nothing to claim
+
+
+def test_track_false_gives_a_side_effect_free_build(tmp_path, stub_aleo):
+    dex = _journalled_dex(tmp_path, stub_aleo)
+    _swap_call_on(dex, track=False)
+    assert dex.journal.counter_cursor() == 0
+    assert dex.journal.events() == []

@@ -12,6 +12,7 @@ from typing import Any, Callable, Generic, Optional, TypeVar
 from . import _generated as g
 from ._calls import extract_tx_id, root_outputs
 from ._core import (
+    decode_position_record,
     default_merkle_proofs,
     find_position_plaintext,
     normalize_mapping_value,
@@ -19,12 +20,19 @@ from ._core import (
     parse_token_record_info,
     pick_covering_record,
     program_imports,
+    record_plaintext,
     register_program_sources,
     resolve_swap_params,
 )
 from ._routing import claim_route, swap_route
+from .position_math import (
+    amounts_for_liquidity,
+    fee_growth_inside,
+    fee_owed,
+    u256_of,
+)
 from .api import AsyncApiClient, api_url_for
-from .tick_math import int_to_u256_plaintext
+from .tick_math import get_sqrt_price_at_tick_x128, int_to_u256_plaintext
 from .derivations import (
     BlindedIdentity,
     derive_blinded_address,
@@ -38,7 +46,13 @@ from .errors import (
     PoolNotInitializedError,
     SwapOutputNotFinalizedError,
 )
-from .types import ClaimResult, SlotView, SwapHandle
+from .types import (
+    ClaimResult,
+    OwnedPosition,
+    OwnedPositionState,
+    SlotView,
+    SwapHandle,
+)
 
 R = TypeVar("R")
 
@@ -304,6 +318,100 @@ class AsyncShieldSwap:
 
     # ── Balances ─────────────────────────────────────────────────────────────
 
+    # ── Owned positions ──────────────────────────────────────────────────────
+
+    async def _tick_info(self, pool_key: str, tick: int) -> "Optional[g.Tick]":
+        """The on-chain ``Tick`` entry for *tick*, or None if uninitialized."""
+        raw = await self._mapping_value("ticks", self.derive_tick_key(pool_key, tick))
+        return g.Tick.from_plaintext(raw) if raw is not None else None
+
+    async def _owned_position_state(self, pool_key: str, position: Any,
+                                    slot: Any) -> Optional[OwnedPositionState]:
+        """Async mirror of ``ShieldSwap._owned_position_state``.
+
+        *slot* is passed in so one slot read serves every position in a pool.
+        """
+        lower = await self._tick_info(pool_key, int(position.tick_lower))
+        upper = await self._tick_info(pool_key, int(position.tick_upper))
+        if lower is None or upper is None:
+            return None
+
+        liquidity = int(position.liquidity)
+        amount0, amount1 = amounts_for_liquidity(
+            u256_of(slot.sqrt_price),
+            get_sqrt_price_at_tick_x128(int(position.tick_lower)),
+            get_sqrt_price_at_tick_x128(int(position.tick_upper)),
+            liquidity,
+        )
+        inside0, inside1 = fee_growth_inside(
+            (u256_of(lower.fee_growth_outside0_x_128),
+             u256_of(lower.fee_growth_outside1_x_128)), int(lower.tick),
+            (u256_of(upper.fee_growth_outside0_x_128),
+             u256_of(upper.fee_growth_outside1_x_128)), int(upper.tick),
+            int(slot.tick),
+            (u256_of(slot.fee_growth_global0_x_128),
+             u256_of(slot.fee_growth_global1_x_128)),
+        )
+        owed0, owed1 = int(position.tokens_owed0), int(position.tokens_owed1)
+        return OwnedPositionState(
+            liquidity=liquidity,
+            amount0=amount0, amount1=amount1,
+            collectible0=owed0 + fee_owed(
+                inside0, u256_of(position.fee_growth_inside0_last_x_128), liquidity),
+            collectible1=owed1 + fee_owed(
+                inside1, u256_of(position.fee_growth_inside1_last_x_128), liquidity),
+            tokens_owed0=owed0, tokens_owed1=owed1,
+        )
+
+    async def get_owned_positions(self, *, pool_key: Optional[str] = None,
+                                  account: Any = None) -> list[OwnedPosition]:
+        """Every position this account holds, joined with live chain state.
+
+        Async mirror of :meth:`ShieldSwap.get_owned_positions` — same reads, same
+        ``state is None`` semantics while a mint finalizes.
+        """
+        acct = self._account(account)
+        records = self._aleo.record_provider.find(
+            acct, program=self.program, unspent=True)
+        out: list[OwnedPosition] = []
+        slots: dict[str, Any] = {}      # one slot read per pool, not per position
+        for rec in records:
+            plaintext = record_plaintext(rec)
+            if not plaintext:
+                continue
+            decoded = decode_position_record(plaintext)
+            if decoded is None:
+                continue
+            pool = str(decoded["pool"])
+            if pool_key is not None and pool != pool_key:
+                continue
+            token_id = str(decoded["token_id"])
+            raw = await self._mapping_value("positions", token_id)
+            state = None
+            if raw is not None:
+                if pool not in slots:
+                    slots[pool] = (await self.get_slot(pool)).raw
+                state = await self._owned_position_state(
+                    pool, g.Position.from_plaintext(raw), slots[pool])
+            out.append(OwnedPosition(
+                position_token_id=token_id, pool_key=pool,
+                tick_lower=int(decoded["tick_lower"]),
+                tick_upper=int(decoded["tick_upper"]),
+                token0_id=str(decoded["token0_id"]),
+                token1_id=str(decoded["token1_id"]),
+                withdrawal=str(decoded["withdrawal"]),
+                record=plaintext, state=state))
+        return out
+
+    async def get_owned_position(self, position_token_id: str, *,
+                                 account: Any = None) -> Optional[OwnedPosition]:
+        """One owned position by token id, or None — see
+        :meth:`ShieldSwap.get_owned_position`."""
+        for owned in await self.get_owned_positions(account=account):
+            if owned.position_token_id == position_token_id:
+                return owned
+        return None
+
     async def get_private_balances(self, programs: list[str],
                                    account: Any = None) -> dict[str, int]:
         """Sum of unspent record amounts per wrapper program (spendable
@@ -390,8 +498,12 @@ class AsyncShieldSwap:
 
         Quote first (``dex.api.get_route``) and pass *expected_out*: without
         it a spot estimate is used, which ignores fees and price impact.
-        Pass *identity* (from journal-reserved counters) to skip the
-        on-chain probe — required for concurrent swaps.  The default
+        **This client has no journal**, so it cannot reserve blinding counters:
+        the identity comes from an on-chain probe, and the probe is not atomic —
+        two concurrent async swaps derive the same counter and the second reverts
+        at finalize.  Pass *identity* explicitly (from a sync client's
+        ``journal.reserve_counters``) for anything concurrent.  The sync
+        :meth:`ShieldSwap.swap` reserves and journals automatically.  The default
         *deadline_offset_blocks* (~8h at ~3s blocks) absorbs delegated-
         proving latency; a tight deadline aborts at finalize when proving
         outlives it.
