@@ -323,7 +323,7 @@ fast when something is systematically wrong (e.g. wrong program).
 
 ### Chain methods
 
-### `swap(self, *, pool_key: 'str', token_in_id: 'str', amount_in: 'int', slippage_bps: 'int' = 50, expected_out: 'Optional[int]' = None, sqrt_price_limit: 'Optional[int]' = None, deadline_offset_blocks: 'int' = 10000, nonce: 'Optional[int]' = None, identity: 'Optional[BlindedIdentity]' = None, token_in_program: 'Optional[str]' = None, token_record: 'Optional[str]' = None, wrapper_proofs: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[SwapHandle]'`
+### `swap(self, *, pool_key: 'str', token_in_id: 'str', amount_in: 'int', slippage_bps: 'int' = 50, expected_out: 'Optional[int]' = None, sqrt_price_limit: 'Optional[int]' = None, deadline_offset_blocks: 'int' = 10000, nonce: 'Optional[int]' = None, identity: 'Optional[BlindedIdentity]' = None, token_in_program: 'Optional[str]' = None, token_record: 'Optional[str]' = None, wrapper_proofs: 'Optional[str]' = None, track: 'bool' = True, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[SwapHandle]'`
 
 Request a private swap — phase one of the two-transaction flow.
 
@@ -339,8 +339,14 @@ process might die before the claim.
 
 Quote first (``dex.api.get_route``) and pass *expected_out*: without
 it a spot estimate is used, which ignores fees and price impact.
-Pass *identity* (from journal-reserved counters) to skip the
-on-chain probe — required for concurrent swaps.  The default
+On a profile-bound client the blinding counter is reserved from the
+journal and the resulting handle is recorded once the broadcast is
+accepted, so concurrent swaps cannot collide and a crash before the
+claim does not lose the secret.  Pass ``track=False`` to opt out (the
+counter then comes from an on-chain probe, which races), or *identity*
+to supply your own.  Without a journal the probe is all there is.
+
+The default
 *deadline_offset_blocks* (~8h at ~3s blocks) absorbs delegated-
 proving latency; a tight deadline aborts at finalize when proving
 outlives it.

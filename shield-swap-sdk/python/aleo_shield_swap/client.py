@@ -615,6 +615,7 @@ class ShieldSwap:
         token_in_program: Optional[str] = None,
         token_record: Optional[str] = None,
         wrapper_proofs: Optional[str] = None,
+        track: bool = True,
         imports: Optional[dict[str, str]] = None,
         account: Any = None,
     ) -> DexCall[SwapHandle]:
@@ -632,8 +633,14 @@ class ShieldSwap:
 
         Quote first (``dex.api.get_route``) and pass *expected_out*: without
         it a spot estimate is used, which ignores fees and price impact.
-        Pass *identity* (from journal-reserved counters) to skip the
-        on-chain probe — required for concurrent swaps.  The default
+        On a profile-bound client the blinding counter is reserved from the
+        journal and the resulting handle is recorded once the broadcast is
+        accepted, so concurrent swaps cannot collide and a crash before the
+        claim does not lose the secret.  Pass ``track=False`` to opt out (the
+        counter then comes from an on-chain probe, which races), or *identity*
+        to supply your own.  Without a journal the probe is all there is.
+
+        The default
         *deadline_offset_blocks* (~8h at ~3s blocks) absorbs delegated-
         proving latency; a tight deadline aborts at finalize when proving
         outlives it.
@@ -648,7 +655,17 @@ class ShieldSwap:
         )
         deadline = get_deadline(self._aleo, deadline_offset_blocks)
         swap_nonce = nonce if nonce is not None else generate_swap_nonce()
-        identity = identity or next_blinded_identity(self._aleo, acct, self.program)
+        # Reserve from the journal rather than probing the chain: the probe
+        # asks "is this blinded address used?" and the answer is only true
+        # until another swap consumes it, so two concurrent swaps derive the
+        # same counter and the second reverts at finalize. Reservation is
+        # serialized by the journal's file lock, so it cannot collide.
+        counter: Optional[int] = None
+        if identity is None and track and self.journal is not None:
+            counter = self.journal.reserve_counters(1)[0]
+            identity = blinded_identity_at(self._aleo, acct, self.program, counter)
+        elif identity is None:
+            identity = next_blinded_identity(self._aleo, acct, self.program)
 
         # Resolve the record-funding program lazily: an explicit record
         # needs no registry lookup (its program registration comes from
@@ -710,7 +727,7 @@ class ShieldSwap:
                 (o for o in outputs if isinstance(o, str) and o.endswith("field")),
                 None,
             )
-            return SwapHandle(
+            handle = SwapHandle(
                 swap_id=swap_id,
                 blinding_factor=identity.blinding_factor,
                 blinded_address=identity.blinded_address,
@@ -721,6 +738,14 @@ class ShieldSwap:
                 transaction_id=tx_id,
                 program=self.program,
             )
+            # Journal the handle as soon as the broadcast is accepted: the
+            # blinding factor is the only thing that can claim this swap, and a
+            # crash before the claim would otherwise lose it. A failure here is
+            # raised, not swallowed — the swap has landed, so silently dropping
+            # its claim secret is the worse outcome.
+            if counter is not None and self.journal is not None:
+                self.journal.record_swap(handle, counter)
+            return handle
 
         return DexCall(self._aleo, bound, build_result)
 
