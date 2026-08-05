@@ -164,6 +164,51 @@ class PositionView:
     source: str                     # "journal" | "scanned"
 
 
+@dataclass(frozen=True)
+class OwnedPositionState:
+    """A position's chain-derived state — everything the mappings know.
+
+    Read from ``positions``/``slots``/``ticks`` and the view math, so it moves
+    with the pool price rather than being fixed at mint.
+    """
+
+    liquidity: int
+    #: Token amounts currently backing the range, at the pool's live price.
+    amount0: int
+    amount1: int
+    #: What ``collect`` would pay today: already-accrued ``tokens_owed`` plus
+    #: fees earned since the position was last touched.
+    collectible0: int
+    collectible1: int
+    tokens_owed0: int
+    tokens_owed1: int
+
+
+@dataclass(frozen=True)
+class OwnedPosition:
+    """A position this account owns: its record identity plus live chain state.
+
+    A position spans two sources.  The private ``PositionNFT`` record carries
+    identity — pool, range, withdrawal address — and no amounts; the public
+    mappings carry amounts and no identity.  This is the join.
+
+    *state* is ``None`` while a fresh mint is still finalizing: the record
+    exists but ``positions[token_id]`` is not written yet.  Burned positions
+    cannot appear at all, because burn consumes the record.
+    """
+
+    position_token_id: str
+    pool_key: str
+    tick_lower: int
+    tick_upper: int
+    token0_id: str
+    token1_id: str
+    withdrawal: str
+    #: The spendable record plaintext — pass as ``position_record=`` to write verbs.
+    record: str
+    state: Optional[OwnedPositionState]
+
+
 @dataclass
 class SessionStatus:
     """Everything an agent needs to re-orient in one call."""
