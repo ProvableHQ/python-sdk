@@ -340,9 +340,11 @@ class AsyncShieldSwap:
         tokens = await self.api.get_tokens()
         # Spendable private records live in the record-funding program: the
         # UNDERLYING program for wrapped assets, the ARC-20 itself for plain.
-        by_program = {t.underlying_program or t.amm_token_program: t
-                      for t in tokens
-                      if t.underlying_program or t.amm_token_program}
+        by_program: dict[str, Any] = {}
+        for tok in tokens:
+            prog = tok.underlying_program or tok.amm_token_program
+            if prog:
+                by_program[prog] = tok
         private = await self.get_private_balances(list(by_program), account=acct)
         out: dict[str, dict[str, Any]] = {}
         for bal in await self.api.get_public_balances(addr):

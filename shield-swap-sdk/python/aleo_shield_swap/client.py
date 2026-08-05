@@ -37,6 +37,8 @@ from .derivations import (
 )
 from .errors import (
     InsufficientRecordsError,
+    NotAuthenticatedError,
+    NotRedeemedError,
     InvalidFeeTierError,
     PoolNotFoundError,
     PoolNotInitializedError,
@@ -561,9 +563,11 @@ class ShieldSwap:
         tokens = self.api.get_tokens()
         # Spendable private records live in the record-funding program: the
         # UNDERLYING program for wrapped assets, the ARC-20 itself for plain.
-        by_program = {t.underlying_program or t.amm_token_program: t
-                      for t in tokens
-                      if t.underlying_program or t.amm_token_program}
+        by_program: dict[str, Any] = {}
+        for tok in tokens:
+            prog = tok.underlying_program or tok.amm_token_program
+            if prog:
+                by_program[prog] = tok
         own_address = str(acct.address) if acct is not None else None
         private = (self.get_private_balances(list(by_program), account=acct)
                    if addr == own_address else {p: 0 for p in by_program})
@@ -603,7 +607,25 @@ class ShieldSwap:
         pids = [self.program, *token_programs, *(imports or {})]
         ensure_programs(self._aleo, pids, imports)
 
-    def _lp_programs(self, route: Any, program0: str, program1: str,
+    def _fund_side(self, *, record: Optional[str], program: Optional[str],
+                   token_id: str, min_amount: int, account: Any
+                   ) -> tuple[str, Optional[str]]:
+        """``(record, program)`` for one side of a liquidity call.
+
+        An explicit *record* needs no program resolution — the caller already
+        chose what to spend — so the returned program stays whatever they passed,
+        possibly None.  Otherwise the funding program is resolved and a covering
+        record selected from it.
+        """
+        if record:
+            return record, program
+        resolved = program or self._token_program(token_id)
+        return select_token_record(
+            self._aleo, program=resolved, min_amount=min_amount,
+            token_id=token_id, account=account), resolved
+
+    def _lp_programs(self, route: Any, program0: Optional[str],
+                     program1: Optional[str],
                      pool: Any, w0: bool, w1: bool) -> list[str]:
         """Programs a (possibly routed) LP call touches: both funding
         programs (None when an explicit record made resolution unnecessary),
@@ -915,8 +937,17 @@ class ShieldSwap:
 
         The route endpoint returns canonical decimal amounts, the contract
         takes base units — this converts in both directions using the
-        token registry's decimals.  None (spot fallback) when either token
-        is unknown or no route is quotable.
+        token registry's decimals.  Returns None when the pool genuinely has no
+        quotable route, or when either token is missing from the registry.
+
+        Raises:
+            NotAuthenticatedError: If no DEX session is established.
+            NotRedeemedError: If the account has not redeemed an invite.
+
+        "Could not ask" is NOT "no route": swallowing an auth failure here
+        yields a spot-estimate ``amount_out_min`` that ignores the pool fee, so
+        the caller pays for a proof the finalize then rejects. Auth failures
+        propagate for that reason.
         """
         from decimal import Decimal
         dec_in = self._token_decimals(token_in_id)
@@ -928,6 +959,8 @@ class ShieldSwap:
             route = self.api.get_route(
                 token_in=token_in_id, token_out=token_out_id,
                 amount_in=f"{canonical:f}")   # fixed-point, never "1E-8"
+        except (NotAuthenticatedError, NotRedeemedError):
+            raise
         except ShieldSwapError:
             return None                   # no quotable route
         if not route.estimated_amount_out:
@@ -966,6 +999,18 @@ class ShieldSwap:
         expected_out = self._quote_expected_out(
             token_in_id=token_in_id, token_out_id=token_out_id,
             amount_in=amount_in)
+        if expected_out is None and slippage_bps < 10_000:
+            # Falling back to the spot estimate would set amount_out_min above
+            # what the pool can actually pay (spot ignores the fee), so every
+            # swap in the batch would be proved, broadcast, and then rejected at
+            # finalize. Refuse before spending anything.
+            raise ShieldSwapError(
+                f"no route quote for {token_in_id} -> {token_out_id}: a spot "
+                "estimate ignores the pool fee, so the batch would prove and "
+                "broadcast swaps the finalize rejects. Quote it yourself and "
+                "pass expected_out, or set slippage_bps=10000 to accept any "
+                "output."
+            )
         counters = self.journal.reserve_counters(count)
         program = self._token_program(token_in_id)
         used_records: set[str] = set()
@@ -1207,16 +1252,12 @@ class ShieldSwap:
             tick_lower_hint=lo_hint, tick_upper_hint=hi_hint,
         ).to_plaintext()
 
-        program0 = token0_program or (
-            None if token0_record else self._token_program(pool.token0))
-        program1 = token1_program or (
-            None if token1_record else self._token_program(pool.token1))
-        record0 = token0_record or select_token_record(
-            self._aleo, program=program0,
-            min_amount=amount0_desired, token_id=pool.token0, account=acct)
-        record1 = token1_record or select_token_record(
-            self._aleo, program=program1,
-            min_amount=amount1_desired, token_id=pool.token1, account=acct)
+        record0, program0 = self._fund_side(
+            record=token0_record, program=token0_program,
+            token_id=pool.token0, min_amount=amount0_desired, account=acct)
+        record1, program1 = self._fund_side(
+            record=token1_record, program=token1_program,
+            token_id=pool.token1, min_amount=amount1_desired, account=acct)
 
         w0 = self._is_wrapped(str(pool.token0))
         w1 = self._is_wrapped(str(pool.token1))
@@ -1293,16 +1334,12 @@ class ShieldSwap:
         hi_hint = (tick_upper_hint if tick_upper_hint is not None
                    else self.find_tick_predecessor(pool_key, int(decoded["tick_upper"])))
 
-        program0 = token0_program or (
-            None if token0_record else self._token_program(pool.token0))
-        program1 = token1_program or (
-            None if token1_record else self._token_program(pool.token1))
-        record0 = token0_record or select_token_record(
-            self._aleo, program=program0,
-            min_amount=amount0_desired, token_id=pool.token0, account=acct)
-        record1 = token1_record or select_token_record(
-            self._aleo, program=program1,
-            min_amount=amount1_desired, token_id=pool.token1, account=acct)
+        record0, program0 = self._fund_side(
+            record=token0_record, program=token0_program,
+            token_id=pool.token0, min_amount=amount0_desired, account=acct)
+        record1, program1 = self._fund_side(
+            record=token1_record, program=token1_program,
+            token_id=pool.token1, min_amount=amount1_desired, account=acct)
 
         w0 = self._is_wrapped(str(pool.token0))
         w1 = self._is_wrapped(str(pool.token1))

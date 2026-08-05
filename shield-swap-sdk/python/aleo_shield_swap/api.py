@@ -213,8 +213,9 @@ class ApiClient:
         if data.get("token"):             # legacy body-JWT deployments
             self._token = data["token"]
             return self._token
-        self._csrf = data["csrf_token"]
-        return self._csrf
+        csrf = str(data["csrf_token"])
+        self._csrf = csrf
+        return csrf
 
     def set_token(self, token: str) -> None:
         """Adopt a previously issued JWT."""
@@ -446,8 +447,9 @@ class AsyncApiClient:
         if data.get("token"):             # legacy body-JWT deployments
             self._token = data["token"]
             return self._token
-        self._csrf = data["csrf_token"]
-        return self._csrf
+        csrf = str(data["csrf_token"])
+        self._csrf = csrf
+        return csrf
 
     def set_token(self, token: str) -> None:
         """Adopt a previously issued JWT — see :meth:`ApiClient.set_token`."""

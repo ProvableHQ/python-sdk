@@ -36,8 +36,10 @@ def dex(tmp_path, monkeypatch):
     monkeypatch.setattr(ShieldSwap, "get_pool",
                         lambda self, key: type("P", (), {"token0": "t0",
                                                          "token1": "t1"})())
+    # A real batch always has a quote; swap_many refuses without one, because
+    # the spot fallback sets amount_out_min above what the pool can pay.
     monkeypatch.setattr(ShieldSwap, "_quote_expected_out",
-                        lambda self, **kw: None)
+                        lambda self, **kw: 990_000)
     monkeypatch.setattr(ShieldSwap, "_token_program",
                         lambda self, token_id: "tok.aleo")
     return d
@@ -166,3 +168,45 @@ def test_swap_many_fails_cleanly_when_records_run_out(dex, monkeypatch):
     assert len(report.handles) == 3        # one per distinct record
     assert len(report.failures) == 2
     assert all("distinct unspent record" in f["error"] for f in report.failures)
+
+
+# ── Quote failures must not become bad trade parameters ──────────────────────
+
+def test_swap_many_refuses_without_a_quote(dex, monkeypatch):
+    """A missing quote would set amount_out_min above what the pool can pay, so
+    every swap would be proved, broadcast and rejected. Refuse first."""
+    from aleo_shield_swap.errors import ShieldSwapError
+
+    monkeypatch.setattr(ShieldSwap, "_quote_expected_out", lambda self, **kw: None)
+    with pytest.raises(ShieldSwapError, match="no route quote"):
+        dex.swap_many(pool_key="5field", token_in_id="t0",
+                      amount_in=10**6, count=3)
+    assert dex.journal.counter_cursor() == 0      # nothing reserved or spent
+
+
+def test_swap_many_allows_no_quote_at_full_slippage(dex, monkeypatch):
+    """slippage_bps=10000 means "accept any output", so no quote is needed."""
+    monkeypatch.setattr(ShieldSwap, "_quote_expected_out", lambda self, **kw: None)
+    dex.swap_many(pool_key="5field", token_in_id="t0", amount_in=10**6,
+                  count=1, slippage_bps=10_000)
+    assert dex.journal.counter_cursor() == 1      # it proceeded
+
+
+def test_quote_propagates_auth_failure():
+    """'could not ask' is not 'no route' — surfacing beats a bad min-out.
+
+    Built outside the ``dex`` fixture on purpose: that fixture patches
+    ``_quote_expected_out`` on the class, which would mask the real method.
+    """
+    from aleo_shield_swap.errors import NotAuthenticatedError
+
+    class _Api:
+        def get_route(self, **_):
+            raise NotAuthenticatedError("no session")
+
+    fresh = ShieldSwap(_Facade())
+    fresh.api = _Api()
+    fresh._token_decimals = lambda _tid: 6   # registry known, route not askable
+    with pytest.raises(NotAuthenticatedError):
+        fresh._quote_expected_out(token_in_id="t0", token_out_id="t1",
+                                  amount_in=10**6)

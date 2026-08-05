@@ -67,9 +67,8 @@ class Profile:
         # Every run after: the same call returns that key, unchanged.
         assert Profile.load_or_create().address == profile.address
 
-        # A second address needs its own home.  Pass a resolved path — ``~``
-        # is not expanded, so a "~/..." string creates a literal ``~`` dir.
-        other = Profile.load_or_create(Path.home() / ".shield-swap-alt")
+        # A second address needs its own home; "~/..." is expanded.
+        other = Profile.load_or_create("~/.shield-swap-alt")
 
     That last call generates a fresh key only when no key is being imported;
     with ``SHIELD_SWAP_PRIVATE_KEY`` set, every new home adopts that one key
@@ -89,10 +88,13 @@ class Profile:
     def default_home() -> Path:
         """Where profiles live by default: ``$SHIELD_SWAP_HOME`` or ``~/.shield-swap``.
 
-        Local only — returns the path whether or not it exists.
+        Local only — returns the path whether or not it exists.  A ``~`` in
+        ``SHIELD_SWAP_HOME`` is expanded, so a value set from a config file that
+        does not shell-expand still resolves to the home directory rather than a
+        literal ``~`` folder in the working directory.
         """
         env = os.environ.get("SHIELD_SWAP_HOME")
-        return Path(env) if env else Path.home() / ".shield-swap"
+        return Path(env).expanduser() if env else Path.home() / ".shield-swap"
 
     @classmethod
     def load_or_create(cls, home: "Path | str | None" = None, *,
@@ -117,7 +119,9 @@ class Profile:
         Returns:
             The loaded or newly created profile.
         """
-        home = Path(home) if home is not None else cls.default_home()
+        # expanduser: a "~/..." string is otherwise taken literally, creating a
+        # directory named ~ in the cwd and writing the private key there.
+        home = Path(home).expanduser() if home is not None else cls.default_home()
         path = home / _PROFILE
         if path.exists():
             path.chmod(0o600)             # heal a pre-existing loose mode
