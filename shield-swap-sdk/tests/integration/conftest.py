@@ -20,7 +20,14 @@ def _make_live_dex():
 
     from aleo_shield_swap import ShieldSwap
 
-    aleo = Aleo(HTTPProvider(ENDPOINT, network="testnet"))
+    # Pass the DPS credentials the write tier gates on: without them the
+    # hosted record scanner answers Unauthorized, so every record read — and
+    # therefore every write test — fails before it reaches the chain.
+    aleo = Aleo(HTTPProvider(
+        ENDPOINT, network="testnet",
+        api_key=os.environ.get("ALEO_E2E_API_KEY"),
+        consumer_id=os.environ.get("ALEO_E2E_CONSUMER_ID"),
+    ))
     dex = ShieldSwap(aleo)
     # Some API endpoints are auth-gated (signature challenge/verify) and
     # additionally invite-gated per account. Prefer the e2e account (it has
@@ -35,6 +42,12 @@ def _make_live_dex():
         )
     except Exception:
         pass                     # auth endpoint down — gated tests will skip
+    if pk and os.environ.get("ALEO_E2E_API_KEY"):
+        try:
+            aleo.default_account = acct
+            aleo.records.register(acct)   # scanning needs a registration
+        except Exception:
+            pass                 # scanner down — record reads will surface it
     return dex
 
 
