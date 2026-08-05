@@ -16,6 +16,7 @@ from .errors import (
     AirdropPendingError,
     AirdropRateLimitedError,
     CredentialsMissingError,
+    NotFundedError,
     NotAuthenticatedError,
     NotRedeemedError,
 )
@@ -181,6 +182,15 @@ def _airdrop_done(ctx: _Ctx) -> bool:
 
 
 def _airdrop_run(ctx: _Ctx) -> str:
+    # /airdrop and /airdrop/{job_id} exist on testnet only — the mainnet API
+    # publishes neither, so requesting one there 404s. Say so instead, because
+    # the remedy is the caller funding the account, not a retry.
+    if ctx.profile.network != "testnet":
+        raise NotFundedError(
+            f"no faucet on {ctx.profile.network}: the airdrop endpoints are "
+            f"testnet-only. Fund {ctx.profile.address} with the tokens you "
+            "intend to trade, then re-run onboard()."
+        )
     try:
         start = ctx.dex.api.request_airdrop(ctx.profile.address)
     except AirdropRateLimitedError:
