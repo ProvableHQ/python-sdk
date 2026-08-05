@@ -66,7 +66,6 @@ from ._routing import (
     mint_route,
     swap_route,
 )
-from .tick_hints import pick_insert_hint
 from .tick_math import (
     MAX_TICK,
     MIN_TICK,
@@ -1107,10 +1106,14 @@ class ShieldSwap:
         position = position_record or self._select_position_record(pool_key, acct)
 
         decoded = parse_plaintext(position)
+        # Walk the on-chain list, as mint does: slot-derived hints bracket the
+        # pool's CURRENT tick, not the target, so any bound further out than one
+        # initialized tick gets a hint above itself — which finalize rejects
+        # after the fee is spent.
         lo_hint = (tick_lower_hint if tick_lower_hint is not None
-                   else pick_insert_hint(slot, int(decoded["tick_lower"])))
+                   else self.find_tick_predecessor(pool_key, int(decoded["tick_lower"])))
         hi_hint = (tick_upper_hint if tick_upper_hint is not None
-                   else pick_insert_hint(slot, int(decoded["tick_upper"])))
+                   else self.find_tick_predecessor(pool_key, int(decoded["tick_upper"])))
 
         program0 = token0_program or (
             None if token0_record else self._token_program(pool.token0))

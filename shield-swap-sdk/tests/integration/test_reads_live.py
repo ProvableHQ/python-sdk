@@ -5,6 +5,8 @@ invariants and shapes, not exact live figures (testnet state varies).
 """
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from aleo_shield_swap.errors import (
@@ -71,9 +73,12 @@ def test_api_get_route_quotes_both_directions(live_dex_module, pool):
 
 
 def test_api_get_ohlcv(live_dex_module, pool):
+    # unix seconds, not ISO-8601: the API's from/to are int64 and reject a
+    # timestamp string with 400.
+    now = int(time.time())
     candles = skip_if_access_gated(lambda: live_dex_module.api.get_ohlcv(
         pool.key, granularity="1d",
-        from_ts="2026-01-01T00:00:00", to_ts="2026-12-31T00:00:00"))
+        from_ts=now - 30 * 86_400, to_ts=now))
     for candle in candles:                     # may be empty on a quiet pool
         assert float(candle.h) >= float(candle.l)
 

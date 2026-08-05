@@ -345,13 +345,14 @@ class ApiClient:
         return _build(models.SwapDoc, self._get(f"/swaps/{swap_id}")["data"])
 
     def get_ohlcv(self, pool_key: str, *, granularity: str,
-                  from_ts: str, to_ts: str) -> list[models.OhlcvDoc]:
+                  from_ts: int, to_ts: int) -> list[models.OhlcvDoc]:
         """Candles for one pool over a time window.
 
         *granularity* is one of ``"1m"``, ``"5m"``, ``"15m"``, ``"30m"``,
         ``"1h"``, ``"6h"``, ``"12h"``, ``"1d"``.  *from_ts* and *to_ts* are unix
-        seconds — *from_ts* inclusive, *to_ts* exclusive.  Anything else raises
-        :class:`DexApiError`.
+        seconds (the API's ``int64``) — *from_ts* inclusive, *to_ts* exclusive.
+        A timestamp string rather than an integer is rejected with
+        :class:`DexApiError` 400.
         """
         data = self._get(f"/pools/{pool_key}/ohlcv",
                          {"granularity": granularity, "from": from_ts, "to": to_ts})["data"]
@@ -528,7 +529,7 @@ class AsyncApiClient:
         return _build(models.SwapDoc, (await self._get(f"/swaps/{swap_id}"))["data"])
 
     async def get_ohlcv(self, pool_key: str, *, granularity: str,
-                        from_ts: str, to_ts: str) -> list[models.OhlcvDoc]:
+                        from_ts: int, to_ts: int) -> list[models.OhlcvDoc]:
         """Candles for one pool — see :meth:`ApiClient.get_ohlcv`."""
         data = (await self._get(f"/pools/{pool_key}/ohlcv",
                                 {"granularity": granularity, "from": from_ts,
