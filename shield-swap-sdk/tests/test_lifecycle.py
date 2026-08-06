@@ -171,3 +171,25 @@ def test_credentials_stage_refreshes_live_facade(profile, dps_env):
     dex = _RefreshingDex(api, {"waleo.aleo": 7}, funded_from_start=True)
     run_onboard(dex, profile)
     assert refreshed == [True]            # live provider picked up the new key
+
+
+def test_airdrop_stage_refuses_on_mainnet(tmp_path):
+    """The faucet endpoints are testnet-only; on mainnet say so, don't 404."""
+    tmp_journal = tmp_path / "j.jsonl"
+    from aleo_shield_swap.errors import NotFundedError
+    from aleo_shield_swap.lifecycle import _Ctx, _airdrop_run
+
+    class _P:
+        network = "mainnet"
+        address = "aleo1me"
+        journal_path = tmp_journal
+
+    ctx = _Ctx(dex=None, profile=_P(), invite_code=None,
+               poll_seconds=0, timeout_seconds=0)
+    try:
+        _airdrop_run(ctx)
+    except NotFundedError as exc:
+        assert "no faucet on mainnet" in str(exc)
+        assert "aleo1me" in str(exc)
+    else:
+        raise AssertionError("expected NotFundedError on mainnet")

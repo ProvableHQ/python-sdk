@@ -14,6 +14,7 @@ from aleo.codegen.runtime import parse_plaintext
 
 from . import _generated as g
 from ._core import (
+    decode_position_record,
     default_merkle_proofs,
     ensure_programs,
     find_position_plaintext,
@@ -27,7 +28,7 @@ from ._core import (
     resolve_swap_params,
     select_token_record,
 )
-from .api import ApiClient, DEFAULT_API_URL
+from .api import ApiClient, api_url_for
 from .derivations import (
     BlindedIdentity,
     blinded_identity_at,
@@ -37,6 +38,8 @@ from .derivations import (
 )
 from .errors import (
     InsufficientRecordsError,
+    NotAuthenticatedError,
+    NotRedeemedError,
     InvalidFeeTierError,
     PoolNotFoundError,
     PoolNotInitializedError,
@@ -46,11 +49,19 @@ from .errors import (
 from .journal import Journal
 from .lifecycle import run_onboard
 from .profile import Profile
+from .position_math import (
+    amounts_for_liquidity,
+    fee_growth_inside,
+    fee_owed,
+    u256_of,
+)
 from .types import (
     ClaimResult,
     CollectReport,
     MintResult,
     OnboardReport,
+    OwnedPosition,
+    OwnedPositionState,
     PositionView,
     SessionStatus,
     SlotView,
@@ -66,7 +77,6 @@ from ._routing import (
     mint_route,
     swap_route,
 )
-from .tick_hints import pick_insert_hint
 from .tick_math import (
     MAX_TICK,
     MIN_TICK,
@@ -88,10 +98,12 @@ class ShieldSwap:
     """
 
     def __init__(self, aleo: Any, *, program: str = g.PROGRAM_ID,
-                 api_url: str = DEFAULT_API_URL) -> None:
+                 api_url: Optional[str] = None) -> None:
         self._aleo = aleo
         self.program = program
-        self.api = ApiClient(api_url)
+        # Resolve the API from the bound client's network so the off-chain
+        # indexer always matches the chain being read.
+        self.api = ApiClient(api_url or api_url_for(aleo.network_name))
         self.profile: Any = None          # set by from_profile()
         self.journal: Any = None          # set by from_profile()
         # allow_token relationships are immutable — cache probes for the
@@ -102,16 +114,35 @@ class ShieldSwap:
         return f"ShieldSwap(program={self.program!r}, api={self.api.base_url!r})"
 
     @classmethod
-    def from_profile(cls, home: Any = None) -> "ShieldSwap":
+    def from_profile(cls, home: Any = None, *,
+                     network: Optional[str] = None,
+                     endpoint: Optional[str] = None) -> "ShieldSwap":
         """The client for the local participant profile (created on first use).
 
         Wires endpoint, network, signer, and (when present) delegated-proving
         credentials from ``$SHIELD_SWAP_HOME``/``~/.shield-swap``.  Run
         ``onboard()`` next on a fresh profile.
+
+        *network* and *endpoint* apply only when the profile is being created —
+        an existing one keeps what it was created with, because its derived pool
+        keys and blinded identities are network-scoped and would not transfer.
+        Give each network its own home directory.
+
+        Args:
+            home: Profile directory; defaults to ``$SHIELD_SWAP_HOME`` or
+                ``~/.shield-swap``.
+            network: ``"mainnet"`` or ``"testnet"`` for a NEW profile; defaults
+                to testnet.
+            endpoint: Node API origin for a NEW profile.
         """
         from aleo import Aleo, HTTPProvider
 
-        profile = Profile.load_or_create(home)
+        kwargs: dict[str, Any] = {}
+        if network is not None:
+            kwargs["network"] = network
+        if endpoint is not None:
+            kwargs["endpoint"] = endpoint
+        profile = Profile.load_or_create(home, **kwargs)
         creds = profile.credentials
         provider = HTTPProvider(profile.endpoint, network=profile.network,
                                 api_key=creds.get("dps_api_key"),
@@ -343,6 +374,140 @@ class ShieldSwap:
         """
         return _derive_tick_key(pool_key, tick, network=self._aleo.network_name)
 
+    # ── Owned positions ──────────────────────────────────────────────────────
+
+    def _tick_info(self, pool_key: str, tick: int) -> "Optional[g.Tick]":
+        """The on-chain ``Tick`` entry for *tick*, or None if uninitialized."""
+        raw = self._mapping_value("ticks", self.derive_tick_key(pool_key, tick))
+        return g.Tick.from_plaintext(raw) if raw is not None else None
+
+    def _owned_position_state(self, pool_key: str, position: "g.Position",
+                              slot: Any) -> Optional[OwnedPositionState]:
+        """Join a position against the pool's slot and its two boundary ticks.
+
+        *slot* is passed in rather than read here so one slot read serves every
+        position in the same pool.
+
+        Returns None when either boundary tick is missing, which means the
+        range is not initialized on chain and no amounts can be derived.
+        """
+        lower = self._tick_info(pool_key, int(position.tick_lower))
+        upper = self._tick_info(pool_key, int(position.tick_upper))
+        if lower is None or upper is None:
+            return None
+
+        liquidity = int(position.liquidity)
+        amount0, amount1 = amounts_for_liquidity(
+            u256_of(slot.sqrt_price),
+            get_sqrt_price_at_tick_x128(int(position.tick_lower)),
+            get_sqrt_price_at_tick_x128(int(position.tick_upper)),
+            liquidity,
+        )
+        inside0, inside1 = fee_growth_inside(
+            (u256_of(lower.fee_growth_outside0_x_128),
+             u256_of(lower.fee_growth_outside1_x_128)), int(lower.tick),
+            (u256_of(upper.fee_growth_outside0_x_128),
+             u256_of(upper.fee_growth_outside1_x_128)), int(upper.tick),
+            int(slot.tick),
+            (u256_of(slot.fee_growth_global0_x_128),
+             u256_of(slot.fee_growth_global1_x_128)),
+        )
+        owed0, owed1 = int(position.tokens_owed0), int(position.tokens_owed1)
+        return OwnedPositionState(
+            liquidity=liquidity,
+            amount0=amount0, amount1=amount1,
+            collectible0=owed0 + fee_owed(
+                inside0, u256_of(position.fee_growth_inside0_last_x_128), liquidity),
+            collectible1=owed1 + fee_owed(
+                inside1, u256_of(position.fee_growth_inside1_last_x_128), liquidity),
+            tokens_owed0=owed0, tokens_owed1=owed1,
+        )
+
+    def _owned_from_record(self, plaintext: str,
+                           slots: Optional[dict[str, Any]] = None
+                           ) -> Optional[OwnedPosition]:
+        """Build an :class:`OwnedPosition` from one PositionNFT record plaintext.
+
+        Returns None for a record that is not a PositionNFT, so a mixed record
+        set from the program can be filtered in one pass.  *slots* is an
+        optional per-call cache of ``pool_key -> slot`` so a batch of positions
+        in one pool costs one slot read.
+        """
+        decoded = decode_position_record(plaintext)
+        if decoded is None:
+            return None
+        token_id = str(decoded["token_id"])
+        pool_key = str(decoded["pool"])
+        raw = self._mapping_value("positions", token_id)
+        state = None
+        if raw is not None:
+            cache = slots if slots is not None else {}
+            if pool_key not in cache:
+                cache[pool_key] = self.get_slot(pool_key).raw
+            state = self._owned_position_state(
+                pool_key, g.Position.from_plaintext(raw), cache[pool_key])
+        return OwnedPosition(
+            position_token_id=token_id,
+            pool_key=pool_key,
+            tick_lower=int(decoded["tick_lower"]),
+            tick_upper=int(decoded["tick_upper"]),
+            token0_id=str(decoded["token0_id"]),
+            token1_id=str(decoded["token1_id"]),
+            withdrawal=str(decoded["withdrawal"]),
+            record=plaintext,
+            state=state,
+        )
+
+    def get_owned_positions(self, *, pool_key: Optional[str] = None,
+                            account: Any = None) -> list[OwnedPosition]:
+        """Every position this account holds, joined with its live chain state.
+
+        Scans unspent PositionNFT records — so it needs a record provider — and
+        for each one reads ``positions``, the pool's slot, and both boundary
+        ticks.  That is several reads per position; filter with *pool_key* when
+        you only care about one pool.
+
+        A position whose ``state`` is ``None`` is mid-finalize: the record is
+        spendable but the chain has no amounts for it yet.  Burned positions
+        never appear, since burn consumes the record.
+
+        Args:
+            pool_key: Return only positions in this pool.
+            account: Signer to scan for; defaults to the client's.
+
+        Returns:
+            One entry per owned position, in record-provider order.
+        """
+        acct = self._account(account)
+        records = self._aleo.record_provider.find(
+            acct, program=self.program, unspent=True)
+        out: list[OwnedPosition] = []
+        slots: dict[str, Any] = {}        # one slot read per pool, not per position
+        for rec in records:
+            plaintext = record_plaintext(rec)
+            if not plaintext:
+                continue
+            owned = self._owned_from_record(plaintext, slots)
+            if owned is None:
+                continue
+            if pool_key is not None and owned.pool_key != pool_key:
+                continue
+            out.append(owned)
+        return out
+
+    def get_owned_position(self, position_token_id: str, *,
+                           account: Any = None) -> Optional[OwnedPosition]:
+        """One owned position by token id, or ``None`` if this account has no
+        such unspent record.
+
+        ``None`` means "not owned or already burned" — it does not distinguish
+        the two, because both look identical from the record set.
+        """
+        for owned in self.get_owned_positions(account=account):
+            if owned.position_token_id == position_token_id:
+                return owned
+        return None
+
     def find_tick_predecessor(self, pool_key: str, new_tick: int,
                               max_hops: int = 128) -> int:
         """Predecessor of *new_tick* in the pool's initialized-tick list.
@@ -408,9 +573,11 @@ class ShieldSwap:
         tokens = self.api.get_tokens()
         # Spendable private records live in the record-funding program: the
         # UNDERLYING program for wrapped assets, the ARC-20 itself for plain.
-        by_program = {t.underlying_program or t.amm_token_program: t
-                      for t in tokens
-                      if t.underlying_program or t.amm_token_program}
+        by_program: dict[str, Any] = {}
+        for tok in tokens:
+            prog = tok.underlying_program or tok.amm_token_program
+            if prog:
+                by_program[prog] = tok
         own_address = str(acct.address) if acct is not None else None
         private = (self.get_private_balances(list(by_program), account=acct)
                    if addr == own_address else {p: 0 for p in by_program})
@@ -450,7 +617,25 @@ class ShieldSwap:
         pids = [self.program, *token_programs, *(imports or {})]
         ensure_programs(self._aleo, pids, imports)
 
-    def _lp_programs(self, route: Any, program0: str, program1: str,
+    def _fund_side(self, *, record: Optional[str], program: Optional[str],
+                   token_id: str, min_amount: int, account: Any
+                   ) -> tuple[str, Optional[str]]:
+        """``(record, program)`` for one side of a liquidity call.
+
+        An explicit *record* needs no program resolution — the caller already
+        chose what to spend — so the returned program stays whatever they passed,
+        possibly None.  Otherwise the funding program is resolved and a covering
+        record selected from it.
+        """
+        if record:
+            return record, program
+        resolved = program or self._token_program(token_id)
+        return select_token_record(
+            self._aleo, program=resolved, min_amount=min_amount,
+            token_id=token_id, account=account), resolved
+
+    def _lp_programs(self, route: Any, program0: Optional[str],
+                     program1: Optional[str],
                      pool: Any, w0: bool, w1: bool) -> list[str]:
         """Programs a (possibly routed) LP call touches: both funding
         programs (None when an explicit record made resolution unnecessary),
@@ -481,6 +666,7 @@ class ShieldSwap:
         token_in_program: Optional[str] = None,
         token_record: Optional[str] = None,
         wrapper_proofs: Optional[str] = None,
+        track: bool = True,
         imports: Optional[dict[str, str]] = None,
         account: Any = None,
     ) -> DexCall[SwapHandle]:
@@ -498,8 +684,16 @@ class ShieldSwap:
 
         Quote first (``dex.api.get_route``) and pass *expected_out*: without
         it a spot estimate is used, which ignores fees and price impact.
-        Pass *identity* (from journal-reserved counters) to skip the
-        on-chain probe — required for concurrent swaps.  The default
+        **Building is not free with a journal.**  The blinded address is a
+        transition input, so a counter is reserved *here*, not at the terminal
+        method — discarding the call, or only simulating, still spends it.  That
+        reservation is what makes concurrent swaps safe: it serializes under a
+        file lock where the probe it replaces could hand two callers the same
+        counter.  The handle is journaled once the broadcast is accepted, so a
+        crash before the claim keeps the blinding factor.  ``track=False`` builds
+        on the racing probe instead; *identity* supplies your own.
+
+        The default
         *deadline_offset_blocks* (~8h at ~3s blocks) absorbs delegated-
         proving latency; a tight deadline aborts at finalize when proving
         outlives it.
@@ -514,7 +708,18 @@ class ShieldSwap:
         )
         deadline = get_deadline(self._aleo, deadline_offset_blocks)
         swap_nonce = nonce if nonce is not None else generate_swap_nonce()
-        identity = identity or next_blinded_identity(self._aleo, acct, self.program)
+        # Reserve from the journal rather than probing the chain: the probe
+        # asks "is this blinded address used?" and the answer is only true
+        # until another swap consumes it, so two concurrent swaps derive the
+        # same counter and the second reverts at finalize. Reservation is
+        # serialized by the journal's file lock, so it cannot collide.
+        counter: Optional[int] = None
+        if identity is None and track and self.journal is not None:
+            reserved = int(self.journal.reserve_counters(1)[0])
+            counter = reserved
+            identity = blinded_identity_at(self._aleo, acct, self.program, reserved)
+        elif identity is None:
+            identity = next_blinded_identity(self._aleo, acct, self.program)
 
         # Resolve the record-funding program lazily: an explicit record
         # needs no registry lookup (its program registration comes from
@@ -576,7 +781,7 @@ class ShieldSwap:
                 (o for o in outputs if isinstance(o, str) and o.endswith("field")),
                 None,
             )
-            return SwapHandle(
+            handle = SwapHandle(
                 swap_id=swap_id,
                 blinding_factor=identity.blinding_factor,
                 blinded_address=identity.blinded_address,
@@ -587,6 +792,14 @@ class ShieldSwap:
                 transaction_id=tx_id,
                 program=self.program,
             )
+            # Journal the handle as soon as the broadcast is accepted: the
+            # blinding factor is the only thing that can claim this swap, and a
+            # crash before the claim would otherwise lose it. A failure here is
+            # raised, not swallowed — the swap has landed, so silently dropping
+            # its claim secret is the worse outcome.
+            if counter is not None and self.journal is not None:
+                self.journal.record_swap(handle, counter)
+            return handle
 
         return DexCall(self._aleo, bound, build_result)
 
@@ -736,8 +949,17 @@ class ShieldSwap:
 
         The route endpoint returns canonical decimal amounts, the contract
         takes base units — this converts in both directions using the
-        token registry's decimals.  None (spot fallback) when either token
-        is unknown or no route is quotable.
+        token registry's decimals.  Returns None when the pool genuinely has no
+        quotable route, or when either token is missing from the registry.
+
+        Raises:
+            NotAuthenticatedError: If no DEX session is established.
+            NotRedeemedError: If the account has not redeemed an invite.
+
+        "Could not ask" is NOT "no route": swallowing an auth failure here
+        yields a spot-estimate ``amount_out_min`` that ignores the pool fee, so
+        the caller pays for a proof the finalize then rejects. Auth failures
+        propagate for that reason.
         """
         from decimal import Decimal
         dec_in = self._token_decimals(token_in_id)
@@ -749,6 +971,8 @@ class ShieldSwap:
             route = self.api.get_route(
                 token_in=token_in_id, token_out=token_out_id,
                 amount_in=f"{canonical:f}")   # fixed-point, never "1E-8"
+        except (NotAuthenticatedError, NotRedeemedError):
+            raise
         except ShieldSwapError:
             return None                   # no quotable route
         if not route.estimated_amount_out:
@@ -763,6 +987,7 @@ class ShieldSwap:
         amount_in: int,
         count: int,
         slippage_bps: int = 50,
+        expected_out: Optional[int] = None,
         record_wait_seconds: float = 120.0,
         account: Any = None,
     ) -> SwapBatchReport:
@@ -775,18 +1000,37 @@ class ShieldSwap:
         becomes claimable (it stays in ``still_pending``).  A failed
         broadcast burns its counter and the batch continues; failures are
         reported, not raised.  Requires ``from_profile()``.
+
+        *expected_out* (base units) skips the route quote.  Without it the batch
+        quotes once and refuses rather than falling back to a spot estimate,
+        which ignores the pool fee and would revert every swap after paying for
+        its proof.
         """
         if self.journal is None:
             raise ValueError("swap_many() needs a journal — construct with "
                              "ShieldSwap.from_profile().")
         acct = self._account(account)
-        # Quote once for the batch: a spot estimate ignores the pool fee, so
-        # min-out would exceed the real output and finalize would reject.
+        # One quote for the whole batch unless the caller supplied one: a spot
+        # estimate ignores the pool fee, so min-out would exceed the real output
+        # and finalize would reject.
         pool = self.get_pool(pool_key)
         token_out_id = pool.token1 if token_in_id == pool.token0 else pool.token0
-        expected_out = self._quote_expected_out(
-            token_in_id=token_in_id, token_out_id=token_out_id,
-            amount_in=amount_in)
+        if expected_out is None:
+            expected_out = self._quote_expected_out(
+                token_in_id=token_in_id, token_out_id=token_out_id,
+                amount_in=amount_in)
+        if expected_out is None and slippage_bps < 10_000:
+            # Falling back to the spot estimate would set amount_out_min above
+            # what the pool can actually pay (spot ignores the fee), so every
+            # swap in the batch would be proved, broadcast, and then rejected at
+            # finalize. Refuse before spending anything.
+            raise ShieldSwapError(
+                f"no route quote for {token_in_id} -> {token_out_id}: a spot "
+                "estimate ignores the pool fee, so the batch would prove and "
+                "broadcast swaps the finalize rejects. Quote it yourself and "
+                "pass expected_out, or set slippage_bps=10000 to accept any "
+                "output."
+            )
         counters = self.journal.reserve_counters(count)
         program = self._token_program(token_in_id)
         used_records: set[str] = set()
@@ -1028,16 +1272,12 @@ class ShieldSwap:
             tick_lower_hint=lo_hint, tick_upper_hint=hi_hint,
         ).to_plaintext()
 
-        program0 = token0_program or (
-            None if token0_record else self._token_program(pool.token0))
-        program1 = token1_program or (
-            None if token1_record else self._token_program(pool.token1))
-        record0 = token0_record or select_token_record(
-            self._aleo, program=program0,
-            min_amount=amount0_desired, token_id=pool.token0, account=acct)
-        record1 = token1_record or select_token_record(
-            self._aleo, program=program1,
-            min_amount=amount1_desired, token_id=pool.token1, account=acct)
+        record0, program0 = self._fund_side(
+            record=token0_record, program=token0_program,
+            token_id=pool.token0, min_amount=amount0_desired, account=acct)
+        record1, program1 = self._fund_side(
+            record=token1_record, program=token1_program,
+            token_id=pool.token1, min_amount=amount1_desired, account=acct)
 
         w0 = self._is_wrapped(str(pool.token0))
         w1 = self._is_wrapped(str(pool.token1))
@@ -1105,21 +1345,21 @@ class ShieldSwap:
         position = position_record or self._select_position_record(pool_key, acct)
 
         decoded = parse_plaintext(position)
+        # Walk the on-chain list, as mint does: slot-derived hints bracket the
+        # pool's CURRENT tick, not the target, so any bound further out than one
+        # initialized tick gets a hint above itself — which finalize rejects
+        # after the fee is spent.
         lo_hint = (tick_lower_hint if tick_lower_hint is not None
-                   else pick_insert_hint(slot, int(decoded["tick_lower"])))
+                   else self.find_tick_predecessor(pool_key, int(decoded["tick_lower"])))
         hi_hint = (tick_upper_hint if tick_upper_hint is not None
-                   else pick_insert_hint(slot, int(decoded["tick_upper"])))
+                   else self.find_tick_predecessor(pool_key, int(decoded["tick_upper"])))
 
-        program0 = token0_program or (
-            None if token0_record else self._token_program(pool.token0))
-        program1 = token1_program or (
-            None if token1_record else self._token_program(pool.token1))
-        record0 = token0_record or select_token_record(
-            self._aleo, program=program0,
-            min_amount=amount0_desired, token_id=pool.token0, account=acct)
-        record1 = token1_record or select_token_record(
-            self._aleo, program=program1,
-            min_amount=amount1_desired, token_id=pool.token1, account=acct)
+        record0, program0 = self._fund_side(
+            record=token0_record, program=token0_program,
+            token_id=pool.token0, min_amount=amount0_desired, account=acct)
+        record1, program1 = self._fund_side(
+            record=token1_record, program=token1_program,
+            token_id=pool.token1, min_amount=amount1_desired, account=acct)
 
         w0 = self._is_wrapped(str(pool.token0))
         w1 = self._is_wrapped(str(pool.token1))

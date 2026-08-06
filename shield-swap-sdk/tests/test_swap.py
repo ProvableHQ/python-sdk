@@ -20,6 +20,15 @@ from .conftest import (
 )
 
 
+def _swap_call_on(dex, **over):
+    """_swap_call against an already-built client (journal wired, etc.)."""
+    kwargs = dict(pool_key="5field", token_in_id="1field", amount_in=10**9,
+                  slippage_bps=50, nonce=123, token_in_program="tok.aleo",
+                  expected_out=1_000_000)
+    kwargs.update(over)
+    return dex.swap(**kwargs)
+
+
 def _swap_call(stub_aleo, **over):
     dex = ShieldSwap(stub_aleo)
     kwargs = dict(pool_key="5field", token_in_id="1field", amount_in=10**9,
@@ -135,3 +144,82 @@ def test_routed_swap_rejects_zero_min_out():
 def test_plain_swap_stays_on_core(stub_aleo):
     _swap_call(stub_aleo)
     assert stub_aleo.last_program == "shield_swap.aleo"
+
+
+# ── Blinded-identity reservation and handle tracking ─────────────────────────
+# The chain probe asks "is this blinded address used?", which is only true
+# until another swap consumes it — so two concurrent swaps derive the same
+# counter and the second reverts at finalize. A journal-backed reservation
+# serializes instead.
+
+def _journalled_dex(tmp_path, stub):
+    from aleo_shield_swap.client import ShieldSwap
+    from aleo_shield_swap.journal import Journal
+    dex = ShieldSwap(stub)
+    dex.journal = Journal(tmp_path / "journal.jsonl")
+    return dex
+
+
+def test_swap_reserves_a_counter_and_journals_the_handle(tmp_path, stub_aleo):
+    dex = _journalled_dex(tmp_path, stub_aleo)
+    assert dex.journal.counter_cursor() == 0
+    handle = _swap_call_on(dex).transact()
+    # counter consumed, and the handle is recoverable from a fresh Journal
+    assert dex.journal.counter_cursor() == 1
+    pending = dex.journal.pending_claims()
+    assert [h.transaction_id for h in pending] == [handle.transaction_id]
+    assert pending[0].blinding_factor == handle.blinding_factor
+
+
+def test_concurrent_swaps_get_distinct_counters(tmp_path, stub_aleo):
+    dex = _journalled_dex(tmp_path, stub_aleo)
+    first = _swap_call_on(dex).transact()
+    second = _swap_call_on(dex).transact()
+    assert first.blinded_address != second.blinded_address
+    assert dex.journal.counter_cursor() == 2
+
+
+def test_track_false_opts_out_of_the_journal(tmp_path, stub_aleo):
+    dex = _journalled_dex(tmp_path, stub_aleo)
+    _swap_call_on(dex, track=False).transact()
+    assert dex.journal.counter_cursor() == 0
+    assert dex.journal.pending_claims() == []
+
+
+def test_explicit_identity_still_wins(tmp_path, stub_aleo):
+    from aleo_shield_swap.derivations import blinded_identity_at
+    dex = _journalled_dex(tmp_path, stub_aleo)
+    ident = blinded_identity_at(stub_aleo, stub_aleo.default_account,
+                                dex.program, 7)
+    handle = _swap_call_on(dex, identity=ident).transact()
+    assert handle.blinded_address == ident.blinded_address
+    assert dex.journal.counter_cursor() == 0     # nothing reserved
+
+
+def test_without_a_journal_swap_still_works(stub_aleo):
+    from aleo_shield_swap.client import ShieldSwap
+    dex = ShieldSwap(stub_aleo)
+    assert dex.journal is None
+    assert _swap_call_on(dex).transact().blinded_address
+
+
+def test_building_a_call_reserves_even_if_never_executed(tmp_path, stub_aleo):
+    """Documented cost of tracking: the blinded address is a transition input,
+    so the counter is spent at build time, not at the terminal method."""
+    dex = _journalled_dex(tmp_path, stub_aleo)
+    _swap_call_on(dex)                       # built, never transacted
+    assert dex.journal.counter_cursor() == 1
+
+
+def test_simulate_also_spends_a_counter(tmp_path, stub_aleo):
+    dex = _journalled_dex(tmp_path, stub_aleo)
+    _swap_call_on(dex).simulate()
+    assert dex.journal.counter_cursor() == 1
+    assert dex.journal.pending_claims() == []   # nothing broadcast, nothing to claim
+
+
+def test_track_false_gives_a_side_effect_free_build(tmp_path, stub_aleo):
+    dex = _journalled_dex(tmp_path, stub_aleo)
+    _swap_call_on(dex, track=False)
+    assert dex.journal.counter_cursor() == 0
+    assert dex.journal.events() == []

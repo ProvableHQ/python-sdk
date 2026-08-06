@@ -165,17 +165,40 @@ def record_plaintext(rec: Any) -> Optional[str]:
     return getattr(rec, "record_plaintext", None)
 
 
+#: Fields a PositionNFT record carries.  Checked as a set, so a future record
+#: type sharing one of them is not mistaken for a position.
+POSITION_RECORD_FIELDS = ("token_id", "pool", "tick_lower", "tick_upper",
+                          "token0_id", "token1_id", "withdrawal")
+
+
+def decode_position_record(plaintext: str) -> Optional[dict[str, Any]]:
+    """A PositionNFT record's fields, or None if *plaintext* is not one.
+
+    Shared by both clients so the record shape is defined once.  Returns None
+    rather than raising for a record of any other type, letting a mixed record
+    set be filtered in one pass.
+    """
+    try:
+        decoded = parse_plaintext(plaintext)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(decoded, dict):
+        return None
+    return decoded if all(f in decoded for f in POSITION_RECORD_FIELDS) else None
+
+
 def find_position_plaintext(records: Any, pool_key: str) -> Optional[str]:
-    """First unspent PositionNFT plaintext whose ``pool`` matches, or None."""
+    """First unspent PositionNFT plaintext whose ``pool`` matches, or None.
+
+    Uses :func:`decode_position_record`, so a record of another type that
+    happens to carry a matching ``pool`` field is not returned as a position.
+    """
     for rec in records:
         plaintext = record_plaintext(rec)
         if not plaintext:
             continue
-        try:
-            decoded = parse_plaintext(plaintext)
-        except (ValueError, TypeError):
-            continue
-        if isinstance(decoded, dict) and decoded.get("pool") == pool_key:
+        decoded = decode_position_record(plaintext)
+        if decoded is not None and decoded.get("pool") == pool_key:
             return plaintext
     return None
 

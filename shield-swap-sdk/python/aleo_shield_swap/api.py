@@ -45,11 +45,47 @@ def _check(resp: Any) -> None:
         raise AirdropRateLimitedError(text)
     raise DexApiError(code, text)
 
-# Staging serves the migrated shield_swap.aleo stack (the old
-# amm-api.dev.provable.com host still serves the pre-migration deployment).
-# Override with SHIELD_SWAP_API_URL when the host moves again.
-DEFAULT_API_URL = os.environ.get("SHIELD_SWAP_API_URL",
-                                 "https://amm-api-staging.dev.provable.com")
+#: DEX API host per network.  The API is deployed per network and the two are
+#: not interchangeable: pool keys and blinded identities are network-scoped, so
+#: a testnet key means nothing to the mainnet indexer.
+SHIELD_SWAP_API_URLS: dict[str, str] = {
+    "mainnet": "https://api.swap.shield.fi",
+    "testnet": "https://api.testnet.swap.shield.fi",
+}
+
+
+def api_url_for(network: str) -> str:
+    """The DEX API base for *network*.
+
+    ``ShieldSwap`` calls this with its bound client's network, so the API
+    always matches the chain being read.  ``SHIELD_SWAP_API_URL`` overrides
+    every network — set it to point at a local or staging deployment.
+
+    Args:
+        network: ``"mainnet"`` or ``"testnet"``.
+
+    Returns:
+        The base URL, without a trailing slash.
+
+    Raises:
+        ValueError: If no host is known for *network* and no override is set —
+            better than silently querying the wrong chain's indexer.
+    """
+    override = os.environ.get("SHIELD_SWAP_API_URL")
+    if override:
+        return override.rstrip("/")
+    try:
+        return SHIELD_SWAP_API_URLS[network]
+    except KeyError:
+        raise ValueError(
+            f"No DEX API host known for network {network!r} — expected one of "
+            f"{sorted(SHIELD_SWAP_API_URLS)}, or set SHIELD_SWAP_API_URL."
+        ) from None
+
+
+#: Fallback for a standalone :class:`ApiClient` built without a network.  Points
+#: at testnet deliberately: an accidental default must not reach mainnet.
+DEFAULT_API_URL = api_url_for("testnet")
 _TIMEOUT = 30.0
 
 T = TypeVar("T")
@@ -177,8 +213,9 @@ class ApiClient:
         if data.get("token"):             # legacy body-JWT deployments
             self._token = data["token"]
             return self._token
-        self._csrf = data["csrf_token"]
-        return self._csrf
+        csrf = str(data["csrf_token"])
+        self._csrf = csrf
+        return csrf
 
     def set_token(self, token: str) -> None:
         """Adopt a previously issued JWT."""
@@ -309,13 +346,14 @@ class ApiClient:
         return _build(models.SwapDoc, self._get(f"/swaps/{swap_id}")["data"])
 
     def get_ohlcv(self, pool_key: str, *, granularity: str,
-                  from_ts: str, to_ts: str) -> list[models.OhlcvDoc]:
+                  from_ts: int, to_ts: int) -> list[models.OhlcvDoc]:
         """Candles for one pool over a time window.
 
         *granularity* is one of ``"1m"``, ``"5m"``, ``"15m"``, ``"30m"``,
         ``"1h"``, ``"6h"``, ``"12h"``, ``"1d"``.  *from_ts* and *to_ts* are unix
-        seconds — *from_ts* inclusive, *to_ts* exclusive.  Anything else raises
-        :class:`DexApiError`.
+        seconds (the API's ``int64``) — *from_ts* inclusive, *to_ts* exclusive.
+        A timestamp string rather than an integer is rejected with
+        :class:`DexApiError` 400.
         """
         data = self._get(f"/pools/{pool_key}/ohlcv",
                          {"granularity": granularity, "from": from_ts, "to": to_ts})["data"]
@@ -409,8 +447,9 @@ class AsyncApiClient:
         if data.get("token"):             # legacy body-JWT deployments
             self._token = data["token"]
             return self._token
-        self._csrf = data["csrf_token"]
-        return self._csrf
+        csrf = str(data["csrf_token"])
+        self._csrf = csrf
+        return csrf
 
     def set_token(self, token: str) -> None:
         """Adopt a previously issued JWT — see :meth:`ApiClient.set_token`."""
@@ -492,7 +531,7 @@ class AsyncApiClient:
         return _build(models.SwapDoc, (await self._get(f"/swaps/{swap_id}"))["data"])
 
     async def get_ohlcv(self, pool_key: str, *, granularity: str,
-                        from_ts: str, to_ts: str) -> list[models.OhlcvDoc]:
+                        from_ts: int, to_ts: int) -> list[models.OhlcvDoc]:
         """Candles for one pool — see :meth:`ApiClient.get_ohlcv`."""
         data = (await self._get(f"/pools/{pool_key}/ohlcv",
                                 {"granularity": granularity, "from": from_ts,

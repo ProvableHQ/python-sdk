@@ -21,13 +21,25 @@ report = dex.swap_many(pool_key=pools[0].key, token_in_id=pools[0].token0,
 dex.collect_all()                        # any session, any time
 ```
 
-### `from_profile(home: 'Any' = None) -> "'ShieldSwap'"`
+### `from_profile(home: 'Any' = None, *, network: 'Optional[str]' = None, endpoint: 'Optional[str]' = None) -> "'ShieldSwap'"`
 
 The client for the local participant profile (created on first use).
 
 Wires endpoint, network, signer, and (when present) delegated-proving
 credentials from ``$SHIELD_SWAP_HOME``/``~/.shield-swap``.  Run
 ``onboard()`` next on a fresh profile.
+
+*network* and *endpoint* apply only when the profile is being created —
+an existing one keeps what it was created with, because its derived pool
+keys and blinded identities are network-scoped and would not transfer.
+Give each network its own home directory.
+
+Args:
+    home: Profile directory; defaults to ``$SHIELD_SWAP_HOME`` or
+        ``~/.shield-swap``.
+    network: ``"mainnet"`` or ``"testnet"`` for a NEW profile; defaults
+        to testnet.
+    endpoint: Node API origin for a NEW profile.
 
 ### `onboard(self, invite_code: 'Optional[str]' = None) -> 'OnboardReport'`
 
@@ -54,7 +66,7 @@ The scan catches positions the journal never saw (account used from
 another machine, journal lost); it needs a registered record
 provider and is skipped silently without one.
 
-### `swap_many(self, *, pool_key: 'str', token_in_id: 'str', amount_in: 'int', count: 'int', slippage_bps: 'int' = 50, record_wait_seconds: 'float' = 120.0, account: 'Any' = None) -> 'SwapBatchReport'`
+### `swap_many(self, *, pool_key: 'str', token_in_id: 'str', amount_in: 'int', count: 'int', slippage_bps: 'int' = 50, expected_out: 'Optional[int]' = None, record_wait_seconds: 'float' = 120.0, account: 'Any' = None) -> 'SwapBatchReport'`
 
 *count* private swaps of *amount_in* each, with reserved counters.
 
@@ -65,6 +77,11 @@ claims whatever finalized.  A swap the network rejects simply never
 becomes claimable (it stays in ``still_pending``).  A failed
 broadcast burns its counter and the batch continues; failures are
 reported, not raised.  Requires ``from_profile()``.
+
+*expected_out* (base units) skips the route quote.  Without it the batch
+quotes once and refuses rather than falling back to a spot estimate,
+which ignores the pool fee and would revert every swap after paying for
+its proof.
 
 ### `collect_all(self, account: 'Any' = None) -> 'CollectReport'`
 
@@ -323,7 +340,7 @@ fast when something is systematically wrong (e.g. wrong program).
 
 ### Chain methods
 
-### `swap(self, *, pool_key: 'str', token_in_id: 'str', amount_in: 'int', slippage_bps: 'int' = 50, expected_out: 'Optional[int]' = None, sqrt_price_limit: 'Optional[int]' = None, deadline_offset_blocks: 'int' = 10000, nonce: 'Optional[int]' = None, identity: 'Optional[BlindedIdentity]' = None, token_in_program: 'Optional[str]' = None, token_record: 'Optional[str]' = None, wrapper_proofs: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[SwapHandle]'`
+### `swap(self, *, pool_key: 'str', token_in_id: 'str', amount_in: 'int', slippage_bps: 'int' = 50, expected_out: 'Optional[int]' = None, sqrt_price_limit: 'Optional[int]' = None, deadline_offset_blocks: 'int' = 10000, nonce: 'Optional[int]' = None, identity: 'Optional[BlindedIdentity]' = None, token_in_program: 'Optional[str]' = None, token_record: 'Optional[str]' = None, wrapper_proofs: 'Optional[str]' = None, track: 'bool' = True, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[SwapHandle]'`
 
 Request a private swap — phase one of the two-transaction flow.
 
@@ -339,8 +356,16 @@ process might die before the claim.
 
 Quote first (``dex.api.get_route``) and pass *expected_out*: without
 it a spot estimate is used, which ignores fees and price impact.
-Pass *identity* (from journal-reserved counters) to skip the
-on-chain probe — required for concurrent swaps.  The default
+**Building is not free with a journal.**  The blinded address is a
+transition input, so a counter is reserved *here*, not at the terminal
+method — discarding the call, or only simulating, still spends it.  That
+reservation is what makes concurrent swaps safe: it serializes under a
+file lock where the probe it replaces could hand two callers the same
+counter.  The handle is journaled once the broadcast is accepted, so a
+crash before the claim keeps the blinding factor.  ``track=False`` builds
+on the racing probe instead; *identity* supplies your own.
+
+The default
 *deadline_offset_blocks* (~8h at ~3s blocks) absorbs delegated-
 proving latency; a tight deadline aborts at finalize when proving
 outlives it.

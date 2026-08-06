@@ -249,3 +249,46 @@ def test_expired_cookie_session_falls_back_to_bearer():
     assert api._csrf is None                         # session dropped
     assert s.calls[0][3]["x-csrf-token"] == "csrf-1"
     assert s.calls[1][3]["authorization"] == "Bearer ss_durable"
+
+
+# ── Per-network API host ─────────────────────────────────────────────────────
+
+def test_api_url_for_each_network():
+    from aleo_shield_swap.api import SHIELD_SWAP_API_URLS, api_url_for
+    assert api_url_for("mainnet") == SHIELD_SWAP_API_URLS["mainnet"]
+    assert api_url_for("testnet") == SHIELD_SWAP_API_URLS["testnet"]
+    # the two must never collide — a testnet pool key means nothing on mainnet
+    assert api_url_for("mainnet") != api_url_for("testnet")
+
+
+def test_api_url_for_unknown_network_raises():
+    from aleo_shield_swap.api import api_url_for
+    with pytest.raises(ValueError, match="No DEX API host known"):
+        api_url_for("devnet")
+
+
+def test_api_url_env_override_wins(monkeypatch):
+    from aleo_shield_swap.api import api_url_for
+    monkeypatch.setenv("SHIELD_SWAP_API_URL", "http://localhost:8080/")
+    assert api_url_for("mainnet") == "http://localhost:8080"   # slash stripped
+    assert api_url_for("devnet") == "http://localhost:8080"    # override skips lookup
+
+
+def test_default_api_url_is_not_mainnet():
+    # an accidental default must not reach mainnet
+    from aleo_shield_swap.api import DEFAULT_API_URL, SHIELD_SWAP_API_URLS
+    assert DEFAULT_API_URL == SHIELD_SWAP_API_URLS["testnet"]
+
+
+def test_client_picks_the_api_for_its_network(monkeypatch):
+    from aleo_shield_swap.api import SHIELD_SWAP_API_URLS
+    from aleo_shield_swap.client import ShieldSwap
+    monkeypatch.delenv("SHIELD_SWAP_API_URL", raising=False)
+
+    class _Net:
+        def __init__(self, name): self.network_name = name
+
+    for net in ("mainnet", "testnet"):
+        assert ShieldSwap(_Net(net)).api.base_url == SHIELD_SWAP_API_URLS[net]
+    # an explicit api_url still wins
+    assert ShieldSwap(_Net("mainnet"), api_url="http://x").api.base_url == "http://x"

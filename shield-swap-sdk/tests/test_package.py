@@ -2,7 +2,7 @@ import aleo_shield_swap
 
 
 def test_version():
-    assert aleo_shield_swap.__version__ == "0.3.1"
+    assert aleo_shield_swap.__version__ == "0.4.0"
 
 
 def test_lifecycle_exports():

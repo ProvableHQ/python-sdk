@@ -35,14 +35,22 @@ def test_private_swap_roundtrip():
 
     from aleo_shield_swap import ShieldSwap
 
+    # consumer_id must go on the PROVIDER, not just the network client: the
+    # record scanner is built lazily from provider config, so setting it only
+    # on network_client leaves the scanner with a key and no consumer — it
+    # cannot mint a JWT and every record read answers Unauthorized.
     provider = HTTPProvider(ENDPOINT, network="testnet",
-                            api_key=os.environ["ALEO_E2E_API_KEY"])
+                            api_key=os.environ["ALEO_E2E_API_KEY"],
+                            consumer_id=os.environ["ALEO_E2E_CONSUMER_ID"])
     aleo = Aleo(provider)
-    aleo.network_client.consumer_id = os.environ["ALEO_E2E_CONSUMER_ID"]
     acct = aleo.account.from_private_key(os.environ["ALEO_E2E_PRIVATE_KEY"])
     aleo.default_account = acct
     aleo.records.register(acct)
     dex = ShieldSwap(aleo)
+    # get_route is auth-gated; without a session it answers 401 well before
+    # anything is proved.
+    dex.api.authenticate(str(acct.address),
+                         lambda msg: str(aleo.account.sign(msg.encode(), acct)))
 
     # Pick a pool where the account holds a private balance of one side.
     pools = dex.api.get_pools()
@@ -59,10 +67,12 @@ def test_private_swap_roundtrip():
     if amount_in == 0:
         pytest.skip(f"account holds no private {program_in} records to swap")
 
-    route = dex.api.get_route(token_in=token_in, token_out=pool.token1,
-                              amount_in=amount_in)
-    expected = (int(float(route.estimated_amount_out) * 10 ** pool.token1_info.decimals)
-                if route.estimated_amount_out else None)
+    # Use the SDK's own quote conversion rather than reimplementing it: the
+    # route endpoint takes a CANONICAL decimal amount, so passing raw base
+    # units quotes a trade 10**decimals too large and yields an
+    # amount_out_min the pool cannot pay — proved, broadcast, rejected.
+    expected = dex._quote_expected_out(
+        token_in_id=token_in, token_out_id=pool.token1, amount_in=amount_in)
 
     handle = _with_retry(lambda: dex.swap(
         pool_key=pool.key, token_in_id=token_in, amount_in=amount_in,
@@ -96,14 +106,22 @@ def test_wrapped_flow_roundtrip():
 
     from aleo_shield_swap import ShieldSwap
 
+    # consumer_id must go on the PROVIDER, not just the network client: the
+    # record scanner is built lazily from provider config, so setting it only
+    # on network_client leaves the scanner with a key and no consumer — it
+    # cannot mint a JWT and every record read answers Unauthorized.
     provider = HTTPProvider(ENDPOINT, network="testnet",
-                            api_key=os.environ["ALEO_E2E_API_KEY"])
+                            api_key=os.environ["ALEO_E2E_API_KEY"],
+                            consumer_id=os.environ["ALEO_E2E_CONSUMER_ID"])
     aleo = Aleo(provider)
-    aleo.network_client.consumer_id = os.environ["ALEO_E2E_CONSUMER_ID"]
     acct = aleo.account.from_private_key(os.environ["ALEO_E2E_PRIVATE_KEY"])
     aleo.default_account = acct
     aleo.records.register(acct)
     dex = ShieldSwap(aleo)
+    # get_route is auth-gated; without a session it answers 401 well before
+    # anything is proved.
+    dex.api.authenticate(str(acct.address),
+                         lambda msg: str(aleo.account.sign(msg.encode(), acct)))
 
     tokens = {t.address: t for t in dex.api.get_tokens()}
     case = None
