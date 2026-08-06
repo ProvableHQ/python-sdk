@@ -987,6 +987,7 @@ class ShieldSwap:
         amount_in: int,
         count: int,
         slippage_bps: int = 50,
+        expected_out: Optional[int] = None,
         record_wait_seconds: float = 120.0,
         account: Any = None,
     ) -> SwapBatchReport:
@@ -999,18 +1000,25 @@ class ShieldSwap:
         becomes claimable (it stays in ``still_pending``).  A failed
         broadcast burns its counter and the batch continues; failures are
         reported, not raised.  Requires ``from_profile()``.
+
+        *expected_out* (base units) skips the route quote.  Without it the batch
+        quotes once and refuses rather than falling back to a spot estimate,
+        which ignores the pool fee and would revert every swap after paying for
+        its proof.
         """
         if self.journal is None:
             raise ValueError("swap_many() needs a journal — construct with "
                              "ShieldSwap.from_profile().")
         acct = self._account(account)
-        # Quote once for the batch: a spot estimate ignores the pool fee, so
-        # min-out would exceed the real output and finalize would reject.
+        # One quote for the whole batch unless the caller supplied one: a spot
+        # estimate ignores the pool fee, so min-out would exceed the real output
+        # and finalize would reject.
         pool = self.get_pool(pool_key)
         token_out_id = pool.token1 if token_in_id == pool.token0 else pool.token0
-        expected_out = self._quote_expected_out(
-            token_in_id=token_in_id, token_out_id=token_out_id,
-            amount_in=amount_in)
+        if expected_out is None:
+            expected_out = self._quote_expected_out(
+                token_in_id=token_in_id, token_out_id=token_out_id,
+                amount_in=amount_in)
         if expected_out is None and slippage_bps < 10_000:
             # Falling back to the spot estimate would set amount_out_min above
             # what the pool can actually pay (spot ignores the fee), so every

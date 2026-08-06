@@ -210,3 +210,19 @@ def test_quote_propagates_auth_failure():
     with pytest.raises(NotAuthenticatedError):
         fresh._quote_expected_out(token_in_id="t0", token_out_id="t1",
                                   amount_in=10**6)
+
+
+def test_swap_many_accepts_a_caller_supplied_quote(dex, monkeypatch):
+    """expected_out skips the route quote — the escape hatch the refusal
+    message points callers at, so it must actually exist."""
+    called = {"n": 0}
+
+    def _never(self, **kw):
+        called["n"] += 1
+        return None
+
+    monkeypatch.setattr(ShieldSwap, "_quote_expected_out", _never)
+    dex.swap_many(pool_key="5field", token_in_id="t0", amount_in=10**6,
+                  count=1, expected_out=990_000)
+    assert called["n"] == 0, "should not have quoted"
+    assert dex.journal.counter_cursor() == 1

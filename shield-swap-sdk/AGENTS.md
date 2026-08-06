@@ -66,7 +66,7 @@ The scan catches positions the journal never saw (account used from
 another machine, journal lost); it needs a registered record
 provider and is skipped silently without one.
 
-### `swap_many(self, *, pool_key: 'str', token_in_id: 'str', amount_in: 'int', count: 'int', slippage_bps: 'int' = 50, record_wait_seconds: 'float' = 120.0, account: 'Any' = None) -> 'SwapBatchReport'`
+### `swap_many(self, *, pool_key: 'str', token_in_id: 'str', amount_in: 'int', count: 'int', slippage_bps: 'int' = 50, expected_out: 'Optional[int]' = None, record_wait_seconds: 'float' = 120.0, account: 'Any' = None) -> 'SwapBatchReport'`
 
 *count* private swaps of *amount_in* each, with reserved counters.
 
@@ -77,6 +77,11 @@ claims whatever finalized.  A swap the network rejects simply never
 becomes claimable (it stays in ``still_pending``).  A failed
 broadcast burns its counter and the batch continues; failures are
 reported, not raised.  Requires ``from_profile()``.
+
+*expected_out* (base units) skips the route quote.  Without it the batch
+quotes once and refuses rather than falling back to a spot estimate,
+which ignores the pool fee and would revert every swap after paying for
+its proof.
 
 ### `collect_all(self, account: 'Any' = None) -> 'CollectReport'`
 

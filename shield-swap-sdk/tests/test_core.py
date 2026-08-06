@@ -178,3 +178,16 @@ def test_extract_tx_id_handles_all_dps_shapes():
                                           "execution": {}}}) == "at1c"
     with pytest.raises(ValueError, match="Cannot find"):
         extract_tx_id({"transaction": {"type": "execute"}})
+
+
+def test_find_position_plaintext_rejects_a_lookalike_record():
+    """A non-PositionNFT record carrying a matching `pool` must not be returned
+    as a position — it would be spent as one."""
+    from aleo_shield_swap._core import find_position_plaintext
+    lookalike = "{ owner: aleo1x.private, pool: 5field.private, amount: 9u128.private }"
+    position = ("{ owner: aleo1x.private, withdrawal: aleo1y.private, "
+                "token_id: 1field.private, token0_id: 2field.private, "
+                "token1_id: 3field.private, pool: 5field.private, "
+                "tick_lower: -60i32.private, tick_upper: 60i32.private }")
+    recs = [{"record_plaintext": lookalike}, {"record_plaintext": position}]
+    assert find_position_plaintext(recs, "5field") == position

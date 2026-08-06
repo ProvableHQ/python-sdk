@@ -188,16 +188,17 @@ def decode_position_record(plaintext: str) -> Optional[dict[str, Any]]:
 
 
 def find_position_plaintext(records: Any, pool_key: str) -> Optional[str]:
-    """First unspent PositionNFT plaintext whose ``pool`` matches, or None."""
+    """First unspent PositionNFT plaintext whose ``pool`` matches, or None.
+
+    Uses :func:`decode_position_record`, so a record of another type that
+    happens to carry a matching ``pool`` field is not returned as a position.
+    """
     for rec in records:
         plaintext = record_plaintext(rec)
         if not plaintext:
             continue
-        try:
-            decoded = parse_plaintext(plaintext)
-        except (ValueError, TypeError):
-            continue
-        if isinstance(decoded, dict) and decoded.get("pool") == pool_key:
+        decoded = decode_position_record(plaintext)
+        if decoded is not None and decoded.get("pool") == pool_key:
             return plaintext
     return None
 
