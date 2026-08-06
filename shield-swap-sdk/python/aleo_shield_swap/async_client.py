@@ -371,7 +371,7 @@ class AsyncShieldSwap:
         ``state is None`` semantics while a mint finalizes.
         """
         acct = self._account(account)
-        records = self._aleo.record_provider.find(
+        records = await self._aleo.record_provider.find(
             acct, program=self.program, unspent=True)
         out: list[OwnedPosition] = []
         slots: dict[str, Any] = {}      # one slot read per pool, not per position

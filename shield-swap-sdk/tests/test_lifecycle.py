@@ -174,8 +174,8 @@ def test_credentials_stage_refreshes_live_facade(profile, dps_env):
 
 
 def test_airdrop_stage_refuses_on_mainnet(tmp_path):
-    tmp_journal = tmp_path / "j.jsonl"
     """The faucet endpoints are testnet-only; on mainnet say so, don't 404."""
+    tmp_journal = tmp_path / "j.jsonl"
     from aleo_shield_swap.errors import NotFundedError
     from aleo_shield_swap.lifecycle import _Ctx, _airdrop_run
 
