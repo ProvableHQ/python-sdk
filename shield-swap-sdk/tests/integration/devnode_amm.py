@@ -134,18 +134,34 @@ class AmmDevnode:
 
     def deploy_program(self, source: str, label: str) -> str:
         """Deploy *source* proofless: dummy verifying keys (no synthesis) and
-        an unproven public fee paid by the admin — devnode-only."""
+        an unproven public fee paid by the admin — devnode-only.
+
+        The devnode bundles its own snarkVM, which need not price deployments
+        identically to the bindings computing the fee here; the two diverged at
+        devnode 0.2.3 / snarkVM 4.9.0.  A rejected base fee names the amount the
+        node wants, so a short fee is retried at that figure rather than
+        carrying a guessed margin.
+        """
         net = self._net()
         process = self.aleo.process
         program = net.Program.from_source(source)
-
         deployment = net.Deployment.from_program_unproven(program, self.admin.address)
+
         cost = process.deployment_cost(deployment)
-        fee_auth = process.authorize_fee_public(
-            self.admin.private_key, cost, 0, deployment.deployment_id())
-        fee = net.Fee.from_authorization_unproven(fee_auth, self.state_root())
-        tx = net.Transaction.from_deployment(self.admin.private_key, deployment, fee)
-        tx_id = self.submit_and_confirm(tx, f"deploy {label}")
+        for attempt in range(2):
+            fee_auth = process.authorize_fee_public(
+                self.admin.private_key, cost, 0, deployment.deployment_id())
+            fee = net.Fee.from_authorization_unproven(fee_auth, self.state_root())
+            tx = net.Transaction.from_deployment(self.admin.private_key, deployment, fee)
+            try:
+                tx_id = self.submit_and_confirm(tx, f"deploy {label}")
+                break
+            except Exception as exc:
+                required = re.search(r"requires (\d+) microcredits", str(exc))
+                if attempt or not required:
+                    raise
+                cost = int(required.group(1))
+
         self.wait_queryable(label)
         # Later deployments/executions resolve this program from the process.
         process.add_program(program)

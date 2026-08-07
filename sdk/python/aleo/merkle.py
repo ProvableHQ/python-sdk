@@ -75,6 +75,9 @@ class MerkleExclusionProof:
             raise ValueError(f"max_depth must be at least 1, got {max_depth}")
         self.max_depth = max_depth
         self._network = network
+        # Built on first use and reused: a full-depth tree is 65_535 hashes,
+        # and Poseidon setup is not free.
+        self._hasher: Any = None
 
     def __repr__(self) -> str:
         return (f"MerkleExclusionProof(max_depth={self.max_depth}, "
@@ -335,5 +338,7 @@ class MerkleExclusionProof:
         going through ``to_fields_raw``, gives a different and wrong answer.
         """
         net = self._net()
+        if self._hasher is None:
+            self._hasher = net.Poseidon4()
         plaintext = net.Plaintext.from_string(f"[{prefix},{left},{right}]")
-        return str(net.Poseidon4().hash(plaintext.to_fields()))
+        return str(self._hasher.hash(plaintext.to_fields()))
