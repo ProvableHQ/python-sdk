@@ -596,3 +596,40 @@ async def test_async_dps_400_not_retried() -> None:
     assert result["ok"] is False
     assert result["status"] == 400
     assert post_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Freeze list (compliance)
+# ---------------------------------------------------------------------------
+
+async def test_get_freeze_list_url_takes_the_program() -> None:
+    """The program is a parameter — one endpoint serves every freeze list."""
+    root = "3642222252059314292809609689035560016959342421640560347114299934615987159853"
+    seen: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        return jr(["0", "0", root])
+
+    c = make_client()
+    c._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+    tree = await c.get_freeze_list("shield_swap_freezelist.aleo")
+
+    assert tree == [0, 0, int(root)]
+    assert seen["url"] == (
+        f"{HOST}/programs/shield_swap_freezelist.aleo/compliance/freeze-list")
+
+
+async def test_get_freeze_list_serves_a_different_program() -> None:
+    c = make_client({"test_usad_freezelist.aleo/compliance/freeze-list":
+                     jr(["0", "0", "17"])})
+
+    assert await c.get_freeze_list("test_usad_freezelist.aleo") == [0, 0, 17]
+
+
+async def test_get_freeze_list_rejects_a_non_list_payload() -> None:
+    c = make_client({"compliance/freeze-list": jr({"unexpected": True})})
+
+    with pytest.raises(ValueError, match="freeze list"):
+        await c.get_freeze_list("shield_swap_freezelist.aleo")

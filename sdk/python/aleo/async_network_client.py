@@ -739,6 +739,45 @@ class AsyncAleoNetworkClient:
             "getProgramMappingValue",
         )
 
+    async def get_freeze_list(self, program_id: str) -> list[int]:
+        """Read a compliance program's freeze-list Merkle tree.
+
+        Programs following the Sealance architecture publish their freeze list
+        as a sorted Merkle tree and require callers to prove non-inclusion in
+        it.  Pair this with :class:`~aleo.MerkleExclusionProof` to turn the tree
+        into the proof a transition expects.
+
+        Args:
+            program_id: The freeze-list program, e.g.
+                ``"shield_swap_freezelist.aleo"``.  Each compliance program
+                keeps its own list, so this is a parameter rather than a
+                constant.
+
+        Returns:
+            Every node of the tree in tree order — leaves first, then each layer
+            above, with the Merkle root last.  An empty list reads back as the
+            two-leaf zero tree.
+
+        Raises:
+            AleoNetworkError: If the program does not exist or serves no list.
+            ValueError: If the response is not an array of field values.
+        """
+        payload = await self._get(
+            f"/programs/{program_id}/compliance/freeze-list",
+            "getFreezeList",
+        )
+        if not isinstance(payload, list):
+            raise ValueError(
+                f"{program_id} returned a {type(payload).__name__} rather than "
+                f"a freeze list array"
+            )
+        try:
+            return [int(str(node).strip().removesuffix("field")) for node in payload]
+        except ValueError:
+            raise ValueError(
+                f"{program_id} freeze list holds a non-numeric node"
+            ) from None
+
     async def get_public_balance(self, address: str) -> int:
         """Read an address's public ``credits.aleo`` balance.
 

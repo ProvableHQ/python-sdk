@@ -875,3 +875,52 @@ def test_set_prover_uri() -> None:
     c = make_client()
     c.set_prover_uri("https://prover.example.com")
     assert c._prover_uri == f"https://prover.example.com/{NET}"
+
+
+# ---------------------------------------------------------------------------
+# Freeze list (compliance)
+# ---------------------------------------------------------------------------
+
+@resp_lib.activate
+def test_get_freeze_list_url_takes_the_program() -> None:
+    """The program is a parameter — one endpoint serves every freeze list."""
+    resp_lib.add(
+        resp_lib.GET,
+        f"{HOST}/programs/shield_swap_freezelist.aleo/compliance/freeze-list",
+        json=["0", "0", "3642222252059314292809609689035560016959342421640560347114299934615987159853"],
+    )
+    c = make_client()
+
+    tree = c.get_freeze_list("shield_swap_freezelist.aleo")
+
+    assert tree == [
+        0, 0,
+        3642222252059314292809609689035560016959342421640560347114299934615987159853,
+    ]
+    assert resp_lib.calls[0].request.url == (
+        f"{HOST}/programs/shield_swap_freezelist.aleo/compliance/freeze-list")
+
+
+@resp_lib.activate
+def test_get_freeze_list_serves_a_different_program() -> None:
+    resp_lib.add(
+        resp_lib.GET,
+        f"{HOST}/programs/test_usad_freezelist.aleo/compliance/freeze-list",
+        json=["0", "0", "17"],
+    )
+    c = make_client()
+
+    assert c.get_freeze_list("test_usad_freezelist.aleo") == [0, 0, 17]
+
+
+@resp_lib.activate
+def test_get_freeze_list_rejects_a_non_list_payload() -> None:
+    resp_lib.add(
+        resp_lib.GET,
+        f"{HOST}/programs/shield_swap_freezelist.aleo/compliance/freeze-list",
+        json={"unexpected": True},
+    )
+    c = make_client()
+
+    with pytest.raises(ValueError, match="freeze list"):
+        c.get_freeze_list("shield_swap_freezelist.aleo")

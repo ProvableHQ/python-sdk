@@ -12,6 +12,7 @@ except ModuleNotFoundError:  # pragma: no cover
     pass
 
 from .encryptor import *
+from .merkle import MerkleExclusionProof as MerkleExclusionProof
 from .network_client import AleoNetworkClient as AleoNetworkClient
 from .async_network_client import AsyncAleoNetworkClient as AsyncAleoNetworkClient
 from ._client_common import AleoNetworkError as AleoNetworkError
