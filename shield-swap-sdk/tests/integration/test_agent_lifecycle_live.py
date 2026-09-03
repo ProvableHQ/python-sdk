@@ -1,9 +1,10 @@
 """Live proof of the full agent lifecycle — fresh profile to collected swap.
 
 Opt in: python -m pytest tests/integration/test_agent_lifecycle_live.py -m live
-Env:    SHIELD_SWAP_INVITE_CODE   a fresh, unredeemed invite code — codes
-                                  are single-use and human-supplied by
-                                  design; the SDK never generates them.
+Env:    SHIELD_SWAP_REFERRAL_CODE   optional — a referral code to credit; when
+                                    set, the referral stage must run and
+                                    record the referrer.  Access itself needs
+                                    nothing beyond authentication.
 Provable + DEX API credentials self-provision during onboarding.
 
 One ordered test: onboarding a fresh account is rate-limited and slow, so
@@ -21,13 +22,6 @@ import pytest
 pytestmark = pytest.mark.live
 
 
-def _invite_code() -> str:
-    return os.environ["SHIELD_SWAP_INVITE_CODE"]
-
-
-@pytest.mark.skipif(not os.environ.get("SHIELD_SWAP_INVITE_CODE"),
-                    reason="SHIELD_SWAP_INVITE_CODE not set — paste a fresh, "
-                           "unredeemed invite code to run the lifecycle")
 def test_full_lifecycle_from_fresh_profile(tmp_path, monkeypatch):
     # Prove the participant path: credentials must SELF-provision and the
     # profile key must be genuinely fresh (a developer shell may carry
@@ -40,19 +34,26 @@ def test_full_lifecycle_from_fresh_profile(tmp_path, monkeypatch):
     from aleo_shield_swap import ShieldSwap
 
     # ── Startup: fresh key material, full registration, airdrop ────────────
+    # No code is required: authentication alone grants access.  A referral
+    # code, when the environment offers one, is optional attribution.
+    referral_code = os.environ.get("SHIELD_SWAP_REFERRAL_CODE")
     dex = ShieldSwap.from_profile(tmp_path / "home")
-    report = dex.onboard(invite_code=_invite_code())
+    report = dex.onboard(referral_code=referral_code)
     assert report.funded, f"onboard did not fund: {report.outcomes}"
     ran = {o.name for o in report.outcomes if o.action == "ran"}
-    assert "authenticate" in ran and "redeem" in ran   # genuinely fresh
+    assert "authenticate" in ran and "credentials" in ran   # genuinely fresh
+    assert ("referral" in ran) == bool(referral_code)
 
-    # Idempotence: a second onboard is a no-op.
-    again = dex.onboard()
+    # Idempotence: a second onboard is a no-op, even if the code is repeated.
+    again = dex.onboard(referral_code=referral_code)
     assert all(o.action == "skipped" for o in again.outcomes)
 
     # ── Discovery: pools, balances, positions ──────────────────────────────
     st = dex.status()
     assert st.authenticated and st.has_access
+    if referral_code:
+        assert dex.api.referral_status().referred_by
+    assert dex.api.my_referral_code()          # every account gets one
     held = {tid for tid, v in st.balances.items() if v.get("private", 0) > 0}
     assert held, "airdrop records not visible in private balances"
     pools = dex.api.get_pools()

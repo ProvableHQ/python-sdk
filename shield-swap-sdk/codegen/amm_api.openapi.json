@@ -2,7 +2,7 @@
     "openapi": "3.1.0",
     "info": {
         "title": "Shield Swap API",
-        "description": "Shield Swap REST API for pools, positions, swaps, routes, quotes, settlement status, and transaction input schemas. Transactions target the configured shield_swap program and `token_registry.aleo`.\n\n## Numeric wire format\n\nExact financial values are JSON strings, not JSON numbers. Unsigned decimal inputs use ASCII digits and an optional `.` fraction, for example `\"1234.50\"`; base-unit integers use ASCII digits only. Grouping separators, localized decimal commas, signs, exponent notation, whitespace, Unicode digits, and redundant leading zeros are not accepted for those inputs. Signed response metrics may include a leading `-`. Clients should localize only for display and convert user input back to this canonical form before sending it.\n\n## Authentication\n\nMost endpoints require credentials from an invited wallet. Public routes are `/health`, `/ready`, `/metrics`, `/auth/*`, `/protocol/state`, `/compliance*`, `GET /tokens*`, `GET /pools`, `GET /pools/stats`, and `GET /pools/{key}`.\n\nBrowsers use HTTP-only session cookies issued by `/auth/verify`. Access sessions last 15 minutes and are renewed through `/auth/refresh`. Programmatic clients use a long-lived token from `POST /api-tokens` as `Authorization: Bearer ss_\u2026`. API tokens cover data and trading routes and can request WebSocket tickets. Token management, code redemption, and admin routes require a browser session.\n\n## WebSocket feed\n\nThe live feed runs on the separate websocket gateway at `GET /ws`.\n\n1. Request a ticket from `GET /auth/ws-ticket` using a browser session or API token.\n2. Open the socket and send the `authenticate` frame within 5 seconds.\n3. Subscribe to each required room.\n4. Before the 60-second ticket expires, request a new ticket and send another `authenticate` frame.\n\nThe socket accepts WebSocket tickets only. Session JWTs and API tokens are rejected.\n\n```json\n{\"action\": \"authenticate\", \"token\": \"<ticket from /auth/ws-ticket>\"}\n{\"action\": \"subscribe\", \"room\": \"trades:<pool_key>\"}\n{\"action\": \"unsubscribe\", \"room\": \"<room>\"}\n{\"action\": \"synchronize\"}\n```\n\nAfter reconnecting, resend subscriptions and then send `synchronize`. The gateway replies `{\"control\": \"synchronized\"}` when those subscriptions are active. Refetch any REST data that depends on the stream after receiving the reply.\n\nEach connection allows 32 rooms, 240 client frames per minute, and 2 KB per frame. A client may subscribe only to the balance room for its ticket subject.\n\nRooms:\n- `pool_launches` \u2014 newly created pools\n- `pool_stats:<pool_key>` \u2014 price & liquidity updates\n- `ohlcv:<pool_key>` \u2014 candle updates\n- `trades:<pool_key>` \u2014 swaps / mints / burns\n- `balances:<address>` \u2014 balance-change hints for an address\n\n- `protocol_config` \u2014 revisioned protocol-configuration invalidations\n\nServer messages are either events (`{\"type\": <event>, \"data\": { \u2026 }}`) or control messages (`{\"control\": <value>}`). Event types are `PoolLaunch`, `PoolStats`, `Ohlcv`, `Trade`, `BalanceChange`, and `ProtocolConfigChanged`. Its data contains `revision`, `observed_block`, and the changed `scope`/`key` pairs. Financial fields use the numeric format described above.\n\nTreat `ProtocolConfigChanged` as an invalidation, not as the new configuration. Fetch `GET /protocol/state?minimum_revision=<revision>`; retry a `503 protocol_revision_pending` after the advertised `Retry-After`; and discard or requote any `/route` result whose `protocol_revision` is older. Subscribe to `pool_stats:<pool_key>` separately when live price and liquidity updates matter.\n\nThe gateway currently sends `synchronized` and `resync_required` controls. `resync_required` means the stream may have missed updates, so refetch affected data over REST. Ignore unknown control values.\n\nEvent delivery is at most once. Treat REST as the source of truth. During a deployment the gateway may close the socket with code 1012 (service restart); reconnect and restore the subscriptions.",
+        "description": "Shield Swap REST API for pools, positions, swaps, routes, quotes, settlement status, and transaction input schemas. Transactions target the configured shield_swap program and `token_registry.aleo`.\n\n## Numeric wire format\n\nExact financial values are JSON strings, not JSON numbers. Unsigned decimal inputs use ASCII digits and an optional `.` fraction, for example `\"1234.50\"`; base-unit integers use ASCII digits only. Grouping separators, localized decimal commas, signs, exponent notation, whitespace, Unicode digits, and redundant leading zeros are not accepted for those inputs. Signed response metrics may include a leading `-`. Clients should localize only for display and convert user input back to this canonical form before sending it.\n\n## Authentication\n\nMost endpoints require credentials from a wallet that has accepted the current terms of use (recorded by `/auth/verify`). Public routes are `/health`, `/ready`, `/metrics`, `/auth/*`, `/protocol/state`, `/compliance*`, `GET /tokens*`, `GET /pools`, `GET /pools/stats`, `GET /pools/{key}`, `GET /pools/{key}/ohlcv`, `GET /pools/{key}/liquidity-distribution`, `GET /pools/{key}/trades`, and `GET /pools/{key}/stats`.\n\nBrowsers use HTTP-only session cookies issued by `/auth/verify`. Access sessions last 15 minutes and are renewed through `/auth/refresh`. Programmatic clients use a long-lived token from `POST /api-tokens` as `Authorization: Bearer ss_\u2026`. API tokens cover data and trading routes and can request WebSocket tickets. Token management, code redemption, and admin routes require a browser session.\n\n## WebSocket feed\n\nThe live feed runs on the separate websocket gateway at `GET /ws`.\n\n1. Request a ticket from `GET /auth/ws-ticket` using a browser session or API token.\n2. Open the socket and send the `authenticate` frame within 5 seconds.\n3. Subscribe to each required room.\n4. Before the 60-second ticket expires, request a new ticket and send another `authenticate` frame.\n\nThe socket accepts WebSocket tickets only. Session JWTs and API tokens are rejected.\n\n```json\n{\"action\": \"authenticate\", \"token\": \"<ticket from /auth/ws-ticket>\"}\n{\"action\": \"subscribe\", \"room\": \"trades:<pool_key>\"}\n{\"action\": \"unsubscribe\", \"room\": \"<room>\"}\n{\"action\": \"synchronize\"}\n```\n\nAfter reconnecting, resend subscriptions and then send `synchronize`. The gateway replies `{\"control\": \"synchronized\"}` when those subscriptions are active. Refetch any REST data that depends on the stream after receiving the reply.\n\nEach connection allows 32 rooms, 240 client frames per minute, and 2 KB per frame. A client may subscribe only to the balance room for its ticket subject.\n\nRooms:\n- `pool_launches` \u2014 newly created pools\n- `pool_stats:<pool_key>` \u2014 price & liquidity updates\n- `ohlcv:<pool_key>` \u2014 candle updates\n- `trades:<pool_key>` \u2014 swaps / mints / burns\n- `balances:<address>` \u2014 balance-change hints for an address\n\n- `protocol_config` \u2014 revisioned protocol-configuration invalidations\n\nServer messages are either events (`{\"type\": <event>, \"data\": { \u2026 }}`) or control messages (`{\"control\": <value>}`). Event types are `PoolLaunch`, `PoolStats`, `Ohlcv`, `Trade`, `BalanceChange`, and `ProtocolConfigChanged`. Its data contains `revision`, `observed_block`, and the changed `scope`/`key` pairs. Financial fields use the numeric format described above.\n\nTreat `ProtocolConfigChanged` as an invalidation, not as the new configuration. Fetch `GET /protocol/state?minimum_revision=<revision>`; retry a `503 protocol_revision_pending` after the advertised `Retry-After`; and discard or requote any `/route` result whose `protocol_revision` is older. Subscribe to `pool_stats:<pool_key>` separately when live price and liquidity updates matter.\n\nThe gateway currently sends `synchronized` and `resync_required` controls. `resync_required` means the stream may have missed updates, so refetch affected data over REST. Ignore unknown control values.\n\nEvent delivery is at most once. Treat REST as the source of truth. During a deployment the gateway may close the socket with code 1012 (service restart); reconnect and restore the subscriptions.",
         "contact": {
             "name": "Shield Swap"
         },
@@ -215,6 +215,7 @@
                 "tags": [
                     "access"
                 ],
+                "description": "Compatibility endpoint for old clients. Remove this endpoint in a future release.",
                 "operationId": "access_redeem",
                 "requestBody": {
                     "content": {
@@ -227,18 +228,8 @@
                     "required": true
                 },
                 "responses": {
-                    "200": {
-                        "description": "Access code redeemed",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/AccessRedeemResponseDoc"
-                                }
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Invalid or already-used code",
+                    "401": {
+                        "description": "Authentication required",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -247,8 +238,8 @@
                             }
                         }
                     },
-                    "401": {
-                        "description": "Authentication required",
+                    "410": {
+                        "description": "Access code redemption is no longer available",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -286,18 +277,9 @@
                                 }
                             }
                         }
-                    },
-                    "500": {
-                        "description": "Internal error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/ErrorResponseDoc"
-                                }
-                            }
-                        }
                     }
                 },
+                "deprecated": true,
                 "security": [
                     {
                         "bearer_auth": []
@@ -1513,6 +1495,16 @@
                             }
                         }
                     },
+                    "403": {
+                        "description": "Terms acceptance required",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
                     "409": {
                         "description": "Credential identity changed",
                         "content": {
@@ -1553,7 +1545,12 @@
                             }
                         }
                     }
-                }
+                },
+                "security": [
+                    {
+                        "bearer_auth": []
+                    }
+                ]
             }
         },
         "/balances": {
@@ -1899,7 +1896,7 @@
                     "pools"
                 ],
                 "summary": "`GET /pools/stats?keys=key1,key2,\u2026`",
-                "description": "Batched rolling-24h stats for many pools in one request. Used by the\npools-table page to populate per-row volume / fees / APR without doing\n`N + 1` round-trips. Missing keys are silently dropped from the response\n(they just won't appear in the returned map); the caller treats absence\nas \"no stats yet\" rather than an error.\n\nCap: hard limit of 100 keys per request to avoid run-away DB load.",
+                "description": "Return rolling-24h stats for multiple pools in one request. The pools page\nuses this endpoint to avoid `N + 1` requests. The response omits unknown\nkeys and keys that fail. Callers treat an absent key as unavailable stats.\nA pool with no indexed square-root price keeps its key and nulls the reserves.\nThe endpoint accepts at most 100 unique keys to limit database load.\nAt most eight pool calculations run across all requests.\nEach calculation has a 10-second deadline, including capacity wait time.",
                 "operationId": "get_pool_24h_stats_batch",
                 "parameters": [
                     {
@@ -1914,7 +1911,7 @@
                 ],
                 "responses": {
                     "200": {
-                        "description": "Map of pool key \u2192 24h stats; failed or unknown keys may be omitted",
+                        "description": "Map of pool key to 24h stats; failed or unknown keys can be absent",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -2093,12 +2090,7 @@
                             }
                         }
                     }
-                },
-                "security": [
-                    {
-                        "bearer_auth": []
-                    }
-                ]
+                }
             }
         },
         "/pools/{key}/ohlcv": {
@@ -2187,6 +2179,116 @@
                             }
                         }
                     }
+                }
+            }
+        },
+        "/pools/{key}/rebalance-state": {
+            "get": {
+                "tags": [
+                    "pools"
+                ],
+                "operationId": "get_rebalance_state",
+                "parameters": [
+                    {
+                        "name": "key",
+                        "in": "path",
+                        "description": "Pool key",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "tick_lower",
+                        "in": "query",
+                        "description": "Current lower tick",
+                        "required": true,
+                        "schema": {
+                            "type": "integer",
+                            "format": "int32"
+                        }
+                    },
+                    {
+                        "name": "tick_upper",
+                        "in": "query",
+                        "description": "Current upper tick",
+                        "required": true,
+                        "schema": {
+                            "type": "integer",
+                            "format": "int32"
+                        }
+                    },
+                    {
+                        "name": "old_liquidity",
+                        "in": "query",
+                        "description": "Current position liquidity",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "mint_tick_lower",
+                        "in": "query",
+                        "description": "New lower tick",
+                        "required": true,
+                        "schema": {
+                            "type": "integer",
+                            "format": "int32"
+                        }
+                    },
+                    {
+                        "name": "mint_tick_upper",
+                        "in": "query",
+                        "description": "New upper tick",
+                        "required": true,
+                        "schema": {
+                            "type": "integer",
+                            "format": "int32"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Consistent pool state and mint hints",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/RebalanceStateResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid position or tick range",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Pool not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Rebalance state is unavailable",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    }
                 },
                 "security": [
                     {
@@ -2214,7 +2316,7 @@
                 ],
                 "responses": {
                     "200": {
-                        "description": "Rolling 24h price/volume summary",
+                        "description": "Rolling pool price and volume summary",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -2243,12 +2345,7 @@
                             }
                         }
                     }
-                },
-                "security": [
-                    {
-                        "bearer_auth": []
-                    }
-                ]
+                }
             }
         },
         "/pools/{key}/trades": {
@@ -2338,12 +2435,7 @@
                             }
                         }
                     }
-                },
-                "security": [
-                    {
-                        "bearer_auth": []
-                    }
-                ]
+                }
             }
         },
         "/positions": {
@@ -2546,6 +2638,256 @@
                 }
             }
         },
+        "/referral/activity": {
+            "post": {
+                "tags": [
+                    "referral"
+                ],
+                "operationId": "referral_activity",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ReferralActivityRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Bound wallet activity claim result",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ReferralActivityResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid tx_id or metadata",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Authentication required",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Terms acceptance required",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "413": {
+                        "description": "Request body too large",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "415": {
+                        "description": "Content-Type must be application/json",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Request body does not match schema",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limit exceeded",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Activity capacity unavailable",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_auth": []
+                    }
+                ]
+            }
+        },
+        "/referral/address-batches": {
+            "post": {
+                "tags": [
+                    "referral"
+                ],
+                "operationId": "referral_record_address_batch",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ReferralAddressBatchRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Unverified referral address batch result",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ReferralAddressBatchResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid address batch",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Authentication required",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Terms acceptance required",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "413": {
+                        "description": "Request body too large",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "415": {
+                        "description": "Content-Type must be application/json",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Request body does not match schema",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limit exceeded",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Request state unavailable",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_auth": []
+                    }
+                ]
+            }
+        },
         "/referral/admin": {
             "get": {
                 "tags": [
@@ -2574,7 +2916,62 @@
                         }
                     },
                     "403": {
-                        "description": "Invite access required",
+                        "description": "Terms acceptance required",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_auth": []
+                    }
+                ]
+            }
+        },
+        "/referral/admin/volume": {
+            "get": {
+                "tags": [
+                    "referral"
+                ],
+                "operationId": "referral_admin_volume",
+                "responses": {
+                    "200": {
+                        "description": "All-time referral input volume by code and token",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ReferralAdminVolumeResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Authentication required",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Administrator authorization required",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -2783,6 +3180,61 @@
                 ]
             }
         },
+        "/referral/my-code": {
+            "get": {
+                "tags": [
+                    "referral"
+                ],
+                "operationId": "referral_my_code",
+                "responses": {
+                    "200": {
+                        "description": "The wallet's own shareable referral code",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ReferralMyCodeResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Authentication required",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Terms acceptance required",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_auth": []
+                    }
+                ]
+            }
+        },
         "/referral/my-codes": {
             "get": {
                 "tags": [
@@ -2811,7 +3263,7 @@
                         }
                     },
                     "403": {
-                        "description": "Invite access required",
+                        "description": "Terms acceptance required",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -3146,6 +3598,131 @@
                 ]
             }
         },
+        "/referral/swap-claims": {
+            "post": {
+                "tags": [
+                    "referral"
+                ],
+                "operationId": "referral_record_swap_claim",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ReferralSwapClaimRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Unverified referral swap claim result",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ReferralSwapClaimResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid swap claim",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Authentication required",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Terms acceptance required",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "413": {
+                        "description": "Request body too large",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "415": {
+                        "description": "Content-Type must be application/json",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Request body does not match schema",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limit exceeded",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Request state unavailable",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_auth": []
+                    }
+                ]
+            }
+        },
         "/route": {
             "get": {
                 "tags": [
@@ -3223,6 +3800,41 @@
                     },
                     "503": {
                         "description": "The live deployment is incompatible, routing dependencies are unavailable, or the quote candidate set exceeds the safe limit",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponseDoc"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearer_auth": []
+                    }
+                ]
+            }
+        },
+        "/route/topology": {
+            "get": {
+                "tags": [
+                    "route"
+                ],
+                "operationId": "route_topology",
+                "responses": {
+                    "200": {
+                        "description": "All routable pool edges",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/RouteTopologyResponseDoc"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "The live deployment is incompatible or routing dependencies are unavailable",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -4075,32 +4687,6 @@
                     }
                 }
             },
-            "AccessRedeemResponse": {
-                "type": "object",
-                "required": [
-                    "code",
-                    "status"
-                ],
-                "properties": {
-                    "code": {
-                        "type": "string"
-                    },
-                    "status": {
-                        "type": "string"
-                    }
-                }
-            },
-            "AccessRedeemResponseDoc": {
-                "type": "object",
-                "required": [
-                    "data"
-                ],
-                "properties": {
-                    "data": {
-                        "$ref": "#/components/schemas/AccessRedeemResponse"
-                    }
-                }
-            },
             "AccessStatusResponse": {
                 "type": "object",
                 "required": [
@@ -4173,6 +4759,12 @@
                         }
                     }
                 }
+            },
+            "ActivityAction": {
+                "type": "string",
+                "enum": [
+                    "create_pool"
+                ]
             },
             "AirdropJob": {
                 "type": "object",
@@ -4631,6 +5223,12 @@
                     "error"
                 ],
                 "properties": {
+                    "code": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    },
                     "error": {
                         "type": "string"
                     },
@@ -5427,6 +6025,7 @@
                     "high_24h",
                     "low_24h",
                     "volume_24h",
+                    "volume_7d",
                     "display_flipped",
                     "display_price",
                     "display_open_24h",
@@ -5438,13 +6037,15 @@
                         "type": [
                             "string",
                             "null"
-                        ]
+                        ],
+                        "description": "The value compares the earliest execution price with the current spot price."
                     },
                     "display_change_24h_pct": {
                         "type": [
                             "string",
                             "null"
-                        ]
+                        ],
+                        "description": "The value compares the display open with the current spot price."
                     },
                     "display_flipped": {
                         "type": "boolean",
@@ -5462,32 +6063,64 @@
                     },
                     "display_price": {
                         "type": "string",
-                        "description": "Current price in canonical display orientation (quote per base)."
+                        "description": "The current spot price uses the canonical display orientation."
+                    },
+                    "fee_24h": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "Net LP fees in raw token0 units."
+                    },
+                    "fee_7d": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "Net LP fees in raw token0 units for the rolling seven-day window."
                     },
                     "high_24h": {
                         "type": "string",
-                        "description": "Highest raw atomic execution price."
+                        "description": "The value is the higher of the execution high and the current spot price."
                     },
                     "liquidity": {
                         "type": "string"
                     },
                     "low_24h": {
                         "type": "string",
-                        "description": "Lowest raw atomic execution price."
+                        "description": "The value is the lower of the execution low and the current spot price."
                     },
                     "open_24h": {
                         "type": "string",
                         "description": "Earliest raw atomic execution price."
                     },
                     "price": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "The current spot price is token1 per token0 in raw atomic units."
                     },
                     "price_reversed": {
                         "type": "string"
                     },
+                    "reserve0": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "Null when the pool slot read fails. Every other field stays valid."
+                    },
+                    "reserve1": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    },
                     "volume_24h": {
                         "type": "string",
                         "description": "Raw token0 units consumed."
+                    },
+                    "volume_7d": {
+                        "type": "string",
+                        "description": "Raw token0 units consumed in the rolling seven-day window."
                     }
                 }
             },
@@ -5583,7 +6216,8 @@
                     "amount1",
                     "executedAt",
                     "transactionHash",
-                    "pool"
+                    "pool",
+                    "legIndex"
                 ],
                 "properties": {
                     "amount0": {
@@ -5595,11 +6229,62 @@
                     "executedAt": {
                         "type": "string"
                     },
+                    "fee0": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "Gross token0 swap fee. This value includes `protocol_fee0`."
+                    },
+                    "fee1": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "Gross token1 swap fee. This value includes `protocol_fee1`."
+                    },
                     "id": {
                         "type": "string"
                     },
+                    "legIndex": {
+                        "type": "integer",
+                        "format": "int32"
+                    },
+                    "liquidityAfter": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    },
                     "pool": {
                         "type": "string"
+                    },
+                    "protocolFee0": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "Protocol share of `fee0`."
+                    },
+                    "protocolFee1": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "Protocol share of `fee1`."
+                    },
+                    "sqrtPriceAfter": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    },
+                    "tickAfter": {
+                        "type": [
+                            "integer",
+                            "null"
+                        ],
+                        "format": "int32"
                     },
                     "tradeType": {
                         "$ref": "#/components/schemas/PoolTradeTypeDoc"
@@ -5683,6 +6368,19 @@
                                     {
                                         "$ref": "#/components/schemas/TokenDoc"
                                     }
+                                ]
+                            },
+                            "reserve0": {
+                                "type": [
+                                    "string",
+                                    "null"
+                                ],
+                                "description": "Null when the pool has no indexed square-root price."
+                            },
+                            "reserve1": {
+                                "type": [
+                                    "string",
+                                    "null"
                                 ]
                             },
                             "stats": {
@@ -5773,10 +6471,16 @@
                         ]
                     },
                     "fee_growth_inside0_last_x_128": {
-                        "type": "string"
+                        "type": [
+                            "string",
+                            "null"
+                        ]
                     },
                     "fee_growth_inside1_last_x_128": {
-                        "type": "string"
+                        "type": [
+                            "string",
+                            "null"
+                        ]
                     },
                     "frozen_at": {
                         "type": [
@@ -6139,6 +6843,9 @@
                     "ready_for_entry": {
                         "type": "boolean"
                     },
+                    "ready_for_quote": {
+                        "type": "boolean"
+                    },
                     "updated_at": {
                         "type": [
                             "string",
@@ -6265,6 +6972,182 @@
                     }
                 }
             },
+            "RebalanceState": {
+                "type": "object",
+                "required": [
+                    "observed_block",
+                    "sqrt_price_x_128",
+                    "tick",
+                    "tick_spacing",
+                    "fee_growth_global0_x_128",
+                    "fee_growth_global1_x_128",
+                    "lower",
+                    "upper",
+                    "tick_lower_hint",
+                    "tick_upper_hint"
+                ],
+                "properties": {
+                    "fee_growth_global0_x_128": {
+                        "type": "string"
+                    },
+                    "fee_growth_global1_x_128": {
+                        "type": "string"
+                    },
+                    "lower": {
+                        "$ref": "#/components/schemas/RebalanceTickState"
+                    },
+                    "observed_block": {
+                        "type": "integer",
+                        "format": "int32",
+                        "minimum": 0
+                    },
+                    "sqrt_price_x_128": {
+                        "type": "string"
+                    },
+                    "tick": {
+                        "type": "integer",
+                        "format": "int32"
+                    },
+                    "tick_lower_hint": {
+                        "type": "integer",
+                        "format": "int32"
+                    },
+                    "tick_spacing": {
+                        "type": "integer",
+                        "format": "int32",
+                        "minimum": 0
+                    },
+                    "tick_upper_hint": {
+                        "type": "integer",
+                        "format": "int32"
+                    },
+                    "upper": {
+                        "$ref": "#/components/schemas/RebalanceTickState"
+                    }
+                }
+            },
+            "RebalanceStateResponseDoc": {
+                "type": "object",
+                "required": [
+                    "data"
+                ],
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/RebalanceState"
+                    }
+                }
+            },
+            "RebalanceTickState": {
+                "type": "object",
+                "required": [
+                    "tick",
+                    "fee_growth_outside0_x_128",
+                    "fee_growth_outside1_x_128"
+                ],
+                "properties": {
+                    "fee_growth_outside0_x_128": {
+                        "type": "string"
+                    },
+                    "fee_growth_outside1_x_128": {
+                        "type": "string"
+                    },
+                    "tick": {
+                        "type": "integer",
+                        "format": "int32"
+                    }
+                }
+            },
+            "ReferralActivityRequest": {
+                "type": "object",
+                "required": [
+                    "action",
+                    "tx_id"
+                ],
+                "properties": {
+                    "action": {
+                        "$ref": "#/components/schemas/ActivityAction"
+                    },
+                    "metadata": {},
+                    "tx_id": {
+                        "type": "string"
+                    }
+                }
+            },
+            "ReferralActivityResponse": {
+                "type": "object",
+                "required": [
+                    "recorded"
+                ],
+                "properties": {
+                    "recorded": {
+                        "type": "boolean"
+                    }
+                }
+            },
+            "ReferralActivityResponseDoc": {
+                "type": "object",
+                "required": [
+                    "data"
+                ],
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/ReferralActivityResponse"
+                    }
+                }
+            },
+            "ReferralAddressBatchRequest": {
+                "type": "object",
+                "description": "Records unverified links for multiple blinded addresses.\nAuthentication does not prove that the caller controls these blinded addresses.",
+                "required": [
+                    "code",
+                    "blinded_addresses"
+                ],
+                "properties": {
+                    "blinded_addresses": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Blinded addresses for unverified referral links."
+                    },
+                    "code": {
+                        "type": "string"
+                    }
+                }
+            },
+            "ReferralAddressBatchResponse": {
+                "type": "object",
+                "required": [
+                    "recorded",
+                    "duplicate",
+                    "conflict"
+                ],
+                "properties": {
+                    "conflict": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "duplicate": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "recorded": {
+                        "type": "integer",
+                        "format": "int64"
+                    }
+                }
+            },
+            "ReferralAddressBatchResponseDoc": {
+                "type": "object",
+                "required": [
+                    "data"
+                ],
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/ReferralAddressBatchResponse"
+                    }
+                }
+            },
             "ReferralAdminCheckResponse": {
                 "type": "object",
                 "required": [
@@ -6287,10 +7170,167 @@
                     }
                 }
             },
+            "ReferralAdminTokenVolume": {
+                "type": "object",
+                "description": "Contains consumed input volume for one token.",
+                "required": [
+                    "token",
+                    "volume",
+                    "swap_count"
+                ],
+                "properties": {
+                    "swap_count": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "token": {
+                        "type": "string"
+                    },
+                    "volume": {
+                        "type": "string"
+                    }
+                }
+            },
+            "ReferralAdminVolumeCode": {
+                "type": "object",
+                "required": [
+                    "code",
+                    "redemption_count",
+                    "pending_count",
+                    "rejected_count",
+                    "provisional_swap_count",
+                    "verified_swap_count",
+                    "provisional_priced_swap_count",
+                    "verified_priced_swap_count",
+                    "provisional_unpriced_swap_count",
+                    "verified_unpriced_swap_count",
+                    "provisional",
+                    "verified"
+                ],
+                "properties": {
+                    "code": {
+                        "type": "string"
+                    },
+                    "issued_to": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    },
+                    "pending_count": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "provisional": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ReferralAdminTokenVolume"
+                        }
+                    },
+                    "provisional_priced_swap_count": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "provisional_swap_count": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "provisional_unpriced_swap_count": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "provisional_usd": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    },
+                    "redemption_count": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "rejected_count": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "verified": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ReferralAdminTokenVolume"
+                        }
+                    },
+                    "verified_priced_swap_count": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "verified_swap_count": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "verified_unpriced_swap_count": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "verified_usd": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                }
+            },
+            "ReferralAdminVolumeResponse": {
+                "type": "object",
+                "required": [
+                    "attributed_swap_count",
+                    "unpriced_swap_count",
+                    "codes"
+                ],
+                "properties": {
+                    "attributed_swap_count": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "codes": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ReferralAdminVolumeCode"
+                        }
+                    },
+                    "provisional_usd": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    },
+                    "unpriced_swap_count": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "verified_usd": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                }
+            },
+            "ReferralAdminVolumeResponseDoc": {
+                "type": "object",
+                "required": [
+                    "data"
+                ],
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/ReferralAdminVolumeResponse"
+                    }
+                }
+            },
             "ReferralCodeRow": {
                 "type": "object",
                 "required": [
                     "code",
+                    "redemption_count",
                     "created_at"
                 ],
                 "properties": {
@@ -6317,6 +7357,10 @@
                             "string",
                             "null"
                         ]
+                    },
+                    "redemption_count": {
+                        "type": "integer",
+                        "format": "int64"
                     }
                 }
             },
@@ -6364,6 +7408,7 @@
                     "total",
                     "redeemed",
                     "available",
+                    "redemptions",
                     "codes"
                 ],
                 "properties": {
@@ -6378,6 +7423,10 @@
                         }
                     },
                     "redeemed": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "redemptions": {
                         "type": "integer",
                         "format": "int64"
                     },
@@ -6398,10 +7447,33 @@
                     }
                 }
             },
+            "ReferralMyCodeResponse": {
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                }
+            },
+            "ReferralMyCodeResponseDoc": {
+                "type": "object",
+                "required": [
+                    "data"
+                ],
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/ReferralMyCodeResponse"
+                    }
+                }
+            },
             "ReferralMyCodeRow": {
                 "type": "object",
                 "required": [
-                    "code"
+                    "code",
+                    "redemption_count"
                 ],
                 "properties": {
                     "code": {
@@ -6418,6 +7490,10 @@
                             "string",
                             "null"
                         ]
+                    },
+                    "redemption_count": {
+                        "type": "integer",
+                        "format": "int64"
                     }
                 }
             },
@@ -6537,6 +7613,18 @@
                     },
                     "has_access": {
                         "type": "boolean"
+                    },
+                    "my_code": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    },
+                    "referred_by": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
                     }
                 }
             },
@@ -6548,6 +7636,46 @@
                 "properties": {
                     "data": {
                         "$ref": "#/components/schemas/ReferralStatusResponse"
+                    }
+                }
+            },
+            "ReferralSwapClaimRequest": {
+                "type": "object",
+                "description": "Records an unverified link between a redeemed referral code and a blinded address.\nAuthentication does not prove that the caller controls the blinded address.",
+                "required": [
+                    "code",
+                    "blinded_address"
+                ],
+                "properties": {
+                    "blinded_address": {
+                        "type": "string",
+                        "description": "Blinded address for an unverified referral link."
+                    },
+                    "code": {
+                        "type": "string"
+                    }
+                }
+            },
+            "ReferralSwapClaimResponse": {
+                "type": "object",
+                "description": "Reports whether the database added the unverified link.",
+                "required": [
+                    "recorded"
+                ],
+                "properties": {
+                    "recorded": {
+                        "type": "boolean"
+                    }
+                }
+            },
+            "ReferralSwapClaimResponseDoc": {
+                "type": "object",
+                "required": [
+                    "data"
+                ],
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/ReferralSwapClaimResponse"
                     }
                 }
             },
@@ -6755,6 +7883,48 @@
                     },
                     "token_out": {
                         "type": "string"
+                    }
+                }
+            },
+            "RouteTopologyDoc": {
+                "type": "object",
+                "required": [
+                    "edges",
+                    "max_hops",
+                    "protocol_revision"
+                ],
+                "properties": {
+                    "edges": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/TopologyEdgeDoc"
+                        }
+                    },
+                    "max_hops": {
+                        "type": "integer",
+                        "minimum": 0
+                    },
+                    "protocol_config_observed_block": {
+                        "type": [
+                            "integer",
+                            "null"
+                        ],
+                        "format": "int64"
+                    },
+                    "protocol_revision": {
+                        "type": "integer",
+                        "format": "int64"
+                    }
+                }
+            },
+            "RouteTopologyResponseDoc": {
+                "type": "object",
+                "required": [
+                    "data"
+                ],
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/RouteTopologyDoc"
                     }
                 }
             },
@@ -7208,6 +8378,21 @@
                     }
                 }
             },
+            "TopologyEdgeDoc": {
+                "type": "object",
+                "required": [
+                    "token0",
+                    "token1"
+                ],
+                "properties": {
+                    "token0": {
+                        "type": "string"
+                    },
+                    "token1": {
+                        "type": "string"
+                    }
+                }
+            },
             "TradingSchemaListResponse": {
                 "type": "object",
                 "required": [
@@ -7345,7 +8530,7 @@
         },
         {
             "name": "access",
-            "description": "Invite access redemption and administration"
+            "description": "Legacy invite-code redemption and administration (superseded by terms-based access)"
         },
         {
             "name": "api-tokens",
@@ -7353,7 +8538,7 @@
         },
         {
             "name": "referral",
-            "description": "Referral redemption and administration"
+            "description": "Referral code redemption, attribution, activity logging, and administration"
         },
         {
             "name": "pools",

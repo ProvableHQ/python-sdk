@@ -12,9 +12,9 @@ Built with snarkvm 4.8.1 (MainnetV0). For build instructions, see [sdk/Readme.md
 ## Agent skills (trade on Shield Swap by chatting)
 
 The [`shield-swap-sdk`](./shield-swap-sdk) package ships everything an AI
-agent needs to drive the shield_swap AMM — set up an account, redeem an
-invite code, get the airdrop, make private swaps, manage liquidity, and
-collect earnings — from a single generated guide.
+agent needs to drive the shield_swap AMM — set up an account, get the
+airdrop, make private swaps, manage liquidity, and collect earnings — from
+a single generated guide.
 
 **Any agent (Claude Code, Codex, Cursor, custom):**
 
@@ -27,9 +27,10 @@ Most coding agents (Codex, Cursor, Claude Code, …) automatically read a
 repo-root `AGENTS.md`, so after that one command just chat: *"set up a
 shield-swap account and get tokens"*, *"find pools and start swapping"*.
 (Equivalently, open with "run `python -m aleo_shield_swap` and follow that
-guide", or paste the output into the agent's instructions.) The one thing
-the agent will ask you for is an invite code; everything else — key
-material, API credentials, airdrop — is handled by the SDK. Bring an existing account by exporting
+guide", or paste the output into the agent's instructions.) The agent needs
+nothing from you to get started — key material, API credentials, and the
+airdrop are all handled by the SDK; a friend's referral code is optional.
+Bring an existing account by exporting
 `SHIELD_SWAP_PRIVATE_KEY` (or `SHIELD_SWAP_PRIVATE_KEY_FILE`) before the
 first run — never paste a private key into the chat.
 

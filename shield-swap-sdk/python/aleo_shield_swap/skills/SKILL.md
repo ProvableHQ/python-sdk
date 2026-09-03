@@ -1,6 +1,6 @@
 ---
 name: shield-swap
-description: Use when the user wants to trade, LP, or build on the shield_swap AMM — setting up an account, redeeming an invite, getting the airdrop, swapping privately, managing liquidity positions, or collecting earnings via the aleo_shield_swap Python SDK.
+description: Use when the user wants to trade, LP, or build on the shield_swap AMM — setting up an account, optionally crediting a referral code, getting the airdrop, swapping privately, managing liquidity positions, or collecting earnings via the aleo_shield_swap Python SDK.
 ---
 
 Read the packaged agent guide (generated from the SDK — always matches the

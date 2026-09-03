@@ -126,10 +126,10 @@ Route quoting, OHLCV, and balances are auth-gated — call
 `api.authenticate(address, sign)` once (challenge/verify by signature, no
 funds required; the session rides as httpOnly cookies + a CSRF header and
 is short-lived — mint a durable `ss_…` token via `create_api_token` for
-anything long-running). Accounts additionally need a one-time invite:
-`redeem_code` takes the **referral code** a human pasted; access codes are
-a separate programmatic tier (`redeem_access_code`). Minting invite or access
-codes is deliberately not exposed by this SDK — obtain a code out-of-band.
+anything long-running). Authentication is the whole gate — no invite is
+needed. A **referral code** is optional attribution: `redeem_code` credits
+the friend who shared it (once per account), and `my_referral_code` returns
+the code this account shares with others.
 
 ## Privacy
 

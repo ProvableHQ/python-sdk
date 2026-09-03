@@ -18,7 +18,6 @@ from .errors import (
     CredentialsMissingError,
     NotFundedError,
     NotAuthenticatedError,
-    NotRedeemedError,
 )
 from .journal import Journal
 from .types import OnboardReport, StageOutcome
@@ -27,11 +26,11 @@ from .types import OnboardReport, StageOutcome
 class _Ctx:
     """Mutable state threaded through the stages of one onboard() run."""
 
-    def __init__(self, dex: Any, profile: Any, invite_code: Optional[str],
+    def __init__(self, dex: Any, profile: Any, referral_code: Optional[str],
                  poll_seconds: float, timeout_seconds: float) -> None:
         self.dex = dex
         self.profile = profile
-        self.invite_code = invite_code
+        self.referral_code = referral_code
         self.poll_seconds = poll_seconds
         self.timeout_seconds = timeout_seconds
         self.journal = Journal(profile.journal_path)
@@ -101,18 +100,21 @@ def _auth_run(ctx: _Ctx) -> str:
     return "authenticated (cookie session)"
 
 
-def _redeem_done(ctx: _Ctx) -> bool:
-    return bool(ctx.dex.api.access_status().has_access)
+def _referral_done(ctx: _Ctx) -> bool:
+    # Optional attribution, never a gate: nothing to do without a code, and
+    # nothing to do once the account already has a referrer (the API records
+    # exactly one).  Access itself comes from authentication alone.
+    if not ctx.referral_code:
+        return True
+    return bool(ctx.dex.api.referral_status().referred_by)
 
 
-def _redeem_run(ctx: _Ctx) -> str:
-    if not ctx.invite_code:
-        raise NotRedeemedError()
-    out = ctx.dex.api.redeem_code(ctx.invite_code)
+def _referral_run(ctx: _Ctx) -> str:
+    out = ctx.dex.api.redeem_code(ctx.referral_code)
     token = getattr(out, "token", None)
     if token:                             # legacy deployments only
         ctx.profile.save_credentials(jwt=token)
-    return f"invite redeemed ({out.status})"
+    return f"referral code redeemed ({out.status})"
 
 
 def provision_provable_credentials(endpoint: str, username: str) -> tuple[str, str]:
@@ -221,22 +223,23 @@ def _funded_run(ctx: _Ctx) -> str:
 
 REGISTRATION_STAGES: list[Stage] = [
     Stage("authenticate", _auth_done, _auth_run),
-    Stage("redeem", _redeem_done, _redeem_run),
+    Stage("referral", _referral_done, _referral_run),
     Stage("credentials", _creds_done, _creds_run),
     Stage("airdrop", _airdrop_done, _airdrop_run),
     Stage("funded", _funded_done, _funded_run),
 ]
 
 
-def run_onboard(dex: Any, profile: Any, invite_code: Optional[str] = None,
+def run_onboard(dex: Any, profile: Any, referral_code: Optional[str] = None,
                 poll_seconds: float = 5.0,
                 timeout_seconds: float = 600.0) -> OnboardReport:
     """Run every not-yet-done registration stage, in order, and report.
 
     Idempotent: already-satisfied stages are skipped, so calling this on a
-    registered, funded account is a no-op that says so.
+    registered, funded account is a no-op that says so.  *referral_code* is
+    optional attribution — access never depends on it.
     """
-    ctx = _Ctx(dex, profile, invite_code, poll_seconds, timeout_seconds)
+    ctx = _Ctx(dex, profile, referral_code, poll_seconds, timeout_seconds)
     outcomes: list[StageOutcome] = []
     for stage in REGISTRATION_STAGES:
         if stage.is_done(ctx):

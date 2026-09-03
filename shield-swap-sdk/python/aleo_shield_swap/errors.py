@@ -83,17 +83,6 @@ class NotAuthenticatedError(DexApiError):
         )
 
 
-class NotRedeemedError(DexApiError):
-    """Authenticated, but the account has not redeemed an invite code (403)."""
-
-    def __init__(self, body: str = "") -> None:
-        super().__init__(
-            403, body,
-            "This account has not redeemed an invite code — run "
-            "dex.onboard(invite_code=...). Codes are distributed by the team."
-        )
-
-
 class NotFundedError(ShieldSwapError):
     """The account holds none of the token required for this action."""
 

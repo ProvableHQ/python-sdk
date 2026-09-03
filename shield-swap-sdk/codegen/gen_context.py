@@ -31,7 +31,8 @@ TIER2_CLIENT = ["swap", "claim_swap_output", "create_pool", "mint",
                 "increase_liquidity", "decrease_liquidity", "collect", "burn",
                 "get_pool", "get_slot", "get_swap_output", "get_balances",
                 "get_private_balances", "derive_pool_key", "derive_tick_key"]
-TIER2_API = ["authenticate", "access_status", "redeem_code",
+TIER2_API = ["authenticate", "access_status", "referral_status",
+             "my_referral_code", "redeem_code",
              "request_airdrop", "get_airdrop_job", "create_api_token",
              "get_pools", "get_tokens", "get_route"]
 TIER2_DERIVATIONS = ["blinded_identity_at", "next_blinded_identity"]
@@ -41,7 +42,7 @@ QUICKSTART = """\
 from aleo_shield_swap import ShieldSwap
 
 dex = ShieldSwap.from_profile()          # key material auto-managed on disk
-dex.onboard(invite_code="...")           # first run only; no-op afterwards
+dex.onboard()                            # first run registers; no-op afterwards
 pools = dex.api.get_pools()
 report = dex.swap_many(pool_key=pools[0].key, token_in_id=pools[0].token0,
                        amount_in=10**6, count=5)
@@ -60,9 +61,12 @@ CONVERSATION_PATTERN = """\
    They supply it out-of-band: `export SHIELD_SWAP_PRIVATE_KEY=...` (or
    `SHIELD_SWAP_PRIVATE_KEY_FILE=path`) in their own shell before the
    profile is first created.
-2. **Invite code.**  Access is invite-gated per account; `onboard()` stops
-   with `NotRedeemedError` until one is supplied.  Ask the user for their
-   code; codes are one-time — never guess or reuse.
+2. **Referral code — optional.**  Access is granted by authentication
+   alone; `onboard()` needs nothing from the user.  Mention that a
+   referral code from a friend can be passed (`onboard(referral_code=)`)
+   to credit them, then proceed whether or not one is offered.  Never
+   block on it, never guess one.  The account gets its own code to share
+   (`dex.api.my_referral_code()`).
 
 ### After startup: ask what's next
 
@@ -143,9 +147,10 @@ What every integration must handle (each enforced or automated by the
 methods above — this list is the review checklist for code that bypasses
 them):
 
-- **Auth is layered**: a bearer credential (24h session JWT from the
-  challenge/verify handshake, or a durable `ss_…` API token — data/trading
-  endpoints only) AND a one-time invite redemption per account.
+- **Auth is by signature, and it is the whole gate**: a session from the
+  challenge/verify handshake (cookie + CSRF, or a legacy JWT), or a durable
+  `ss_…` API token for data/trading endpoints.  No code is required; a
+  referral code is optional attribution.
 - **Dynamic-dispatch imports**: every record-spending write must register
   the involved token programs with the prover (the methods resolve this via
   the token registry; pass `imports=`/`token_*_program=` to override).

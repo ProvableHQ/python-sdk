@@ -9,7 +9,7 @@ def test_lifecycle_exports():
     import aleo_shield_swap as pkg
     for name in ("Profile", "Journal", "OnboardReport", "SessionStatus",
                  "PositionView", "SwapBatchReport", "CollectReport",
-                 "StageOutcome", "NotAuthenticatedError", "NotRedeemedError",
+                 "StageOutcome", "NotAuthenticatedError",
                  "NotFundedError", "AirdropPendingError",
                  "AirdropRateLimitedError", "CredentialsMissingError",
                  "blinded_identity_at", "REGISTRATION_STAGES"):

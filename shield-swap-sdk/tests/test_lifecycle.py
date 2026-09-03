@@ -1,7 +1,7 @@
 import pytest
 
 from aleo_shield_swap.errors import (AirdropRateLimitedError,
-                                     CredentialsMissingError, NotRedeemedError)
+                                     CredentialsMissingError)
 from aleo_shield_swap.journal import Journal
 from aleo_shield_swap.lifecycle import REGISTRATION_STAGES, run_onboard
 from aleo_shield_swap.profile import Profile
@@ -14,9 +14,11 @@ class _Tok:
 
 
 class _StubApi:
-    def __init__(self, has_access=False):
+    # Access is granted by authentication alone (has_access is True for any
+    # authenticated account); a referral code is optional attribution.
+    def __init__(self, referred_by=None):
         self._token = None
-        self.has_access = has_access
+        self.referred_by = referred_by
         self.redeemed_with = None
         self.airdrops = 0
 
@@ -25,11 +27,16 @@ class _StubApi:
         return "jwt"
 
     def access_status(self):
-        return type("S", (), {"has_access": self.has_access})()
+        return type("S", (), {"has_access": self._token is not None})()
+
+    def referral_status(self):
+        return type("RS", (), {"has_access": self._token is not None,
+                               "referred_by": self.referred_by,
+                               "my_code": "MYCODE", "code": None})()
 
     def redeem_code(self, code):
         self.redeemed_with = code
-        self.has_access = True
+        self.referred_by = "aleo1referrer"
         return type("R", (), {"code": code, "status": "redeemed",
                               "token": "jwt2"})()
 
@@ -75,7 +82,7 @@ def dps_env(monkeypatch):
 def test_fresh_account_runs_every_stage(profile, dps_env):
     api = _StubApi()
     dex = _StubDex(api, {"waleo.aleo": 7})           # funded once airdrop "lands"
-    report = run_onboard(dex, profile, invite_code="CODE", poll_seconds=0)
+    report = run_onboard(dex, profile, referral_code="CODE", poll_seconds=0)
     assert [o.name for o in report.outcomes] == [s.name for s in REGISTRATION_STAGES]
     # funded is a verification stage: once the airdrop lands it is already
     # satisfied, so it reports "skipped" rather than polling.
@@ -90,7 +97,7 @@ def test_fresh_account_runs_every_stage(profile, dps_env):
 def test_registered_funded_account_is_noop(profile, dps_env):
     profile.save_credentials(jwt="oldjwt", dps_api_key="k", dps_consumer_id="c",
                              dex_api_token="ss_stored")
-    api = _StubApi(has_access=True)
+    api = _StubApi()
     api._token = "oldjwt"
     dex = _StubDex(api, {"waleo.aleo": 7}, funded_from_start=True)
     report = run_onboard(dex, profile)
@@ -98,12 +105,34 @@ def test_registered_funded_account_is_noop(profile, dps_env):
     assert api.airdrops == 0
 
 
-def test_redeem_without_code_raises_instructively(profile, dps_env):
-    api = _StubApi(has_access=False)
-    api._token = "jwt"                                # authenticated already
+def test_onboard_without_referral_code_completes(profile, dps_env):
+    """Access is granted by authentication alone — no code is required.
+
+    The referral stage is optional attribution: with nothing to redeem it is
+    skipped and every later stage still runs.
+    """
+    api = _StubApi()
     dex = _StubDex(api, {"waleo.aleo": 7})
-    with pytest.raises(NotRedeemedError):
-        run_onboard(dex, profile)                     # no invite_code
+    report = run_onboard(dex, profile, poll_seconds=0)    # no referral_code
+    by_name = {o.name: o for o in report.outcomes}
+    assert "redeem" not in by_name                        # old gate is gone
+    assert by_name["referral"].action == "skipped"
+    assert api.redeemed_with is None
+    assert by_name["credentials"].action == "ran"
+    assert by_name["airdrop"].action == "ran"
+    assert report.funded is True
+
+
+def test_referral_code_redeemed_only_once(profile, dps_env):
+    """A supplied code is redeemed; an already-referred account never
+    redeems again (attribution is one-time on the server)."""
+    api = _StubApi(referred_by="aleo1someone")
+    api._token = "jwt"
+    dex = _StubDex(api, {"waleo.aleo": 7}, funded_from_start=True)
+    report = run_onboard(dex, profile, referral_code="LATECODE", poll_seconds=0)
+    referral = next(o for o in report.outcomes if o.name == "referral")
+    assert referral.action == "skipped"
+    assert api.redeemed_with is None
 
 
 def test_provisioning_failure_raises_instructively(profile, monkeypatch):
@@ -112,7 +141,7 @@ def test_provisioning_failure_raises_instructively(profile, monkeypatch):
     monkeypatch.setattr("aleo_shield_swap.lifecycle.provision_provable_credentials",
                         lambda endpoint, username: (_ for _ in ()).throw(
                             CredentialsMissingError("POST /consumers -> 500")))
-    api = _StubApi(has_access=True)
+    api = _StubApi()
     api._token = "jwt"
     dex = _StubDex(api, {"waleo.aleo": 7})
     with pytest.raises(CredentialsMissingError, match="consumers"):
@@ -124,7 +153,7 @@ def test_credentials_auto_provision_both_systems(profile, monkeypatch):
     monkeypatch.delenv("ALEO_E2E_CONSUMER_ID", raising=False)
     monkeypatch.setattr("aleo_shield_swap.lifecycle.provision_provable_credentials",
                         lambda endpoint, username: ("pk-auto", "cid-auto"))
-    api = _StubApi(has_access=True)
+    api = _StubApi()
     api._token = "jwt"
     dex = _StubDex(api, {"waleo.aleo": 7}, funded_from_start=True)
     report = run_onboard(dex, profile)
@@ -137,7 +166,7 @@ def test_credentials_auto_provision_both_systems(profile, monkeypatch):
 
 
 def test_rate_limited_airdrop_with_funds_is_tolerated(profile, dps_env):
-    api = _StubApi(has_access=True)
+    api = _StubApi()
     api._token = "jwt"
 
     def limited(address):
@@ -153,7 +182,7 @@ def test_rate_limited_airdrop_with_funds_is_tolerated(profile, dps_env):
 
 def test_stage_progress_journaled(profile, dps_env):
     dex = _StubDex(_StubApi(), {"waleo.aleo": 7})
-    run_onboard(dex, profile, invite_code="C", poll_seconds=0)
+    run_onboard(dex, profile, referral_code="C", poll_seconds=0)
     names = [e["name"] for e in Journal(profile.journal_path).events()
              if e["type"] == "stage"]
     assert names == [s.name for s in REGISTRATION_STAGES]
@@ -166,7 +195,7 @@ def test_credentials_stage_refreshes_live_facade(profile, dps_env):
         def _refresh_credentials(self):
             refreshed.append(True)
 
-    api = _StubApi(has_access=True)
+    api = _StubApi()
     api._token = "jwt"
     dex = _RefreshingDex(api, {"waleo.aleo": 7}, funded_from_start=True)
     run_onboard(dex, profile)
@@ -184,7 +213,7 @@ def test_airdrop_stage_refuses_on_mainnet(tmp_path):
         address = "aleo1me"
         journal_path = tmp_journal
 
-    ctx = _Ctx(dex=None, profile=_P(), invite_code=None,
+    ctx = _Ctx(dex=None, profile=_P(), referral_code=None,
                poll_seconds=0, timeout_seconds=0)
     try:
         _airdrop_run(ctx)

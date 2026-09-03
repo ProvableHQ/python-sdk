@@ -7,7 +7,7 @@ from aleo_shield_swap.types import (CollectReport, MintResult, OnboardReport,
                                     StageOutcome, SwapBatchReport, SwapHandle,
                                     TxResult)
 
-CURATED = {"setup_account", "redeem_invite", "request_airdrop", "status",
+CURATED = {"setup_account", "redeem_referral_code", "request_airdrop", "status",
            "get_pools", "get_balances", "get_positions", "swap_many",
            "mint_position", "adjust_liquidity", "collect_all"}
 
@@ -19,16 +19,22 @@ def test_tool_surface_is_curated():
         assert t["description"], f"{t['name']} needs a teaching description"
         assert t["input_schema"]["type"] == "object"
         json.dumps(t)                          # fully serializable
+        # Nothing may teach the agent to demand an invite: access is granted
+        # by authentication alone and a referral code is optional.
+        assert "invite" not in t["description"].lower(), t["name"]
+    setup = next(t for t in tools if t["name"] == "setup_account")
+    assert "referral_code" in setup["input_schema"]["properties"]
+    assert setup["input_schema"].get("required", []) == []
 
 
 def test_dispatch_setup_account_serializes_report():
     class _Dex:
-        def onboard(self, invite_code=None):
-            assert invite_code == "C"
+        def onboard(self, referral_code=None):
+            assert referral_code == "C"
             return OnboardReport("aleo1x", [StageOutcome("authenticate", "ran")],
                                  funded=True)
 
-    out = dispatch_tool(_Dex(), "setup_account", {"invite_code": "C"})
+    out = dispatch_tool(_Dex(), "setup_account", {"referral_code": "C"})
     assert out["funded"] is True
     assert out["outcomes"][0]["name"] == "authenticate"
     json.dumps(out)

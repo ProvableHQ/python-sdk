@@ -39,7 +39,6 @@ from .derivations import (
 from .errors import (
     InsufficientRecordsError,
     NotAuthenticatedError,
-    NotRedeemedError,
     InvalidFeeTierError,
     PoolNotFoundError,
     PoolNotInitializedError,
@@ -202,18 +201,21 @@ class ShieldSwap:
             if account is not None:
                 records.register(account)
 
-    def onboard(self, invite_code: Optional[str] = None) -> OnboardReport:
+    def onboard(self, referral_code: Optional[str] = None) -> OnboardReport:
         """Register this profile end to end — safe to re-run any time.
 
         Runs only the registration stages not already satisfied (see
         ``lifecycle.REGISTRATION_STAGES``); a registered, funded account is
-        a no-op.  The one thing it may need from you: *invite_code*, on the
-        first run.  Requires a profile-bound client (``from_profile()``).
+        a no-op.  Needs nothing from you: access is granted by
+        authentication alone.  *referral_code* is optional — pass one a
+        friend shared to credit them as the referrer (recorded once; later
+        calls ignore it).  Requires a profile-bound client
+        (``from_profile()``).
         """
         if self.profile is None:
             raise ValueError("onboard() needs a profile-bound client — "
                              "construct with ShieldSwap.from_profile().")
-        return run_onboard(self, self.profile, invite_code)
+        return run_onboard(self, self.profile, referral_code)
 
     # ── Mapping plumbing ─────────────────────────────────────────────────────
 
@@ -954,7 +956,6 @@ class ShieldSwap:
 
         Raises:
             NotAuthenticatedError: If no DEX session is established.
-            NotRedeemedError: If the account has not redeemed an invite.
 
         "Could not ask" is NOT "no route": swallowing an auth failure here
         yields a spot-estimate ``amount_out_min`` that ignores the pool fee, so
@@ -971,7 +972,7 @@ class ShieldSwap:
             route = self.api.get_route(
                 token_in=token_in_id, token_out=token_out_id,
                 amount_in=f"{canonical:f}")   # fixed-point, never "1E-8"
-        except (NotAuthenticatedError, NotRedeemedError):
+        except NotAuthenticatedError:
             raise
         except ShieldSwapError:
             return None                   # no quotable route

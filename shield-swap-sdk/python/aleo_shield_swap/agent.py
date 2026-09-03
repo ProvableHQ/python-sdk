@@ -48,10 +48,10 @@ def _h_get_balances(dex: Any, args: dict[str, Any]) -> Any:
 
 
 def _h_setup_account(dex: Any, args: dict[str, Any]) -> Any:
-    return _serialize(dex.onboard(invite_code=args.get("invite_code")))
+    return _serialize(dex.onboard(referral_code=args.get("referral_code")))
 
 
-def _h_redeem_invite(dex: Any, args: dict[str, Any]) -> Any:
+def _h_redeem_referral_code(dex: Any, args: dict[str, Any]) -> Any:
     return _serialize(dex.api.redeem_code(args["code"]))
 
 
@@ -107,14 +107,16 @@ def _h_collect_all(dex: Any, args: dict[str, Any]) -> Any:
 
 _TOOLS: list[tuple[str, str, dict[str, Any], Callable[[Any, dict[str, Any]], Any]]] = [
     ("setup_account",
-     "Register this machine's shield-swap profile end to end (auth, invite "
-     "redeem, credentials, airdrop, funded check). Pass invite_code on the "
-     "first run; re-running is a safe no-op that reports what was skipped.",
-     _schema({"invite_code": _S}, []), _h_setup_account),
-    ("redeem_invite",
-     "Redeem an invite code for the authenticated account (setup_account "
-     "does this for you; use this only for manual control).",
-     _schema({"code": _S}, ["code"]), _h_redeem_invite),
+     "Register this machine's shield-swap profile end to end (auth, "
+     "credentials, airdrop, funded check). Nothing is required from the "
+     "user: access is granted by authentication alone. referral_code is "
+     "optional — pass one only if the user has a friend's code to credit. "
+     "Re-running is a safe no-op that reports what was skipped.",
+     _schema({"referral_code": _S}, []), _h_setup_account),
+    ("redeem_referral_code",
+     "Credit a referrer by redeeming their referral code (optional, once "
+     "per account; setup_account does this when given referral_code).",
+     _schema({"code": _S}, ["code"]), _h_redeem_referral_code),
     ("request_airdrop",
      "Queue the test-token airdrop (private records; one claim per address "
      "per 15 minutes). Defaults to the profile's own address.",

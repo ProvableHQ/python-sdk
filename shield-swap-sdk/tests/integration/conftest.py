@@ -29,10 +29,10 @@ def _make_live_dex():
         consumer_id=os.environ.get("ALEO_E2E_CONSUMER_ID"),
     ))
     dex = ShieldSwap(aleo)
-    # Some API endpoints are auth-gated (signature challenge/verify) and
-    # additionally invite-gated per account. Prefer the e2e account (it has
-    # access when provisioned); fall back to a throwaway signature so the
-    # JWT layer is still exercised. Gated tests skip on 401/403.
+    # Some API endpoints are auth-gated (signature challenge/verify);
+    # authentication alone grants access. Prefer the e2e account (it is the
+    # funded one); fall back to a throwaway signature so the session layer
+    # is still exercised. Gated tests skip on 401.
     pk = os.environ.get("ALEO_E2E_PRIVATE_KEY")
     acct = aleo.account.from_private_key(pk) if pk else aleo.account.create()
     try:

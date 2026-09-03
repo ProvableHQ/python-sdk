@@ -97,17 +97,15 @@ def test_401_maps_to_not_authenticated():
         ApiClient(base_url="https://x", session=s)._get("/access/status")
 
 
-def test_403_invite_maps_to_not_redeemed():
-    from aleo_shield_swap.errors import NotRedeemedError
+def test_403_is_a_plain_dex_api_error():
+    # Access is no longer invite-gated, so there is no "not redeemed" error
+    # class to map a 403 onto — any 403 surfaces with its status and body.
+    import aleo_shield_swap.errors as errors
+    assert not hasattr(errors, "NotRedeemedError")
     s = _Session([_Resp(403, {"error": "redeem an invite code to unlock access"})])
-    with pytest.raises(NotRedeemedError):
+    with pytest.raises(DexApiError) as exc:
         ApiClient(base_url="https://x", session=s, token="t")._get("/route")
-
-
-def test_other_403_stays_dex_api_error():
-    s = _Session([_Resp(403, {"error": "forbidden for another reason"})])
-    with pytest.raises(DexApiError):
-        ApiClient(base_url="https://x", session=s, token="t")._get("/route")
+    assert type(exc.value) is DexApiError and exc.value.status == 403
 
 
 def _lifecycle_client(*resps, token="t"):
@@ -121,15 +119,33 @@ def test_access_status():
     assert s.calls[0][:2] == ("GET", "https://x/access/status")
 
 
-def test_redeem_code_targets_referral_endpoint_only():
-    # Pasted invites are ALWAYS referral codes; access codes belong to the
-    # programmatic self-registration flow and are never routed through here.
+def test_redeem_code_targets_referral_endpoint():
+    # Referral codes are the only kind of code that exists now.
     api, s = _lifecycle_client(_Resp(200, {"data": {"code": "C", "status": "redeemed"}}))
     out = api.redeem_code("C")
     assert out.status == "redeemed"
     assert s.calls[0][1] == "https://x/referral/redeem"
     assert s.calls[0][2] == {"code": "C"}
     assert api._token == "t"          # sessions moved to /auth/* — no rotation
+
+
+def test_referral_status():
+    api, s = _lifecycle_client(_Resp(200, {"data": {
+        "has_access": True, "code": None, "referred_by": None,
+        "my_code": "HRBH9UVEDR"}}))
+    st = api.referral_status()
+    assert st.has_access is True and st.referred_by is None
+    assert st.my_code == "HRBH9UVEDR"
+    assert s.calls[0][:2] == ("GET", "https://x/referral/status")
+
+
+def test_my_referral_code():
+    # Every authenticated account owns a code to share; None until issued.
+    api, s = _lifecycle_client(_Resp(200, {"data": {"code": "HRBH9UVEDR"}}))
+    assert api.my_referral_code() == "HRBH9UVEDR"
+    assert s.calls[0][:2] == ("GET", "https://x/referral/my-code")
+    api, _ = _lifecycle_client(_Resp(200, {"data": {"code": None}}))
+    assert api.my_referral_code() is None
 
 
 def test_request_airdrop_and_poll():
@@ -188,7 +204,10 @@ async def test_async_lifecycle_endpoints():
     from aleo_shield_swap.api import AsyncApiClient
     from aleo_shield_swap.errors import AirdropRateLimitedError
     c = _AsyncClient([
-        _AsyncResp(200, {"data": {"has_access": False}}),
+        _AsyncResp(200, {"data": {"has_access": True}}),
+        _AsyncResp(200, {"data": {"has_access": True, "code": None,
+                                  "referred_by": None, "my_code": "MC"}}),
+        _AsyncResp(200, {"data": {"code": "MC"}}),
         _AsyncResp(200, {"data": {"code": "C", "status": "redeemed"}}),
         _AsyncResp(200, {"data": {"job_id": "j1", "status": "running"}}),
         _AsyncResp(200, {"data": {"status": "complete", "total": 1, "results": [
@@ -197,9 +216,13 @@ async def test_async_lifecycle_endpoints():
         _AsyncResp(429, {"error": "already claimed"}),
     ])
     api = AsyncApiClient(base_url="https://x", client=c, token="t")
-    assert (await api.access_status()).has_access is False
+    assert (await api.access_status()).has_access is True
+    assert (await api.referral_status()).my_code == "MC"
+    assert (await api.my_referral_code()) == "MC"
     assert (await api.redeem_code("C")).status == "redeemed"
     assert api._token == "t"          # redeem no longer rotates the credential
+    assert [u for _, u, *_ in c.calls[1:3]] == [
+        "https://x/referral/status", "https://x/referral/my-code"]
     assert (await api.request_airdrop("aleo1a")).job_id == "j1"
     job = await api.get_airdrop_job("j1")
     assert job.results[0].amm_token_program == "weth.aleo"
@@ -207,22 +230,13 @@ async def test_async_lifecycle_endpoints():
         await api.request_airdrop("aleo1a")
 
 
-def test_access_code_redeem_flow():
-    # Access codes are redeemed programmatically — a separate surface from the
-    # human referral-paste path.  Minting is deliberately not exposed by the
-    # SDK, so a code arrives out-of-band from an operator.
-    api, s = _lifecycle_client(
-        _Resp(200, {"data": {"code": "ACODE12CHARS", "status": "redeemed"}}),
-    )
-    out = api.redeem_access_code("ACODE12CHARS")
-    assert out.status == "redeemed"
-    assert [c[1] for c in s.calls] == ["https://x/access/redeem"]
-
-
-def test_minting_access_codes_is_not_exposed():
-    # Guard the removal: the SDK must not offer a way to mint invites.
+def test_access_code_tier_is_not_exposed():
+    # Access codes are a deprecated compatibility tier (the API marks
+    # POST /access/redeem "for old clients") — the SDK neither mints nor
+    # redeems them.  Referral codes are the only codes that exist.
     for cls in (ApiClient, AsyncApiClient):
         assert not hasattr(cls, "generate_access_codes"), cls.__name__
+        assert not hasattr(cls, "redeem_access_code"), cls.__name__
 
 
 def test_cookie_session_outranks_bearer():

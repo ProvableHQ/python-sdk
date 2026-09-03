@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Stress-test rehearsal: the four flows, end to end, via the tier-1 methods.
 
-Usage: python scripts/rehearsal.py [--code INVITE] [--home DIR]
-Needs: network access.  ``--code`` takes a REFERRAL code (human-pasted by
-design — the SDK never generates invites) and is only needed the first
-time an account onboards; credentials self-provision.
+Usage: python scripts/rehearsal.py [--code REFERRAL] [--home DIR]
+Needs: network access.  ``--code`` is an OPTIONAL referral code to credit
+the account that shared it; access never depends on one.  Credentials
+self-provision.
 
 This script deliberately uses ONLY what AGENTS.md documents — if it needs
 anything more, that's a finding.
@@ -24,13 +24,13 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--home", default=None)
     ap.add_argument("--code", default=None,
-                    help="referral code (first onboard only)")
+                    help="optional referral code to credit (first onboard only)")
     args = ap.parse_args()
     results: list[tuple[str, str]] = []
 
     dex = ShieldSwap.from_profile(args.home)
 
-    report = dex.onboard(invite_code=args.code)
+    report = dex.onboard(referral_code=args.code)
     results.append(("startup", "ok" if report.funded else "NOT FUNDED"))
 
     st = dex.status()

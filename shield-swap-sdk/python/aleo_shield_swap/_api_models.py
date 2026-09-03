@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any
 
 
 @dataclass
@@ -48,17 +49,6 @@ class AccessRedeemRequest:
 
 
 @dataclass
-class AccessRedeemResponse:
-    code: str
-    status: str
-
-
-@dataclass
-class AccessRedeemResponseDoc:
-    data: AccessRedeemResponse
-
-
-@dataclass
 class AccessStatusResponse:
     has_access: bool
 
@@ -81,6 +71,10 @@ class ActiveSessionPayload:
 @dataclass
 class ActiveSessionsResponseDoc:
     data: list[ActiveSessionPayload]
+
+
+class ActivityAction(Enum):
+    create_pool = 'create_pool'
 
 
 @dataclass
@@ -203,6 +197,7 @@ class DeployTokenResult:
 @dataclass
 class ErrorResponseDoc:
     error: str
+    code: str | None = None
     ref: str | None = None
 
 
@@ -376,8 +371,13 @@ class PoolStats24hDoc:
     price: str
     price_reversed: str
     volume_24h: str
+    volume_7d: str
     change_24h_pct: str | None = None
     display_change_24h_pct: str | None = None
+    fee_24h: str | None = None
+    fee_7d: str | None = None
+    reserve0: str | None = None
+    reserve1: str | None = None
 
 
 @dataclass
@@ -429,8 +429,8 @@ class PositionDoc:
     amount1: str
     created_at: str
     created_transaction: str
-    fee_growth_inside0_last_x_128: str
-    fee_growth_inside1_last_x_128: str
+    fee_growth_inside0_last_x_128: str | None
+    fee_growth_inside1_last_x_128: str | None
     id: str
     is_burned: bool
     is_frozen: bool
@@ -483,6 +483,7 @@ class ProtocolFreshness:
     confirmed_head: int | None = None
     indexed_block: int | None = None
     lag_blocks: int | None = None
+    ready_for_quote: bool | None = None
     updated_at: str | None = None
 
 
@@ -509,6 +510,48 @@ class ProtocolRevisionPending:
 
 
 @dataclass
+class RebalanceTickState:
+    fee_growth_outside0_x_128: str
+    fee_growth_outside1_x_128: str
+    tick: int
+
+
+@dataclass
+class ReferralActivityRequest:
+    action: ActivityAction
+    tx_id: str
+    metadata: Any | None = None
+
+
+@dataclass
+class ReferralActivityResponse:
+    recorded: bool
+
+
+@dataclass
+class ReferralActivityResponseDoc:
+    data: ReferralActivityResponse
+
+
+@dataclass
+class ReferralAddressBatchRequest:
+    blinded_addresses: list[str]
+    code: str
+
+
+@dataclass
+class ReferralAddressBatchResponse:
+    conflict: int
+    duplicate: int
+    recorded: int
+
+
+@dataclass
+class ReferralAddressBatchResponseDoc:
+    data: ReferralAddressBatchResponse
+
+
+@dataclass
 class ReferralAdminCheckResponse:
     is_admin: bool
 
@@ -519,9 +562,50 @@ class ReferralAdminResponseDoc:
 
 
 @dataclass
+class ReferralAdminTokenVolume:
+    swap_count: int
+    token: str
+    volume: str
+
+
+@dataclass
+class ReferralAdminVolumeCode:
+    code: str
+    pending_count: int
+    provisional: list[ReferralAdminTokenVolume]
+    provisional_priced_swap_count: int
+    provisional_swap_count: int
+    provisional_unpriced_swap_count: int
+    redemption_count: int
+    rejected_count: int
+    verified: list[ReferralAdminTokenVolume]
+    verified_priced_swap_count: int
+    verified_swap_count: int
+    verified_unpriced_swap_count: int
+    issued_to: str | None = None
+    provisional_usd: str | None = None
+    verified_usd: str | None = None
+
+
+@dataclass
+class ReferralAdminVolumeResponse:
+    attributed_swap_count: int
+    codes: list[ReferralAdminVolumeCode]
+    unpriced_swap_count: int
+    provisional_usd: str | None = None
+    verified_usd: str | None = None
+
+
+@dataclass
+class ReferralAdminVolumeResponseDoc:
+    data: ReferralAdminVolumeResponse
+
+
+@dataclass
 class ReferralCodeRow:
     code: str
     created_at: str
+    redemption_count: int
     issued_to: str | None = None
     redeemed_at: str | None = None
     redeemed_by: str | None = None
@@ -547,6 +631,7 @@ class ReferralListResponse:
     available: int
     codes: list[ReferralCodeRow]
     redeemed: int
+    redemptions: int
     total: int
 
 
@@ -556,8 +641,19 @@ class ReferralListResponseDoc:
 
 
 @dataclass
+class ReferralMyCodeResponse:
+    code: str | None = None
+
+
+@dataclass
+class ReferralMyCodeResponseDoc:
+    data: ReferralMyCodeResponse
+
+
+@dataclass
 class ReferralMyCodeRow:
     code: str
+    redemption_count: int
     redeemed_at: str | None = None
     redeemed_by: str | None = None
 
@@ -605,11 +701,29 @@ class ReferralSettingsResponseDoc:
 class ReferralStatusResponse:
     has_access: bool
     code: str | None = None
+    my_code: str | None = None
+    referred_by: str | None = None
 
 
 @dataclass
 class ReferralStatusResponseDoc:
     data: ReferralStatusResponse
+
+
+@dataclass
+class ReferralSwapClaimRequest:
+    blinded_address: str
+    code: str
+
+
+@dataclass
+class ReferralSwapClaimResponse:
+    recorded: bool
+
+
+@dataclass
+class ReferralSwapClaimResponseDoc:
+    data: ReferralSwapClaimResponse
 
 
 @dataclass
@@ -766,6 +880,12 @@ class TokenResponseDoc:
 
 
 @dataclass
+class TopologyEdgeDoc:
+    token0: str
+    token1: str
+
+
+@dataclass
 class UsdcUsdQuote:
     corroborated: bool
     decimals: int
@@ -904,9 +1024,17 @@ class PoolTradeDoc:
     amount1: str
     executedAt: str
     id: str
+    legIndex: int
     pool: str
     tradeType: PoolTradeTypeDoc
     transactionHash: str
+    fee0: str | None = None
+    fee1: str | None = None
+    liquidityAfter: str | None = None
+    protocolFee0: str | None = None
+    protocolFee1: str | None = None
+    sqrtPriceAfter: str | None = None
+    tickAfter: int | None = None
 
 
 @dataclass
@@ -920,6 +1048,8 @@ class PoolWithStatsDoc(PoolStateDoc):
     display_flipped: bool
     base_token: TokenDoc | None = None
     quote_token: TokenDoc | None = None
+    reserve0: str | None = None
+    reserve1: str | None = None
     stats: PoolStatsDoc | None = None
     token0_info: TokenDoc | None = None
     token1_info: TokenDoc | None = None
@@ -973,8 +1103,40 @@ class ProtocolDeployment:
 
 
 @dataclass
+class RebalanceState:
+    fee_growth_global0_x_128: str
+    fee_growth_global1_x_128: str
+    lower: RebalanceTickState
+    observed_block: int
+    sqrt_price_x_128: str
+    tick: int
+    tick_lower_hint: int
+    tick_spacing: int
+    tick_upper_hint: int
+    upper: RebalanceTickState
+
+
+@dataclass
+class RebalanceStateResponseDoc:
+    data: RebalanceState
+
+
+@dataclass
 class RouteResponseDoc:
     data: RouteResultDoc
+
+
+@dataclass
+class RouteTopologyDoc:
+    edges: list[TopologyEdgeDoc]
+    max_hops: int
+    protocol_revision: int
+    protocol_config_observed_block: int | None = None
+
+
+@dataclass
+class RouteTopologyResponseDoc:
+    data: RouteTopologyDoc
 
 
 @dataclass

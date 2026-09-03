@@ -21,7 +21,6 @@ from .errors import (
     AirdropRateLimitedError,
     DexApiError,
     NotAuthenticatedError,
-    NotRedeemedError,
 )
 
 
@@ -29,9 +28,6 @@ def _check(resp: Any) -> None:
     """Map DEX API failures to the lifecycle taxonomy; DexApiError otherwise.
 
     Takes the response object so the body is only decoded on failure.
-    The 403 classification keys on the API's "invite" wording — if the
-    message ever drifts, this degrades to a plain DexApiError(403), which
-    every catcher of these subclasses already handles.
     """
     code = resp.status_code
     if 200 <= code < 300:
@@ -39,8 +35,6 @@ def _check(resp: Any) -> None:
     text = resp.text
     if code == 401:
         raise NotAuthenticatedError(text)
-    if code == 403 and "invite" in text.lower():
-        raise NotRedeemedError(text)
     if code == 429:
         raise AirdropRateLimitedError(text)
     raise DexApiError(code, text)
@@ -122,10 +116,11 @@ class ApiClient:
     by signature (challenge/verify), no funds required — or adopt a
     previously issued JWT via ``token=``/:meth:`set_token`.
 
-    Auth alone is not enough for the gated endpoints: the account must also
-    have redeemed an invite code (``POST /access/redeem``), otherwise they
-    return 403 ``redeem an invite code to unlock access``. Check with
-    ``GET /access/status``.
+    Authentication alone grants access; there is no invite gate.  A
+    **referral code** is optional attribution — redeem one with
+    :meth:`redeem_code` to record who referred this account — and every
+    authenticated account owns a code of its own to share
+    (:meth:`my_referral_code`).
     """
 
     def __init__(self, base_url: str = DEFAULT_API_URL, session: Any | None = None,
@@ -226,38 +221,52 @@ class ApiClient:
     # (codegen/regen-openapi.sh) before touching these.
 
     def access_status(self) -> models.AccessStatusResponse:
-        """Whether this authenticated account has redeemed an invite code."""
+        """Whether this authenticated account may use the gated endpoints.
+
+        Always ``has_access: true`` for an authenticated account — access is
+        granted by authentication alone, no code required.  Raises
+        :class:`NotAuthenticatedError` when the session is missing or
+        expired, which is what makes this a useful liveness probe.
+        """
         return _build(models.AccessStatusResponse,
                       self._get("/access/status")["data"])
 
-    def redeem_code(self, code: str) -> models.AccessRedeemResponse:
-        """Redeem a pasted invite — always a REFERRAL code.
+    def referral_status(self) -> models.ReferralStatusResponse:
+        """This account's referral picture: ``referred_by`` (the referrer's
+        address once a code was redeemed, else None), ``my_code`` (the code
+        this account shares), and ``has_access``.  Network read."""
+        return _build(models.ReferralStatusResponse,
+                      self._get("/referral/status")["data"])
 
-        User-shared invites are referral codes (``/referral/redeem``);
-        that is the ONLY kind a person pastes.  Access codes are a separate
-        programmatic tier — see :meth:`redeem_access_code` — never routed
-        through here.
+    def my_referral_code(self) -> Optional[str]:
+        """The referral code this account hands to others.
 
-        Sessions moved to the ``/auth/*`` endpoints, so no token comes
-        back — re-authenticate if needed (one is still adopted if the API
-        resurrects the legacy body-JWT).
+        The API issues the code on the first request, so this normally
+        returns a value; None means issuance is disabled for the account.
+        Network read.
+        """
+        data = self._get("/referral/my-code")["data"]
+        return _build(models.ReferralMyCodeResponse, data).code
+
+    def redeem_code(self, code: str) -> models.ReferralRedeemResponse:
+        """Redeem a referral code (``POST /referral/redeem``) — optional.
+
+        Access does not depend on this: authentication alone unlocks every
+        endpoint.  Redeeming records who referred the account, once: a
+        repeat returns ``status="already_redeemed"`` without changing
+        anything, while an unknown code or the account's own code is a 400
+        (:class:`DexApiError`).
+
+        Sessions live on the ``/auth/*`` endpoints, so no token comes
+        back (one is still adopted if the API resurrects the legacy
+        body-JWT).
         """
         data = self._post("/referral/redeem", {"code": code})["data"]
-        out = _build(models.AccessRedeemResponse, data)
-        token = getattr(out, "token", None)
+        out = _build(models.ReferralRedeemResponse, data)
+        token = data.get("token")
         if token:
             self._token = token
         return out
-
-    def redeem_access_code(self, code: str) -> models.AccessRedeemResponse:
-        """Redeem a programmatically minted access code
-        (``POST /access/redeem``) — not for human-pasted invites, which are
-        referral codes and go through :meth:`redeem_code`.
-
-        Minting these is deliberately not exposed by this SDK; obtain a code
-        out-of-band from an operator."""
-        data = self._post("/access/redeem", {"code": code})["data"]
-        return _build(models.AccessRedeemResponse, data)
 
     def request_airdrop(self, address: str) -> models.AirdropStartResult:
         """Start the test-token airdrop job for *address* (private records).
@@ -458,23 +467,28 @@ class AsyncApiClient:
     # ── Lifecycle (async mirror of ApiClient) ──────────────────────────────
 
     async def access_status(self) -> models.AccessStatusResponse:
-        """Whether this authenticated account has redeemed an invite code."""
+        """Access flag for the session — see :meth:`ApiClient.access_status`."""
         return _build(models.AccessStatusResponse,
                       (await self._get("/access/status"))["data"])
 
-    async def redeem_code(self, code: str) -> models.AccessRedeemResponse:
-        """Redeem a pasted (referral) invite — see :meth:`ApiClient.redeem_code`."""
+    async def referral_status(self) -> models.ReferralStatusResponse:
+        """Referral picture — see :meth:`ApiClient.referral_status`."""
+        return _build(models.ReferralStatusResponse,
+                      (await self._get("/referral/status"))["data"])
+
+    async def my_referral_code(self) -> Optional[str]:
+        """This account's shareable code — see :meth:`ApiClient.my_referral_code`."""
+        data = (await self._get("/referral/my-code"))["data"]
+        return _build(models.ReferralMyCodeResponse, data).code
+
+    async def redeem_code(self, code: str) -> models.ReferralRedeemResponse:
+        """Redeem an optional referral code — see :meth:`ApiClient.redeem_code`."""
         data = (await self._post("/referral/redeem", {"code": code}))["data"]
-        out = _build(models.AccessRedeemResponse, data)
-        token = getattr(out, "token", None)
+        out = _build(models.ReferralRedeemResponse, data)
+        token = data.get("token")
         if token:
             self._token = token
         return out
-
-    async def redeem_access_code(self, code: str) -> models.AccessRedeemResponse:
-        """Redeem an access code — see :meth:`ApiClient.redeem_access_code`."""
-        data = (await self._post("/access/redeem", {"code": code}))["data"]
-        return _build(models.AccessRedeemResponse, data)
 
     async def request_airdrop(self, address: str) -> models.AirdropStartResult:
         """Start the airdrop job for *address* — see :meth:`ApiClient.request_airdrop`."""

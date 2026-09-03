@@ -14,7 +14,7 @@ lifecycle as tools.
 from aleo_shield_swap import ShieldSwap
 
 dex = ShieldSwap.from_profile()          # key material auto-managed on disk
-dex.onboard(invite_code="...")           # first run only; no-op afterwards
+dex.onboard()                            # first run registers; no-op afterwards
 pools = dex.api.get_pools()
 report = dex.swap_many(pool_key=pools[0].key, token_in_id=pools[0].token0,
                        amount_in=10**6, count=5)
@@ -41,14 +41,17 @@ Args:
         to testnet.
     endpoint: Node API origin for a NEW profile.
 
-### `onboard(self, invite_code: 'Optional[str]' = None) -> 'OnboardReport'`
+### `onboard(self, referral_code: 'Optional[str]' = None) -> 'OnboardReport'`
 
 Register this profile end to end — safe to re-run any time.
 
 Runs only the registration stages not already satisfied (see
 ``lifecycle.REGISTRATION_STAGES``); a registered, funded account is
-a no-op.  The one thing it may need from you: *invite_code*, on the
-first run.  Requires a profile-bound client (``from_profile()``).
+a no-op.  Needs nothing from you: access is granted by
+authentication alone.  *referral_code* is optional — pass one a
+friend shared to credit them as the referrer (recorded once; later
+calls ignore it).  Requires a profile-bound client
+(``from_profile()``).
 
 ### `status(self) -> 'SessionStatus'`
 
@@ -103,9 +106,12 @@ reports.  Requires ``from_profile()``.
    They supply it out-of-band: `export SHIELD_SWAP_PRIVATE_KEY=...` (or
    `SHIELD_SWAP_PRIVATE_KEY_FILE=path`) in their own shell before the
    profile is first created.
-2. **Invite code.**  Access is invite-gated per account; `onboard()` stops
-   with `NotRedeemedError` until one is supplied.  Ask the user for their
-   code; codes are one-time — never guess or reuse.
+2. **Referral code — optional.**  Access is granted by authentication
+   alone; `onboard()` needs nothing from the user.  Mention that a
+   referral code from a friend can be passed (`onboard(referral_code=)`)
+   to credit them, then proceed whether or not one is offered.  Never
+   block on it, never guess one.  The account gets its own code to share
+   (`dex.api.my_referral_code()`).
 
 ### After startup: ask what's next
 
@@ -186,9 +192,10 @@ What every integration must handle (each enforced or automated by the
 methods above — this list is the review checklist for code that bypasses
 them):
 
-- **Auth is layered**: a bearer credential (24h session JWT from the
-  challenge/verify handshake, or a durable `ss_…` API token — data/trading
-  endpoints only) AND a one-time invite redemption per account.
+- **Auth is by signature, and it is the whole gate**: a session from the
+  challenge/verify handshake (cookie + CSRF, or a legacy JWT), or a durable
+  `ss_…` API token for data/trading endpoints.  No code is required; a
+  referral code is optional attribution.
 - **Dynamic-dispatch imports**: every record-spending write must register
   the involved token programs with the prover (the methods resolve this via
   the token registry; pass `imports=`/`token_*_program=` to override).
@@ -225,7 +232,7 @@ introspect `lifecycle.REGISTRATION_STAGES`, never hard-code the
 sequence.  Current stages:
 
 - `authenticate`
-- `redeem`
+- `referral`
 - `credentials`
 - `airdrop`
 - `funded`
@@ -253,20 +260,40 @@ returning an Aleo signature literal (``sign1…``) — e.g.::
 
 ### `api.access_status(self) -> 'models.AccessStatusResponse'`
 
-Whether this authenticated account has redeemed an invite code.
+Whether this authenticated account may use the gated endpoints.
 
-### `api.redeem_code(self, code: 'str') -> 'models.AccessRedeemResponse'`
+Always ``has_access: true`` for an authenticated account — access is
+granted by authentication alone, no code required.  Raises
+:class:`NotAuthenticatedError` when the session is missing or
+expired, which is what makes this a useful liveness probe.
 
-Redeem a pasted invite — always a REFERRAL code.
+### `api.referral_status(self) -> 'models.ReferralStatusResponse'`
 
-User-shared invites are referral codes (``/referral/redeem``);
-that is the ONLY kind a person pastes.  Access codes are a separate
-programmatic tier — see :meth:`redeem_access_code` — never routed
-through here.
+This account's referral picture: ``referred_by`` (the referrer's
+address once a code was redeemed, else None), ``my_code`` (the code
+this account shares), and ``has_access``.  Network read.
 
-Sessions moved to the ``/auth/*`` endpoints, so no token comes
-back — re-authenticate if needed (one is still adopted if the API
-resurrects the legacy body-JWT).
+### `api.my_referral_code(self) -> 'Optional[str]'`
+
+The referral code this account hands to others.
+
+The API issues the code on the first request, so this normally
+returns a value; None means issuance is disabled for the account.
+Network read.
+
+### `api.redeem_code(self, code: 'str') -> 'models.ReferralRedeemResponse'`
+
+Redeem a referral code (``POST /referral/redeem``) — optional.
+
+Access does not depend on this: authentication alone unlocks every
+endpoint.  Redeeming records who referred the account, once: a
+repeat returns ``status="already_redeemed"`` without changing
+anything, while an unknown code or the account's own code is a 400
+(:class:`DexApiError`).
+
+Sessions live on the ``/auth/*`` endpoints, so no token comes
+back (one is still adopted if the API resurrects the legacy
+body-JWT).
 
 ### `api.request_airdrop(self, address: 'str') -> 'models.AirdropStartResult'`
 

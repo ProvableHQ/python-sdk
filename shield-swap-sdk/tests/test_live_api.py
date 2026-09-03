@@ -1,12 +1,12 @@
 """Live smoke tests against the deployed amm-api — auth handshake included.
 
 Opt-in: set ``SHIELD_SWAP_LIVE=1`` to run (they hit the network). The funded
-half additionally needs ``ALEO_E2E_PRIVATE_KEY`` — an account that has
-redeemed an invite code (``/access/status`` → ``has_access: true``).
+half additionally needs ``ALEO_E2E_PRIVATE_KEY`` — the funded e2e account.
 
 Verified live invariants:
   * challenge/verify works for ANY account — signature only, no funds;
-  * gated endpoints 401 without a token and 403 without redeemed access;
+  * gated endpoints 401 without a session; authentication alone grants
+    access (no invite gate — a fresh key has ``has_access: true``);
   * with the e2e account: route quoting, OHLCV, and balances succeed.
 """
 from __future__ import annotations
@@ -47,15 +47,18 @@ def funded_api() -> ApiClient:
         pytest.skip("ALEO_E2E_PRIVATE_KEY not set")
     pk = aleo.testnet.PrivateKey.from_string(key)
     api = _authed_client(pk)
-    if not api.access_status().has_access:
-        pytest.skip("e2e account has not redeemed an invite code")
+    assert api.access_status().has_access      # authentication is the gate
     return api
 
 
 def test_authenticate_needs_no_funds():
     pk = aleo.testnet.PrivateKey.random()
     api = _authed_client(pk)
-    assert api._token and api._token.count(".") == 2  # JWT shape
+    # The session rides as an httpOnly cookie + CSRF token (legacy
+    # deployments returned a body JWT) — either way the credential is held
+    # and the gated status probe answers.
+    assert api.is_authenticated
+    assert api.access_status().has_access is True
 
 
 def test_gated_endpoint_rejects_missing_token():
@@ -67,15 +70,17 @@ def test_gated_endpoint_rejects_missing_token():
     assert exc.value.status == 401
 
 
-def test_gated_endpoint_rejects_unredeemed_account():
+def test_authentication_alone_grants_access():
+    # No invite gate: a never-redeemed key has access the moment it
+    # authenticates, owns a referral code to share, and can mint a durable
+    # API token.
     pk = aleo.testnet.PrivateKey.random()
     api = _authed_client(pk)
-    assert api._get("/access/status")["data"]["has_access"] is False
-    pools = api.get_pools()
-    with pytest.raises(DexApiError) as exc:
-        api.get_route(token_in=pools[0].token0, token_out=pools[0].token1,
-                      amount_in=1_000)
-    assert exc.value.status == 403
+    assert api.access_status().has_access is True
+    status = api.referral_status()
+    assert status.has_access is True and status.referred_by is None
+    assert api.my_referral_code()               # issued on first login
+    assert api.create_api_token("probe").token
 
 
 def test_funded_route_quote(funded_api):
