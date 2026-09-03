@@ -8,6 +8,7 @@ from aleo_shield_swap.types import (CollectReport, MintResult, OnboardReport,
                                     TxResult)
 
 CURATED = {"setup_account", "redeem_referral_code", "request_airdrop", "status",
+           "get_swap_execution", "plan_rebalance", "rebalance_position",
            "get_pools", "get_balances", "get_positions", "swap_many",
            "mint_position", "adjust_liquidity", "collect_all"}
 
@@ -124,3 +125,66 @@ def test_dispatch_request_airdrop_defaults_to_profile():
 def test_dispatch_unknown_tool():
     with pytest.raises(ValueError, match="Unknown"):
         dispatch_tool(object(), "nope", {})
+
+
+def test_rebalance_and_execution_tools_are_curated():
+    names = {t["name"] for t in shield_swap_tools()}
+    assert {"plan_rebalance", "rebalance_position", "get_swap_execution"} <= names
+    plan = next(t for t in shield_swap_tools() if t["name"] == "plan_rebalance")
+    assert set(plan["input_schema"]["required"]) == {"pool_key", "position_token_id",
+                                                     "tick_lower", "tick_upper"}
+    assert {"liquidity_target", "max_funding0", "max_funding1"} <= set(plan["input_schema"]["properties"])
+    assert "testnet" in plan["description"].lower()          # not on mainnet yet
+
+
+def test_dispatch_plan_and_rebalance_serialize():
+    from aleo_shield_swap.rebalance import RebalancePlan, RebalanceResult
+    plan = RebalancePlan(pool_key="5field", position_token_id="42field", tick_lower=-60,
+                         tick_upper=60, old_liquidity=10, fees_accrued0=0, fees_accrued1=0,
+                         recovered0=5, recovered1=6, required0=7, required1=4,
+                         funded0=2, funded1=0, refund0=0, refund1=2, liquidity_target=12,
+                         function_name="rebalance_plain_plain_one")
+
+    class _Call:
+        def delegate(self):
+            return RebalanceResult("77field", "at1x", plan)
+
+    class _Dex:
+        def plan_rebalance(self, **kw):
+            assert kw == {"pool_key": "5field", "position_token_id": "42field",
+                          "tick_lower": -60, "tick_upper": 60,
+                          "liquidity_target": 12, "max_funding0": None, "max_funding1": None}
+            return plan
+
+        def rebalance_position(self, **kw):
+            assert kw["max_funding0"] == 0 and kw["max_funding1"] == 0
+            assert kw["liquidity_target"] is None
+            return _Call()
+
+    out = dispatch_tool(_Dex(), "plan_rebalance",
+                        {"pool_key": "5field", "position_token_id": "42field",
+                         "tick_lower": -60, "tick_upper": 60, "liquidity_target": "12"})
+    assert out["funded0"] == 2 and out["function_name"] == "rebalance_plain_plain_one"
+    json.dumps(out)
+    out = dispatch_tool(_Dex(), "rebalance_position",
+                        {"pool_key": "5field", "position_token_id": "42field",
+                         "tick_lower": -60, "tick_upper": 60,
+                         "max_funding0": "0", "max_funding1": "0"})
+    assert out["position_token_id"] == "77field" and out["plan"]["liquidity_target"] == 12
+    json.dumps(out)
+
+
+def test_dispatch_get_swap_execution():
+    from aleo_shield_swap.types import HopFill, SwapExecution
+
+    class _Dex:
+        def get_swap_execution(self, swap_id):
+            assert swap_id == "77field"
+            return SwapExecution("77field", 4242, [HopFill("5field", True, 10, 9, 1, 0, 1,
+                                                           1 << 128, 5, 3)])
+
+    out = dispatch_tool(_Dex(), "get_swap_execution", {"swap_id": "77field"})
+    assert out["executed_height"] == 4242 and out["hops"][0]["lp_fee"] == 1
+    json.dumps(out)
+    assert dispatch_tool(type("D", (), {"get_swap_execution": lambda self, s: None})(),
+                         "get_swap_execution", {"swap_id": "1field"}) is None

@@ -13,7 +13,7 @@ CODEGEN = Path(__file__).parents[2] / "codegen"
 # Core drives codegen; the routers are pinned as pure drift guards — the
 # client assembles their inputs positionally from these exact signatures.
 PROGRAMS = ["shield_swap.aleo", "shield_swap_router.aleo",
-            "shield_swap_lp_router.aleo"]
+            "shield_swap_lp_router.aleo", "shield_swap_rebalance_router.aleo"]
 
 
 def _fetch(program_id: str) -> str:

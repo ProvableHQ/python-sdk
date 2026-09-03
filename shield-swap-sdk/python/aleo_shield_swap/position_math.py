@@ -113,6 +113,65 @@ def amounts_for_liquidity(sqrt_current: int, sqrt_a: int, sqrt_b: int,
     return 0, 0
 
 
+def _liquidity_for_amount0(lower: int, upper: int, amount0: int) -> int:
+    # Scaled down by 2^128 first, matching the forward direction's chained
+    # mul-divs rather than multiplying out to 2^256 and dividing back.
+    intermediate = _mul_div(lower, upper, Q128, False)
+    return _mul_div(amount0, intermediate, upper - lower, False)
+
+
+def _liquidity_for_amount1(lower: int, upper: int, amount1: int) -> int:
+    return _mul_div(amount1, Q128, upper - lower, False)
+
+
+def liquidity_for_amount(sqrt_current: int, sqrt_a: int, sqrt_b: int, *,
+                         side: int, amount: int) -> int:
+    """Liquidity that *amount* of one token supports in a range — the inverse
+    of :func:`amounts_for_liquidity` for a single side.  Floors.
+
+    Args:
+        sqrt_current: The pool's current Q128.128 sqrt price.
+        sqrt_a: One range bound's sqrt price (order does not matter).
+        sqrt_b: The other bound's sqrt price.
+        side: ``0`` or ``1`` — which token *amount* is denominated in.
+        amount: Raw base units of that token.
+
+    Returns:
+        The liquidity, or 0 when the price sits on the side of the range where
+        that token backs nothing (token0 above the range, token1 below it).
+    """
+    lower, upper = (sqrt_a, sqrt_b) if sqrt_a < sqrt_b else (sqrt_b, sqrt_a)
+    if side == 0:
+        if sqrt_current <= lower:
+            return _liquidity_for_amount0(lower, upper, amount)
+        if sqrt_current < upper:
+            return _liquidity_for_amount0(sqrt_current, upper, amount)
+        return 0
+    if sqrt_current >= upper:
+        return _liquidity_for_amount1(lower, upper, amount)
+    if sqrt_current > lower:
+        return _liquidity_for_amount1(lower, sqrt_current, amount)
+    return 0
+
+
+def liquidity_for_amounts(sqrt_current: int, sqrt_a: int, sqrt_b: int,
+                          amount0: int, amount1: int) -> int:
+    """The largest liquidity both *amount0* and *amount1* can fund in a range.
+
+    Below the range only token0 counts, above it only token1; in range both
+    are consumed and the shorter side caps the position.  Floors, so a mint
+    sized from :func:`amounts_for_liquidity` of the result never exceeds the
+    amounts given.
+    """
+    lower, upper = (sqrt_a, sqrt_b) if sqrt_a < sqrt_b else (sqrt_b, sqrt_a)
+    if sqrt_current <= lower:
+        return _liquidity_for_amount0(lower, upper, amount0)
+    if sqrt_current < upper:
+        return min(_liquidity_for_amount0(sqrt_current, upper, amount0),
+                   _liquidity_for_amount1(lower, sqrt_current, amount1))
+    return _liquidity_for_amount1(lower, upper, amount1)
+
+
 def fee_growth_inside(lower_outside: tuple[int, int], lower_tick: int,
                       upper_outside: tuple[int, int], upper_tick: int,
                       tick_current: int,

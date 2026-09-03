@@ -349,6 +349,64 @@ def test_collect_pays_immutable_withdrawal(ctx, dex, journey):
     assert not user_token_records, "owner received the payout despite withdrawal"
 
 
+def test_rebalance_moves_ranges_atomically(ctx, dex, journey):
+    """Close-and-remint through shield_swap_rebalance_router.aleo.
+
+    Pool 0 shifts its range one spacing up on recovered funds alone (zero
+    budget → ``rebalance_plain_plain_none``); pool 1 doubles its liquidity in
+    place with fresh funding on both sides (``rebalance_plain_plain_both``).
+    Both assert the old position is gone and the successor carries exactly
+    the planned liquidity.
+    """
+    from aleo_shield_swap.rebalance import REBALANCE_DEADLINE_OFFSET_BLOCKS
+
+    cases = []
+    p0 = journey.pools[0]
+    s0 = p0["tick_spacing"]
+    cases.append((p0, dict(tick_lower=-9 * s0, tick_upper=11 * s0,
+                           max_funding0=0, max_funding1=0), {}))
+    p1 = journey.pools[1]
+    s1 = p1["tick_spacing"]
+    old1 = _position(ctx, p1)["liquidity"]
+    cases.append((p1, dict(tick_lower=-10 * s1, tick_upper=10 * s1,
+                           liquidity_target=old1 * 2),
+                  dict(token0_record=ctx.privatize_token(ctx.user, ctx.token0_program, 400_000_000),
+                       token1_record=ctx.privatize_token(ctx.user, ctx.token1_program, 400_000_000))))
+
+    for pool_case, sizing, funding in cases:
+        old_id = pool_case["position_token_id"]
+        plan = dex.plan_rebalance(pool_key=pool_case["pool_key"],
+                                  position_token_id=old_id, **sizing)
+        assert plan.old_liquidity == _position(ctx, pool_case)["liquidity"]
+        assert plan.recovered0 + plan.funded0 == plan.required0 + plan.refund0
+        if "liquidity_target" in sizing:
+            assert plan.funded0 > 0 and plan.funded1 > 0
+            assert plan.function_name == "rebalance_plain_plain_both"
+        else:
+            assert plan.funded0 == 0 and plan.funded1 == 0
+            assert plan.function_name == "rebalance_plain_plain_none"
+
+        call = dex.rebalance_position(
+            pool_key=pool_case["pool_key"], position_token_id=old_id,
+            position_record=pool_case["nft_record"], **sizing, **funding,
+            deadline_offset_blocks=REBALANCE_DEADLINE_OFFSET_BLOCKS,
+            imports=ctx.imports, account=ctx.user)
+        result = _submit(ctx, call, ctx.user)
+        assert result.position_token_id and result.position_token_id != old_id
+        assert result.plan.liquidity_target == plan.liquidity_target
+
+        # The close removed the old entry; the successor holds exactly the target.
+        assert ctx.read_mapping("positions", old_id) is None
+        pool_case["position_token_id"] = result.position_token_id
+        _refresh_nft(ctx, pool_case, result.transaction_id)
+        assert re.search(rf"tick_lower:\s*{plan.tick_lower}i32", pool_case["nft_record"])
+        assert _position(ctx, pool_case)["liquidity"] == plan.liquidity_target
+        # In range, so the pool's active liquidity includes the successor (the
+        # withdrawal-address test above minted a second position in pool 0, so
+        # this is a floor, not an equality).
+        assert dex.get_slot(pool_case["pool_key"]).liquidity >= plan.liquidity_target
+
+
 def test_burn_exits_positions(ctx, dex, journey):
     for pool_case in journey.pools:
         remaining = _position(ctx, pool_case)

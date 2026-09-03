@@ -651,6 +651,144 @@
   },
   {
    "path": [
+    "RebalanceAsset"
+   ],
+   "fields": [
+    {
+     "name": "token_id",
+     "ty": {
+      "Primitive": "Field"
+     }
+    },
+    {
+     "name": "underlying_id",
+     "ty": {
+      "Primitive": "Field"
+     }
+    }
+   ]
+  },
+  {
+   "path": [
+    "RebalanceAssets"
+   ],
+   "fields": [
+    {
+     "name": "token0",
+     "ty": {
+      "Struct": {
+       "path": [
+        "RebalanceAsset"
+       ],
+       "program": "shield_swap.aleo"
+      }
+     }
+    },
+    {
+     "name": "token1",
+     "ty": {
+      "Struct": {
+       "path": [
+        "RebalanceAsset"
+       ],
+       "program": "shield_swap.aleo"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "path": [
+    "CoreRebalanceRequest"
+   ],
+   "fields": [
+    {
+     "name": "old_liquidity",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "recovered0",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "recovered1",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "funded0",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "funded1",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "refund0",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "refund1",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "liquidity_target",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "mint",
+     "ty": {
+      "Struct": {
+       "path": [
+        "MintPositionRequest"
+       ],
+       "program": "shield_swap.aleo"
+      }
+     }
+    },
+    {
+     "name": "deadline",
+     "ty": {
+      "Primitive": {
+       "UInt": "U32"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "path": [
     "SwapIterCfg"
    ],
    "fields": [
@@ -797,6 +935,128 @@
      "ty": {
       "Primitive": {
        "Int": "I32"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "path": [
+    "HopExecution"
+   ],
+   "fields": [
+    {
+     "name": "pool",
+     "ty": {
+      "Primitive": "Field"
+     }
+    },
+    {
+     "name": "zero_for_one",
+     "ty": {
+      "Primitive": "Boolean"
+     }
+    },
+    {
+     "name": "amount_in",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "amount_out",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "fee_paid",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "protocol_fee",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "sqrt_price_after",
+     "ty": {
+      "Struct": {
+       "path": [
+        "U256__8JquwLopp8"
+       ],
+       "program": "shield_swap.aleo"
+      }
+     }
+    },
+    {
+     "name": "liquidity_after",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "tick_after",
+     "ty": {
+      "Primitive": {
+       "Int": "I32"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "path": [
+    "SwapExecutionHeader"
+   ],
+   "fields": [
+    {
+     "name": "executed_height",
+     "ty": {
+      "Primitive": {
+       "UInt": "U32"
+      }
+     }
+    },
+    {
+     "name": "hop_count",
+     "ty": {
+      "Primitive": {
+       "UInt": "U8"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "path": [
+    "SwapExecutionKey"
+   ],
+   "fields": [
+    {
+     "name": "swap_id",
+     "ty": {
+      "Primitive": "Field"
+     }
+    },
+    {
+     "name": "hop_index",
+     "ty": {
+      "Primitive": {
+       "UInt": "U8"
       }
      }
     }
@@ -1239,6 +1499,39 @@
    }
   },
   {
+   "name": "swap_execution_headers",
+   "key": {
+    "Primitive": "Field"
+   },
+   "value": {
+    "Struct": {
+     "path": [
+      "SwapExecutionHeader"
+     ],
+     "program": "shield_swap.aleo"
+    }
+   }
+  },
+  {
+   "name": "swap_execution_hops",
+   "key": {
+    "Struct": {
+     "path": [
+      "SwapExecutionKey"
+     ],
+     "program": "shield_swap.aleo"
+    }
+   },
+   "value": {
+    "Struct": {
+     "path": [
+      "HopExecution"
+     ],
+     "program": "shield_swap.aleo"
+    }
+   }
+  },
+  {
    "name": "admin",
    "key": {
     "Primitive": "Boolean"
@@ -1342,6 +1635,15 @@
    },
    "value": {
     "Primitive": "Field"
+   }
+  },
+  {
+   "name": "pool_creators",
+   "key": {
+    "Primitive": "Field"
+   },
+   "value": {
+    "Primitive": "Address"
    }
   }
  ],
@@ -1845,6 +2147,118 @@
        }
       },
       "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    }
+   ],
+   "outputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Record": {
+      "path": [
+       "PositionNFT"
+      ],
+      "program": "shield_swap.aleo"
+     }
+    },
+    "DynamicRecord",
+    "DynamicRecord",
+    {
+     "Record": {
+      "path": [
+       "MintComplianceRecord"
+      ],
+      "program": "shield_swap.aleo"
+     }
+    },
+    "Final"
+   ]
+  },
+  {
+   "name": "rebalance_position",
+   "inputs": [
+    {
+     "Record": {
+      "path": [
+       "PositionNFT"
+      ],
+      "program": "shield_swap.aleo"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "CoreRebalanceRequest"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "RebalanceAssets"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
      }
     },
     {
@@ -2426,6 +2840,83 @@
    ]
   },
   {
+   "name": "claim_swap_output_no_refund",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Address"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    }
+   ],
+   "outputs": [
+    "DynamicRecord",
+    "Final"
+   ]
+  },
+  {
    "name": "swap_multi_hop",
    "inputs": [
     {
@@ -2664,6 +3155,385 @@
          "U256__8JquwLopp8"
         ],
         "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    }
+   ]
+  },
+  {
+   "name": "view_swap_iteration_v2",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "SwapIterCfg"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "Int": "I32"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "U256__8JquwLopp8"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "Tick"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "SwapIterState"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    }
+   ],
+   "outputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "SwapIterState"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "Tick"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    }
+   ]
+  },
+  {
+   "name": "view_bounded_partial_v2",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "U256__8JquwLopp8"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "U256__8JquwLopp8"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "U256__8JquwLopp8"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "U256__8JquwLopp8"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U32"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U8"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Boolean"
+      },
+      "mode": "Public"
+     }
+    }
+   ],
+   "outputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "U256__8JquwLopp8"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "U256__8JquwLopp8"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "Int": "I32"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "UInt": "U128"
+       }
+      },
+      "mode": "Public"
+     }
+    }
+   ]
+  },
+  {
+   "name": "resolve_stored_tick",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "U256__8JquwLopp8"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "Int": "I32"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "U256__8JquwLopp8"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "Int": "I32"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Boolean"
+      },
+      "mode": "Public"
+     }
+    }
+   ],
+   "outputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": {
+        "Int": "I32"
        }
       },
       "mode": "Public"
@@ -2947,77 +3817,6 @@
       "mode": "Public"
      }
     },
-    {
-     "Plaintext": {
-      "ty": {
-       "Primitive": {
-        "Int": "I32"
-       }
-      },
-      "mode": "Public"
-     }
-    }
-   ]
-  },
-  {
-   "name": "resolve_stored_tick",
-   "inputs": [
-    {
-     "Plaintext": {
-      "ty": {
-       "Struct": {
-        "path": [
-         "U256__8JquwLopp8"
-        ],
-        "program": "shield_swap.aleo"
-       }
-      },
-      "mode": "Public"
-     }
-    },
-    {
-     "Plaintext": {
-      "ty": {
-       "Primitive": {
-        "Int": "I32"
-       }
-      },
-      "mode": "Public"
-     }
-    },
-    {
-     "Plaintext": {
-      "ty": {
-       "Struct": {
-        "path": [
-         "U256__8JquwLopp8"
-        ],
-        "program": "shield_swap.aleo"
-       }
-      },
-      "mode": "Public"
-     }
-    },
-    {
-     "Plaintext": {
-      "ty": {
-       "Primitive": {
-        "Int": "I32"
-       }
-      },
-      "mode": "Public"
-     }
-    },
-    {
-     "Plaintext": {
-      "ty": {
-       "Primitive": "Boolean"
-      },
-      "mode": "Public"
-     }
-    }
-   ],
-   "outputs": [
     {
      "Plaintext": {
       "ty": {

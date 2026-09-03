@@ -25,6 +25,7 @@ from ._core import (
     resolve_swap_params,
 )
 from ._routing import claim_route, swap_route
+from .rebalance import RebalancePlan, plan_rebalance as _plan_rebalance
 from .position_math import (
     amounts_for_liquidity,
     fee_growth_inside,
@@ -51,6 +52,7 @@ from .types import (
     OwnedPosition,
     OwnedPositionState,
     SlotView,
+    SwapExecution,
     SwapHandle,
 )
 
@@ -170,6 +172,27 @@ class AsyncShieldSwap:
         if raw is None:
             raise SwapOutputNotFinalizedError(swap_id)
         return g.SwapOutput.from_plaintext(raw)
+
+    async def get_swap_execution(self, swap: "SwapHandle | str") -> Optional[SwapExecution]:
+        """Per-hop fill receipt — see :meth:`ShieldSwap.get_swap_execution`.
+        The hop reads run concurrently."""
+        import asyncio
+        swap_id = swap.swap_id if isinstance(swap, SwapHandle) else swap
+        if not swap_id:
+            raise ValueError("SwapHandle has no swap_id yet — wait for the "
+                             "request transaction and recover it first.")
+        header = await self._mapping_value("swap_execution_headers", swap_id)
+        if header is None:
+            return None
+        count = g.SwapExecutionHeader.from_plaintext(header).hop_count
+        hops = await asyncio.gather(*(
+            self._mapping_value("swap_execution_hops", SwapExecution.hop_key(swap_id, i))
+            for i in range(count)))
+        return SwapExecution.from_plaintexts(swap_id, header, list(hops))
+
+    async def get_pool_creator(self, pool_key: str) -> Optional[str]:
+        """Creator address of *pool_key* — see :meth:`ShieldSwap.get_pool_creator`."""
+        return await self._mapping_value("pool_creators", pool_key)
 
     async def is_pool_initialized(self, pool_key: str) -> bool:
         """True once *pool_key* has been initialized on chain. Reads a mapping.
@@ -403,6 +426,35 @@ class AsyncShieldSwap:
                 record=plaintext, state=state))
         return out
 
+    async def plan_rebalance(self, *, pool_key: str, position_token_id: str,
+                             tick_lower: int, tick_upper: int,
+                             liquidity_target: Optional[int] = None,
+                             max_funding0: Optional[int] = None,
+                             max_funding1: Optional[int] = None) -> RebalancePlan:
+        """Quote a close-and-remint — see :meth:`ShieldSwap.plan_rebalance`.
+        Reads only; the boundary-tick and wrapped-ness reads run concurrently."""
+        import asyncio
+        pool = await self.get_pool(pool_key)
+        slot = (await self.get_slot(pool_key)).raw
+        raw = await self._mapping_value("positions", position_token_id)
+        if raw is None:
+            raise ValueError(f"Position does not exist: {position_token_id}")
+        position = g.Position.from_plaintext(raw)
+        lower, upper, w0, w1 = await asyncio.gather(
+            self._tick_info(pool_key, int(position.tick_lower)),
+            self._tick_info(pool_key, int(position.tick_upper)),
+            self._is_wrapped(str(pool.token0)),
+            self._is_wrapped(str(pool.token1)))
+        if lower is None or upper is None:
+            raise ValueError("The position's boundary ticks are not initialized: "
+                             f"{position_token_id}")
+        return _plan_rebalance(
+            pool_key=pool_key, position_token_id=position_token_id,
+            tick_lower=tick_lower, tick_upper=tick_upper,
+            slot=slot, position=position, lower_tick=lower, upper_tick=upper,
+            wrapped0=w0, wrapped1=w1, liquidity_target=liquidity_target,
+            max_funding0=max_funding0, max_funding1=max_funding1)
+
     async def get_owned_position(self, position_token_id: str, *,
                                  account: Any = None) -> Optional[OwnedPosition]:
         """One owned position by token id, or None — see
@@ -603,7 +655,8 @@ class AsyncShieldSwap:
         out = await self.get_swap_output(handle.swap_id)
         w_out = await self._is_wrapped(str(out.token_out))
         w_in = await self._is_wrapped(str(out.token_in))
-        route = claim_route(w_out, w_in)
+        no_refund = int(out.amount_remaining) == 0
+        route = claim_route(w_out, w_in, no_refund=no_refund)
         token_programs = [route.program] if route.program != self.program else []
         for token_id, wrapped in ((out.token_in, w_in), (out.token_out, w_out)):
             if wrapped:
@@ -612,14 +665,15 @@ class AsyncShieldSwap:
                     token_programs.append(wrapper)
         await self._ensure(token_programs, imports)
         inputs = [handle.blinding_factor, handle.blinded_address, handle.swap_id,
-                  out.token_in, out.token_out,
-                  f"{out.amount_out}u128", f"{out.amount_remaining}u128",
-                  default_merkle_proofs()]
+                  out.token_in, out.token_out, f"{out.amount_out}u128"]
+        if not no_refund:
+            inputs.append(f"{out.amount_remaining}u128")
+        inputs.append(default_merkle_proofs())
         wp = wrapper_proofs or default_merkle_proofs()
-        if w_out and w_in:
-            inputs += [wp, wp]            # wp for the output, then the refund
-        elif w_out or w_in:
-            inputs += [wp]
+        if w_out:
+            inputs.append(wp)             # output receiver proof
+        if w_in and not no_refund:
+            inputs.append(wp)             # refund receiver proof
         prog = await self._aleo.programs.get(route.program)
         bound = getattr(prog.functions, route.function)(*inputs)
         return AsyncDexCall(self._aleo, bound,

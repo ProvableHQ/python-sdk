@@ -2,7 +2,8 @@
 [blinding_factor, blinded_address, swap_id, token_in, token_out,
  amount_out u128, amount_remaining u128, signer_proofs].
 Wrapped output/refund tokens dispatch to the router claim variants with
-trailing wrapper-proof arrays."""
+trailing wrapper-proof arrays.  A zero remainder takes the no-refund
+variants, which drop the amount_remaining input (and the refund proof)."""
 import pytest
 
 from aleo_shield_swap._core import default_merkle_proofs
@@ -14,6 +15,11 @@ from aleo_shield_swap.types import ClaimResult, SwapHandle
 from .conftest import POOL_TEXT, SLOT_TEXT, StubAleo
 
 SWAP_OUTPUT_TEXT = (
+    "{ recipient: 3field, caller: 4field, token_in: 1field, token_out: 2field, "
+    "amount_out: 990000u128, amount_remaining: 5u128 }"
+)
+# Fully consumed input: nothing to refund.
+SWAP_OUTPUT_NO_REFUND_TEXT = (
     "{ recipient: 3field, caller: 4field, token_in: 1field, token_out: 2field, "
     "amount_out: 990000u128, amount_remaining: 0u128 }"
 )
@@ -42,9 +48,9 @@ def test_claim_builds_exact_inputs_and_result():
     fn, args = stub.last_call
     assert fn == "claim_swap_output"
     assert args == ["11field", "aleo1blinded", "77field",
-                    "1field", "2field", "990000u128", "0u128",
+                    "1field", "2field", "990000u128", "5u128",
                     default_merkle_proofs()]
-    assert result == ClaimResult("at1stubtx", 990000, 0)
+    assert result == ClaimResult("at1stubtx", 990000, 5)
 
 
 def test_claim_not_finalized_raises_before_any_call():
@@ -105,3 +111,45 @@ def test_claim_plain_stays_on_core():
     ShieldSwap(stub).claim_swap_output(_handle()).transact()
     fn, _ = stub.last_call
     assert (stub.last_program, fn) == ("shield_swap.aleo", "claim_swap_output")
+
+
+# ── No-refund variants (amount_remaining == 0) ───────────────────────────────
+
+def test_claim_no_refund_plain_drops_remaining_input():
+    stub = _stub_wrapped({"77field": SWAP_OUTPUT_NO_REFUND_TEXT}, wrapped=set())
+    result = ShieldSwap(stub).claim_swap_output(_handle()).transact()
+    fn, args = stub.last_call
+    assert (stub.last_program, fn) == ("shield_swap.aleo", "claim_swap_output_no_refund")
+    assert args == ["11field", "aleo1blinded", "77field",
+                    "1field", "2field", "990000u128",
+                    default_merkle_proofs()]           # no amount_remaining
+    assert result == ClaimResult("at1stubtx", 990000, 0)
+
+
+def test_claim_no_refund_wrapped_output_takes_one_receiver_proof():
+    stub = _stub_wrapped({"77field": SWAP_OUTPUT_NO_REFUND_TEXT}, wrapped={"2field"})
+    ShieldSwap(stub).claim_swap_output(_handle()).transact()
+    fn, args = stub.last_call
+    assert (stub.last_program, fn) == (ROUTER_ID, "claim_to_wrapped_no_refund")
+    assert len(args) == 8
+    assert args[6] == default_merkle_proofs()          # AMM signer proofs
+    assert args[7] == default_merkle_proofs()          # output receiver proof
+
+
+def test_claim_no_refund_wrapped_input_only_needs_no_receiver_proof():
+    # The refund leg is wrapped but empty: the router variant still exists
+    # (it must not pay through the core), yet takes no receiver proof.
+    stub = _stub_wrapped({"77field": SWAP_OUTPUT_NO_REFUND_TEXT}, wrapped={"1field"})
+    ShieldSwap(stub).claim_swap_output(_handle()).transact()
+    fn, args = stub.last_call
+    assert (stub.last_program, fn) == (ROUTER_ID, "claim_to_arc20_no_refund")
+    assert len(args) == 7
+
+
+def test_claim_no_refund_both_wrapped_proves_only_the_output():
+    stub = _stub_wrapped({"77field": SWAP_OUTPUT_NO_REFUND_TEXT},
+                         wrapped={"1field", "2field"})
+    ShieldSwap(stub).claim_swap_output(_handle()).transact()
+    fn, args = stub.last_call
+    assert (stub.last_program, fn) == (ROUTER_ID, "claim_to_wrapped_no_refund")
+    assert len(args) == 8

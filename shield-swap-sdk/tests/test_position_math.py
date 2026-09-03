@@ -160,3 +160,86 @@ def test_zero_sqrt_price_raises_rather_than_silently_returning():
     """A zero bound divides by zero in the contract too — surface it."""
     with pytest.raises(ZeroDivisionError):
         amount0_delta(0, 4 * Q128, 10**6)
+
+
+# ── liquidity_for_amount(s) — inverse of amounts_for_liquidity ──────────────
+
+def _vectors():
+    import json
+    from pathlib import Path
+    return json.loads((Path(__file__).parent / "fixtures"
+                       / "q128_oracle_vectors.json").read_text())
+
+
+def test_liquidity_for_amount_side0_below_range_prices_over_full_width():
+    from aleo_shield_swap.position_math import liquidity_for_amount
+    from aleo_shield_swap.tick_math import get_sqrt_price_at_tick_x128 as sp
+    lower, upper = sp(-600), sp(600)
+    amount0, _ = amounts_for_liquidity(lower - 1, lower, upper, 10**12)
+    liq = liquidity_for_amount(lower - 1, lower, upper, side=0, amount=amount0)
+    assert 0 < liq <= 10**12 and 10**12 - liq <= 2       # floors, near-exact
+
+
+def test_liquidity_for_amount_side_not_backing_the_range_is_zero():
+    from aleo_shield_swap.position_math import liquidity_for_amount
+    from aleo_shield_swap.tick_math import get_sqrt_price_at_tick_x128 as sp
+    lower, upper = sp(-600), sp(600)
+    assert liquidity_for_amount(upper + 1, lower, upper, side=0, amount=10**9) == 0
+    assert liquidity_for_amount(lower - 1, lower, upper, side=1, amount=10**9) == 0
+
+
+def test_liquidity_for_amounts_in_range_is_capped_by_the_shorter_side():
+    from aleo_shield_swap.position_math import liquidity_for_amount, liquidity_for_amounts
+    from aleo_shield_swap.tick_math import get_sqrt_price_at_tick_x128 as sp
+    lower, upper, cur = sp(-600), sp(600), sp(0)
+    a0, a1 = amounts_for_liquidity(cur, lower, upper, 10**15)
+    from0 = liquidity_for_amount(cur, lower, upper, side=0, amount=a0)
+    from1 = liquidity_for_amount(cur, lower, upper, side=1, amount=a1 * 3)
+    assert liquidity_for_amounts(cur, lower, upper, a0, a1 * 3) == min(from0, from1)
+    assert liquidity_for_amounts(cur, lower, upper, a0, a1 * 3) == from0
+
+
+def test_liquidity_for_amounts_bound_order_does_not_matter():
+    from aleo_shield_swap.position_math import liquidity_for_amounts
+    from aleo_shield_swap.tick_math import get_sqrt_price_at_tick_x128 as sp
+    lower, upper, cur = sp(-600), sp(600), sp(0)
+    assert (liquidity_for_amounts(cur, lower, upper, 10**9, 10**9)
+            == liquidity_for_amounts(cur, upper, lower, 10**9, 10**9))
+
+
+def test_liquidity_roundtrip_is_tight_but_not_exact():
+    """amounts_for_liquidity(L) -> liquidity_for_amounts lands within a
+    hair of L.  It is NOT exact: the token0 inverse scales ``lower*upper`` down
+    by 2^128 first (as the TS oracle does), so it can land a few units either
+    side — which is exactly why the rebalance planner re-derives the deposit
+    from the solved liquidity and clamps, rather than trusting the inverse."""
+    from aleo_shield_swap.position_math import liquidity_for_amounts
+    for v in _vectors()["amounts"]:
+        lower, upper = int(v["sqrtA"]), int(v["sqrtB"])
+        liquidity = int(v["liquidity"])
+        for cur in (lower - 1, (lower + upper) // 2, upper):
+            a0, a1 = amounts_for_liquidity(cur, lower, upper, liquidity, round_up=True)
+            back = liquidity_for_amounts(cur, lower, upper, a0, a1)
+            assert abs(back - liquidity) <= liquidity // 10**9 + 2, (v, cur, back)
+
+
+# ── veil q128 oracle vectors (differentially tested against amm-v3's Python oracles)
+
+def test_oracle_amount_vectors():
+    for v in _vectors()["amounts"]:
+        lower, upper = int(v["sqrtA"]), int(v["sqrtB"])
+        a0 = amount0_delta(lower, upper, int(v["liquidity"]), v["roundUp"])
+        a1 = amount1_delta(lower, upper, int(v["liquidity"]), v["roundUp"])
+        assert (a0, a1) == (int(v["amount0"]), int(v["amount1"])), v
+
+
+def test_oracle_mul_div_vectors():
+    from aleo_shield_swap.position_math import _mul_div
+    for v in _vectors()["mulDiv"]:
+        assert _mul_div(int(v["a"]), int(v["b"]), int(v["d"]), v["roundUp"]) == int(v["result"]), v
+
+
+def test_oracle_sqrt_price_at_tick_vectors():
+    from aleo_shield_swap.tick_math import get_sqrt_price_at_tick_x128
+    for v in _vectors()["sqrtPriceAtTickX128"]:
+        assert get_sqrt_price_at_tick_x128(v["tick"]) == int(v["sqrtPriceX128"]), v

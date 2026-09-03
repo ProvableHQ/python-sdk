@@ -17,9 +17,15 @@
 from .client import ShieldSwap as ShieldSwap
 from .async_client import AsyncShieldSwap as AsyncShieldSwap
 from .api import ApiClient as ApiClient, AsyncApiClient as AsyncApiClient
+from .rebalance import (
+    RebalancePlan as RebalancePlan,
+    RebalanceResult as RebalanceResult,
+)
 from .types import (
     OwnedPosition as OwnedPosition,
     OwnedPositionState as OwnedPositionState,
+    HopFill as HopFill,
+    SwapExecution as SwapExecution,
     ClaimResult as ClaimResult,
     CollectReport as CollectReport,
     MintResult as MintResult,
@@ -84,7 +90,8 @@ __all__ = [
     "NotAuthenticatedError", "NotFundedError",
     "AirdropPendingError", "AirdropRateLimitedError",
     "CredentialsMissingError",
-    "OwnedPosition", "OwnedPositionState",
+    "OwnedPosition", "OwnedPositionState", "HopFill", "SwapExecution",
+    "RebalancePlan", "RebalanceResult",
     "Profile", "Journal", "REGISTRATION_STAGES",
     "OnboardReport", "StageOutcome", "SessionStatus", "PositionView",
     "SwapBatchReport", "CollectReport", "blinded_identity_at",

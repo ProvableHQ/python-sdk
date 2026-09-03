@@ -29,12 +29,15 @@ TIER1 = ["from_profile", "onboard", "status", "get_positions",
          "swap_many", "collect_all"]
 TIER2_CLIENT = ["swap", "claim_swap_output", "create_pool", "mint",
                 "increase_liquidity", "decrease_liquidity", "collect", "burn",
-                "get_pool", "get_slot", "get_swap_output", "get_balances",
+                "plan_rebalance", "rebalance_position",
+                "get_pool", "get_slot", "get_swap_output", "get_swap_execution",
+                "get_balances",
                 "get_private_balances", "derive_pool_key", "derive_tick_key"]
 TIER2_API = ["authenticate", "access_status", "referral_status",
              "my_referral_code", "redeem_code",
              "request_airdrop", "get_airdrop_job", "create_api_token",
-             "get_pools", "get_tokens", "get_route"]
+             "get_pools", "get_tokens", "get_route", "get_route_topology",
+             "get_unclaimed", "get_protocol_state"]
 TIER2_DERIVATIONS = ["blinded_identity_at", "next_blinded_identity"]
 
 QUICKSTART = """\
@@ -164,6 +167,15 @@ them):
   hand wrapper records around.
 - **A `SwapHandle` is the only key to a swap's output** — persist before
   anything else (the journal does this); claim after finalize with retry.
+  A swap with nothing left over claims through the no-refund entrypoints
+  automatically; `get_swap_execution` reads the per-hop fill receipt (fees
+  paid, price after) at any later time.
+- **Rebalancing is one transaction, testnet only for now** —
+  `plan_rebalance` quotes the close-and-remint (what comes back, what the
+  new range needs, funding vs refund per token) and `rebalance_position`
+  submits it through `shield_swap_rebalance_router.aleo`.  Every amount is
+  asserted at the execution price: a trade in between reverts the whole
+  transaction (fee paid, no funds moved) — re-plan and resubmit.
 - **Concurrency needs partitioned blinded-identity counters AND disjoint
   input records** — `swap_many` implements the recipe; copy it, don't
   improvise.

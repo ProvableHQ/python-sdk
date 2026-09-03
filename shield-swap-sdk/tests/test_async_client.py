@@ -220,7 +220,7 @@ async def test_async_claim_wrapped_output_routes_through_router():
     from aleo_shield_swap._routing import ROUTER_ID
     from aleo_shield_swap.types import SwapHandle
     out_text = ("{ recipient: 3field, caller: 4field, token_in: 1field, "
-                "token_out: 2field, amount_out: 990000u128, amount_remaining: 0u128 }")
+                "token_out: 2field, amount_out: 990000u128, amount_remaining: 5u128 }")
     astub = AsyncStubAleo(mappings={
         "pools": {"5field": POOL_TEXT},
         "slots": {"5field": SLOT_TEXT},
@@ -235,3 +235,48 @@ async def test_async_claim_wrapped_output_routes_through_router():
     fn, args = astub.last_call
     assert (astub.last_program, fn) == (ROUTER_ID, "claim_to_wrapped_refund_arc20")
     assert len(args) == 9
+
+
+async def test_async_swap_execution_and_pool_creator():
+    from .test_client_reads import HEADER_TEXT, HOP0_TEXT, HOP1_TEXT
+    astub = AsyncStubAleo(mappings={
+        "swap_execution_headers": {"77field": HEADER_TEXT},
+        "swap_execution_hops": {
+            "{ swap_id: 77field, hop_index: 0u8 }": HOP0_TEXT,
+            "{ swap_id: 77field, hop_index: 1u8 }": HOP1_TEXT,
+        },
+        "pool_creators": {"5field": "aleo1creator"},
+    })
+    dex = AsyncShieldSwap(astub)
+    ex = await dex.get_swap_execution("77field")
+    assert ex is not None and ex.executed_height == 4242
+    assert [h.lp_fee for h in ex.hops] == [24, 22]
+    assert await dex.get_swap_execution("99field") is None
+    assert await dex.get_pool_creator("5field") == "aleo1creator"
+    assert await dex.get_pool_creator("6field") is None
+
+
+async def test_async_claim_no_refund_mirrors_sync_dispatch():
+    from aleo_shield_swap._routing import ROUTER_ID
+    from aleo_shield_swap.types import SwapHandle
+    out_text = ("{ recipient: 3field, caller: 4field, token_in: 1field, "
+                "token_out: 2field, amount_out: 990000u128, amount_remaining: 0u128 }")
+    handle = SwapHandle(swap_id="77field", blinding_factor="11field",
+                        blinded_address="aleo1blinded", token_in_id="1field",
+                        token_out_id="2field", pool_key="5field", amount_in=1,
+                        transaction_id="at1req", program="shield_swap.aleo")
+    for wrapped, expected, count in (
+        ({}, ("shield_swap.aleo", "claim_swap_output_no_refund"), 7),
+        ({"2field": "9field"}, (ROUTER_ID, "claim_to_wrapped_no_refund"), 8),
+        ({"1field": "9field"}, (ROUTER_ID, "claim_to_arc20_no_refund"), 7),
+    ):
+        astub = AsyncStubAleo(mappings={
+            "pools": {"5field": POOL_TEXT}, "slots": {"5field": SLOT_TEXT},
+            "swap_outputs": {"77field": out_text},
+            "from_wrapper_token_id": wrapped,
+        })
+        await AsyncShieldSwap(astub).claim_swap_output(handle)
+        fn, args = astub.last_call
+        assert (astub.last_program, fn) == expected
+        assert len(args) == count
+        assert "0u128" not in args           # amount_remaining is not an input

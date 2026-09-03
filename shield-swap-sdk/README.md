@@ -89,6 +89,8 @@ from the chain or the service.
 | `get_pool(pool_key)` | The pool struct from the `pools` mapping. |
 | `get_slot(pool_key)` | `SlotView` — current tick, sqrt price, liquidity, spacing. |
 | `get_swap_output(swap_id)` | The finalized swap outcome; raises `SwapOutputNotFinalizedError` until the finalize lands (and again after the claim consumes it). |
+| `get_swap_execution(swap_id)` | The fill receipt — executed height and per-hop amounts, gross/protocol/LP fee, post-trade price. Survives the claim; `None` until finalized. |
+| `get_pool_creator(pool_key)` | Who created the pool (`None` for pools that predate creator tracking). |
 | `is_pool_initialized(pool_key)` | Whether the pool exists on chain. |
 | `get_private_balances(programs)` | Summed unspent record amounts per token program (needs a registered record provider). |
 | `get_balances()` | Public + private balances in one shape. |
@@ -105,6 +107,12 @@ from the chain or the service.
 | `increase_liquidity(...)` / `decrease_liquidity(...)` | Resizes a position (spends the position NFT record and returns a fresh one). |
 | `collect(...)` | Pays out `tokens_owed` as private records. |
 | `burn(...)` | Closes an emptied position and removes it from the `positions` mapping. |
+| `plan_rebalance(...)` / `rebalance_position(...)` | Close a position and mint its successor range in ONE transaction via `shield_swap_rebalance_router.aleo` (testnet). The plan quotes what comes back, what the new range needs, and funding vs refund per token; every amount is asserted at the execution price, so re-plan and resubmit if the pool moved. |
+
+A swap whose input was fully consumed (`amount_remaining == 0`) claims
+through the no-refund entrypoints (`claim_swap_output_no_refund` and the
+router's `claim_to_*_no_refund`), which never mint a zero-value refund
+record — `claim_swap_output` picks them automatically.
 
 Quote before you swap: pass `expected_out` from `dex.api.get_route(...)` —
 without it a spot estimate is used, which ignores fees and price impact.
