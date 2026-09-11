@@ -4,69 +4,26 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any
 
 
 @dataclass
-class AccessCodeRow:
-    code: str
-    created_at: str
-    redeemed_at: str | None = None
-    redeemed_by: str | None = None
+class ActiveSessionPayload:
+    current: bool
+    expires_at: int
+    last_refreshed_at: int
+    session_id: str
+    started_at: int
+    user_agent: str | None = None
 
 
 @dataclass
-class AccessGenerateRequest:
-    count: int
+class ActiveSessionsResponseDoc:
+    data: list[ActiveSessionPayload]
 
 
-@dataclass
-class AccessGenerateResponse:
-    codes: list[str]
-
-
-@dataclass
-class AccessGenerateResponseDoc:
-    data: AccessGenerateResponse
-
-
-@dataclass
-class AccessListResponse:
-    available: int
-    codes: list[AccessCodeRow]
-    redeemed: int
-    total: int
-
-
-@dataclass
-class AccessListResponseDoc:
-    data: AccessListResponse
-
-
-@dataclass
-class AccessRedeemRequest:
-    code: str
-
-
-@dataclass
-class AccessRedeemResponse:
-    code: str
-    status: str
-    token: str
-
-
-@dataclass
-class AccessRedeemResponseDoc:
-    data: AccessRedeemResponse
-
-
-@dataclass
-class AccessStatusResponse:
-    has_access: bool
-
-
-@dataclass
-class AccessStatusResponseDoc:
-    data: AccessStatusResponse
+class ActivityAction(Enum):
+    create_pool = 'create_pool'
 
 
 @dataclass
@@ -76,10 +33,10 @@ class AirdropRequest:
 
 @dataclass
 class AirdropResult:
+    amm_token_program: str
     amount: str
     status: str
     symbol: str
-    wrapper_program: str
     error: str | None = None
     tx_id: str | None = None
 
@@ -134,7 +91,22 @@ class ApiTokenRow:
 
 
 @dataclass
+class Asset:
+    decimals: int
+    id: str
+    name: str
+    symbol: str
+    coinGeckoId: str | None = None
+
+
+@dataclass
+class AssetResponse:
+    asset: Asset
+
+
+@dataclass
 class AuthTokenPayload:
+    expires_at: int
     token: str
 
 
@@ -144,7 +116,14 @@ class AuthTokenResponseDoc:
 
 
 @dataclass
+class BlockResponse:
+    blockNumber: int
+    blockTimestamp: int
+
+
+@dataclass
 class ChallengePayload:
+    challenge_id: str
     message: str
     nonce: str
 
@@ -160,34 +139,16 @@ class ChallengeResponseDoc:
 
 
 @dataclass
-class CreateTokenRequestDoc:
-    address: str
-    decimals: int
-    name: str
-    symbol: str
-    wrapper_program: str | None = None
-
-
-@dataclass
-class DeployTokenRequest:
-    decimals: int
-    name: str
-    recipient: str
-    symbol: str
-    supply: str | None = None
-
-
-@dataclass
-class DeployTokenResult:
-    program_id: str
-    recipient: str
-    status: str
-
-
-@dataclass
 class ErrorResponseDoc:
     error: str
+    code: str | None = None
     ref: str | None = None
+
+
+@dataclass
+class FeeBinding:
+    fee_tier: int
+    tick_spacing: int
 
 
 @dataclass
@@ -196,6 +157,7 @@ class FeeTierDoc:
     fee_tier: int
     id: str
     transaction: str
+    tick_spacing: int | None = None
 
 
 @dataclass
@@ -226,16 +188,58 @@ class InitializedTicksResponseDoc:
 
 
 @dataclass
-class MintTokenRequest:
-    amount: str
-    recipient: str
-    wrapper_program: str
+class LatestBlockResponse:
+    block: BlockResponse
+
+
+class LiveCompatibilityFailureCode(Enum):
+    cache_unavailable = 'cache_unavailable'
+    edition_mismatch = 'edition_mismatch'
+    edition_unavailable = 'edition_unavailable'
+    rate_limited = 'rate_limited'
+    rpc_unavailable = 'rpc_unavailable'
+    program_missing = 'program_missing'
+    source_mismatch = 'source_mismatch'
+    source_unavailable = 'source_unavailable'
+    verification_timeout = 'verification_timeout'
+
+
+class LiveCompatibilityStatus(Enum):
+    compatible = 'compatible'
+    incompatible = 'incompatible'
+    unavailable = 'unavailable'
 
 
 @dataclass
-class MintTokenResult:
-    status: str
-    tx_id: str | None = None
+class LiveProgramObservation:
+    source_sha256: str
+    edition: int | None = None
+    version: str | None = None
+
+
+@dataclass
+class LogoutAllResponse:
+    address: str
+    ended: bool
+    ok: bool
+    session_version: int
+
+
+@dataclass
+class LogoutAllResponseDoc:
+    data: LogoutAllResponse
+
+
+@dataclass
+class LogoutResponse:
+    ended: bool
+    ok: bool
+    session_id: str | None = None
+
+
+@dataclass
+class LogoutResponseDoc:
+    data: LogoutResponse
 
 
 @dataclass
@@ -263,10 +267,24 @@ class PaginationMeta:
 
 
 @dataclass
+class Pair:
+    asset0Id: str
+    asset1Id: str
+    dexKey: str
+    feeBps: float
+    id: str
+
+
+@dataclass
 class PairComplianceStatus:
     paused: bool
     token0: str
     token1: str
+
+
+@dataclass
+class PairResponse:
+    pair: Pair
 
 
 @dataclass
@@ -276,10 +294,12 @@ class PendingSwapOutputDoc:
     recipient: str
     token_in: str
     token_out: str
-    amount_remaining_1: str | None = None
-    amount_remaining_2: str | None = None
-    token_in_1: str | None = None
-    token_in_2: str | None = None
+
+
+@dataclass
+class PoolFeeProtocol:
+    fee_protocol: int
+    pool_key: str
 
 
 @dataclass
@@ -287,18 +307,21 @@ class PoolStateDoc:
     created_at: str
     creator: str
     enabled: bool
-    fee: str
+    fee_percent: str
     id: str
     init_tx: str
     key: str
-    scale0: str
-    scale1: str
     token0: str
     token1: str
 
 
 @dataclass
 class PoolStats24hDoc:
+    display_flipped: bool
+    display_high_24h: str
+    display_low_24h: str
+    display_open_24h: str
+    display_price: str
     high_24h: str
     liquidity: str
     low_24h: str
@@ -306,7 +329,13 @@ class PoolStats24hDoc:
     price: str
     price_reversed: str
     volume_24h: str
+    volume_7d: str
     change_24h_pct: str | None = None
+    display_change_24h_pct: str | None = None
+    fee_24h: str | None = None
+    fee_7d: str | None = None
+    reserve0: str | None = None
+    reserve1: str | None = None
 
 
 @dataclass
@@ -317,8 +346,8 @@ class PoolStats24hResponseDoc:
 @dataclass
 class PoolStatsDoc:
     active_tick: int
-    fee_growth_global0_x_64: str
-    fee_growth_global1_x_64: str
+    fee_growth_global0_x_128: str
+    fee_growth_global1_x_128: str
     fee_protocol: int
     id: str
     liquidity: str
@@ -357,12 +386,14 @@ class PositionDoc:
     amount0: str
     amount1: str
     created_at: str
-    fee_growth_inside0_last_64: str
-    fee_growth_inside1_last_64: str
+    created_transaction: str
+    fee_growth_inside0_last_x_128: str | None
+    fee_growth_inside1_last_x_128: str | None
     id: str
     is_burned: bool
     is_frozen: bool
     is_private: bool
+    last_transaction: str
     liquidity: str
     pool: str
     tick_lower: int
@@ -370,10 +401,10 @@ class PositionDoc:
     token_id: str
     tokens_owed0: str
     tokens_owed1: str
-    transaction: str
     user: str
+    created_transaction_hash: str | None = None
     frozen_at: str | None = None
-    transaction_hash: str | None = None
+    last_transaction_hash: str | None = None
 
 
 @dataclass
@@ -383,8 +414,94 @@ class PositionListResponseDoc:
 
 
 @dataclass
-class PositionResponseDoc:
-    data: PositionDoc
+class ProtocolCapabilities:
+    debug_api: bool
+    faucet: bool
+    freezelist_proofs: str
+    protocol_config_websocket: bool
+    token_admin: bool
+
+
+@dataclass
+class ProtocolFeeConfiguration:
+    pool_fee_protocols: list[PoolFeeProtocol]
+    registered_fee_tiers: list[int]
+    registered_tick_spacings: list[int]
+    valid_bindings: list[FeeBinding]
+
+
+@dataclass
+class ProtocolFreshness:
+    ready_for_entry: bool
+    confirmed_head: int | None = None
+    indexed_block: int | None = None
+    lag_blocks: int | None = None
+    ready_for_quote: bool | None = None
+    updated_at: str | None = None
+
+
+@dataclass
+class ProtocolPair:
+    token0: str
+    token1: str
+
+
+@dataclass
+class ProtocolProgram:
+    program_id: str
+    role: str
+    source_sha256: str
+    edition: int | None = None
+
+
+@dataclass
+class ProtocolRevisionPending:
+    code: str
+    current_revision: int
+    error: str
+    minimum_revision: int
+
+
+@dataclass
+class RebalanceTickState:
+    fee_growth_outside0_x_128: str
+    fee_growth_outside1_x_128: str
+    tick: int
+
+
+@dataclass
+class ReferralActivityRequest:
+    action: ActivityAction
+    tx_id: str
+    metadata: Any | None = None
+
+
+@dataclass
+class ReferralActivityResponse:
+    recorded: bool
+
+
+@dataclass
+class ReferralActivityResponseDoc:
+    data: ReferralActivityResponse
+
+
+@dataclass
+class ReferralAddressBatchRequest:
+    blinded_addresses: list[str]
+    code: str
+
+
+@dataclass
+class ReferralAddressBatchResponse:
+    conflict: int
+    duplicate: int
+    recorded: int
+
+
+@dataclass
+class ReferralAddressBatchResponseDoc:
+    data: ReferralAddressBatchResponse
 
 
 @dataclass
@@ -398,9 +515,50 @@ class ReferralAdminResponseDoc:
 
 
 @dataclass
+class ReferralAdminTokenVolume:
+    swap_count: int
+    token: str
+    volume: str
+
+
+@dataclass
+class ReferralAdminVolumeCode:
+    code: str
+    pending_count: int
+    provisional: list[ReferralAdminTokenVolume]
+    provisional_priced_swap_count: int
+    provisional_swap_count: int
+    provisional_unpriced_swap_count: int
+    redemption_count: int
+    rejected_count: int
+    verified: list[ReferralAdminTokenVolume]
+    verified_priced_swap_count: int
+    verified_swap_count: int
+    verified_unpriced_swap_count: int
+    issued_to: str | None = None
+    provisional_usd: str | None = None
+    verified_usd: str | None = None
+
+
+@dataclass
+class ReferralAdminVolumeResponse:
+    attributed_swap_count: int
+    codes: list[ReferralAdminVolumeCode]
+    unpriced_swap_count: int
+    provisional_usd: str | None = None
+    verified_usd: str | None = None
+
+
+@dataclass
+class ReferralAdminVolumeResponseDoc:
+    data: ReferralAdminVolumeResponse
+
+
+@dataclass
 class ReferralCodeRow:
     code: str
     created_at: str
+    redemption_count: int
     issued_to: str | None = None
     redeemed_at: str | None = None
     redeemed_by: str | None = None
@@ -426,6 +584,7 @@ class ReferralListResponse:
     available: int
     codes: list[ReferralCodeRow]
     redeemed: int
+    redemptions: int
     total: int
 
 
@@ -435,21 +594,13 @@ class ReferralListResponseDoc:
 
 
 @dataclass
-class ReferralMyCodeRow:
-    code: str
-    redeemed_at: str | None = None
-    redeemed_by: str | None = None
+class ReferralMyCodeResponse:
+    code: str | None = None
 
 
 @dataclass
-class ReferralMyCodesResponse:
-    codes: list[ReferralMyCodeRow]
-    quota: int
-
-
-@dataclass
-class ReferralMyCodesResponseDoc:
-    data: ReferralMyCodesResponse
+class ReferralMyCodeResponseDoc:
+    data: ReferralMyCodeResponse
 
 
 @dataclass
@@ -461,7 +612,6 @@ class ReferralRedeemRequest:
 class ReferralRedeemResponse:
     code: str
     status: str
-    token: str
 
 
 @dataclass
@@ -485,6 +635,8 @@ class ReferralSettingsResponseDoc:
 class ReferralStatusResponse:
     has_access: bool
     code: str | None = None
+    my_code: str | None = None
+    referred_by: str | None = None
 
 
 @dataclass
@@ -493,9 +645,59 @@ class ReferralStatusResponseDoc:
 
 
 @dataclass
+class ReferralSwapClaimRequest:
+    blinded_address: str
+    code: str
+
+
+@dataclass
+class ReferralSwapClaimResponse:
+    recorded: bool
+
+
+@dataclass
+class ReferralSwapClaimResponseDoc:
+    data: ReferralSwapClaimResponse
+
+
+@dataclass
 class ReferralUpdateSettingsRequest:
     codes_per_user: int
     max_users: int | None = None
+
+
+@dataclass
+class Reserves:
+    asset0: str
+    asset1: str
+
+
+@dataclass
+class RevokeSessionPayload:
+    current: bool
+    ok: bool
+    revoked: bool
+
+
+@dataclass
+class RevokeSessionResponseDoc:
+    data: RevokeSessionPayload
+
+
+@dataclass
+class RevokeSessionsRequest:
+    address: str
+
+
+@dataclass
+class RevokeSessionsResponse:
+    refresh_tokens_revoked: int
+    session_version: int
+
+
+@dataclass
+class RevokeSessionsResponseDoc:
+    data: RevokeSessionsResponse
 
 
 @dataclass
@@ -516,24 +718,31 @@ class RouteHopDoc:
 @dataclass
 class RouteResultDoc:
     hops: list[RouteHopDoc]
+    protocol_revision: int
     token_in: str
     token_out: str
     estimated_amount_out: str | None = None
+    protocol_config_observed_block: int | None = None
 
 
 @dataclass
-class SchemaField:
-    description: str
-    name: str
-    type: str
-    visibility: str
-    fields: list[SchemaField] | None = None
+class SessionPayload:
+    address: str
+    csrf_token: str
+    expires_at: int
+    session_version: int
+    session_id: str | None = None
 
 
 @dataclass
-class SwapHopDoc:
-    pool: str
-    zero_for_one: bool
+class SessionResponseDoc:
+    data: SessionPayload
+
+
+@dataclass
+class SwapMetadata:
+    fees0In: str | None = None
+    fees1In: str | None = None
 
 
 @dataclass
@@ -543,32 +752,11 @@ class TickLiquidityDoc:
 
 
 @dataclass
-class TickSpacingDoc:
-    id: str
-    tick_spacing: int
-
-
-@dataclass
-class TickSpacingListResponseDoc:
-    data: list[TickSpacingDoc]
-
-
-@dataclass
 class TickStatusDoc:
     exists: bool
     tick: int
     tick_mapping_key: str
     raw_value: str | None = None
-
-
-@dataclass
-class TokenBalanceDoc:
-    balance: str
-    decimals: int
-    name: str
-    symbol: str
-    token_address: str
-    token_id: str
 
 
 @dataclass
@@ -585,8 +773,10 @@ class TokenDoc:
     id: str
     name: str
     symbol: str
+    amm_token_program: str | None = None
     image: str | None = None
-    wrapper_program: str | None = None
+    underlying_program: str | None = None
+    underlying_token_id: str | None = None
 
 
 @dataclass
@@ -595,13 +785,26 @@ class TokenListResponseDoc:
 
 
 @dataclass
-class TokenResponseDoc:
-    data: TokenDoc
+class TopologyEdgeDoc:
+    token0: str
+    token1: str
+
+
+@dataclass
+class UsdcUsdQuote:
+    corroborated: bool
+    decimals: int
+    price: str
+    publishTime: int
+    serverTime: int
+    source: str
+    validUntil: int
 
 
 @dataclass
 class VerifyRequestDoc:
     address: str
+    challenge_id: str
     signature: str
 
 
@@ -633,27 +836,6 @@ class ApiTokenListResponseDoc:
 
 
 @dataclass
-class BalanceListResponseDoc:
-    data: list[TokenBalanceDoc]
-
-
-@dataclass
-class DeployTokenResponseDoc:
-    data: DeployTokenResult
-
-
-@dataclass
-class FunctionSchema:
-    description: str
-    function: str
-    id: str
-    inputs: list[SchemaField]
-    program: str
-    visibility: str
-    follow_up: list[str] | None = None
-
-
-@dataclass
 class GlobalConfigResponseDoc:
     data: GlobalConfigStatus
 
@@ -664,8 +846,9 @@ class LiquidityDistributionResponseDoc:
 
 
 @dataclass
-class MintTokenResponseDoc:
-    data: MintTokenResult
+class LiveCompatibilityFailure:
+    code: LiveCompatibilityFailureCode
+    program_id: str | None = None
 
 
 @dataclass
@@ -702,6 +885,9 @@ class PoolDebugResponseDoc:
 
 @dataclass
 class PoolResponseDoc(PoolStateDoc):
+    display_flipped: bool
+    base_token: TokenDoc | None = None
+    quote_token: TokenDoc | None = None
     token0_info: TokenDoc | None = None
     token1_info: TokenDoc | None = None
 
@@ -717,9 +903,17 @@ class PoolTradeDoc:
     amount1: str
     executedAt: str
     id: str
+    legIndex: int
     pool: str
     tradeType: PoolTradeTypeDoc
     transactionHash: str
+    fee0: str | None = None
+    fee1: str | None = None
+    liquidityAfter: str | None = None
+    protocolFee0: str | None = None
+    protocolFee1: str | None = None
+    sqrtPriceAfter: str | None = None
+    tickAfter: int | None = None
 
 
 @dataclass
@@ -730,6 +924,11 @@ class PoolTradesResponseDoc:
 
 @dataclass
 class PoolWithStatsDoc(PoolStateDoc):
+    display_flipped: bool
+    base_token: TokenDoc | None = None
+    quote_token: TokenDoc | None = None
+    reserve0: str | None = None
+    reserve1: str | None = None
     stats: PoolStatsDoc | None = None
     token0_info: TokenDoc | None = None
     token1_info: TokenDoc | None = None
@@ -742,18 +941,64 @@ class PoolWithStatsResponseDoc:
 
 @dataclass
 class PositionWithOwedDoc:
+    is_frozen: bool
     is_private: bool
     pool: str
-    scale0: str
-    scale1: str
     tick_lower: int
     tick_upper: int
     token_id: str
     tokens_owed0: str
     tokens_owed1: str
+    frozen_at: str | None = None
+    last_transaction_hash: str | None = None
     token0_info: TokenDoc | None = None
     token1_info: TokenDoc | None = None
-    transaction_hash: str | None = None
+
+
+@dataclass
+class ProtocolControls:
+    allowed_tokens: list[str]
+    disabled_pools: list[str]
+    global_paused: bool
+    paused_pairs: list[ProtocolPair]
+    paused_tokens: list[str]
+    pool_creation_is_open: bool
+
+
+@dataclass
+class ProtocolDeployment:
+    abi_version: int
+    amm_start_block: int
+    compatibility_fingerprint: str
+    contract_ref: str
+    contract_repository: str
+    deployment_fingerprint: str
+    freezelist_proof_version: str
+    math_version: str
+    network: str
+    profile: str
+    programs: dict[str, ProtocolProgram]
+    protocol_version: int
+    verified_at: str
+
+
+@dataclass
+class RebalanceState:
+    fee_growth_global0_x_128: str
+    fee_growth_global1_x_128: str
+    lower: RebalanceTickState
+    observed_block: int
+    sqrt_price_x_128: str
+    tick: int
+    tick_lower_hint: int
+    tick_spacing: int
+    tick_upper_hint: int
+    upper: RebalanceTickState
+
+
+@dataclass
+class RebalanceStateResponseDoc:
+    data: RebalanceState
 
 
 @dataclass
@@ -762,57 +1007,39 @@ class RouteResponseDoc:
 
 
 @dataclass
-class SwapDoc:
-    amount_remaining: str
-    amount_remaining_1: str
-    amount_remaining_2: str
-    executed_at: str
-    hops: list[SwapHopDoc]
-    id: str
-    input_amount: str
-    input_token: str
-    is_private: bool
-    nonce: str
-    output_amount: str
-    output_token: str
-    pool: str
-    recipient: str
-    swap_id: str
-    transaction: str
-    user: str
-    claim_tx: str | None = None
-    claimed_at: str | None = None
-    input_token_info: TokenDoc | None = None
-    output_token_info: TokenDoc | None = None
-    token_in_1: str | None = None
-    token_in_2: str | None = None
-    trade: str | None = None
+class RouteTopologyDoc:
+    edges: list[TopologyEdgeDoc]
+    max_hops: int
+    protocol_revision: int
+    protocol_config_observed_block: int | None = None
 
 
 @dataclass
-class SwapListResponseDoc:
-    data: list[SwapDoc]
-    pagination: PaginationMeta
+class RouteTopologyResponseDoc:
+    data: RouteTopologyDoc
 
 
 @dataclass
-class SwapResponseDoc:
-    data: SwapDoc
+class SwapEvent:
+    block: BlockResponse
+    eventIndex: int
+    eventType: str
+    maker: str
+    metadata: SwapMetadata
+    pairId: str
+    priceNative: str
+    reserves: Reserves
+    txnId: str
+    txnIndex: int
+    asset0In: str | None = None
+    asset0Out: str | None = None
+    asset1In: str | None = None
+    asset1Out: str | None = None
 
 
 @dataclass
 class TokenComplianceResponseDoc:
     data: TokenComplianceStatus
-
-
-@dataclass
-class TradingSchemaListResponse:
-    data: list[FunctionSchema]
-
-
-@dataclass
-class TradingSchemaResponse:
-    data: FunctionSchema
 
 
 @dataclass
@@ -827,6 +1054,35 @@ class UnclaimedResponseDoc:
 
 
 @dataclass
+class EventsResponse:
+    events: list[SwapEvent]
+
+
+@dataclass
+class LiveCompatibility:
+    artifacts_checked: int
+    checked_at: str
+    failures: list[LiveCompatibilityFailure]
+    observed_programs: dict[str, LiveProgramObservation]
+    status: LiveCompatibilityStatus
+    observed_artifact_vector_hash: str | None = None
+
+
+@dataclass
 class PoolListResponseDoc:
     data: list[PoolResponseDoc]
     pagination: PaginationMeta
+    valuation: UsdcUsdQuote | None = None
+
+
+@dataclass
+class ProtocolStateResponse:
+    capabilities: ProtocolCapabilities
+    controls: ProtocolControls
+    deployment: ProtocolDeployment
+    fee_configuration: ProtocolFeeConfiguration
+    freshness: ProtocolFreshness
+    live_compatibility: LiveCompatibility
+    revision: int
+    changed_at: str | None = None
+    observed_block: int | None = None

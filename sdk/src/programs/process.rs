@@ -15,7 +15,7 @@
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
 use crate::{
-    types::{CurrentAleo, ProcessNative},
+    types::{CurrentAleo, CurrentNetwork, ProcessNative},
     Address, Authorization, Deployment, Execution, Fee, Field, Identifier, PrivateKey, Program,
     ProgramID, ProvingKey, RecordPlaintext, Response, Trace, Value, VerifyingKey,
 };
@@ -24,8 +24,26 @@ use indexmap::IndexMap;
 use pyo3::prelude::*;
 use rand::rngs::StdRng;
 use snarkvm::algorithms::snark::varuna::VarunaVersion;
-use snarkvm::console::network::ConsensusVersion;
+use snarkvm::console::network::{ConsensusVersion, Network};
 use snarkvm::synthesizer::process::{deployment_cost, execution_cost, InclusionVersion};
+
+/// The consensus version in force at `block_height` on this build's network,
+/// from snarkvm's per-network activation table.
+///
+/// A transaction is judged by the rules at its *inclusion* height, so callers
+/// should pass the chain head (the facade does: `network.get_latest_height()`)
+/// — that is snarkvm's own convention (`query.current_block_height()`).  With
+/// no height, the newest version the network has *scheduled* is used.  That
+/// is a fallback for when no node is reachable, not a default to rely on: the
+/// moment a future snarkvm schedules a version at a height not yet reached,
+/// it would apply unenforced rules to a transaction broadcast now.
+///
+/// Never hardcode a version here either: the deployment-cost formula changed
+/// at V18 and a stale literal underestimates the fee, so the transaction is
+/// rejected as underpaid.
+fn consensus_version_at(block_height: Option<u32>) -> anyhow::Result<ConsensusVersion> {
+    CurrentNetwork::CONSENSUS_VERSION(block_height.unwrap_or(u32::MAX))
+}
 
 /// The Aleo process type.
 #[pyclass]
@@ -165,8 +183,15 @@ impl Process {
             .map_err(anyhow::Error::from)
     }
 
-    /// Verifies the given execution is valid. Note: This does not check that the global state root exists in the ledger.
-    fn verify_execution(&self, execution: &Execution) -> anyhow::Result<()> {
+    /// Verifies the given execution is valid under the consensus rules at
+    /// `block_height` (default: the network's newest scheduled version).
+    /// Note: This does not check that the global state root exists in the ledger.
+    #[pyo3(signature = (execution, block_height=None))]
+    fn verify_execution(
+        &self,
+        execution: &Execution,
+        block_height: Option<u32>,
+    ) -> anyhow::Result<()> {
         let execution: crate::types::ExecutionNative = execution.clone().into();
         // Build the map of program stacks referenced by the execution's transitions.
         let execution_stacks = execution
@@ -179,7 +204,7 @@ impl Process {
             })
             .collect::<anyhow::Result<IndexMap<_, _>>>()?;
         ProcessNative::verify_execution(
-            ConsensusVersion::V17,
+            consensus_version_at(block_height)?,
             VarunaVersion::V2,
             InclusionVersion::V1,
             &execution,
@@ -187,10 +212,18 @@ impl Process {
         )
     }
 
-    /// Verifies the given fee is valid. Note: This does not check that the global state root exists in the ledger.
-    fn verify_fee(&self, fee: &Fee, deployment_or_execution_id: Field) -> anyhow::Result<()> {
+    /// Verifies the given fee is valid under the consensus rules at
+    /// `block_height` (default: the network's newest scheduled version).
+    /// Note: This does not check that the global state root exists in the ledger.
+    #[pyo3(signature = (fee, deployment_or_execution_id, block_height=None))]
+    fn verify_fee(
+        &self,
+        fee: &Fee,
+        deployment_or_execution_id: Field,
+        block_height: Option<u32>,
+    ) -> anyhow::Result<()> {
         self.0.verify_fee(
-            ConsensusVersion::V17,
+            consensus_version_at(block_height)?,
             VarunaVersion::V2,
             InclusionVersion::V1,
             fee,
@@ -198,9 +231,20 @@ impl Process {
         )
     }
 
-    /// Returns the *minimum* cost in microcredits to publish the given execution (total cost, (storage cost, finalize cost)).
-    fn execution_cost(&self, execution: &Execution) -> anyhow::Result<(u64, (u64, u64))> {
-        execution_cost(&self.0, &execution.clone().into(), ConsensusVersion::V17)
+    /// Returns the *minimum* cost in microcredits to publish the given execution
+    /// (total cost, (storage cost, finalize cost)) under the fee rules at
+    /// `block_height` (default: the network's newest scheduled version).
+    #[pyo3(signature = (execution, block_height=None))]
+    fn execution_cost(
+        &self,
+        execution: &Execution,
+        block_height: Option<u32>,
+    ) -> anyhow::Result<(u64, (u64, u64))> {
+        execution_cost(
+            &self.0,
+            &execution.clone().into(),
+            consensus_version_at(block_height)?,
+        )
     }
 
     /// Synthesizes a deployment for the given program (V9+ semantics: the
@@ -217,10 +261,20 @@ impl Process {
         Ok(deployment.into())
     }
 
-    /// Returns the *minimum* cost in microcredits to publish the given deployment.
-    fn deployment_cost(&self, deployment: &Deployment) -> anyhow::Result<u64> {
-        let (minimum_cost, _) =
-            deployment_cost(&self.0, deployment.as_ref(), ConsensusVersion::V17)?;
+    /// Returns the *minimum* cost in microcredits to publish the given deployment
+    /// under the fee rules at `block_height` (default: the network's newest
+    /// scheduled version — the formula changed at V18).
+    #[pyo3(signature = (deployment, block_height=None))]
+    fn deployment_cost(
+        &self,
+        deployment: &Deployment,
+        block_height: Option<u32>,
+    ) -> anyhow::Result<u64> {
+        let (minimum_cost, _) = deployment_cost(
+            &self.0,
+            deployment.as_ref(),
+            consensus_version_at(block_height)?,
+        )?;
         Ok(minimum_cost)
     }
 }

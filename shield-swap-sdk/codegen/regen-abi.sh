@@ -3,7 +3,7 @@
 # Run from anywhere; requires the aleo + aleo-contract-abi-generator packages on python3's path.
 set -euo pipefail
 cd "$(dirname "$0")"
-PROGRAM="${1:-shield_swap_v3.aleo}"
+PROGRAM="${1:-shield_swap.aleo}"
 PYTHON="${PYTHON:-python3}"
 "$PYTHON" - "$PROGRAM" <<'EOF'
 import json
@@ -46,6 +46,19 @@ abi = aleo.abi.generate_abi(src, "testnet", imports=deps)
 json.dump(abi, open("shield_swap.abi.json", "w"), indent=1)
 print(f"wrote shield_swap.abi.json ({len(abi['structs'])} structs, "
       f"{len(abi['records'])} records, {len(abi['mappings'])} mappings)")
+
+# The routers are pinned as DRIFT GUARDS only (test_drift.py + the input-count
+# parity test) — no Python is generated from them: their calls reuse the
+# core's structs and the client assembles inputs positionally.
+for router in ("shield_swap_router.aleo", "shield_swap_lp_router.aleo",
+               "shield_swap_rebalance_router.aleo"):
+    seen = {}
+    load_deps(router, seen)
+    src = seen.pop(router)
+    abi = aleo.abi.generate_abi(src, "testnet", imports=list(seen.items()))
+    out = router.removesuffix(".aleo") + ".abi.json"
+    json.dump(abi, open(out, "w"), indent=1)
+    print(f"wrote {out} ({len(abi['functions'])} functions)")
 EOF
 "$PYTHON" -m aleo.codegen --abi shield_swap.abi.json \
     --out ../python/aleo_shield_swap/_generated.py

@@ -2,7 +2,16 @@
 # Refetch the DEX API's OpenAPI spec and regenerate the response models.
 set -euo pipefail
 cd "$(dirname "$0")"
-BASE="${1:-https://amm-api.dev.provable.com}"
+# The API is deployed per network on separate hosts; pass the network (or a
+# full base URL) as $1. Never point this at amm-api.dev.provable.com — that
+# host indexes the pre-migration shield_swap_v3.aleo.
+TARGET="${1:-testnet}"
+case "$TARGET" in
+  mainnet) BASE="https://api.swap.shield.fi" ;;
+  testnet) BASE="https://api.testnet.swap.shield.fi" ;;
+  *)       BASE="$TARGET" ;;
+esac
+echo "fetching spec from $BASE"
 PYTHON="${PYTHON:-python3}"
 curl -sf "${BASE}/openapi.json" | "$PYTHON" -m json.tool > amm_api.openapi.json
 "$PYTHON" -m datamodel_code_generator \

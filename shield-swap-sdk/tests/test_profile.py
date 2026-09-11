@@ -59,3 +59,27 @@ def test_existing_key_imported_from_file(tmp_path, monkeypatch):
     monkeypatch.setenv("SHIELD_SWAP_PRIVATE_KEY_FILE", str(key_file))
     p = Profile.load_or_create(tmp_path / "home")
     assert p.address == str(pk.address)
+
+
+def test_tilde_in_home_is_expanded(tmp_path, monkeypatch):
+    """A "~/..." string must not create a literal ~ directory in the cwd —
+    that would write the private key somewhere no later run looks."""
+    from pathlib import Path
+    from aleo_shield_swap.profile import Profile
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    profile = Profile.load_or_create("~/.shield-swap-tilde")
+    assert profile.home == tmp_path / ".shield-swap-tilde"
+    assert not (tmp_path / "~").exists(), "created a literal ~ directory"
+
+
+def test_tilde_in_shield_swap_home_is_expanded(tmp_path, monkeypatch):
+    from aleo_shield_swap.profile import Profile
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("SHIELD_SWAP_HOME", "~/from-env")
+    monkeypatch.chdir(tmp_path)
+    assert Profile.default_home() == tmp_path / "from-env"
+    assert Profile.load_or_create().home == tmp_path / "from-env"
+    assert not (tmp_path / "~").exists()

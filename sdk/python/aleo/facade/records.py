@@ -13,9 +13,8 @@ auto-source a credits record for a private fee.
     scanner is a *hosted* service, so :meth:`RecordsModule.register` sends your
     account's **view key** (sealed-box encrypted in transit) to that service —
     which can then decrypt every record you own.  This is a real privacy
-    tradeoff.  If you do not want to share your view key with a hosted scanner,
-    point ``aleo.records.scanner`` at a **self-hosted** endpoint, or assign your
-    own :class:`~aleo._facade_common.RecordProvider` implementation to
+    tradeoff.  To keep the view key out of the service, assign your own
+    :class:`~aleo._facade_common.RecordProvider` implementation to
     ``aleo.record_provider``.
 """
 from __future__ import annotations
@@ -37,8 +36,7 @@ class RecordsModule:
         This module talks to a **delegated record scanner**.  Registering an
         account (:meth:`register`) shares that account's **view key** with the
         scanning service, which can then decrypt every record the account owns.
-        For a self-custodial alternative, repoint :attr:`scanner` at a
-        self-hosted endpoint or assign a custom
+        To avoid that, assign a custom
         :class:`~aleo._facade_common.RecordProvider` to ``aleo.record_provider``.
 
     Parameters
@@ -73,9 +71,10 @@ class RecordsModule:
         (see :func:`~aleo.facade.provider.scanner_base`); its base, creds
         (api key + consumer id, shared with the delegated prover), network and
         transport are all derived from the client's
-        :class:`~aleo.facade.provider.HTTPProvider`.  Point :attr:`scanner`
-        elsewhere to use a self-hosted scanning endpoint.
+        :class:`~aleo.facade.provider.HTTPProvider`.  Assign :attr:`scanner` to
+        replace it.
         """
+        from .._client_common import requires_credentials
         from ..record_scanner import RecordScanner
         from .provider import scanner_base
 
@@ -84,15 +83,20 @@ class RecordsModule:
         if base is None:
             raise RuntimeError(
                 "The hosted record scanner is only available on the Provable API "
-                f"(api.provable.com); this client points at {provider.url!r}. "
+                f"(edge.provable.com/api or api.provable.com); this client points at "
+                f"{provider.url!r}. "
                 "Assign your own scanner (aleo.records.scanner = RecordScanner(...)) "
                 "or a custom aleo.record_provider to scan against this endpoint."
             )
+        # Credentials travel only to the host that gates the scanner behind
+        # them; on the open edge ambient/legacy credentials are dropped so the
+        # scanner never tries to mint a JWT there.
+        credentialed = requires_credentials(provider.url)
         return RecordScanner(
             base,
             network=provider.network,
-            api_key=provider.api_key,
-            consumer_id=getattr(provider, "consumer_id", None),
+            api_key=provider.api_key if credentialed else None,
+            consumer_id=getattr(provider, "consumer_id", None) if credentialed else None,
             transport=getattr(provider, "_transport", None),
         )
 
@@ -101,8 +105,7 @@ class RecordsModule:
         """The underlying :class:`~aleo.record_scanner.RecordScanner` (escape hatch).
 
         Built lazily on first access from the client's provider config.  Assign a
-        pre-configured scanner (e.g. one pointed at a self-hosted endpoint) to
-        override the default hosted service and keep your view key private.
+        pre-configured scanner to override the default.
         """
         if self._scanner is None:
             self._scanner = self._build_scanner()
@@ -110,6 +113,16 @@ class RecordsModule:
 
     @scanner.setter
     def scanner(self, scanner: Any) -> None:
+        """Replace the underlying record scanner.
+
+        Assigning here bypasses the lazy default, so the client's provider config
+        is not consulted afterwards.
+
+        Parameters
+        ----------
+        scanner:
+            A pre-configured :class:`~aleo.record_scanner.RecordScanner`.
+        """
         self._scanner = scanner
 
     # ── Registration / lifecycle ─────────────────────────────────────────────
@@ -127,10 +140,9 @@ class RecordsModule:
             **view key** (sealed-box encrypted in transit) to the scanning
             service so it can decrypt the records you own on your behalf.  The
             service can therefore see every record belonging to *account*.  If
-            that is not acceptable, repoint :attr:`scanner` at a self-hosted
-            endpoint before calling :meth:`register`, or supply your own
+            that is not acceptable, supply your own
             :class:`~aleo._facade_common.RecordProvider` via
-            ``aleo.record_provider``.
+            ``aleo.record_provider`` instead of registering.
 
         Parameters
         ----------

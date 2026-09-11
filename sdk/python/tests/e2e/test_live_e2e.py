@@ -35,7 +35,8 @@ Env vars
     ``ALEO_E2E_PRIVATE_KEY_MAINNET`` take precedence for that network when set
     (an Aleo address is identical across networks, but funding is per-network).
 ``ALEO_E2E_ENDPOINT``
-    API origin.  Default ``https://api.provable.com`` — the SDK adds ``/v2`` for
+    API service root.  Default ``https://edge.provable.com/api`` (open, no
+    credentials) — the SDK adds ``/v2`` for
     reads and ``/prove`` / ``/scanner`` for the services automatically. (A legacy
     ``.../v2`` value is still accepted.)
 ``ALEO_E2E_API_KEY`` / ``ALEO_E2E_CONSUMER_ID``
@@ -65,9 +66,14 @@ from aleo import Aleo, HTTPProvider
 pytestmark = pytest.mark.live
 
 _PRIVATE_KEY = os.environ.get("ALEO_E2E_PRIVATE_KEY")
-_ENDPOINT = os.environ.get("ALEO_E2E_ENDPOINT", "https://api.provable.com")
+_ENDPOINT = os.environ.get("ALEO_E2E_ENDPOINT", "https://edge.provable.com/api")
 _API_KEY = os.environ.get("ALEO_E2E_API_KEY")
 _CONSUMER_ID = os.environ.get("ALEO_E2E_CONSUMER_ID")
+# Only the legacy credentialed host needs DPS/scanner credentials; the default
+# edge is open, so credential-gated tests run there with none.
+from aleo._client_common import requires_credentials  # noqa: E402
+
+_MISSING_CREDS = requires_credentials(_ENDPOINT) and (_API_KEY is None or _CONSUMER_ID is None)
 _PROVER_URI = os.environ.get("ALEO_E2E_PROVER_URI")
 
 # Skip the ENTIRE module (collection still succeeds) when the funded key is
@@ -157,8 +163,8 @@ def _client(network: str, *, with_creds: bool) -> Aleo:
 
 
 @pytest.mark.skipif(
-    _API_KEY is None or _CONSUMER_ID is None,
-    reason="ALEO_E2E_API_KEY / ALEO_E2E_CONSUMER_ID not set — DPS creds required.",
+    _MISSING_CREDS,
+    reason="legacy host needs ALEO_E2E_API_KEY / ALEO_E2E_CONSUMER_ID (DPS creds).",
 )
 def test_delegate_transfer_public_live(network: str) -> None:
     """REAL delegated proving of a tiny ``credits.aleo/transfer_public``.
@@ -193,8 +199,8 @@ def test_delegate_transfer_public_live(network: str) -> None:
 
 
 @pytest.mark.skipif(
-    _API_KEY is None or _CONSUMER_ID is None,
-    reason="ALEO_E2E_API_KEY / ALEO_E2E_CONSUMER_ID not set — hosted scanner creds required.",
+    _MISSING_CREDS,
+    reason="legacy host needs ALEO_E2E_API_KEY / ALEO_E2E_CONSUMER_ID (scanner creds).",
 )
 def test_hosted_record_scanner_live(network: str) -> None:
     """Register with the hosted scanner and query owned credits records.
@@ -232,8 +238,8 @@ def test_hosted_record_scanner_live(network: str) -> None:
 
 
 @pytest.mark.skipif(
-    _API_KEY is None or _CONSUMER_ID is None,
-    reason="ALEO_E2E_API_KEY / ALEO_E2E_CONSUMER_ID not set — DPS + scanner creds required.",
+    _MISSING_CREDS,
+    reason="legacy host needs ALEO_E2E_API_KEY / ALEO_E2E_CONSUMER_ID (DPS + scanner creds).",
 )
 def test_private_roundtrip_live(network: str) -> None:
     """End-to-end private roundtrip on live {testnet, mainnet}.

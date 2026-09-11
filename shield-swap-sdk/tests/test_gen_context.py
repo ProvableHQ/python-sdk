@@ -18,16 +18,26 @@ def test_tier1_lifecycle_and_conversation_pattern():
     assert "from_profile" in page and "onboard" in page
     assert "`status()` first" in page                  # conversation pattern
     assert "recommend" in page.lower()                 # minting/LP recommendations
-    assert "invite code" in page.lower()
+    # Access is granted by authentication alone; a referral code is optional
+    # attribution.  The page must say so and must never tell an agent to
+    # demand an invite from the user.
+    assert "referral code" in page.lower()
+    assert "optional" in page.lower()
+    assert "invite" not in page.lower()
 
 
 def test_tier2_covers_building_blocks_and_stages():
     page = _render()
-    for verb in ("swap_many", "claim_swap_output", "collect_all",
+    for method in ("swap_many", "claim_swap_output", "collect_all",
                  "increase_liquidity", "decrease_liquidity",
                  "derive_pool_key", "simulate", "blinded_identity_at",
-                 "redeem_code", "request_airdrop"):
-        assert verb in page, verb
+                 "redeem_code", "referral_status", "my_referral_code",
+                 "request_airdrop",
+                 # 2026-09 surface: fill receipts, rebalancing, routing graph
+                 "get_swap_execution", "plan_rebalance", "rebalance_position",
+                 "get_route_topology", "get_unclaimed", "get_protocol_state"):
+        assert method in page, method
+    assert "rebalance" in page.lower() and "testnet" in page.lower()
     # stages rendered FROM the list, not hand-written
     from aleo_shield_swap.lifecycle import REGISTRATION_STAGES
     for stage in REGISTRATION_STAGES:
@@ -42,4 +52,14 @@ def test_committed_page_is_current():
 
 
 def test_page_stays_compact():
-    assert len(_render()) < 20_000        # ~5k tokens — cheap context, enforced
+    # ~6.5k tokens — cheap context, enforced.  Raised 20k → 22k with the
+    # router-dispatch surface (wrapper_proofs / withdrawal params); 22k → 24k
+    # when get_pools/get_tokens/derive_pool_key/derive_tick_key picked up full
+    # docstrings (they rendered blank before); 24k → 26k for the swap/swap_many
+    # footgun warnings (build-time counter reservation, refusing an unusable
+    # quote). 24k had been squeezed to 134 chars of headroom, which any further
+    # edit broke — this is deliberate room, not another squeeze.  26k → 32k
+    # (2026-09) for the upstream sync: rebalancing (plan + execute, with the
+    # price-fragility warning agents must relay), fill receipts, the routing
+    # graph, and the indexer's unclaimed/protocol-state views.
+    assert len(_render()) < 32_000

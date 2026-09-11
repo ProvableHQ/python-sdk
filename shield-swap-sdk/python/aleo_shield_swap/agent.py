@@ -2,11 +2,11 @@
 
 ``shield_swap_tools()`` returns tool definitions in the Claude API ``tools=``
 shape (name / description / input_schema) — they plug into any framework
-that speaks JSON-schema tools.  ``dispatch_tool(dex, name, args)`` executes
-one against a :class:`~aleo_shield_swap.client.ShieldSwap` (write verbs run
+that accepts JSON-schema tools.  ``dispatch_tool(dex, name, args)`` executes
+one against a :class:`~aleo_shield_swap.client.ShieldSwap` (write methods run
 ``.delegate()``) and returns a JSON-serializable result.  The surface is the
 curated lifecycle set — swap handles and counters live in the profile
-journal, so agents never carry state between calls; the long tail of verbs
+journal, so agents never carry state between calls; the long tail of methods
 is reachable by writing Python against the client instead.
 """
 from __future__ import annotations
@@ -36,8 +36,11 @@ def _serialize(value: Any) -> Any:
 
 
 def _h_get_pools(dex: Any, args: dict[str, Any]) -> Any:
+    # The API's pool document carries the fee as ``fee_percent`` — a legacy
+    # name for the fee in basis points ("2" means 0.02%).  There is no ``fee``
+    # attribute on it; that lives on the chain-side PoolState.
     return [{"key": p.key, "token0": p.token0, "token1": p.token1,
-             "fee": p.fee,
+             "fee_bps": int(p.fee_percent),
              "token0_symbol": p.token0_info.symbol if p.token0_info else None,
              "token1_symbol": p.token1_info.symbol if p.token1_info else None}
             for p in dex.api.get_pools()]
@@ -48,10 +51,10 @@ def _h_get_balances(dex: Any, args: dict[str, Any]) -> Any:
 
 
 def _h_setup_account(dex: Any, args: dict[str, Any]) -> Any:
-    return _serialize(dex.onboard(invite_code=args.get("invite_code")))
+    return _serialize(dex.onboard(referral_code=args.get("referral_code")))
 
 
-def _h_redeem_invite(dex: Any, args: dict[str, Any]) -> Any:
+def _h_redeem_referral_code(dex: Any, args: dict[str, Any]) -> Any:
     return _serialize(dex.api.redeem_code(args["code"]))
 
 
@@ -105,16 +108,64 @@ def _h_collect_all(dex: Any, args: dict[str, Any]) -> Any:
     return _serialize(dex.collect_all())
 
 
+def _h_get_swap_execution(dex: Any, args: dict[str, Any]) -> Any:
+    return _serialize(dex.get_swap_execution(args["swap_id"]))
+
+
+def _opt_int(args: dict[str, Any], key: str) -> Any:
+    value = args.get(key)
+    return int(value) if value is not None else None
+
+
+def _rebalance_kwargs(args: dict[str, Any]) -> dict[str, Any]:
+    return dict(pool_key=args["pool_key"], position_token_id=args["position_token_id"],
+                tick_lower=int(args["tick_lower"]), tick_upper=int(args["tick_upper"]),
+                liquidity_target=_opt_int(args, "liquidity_target"),
+                max_funding0=_opt_int(args, "max_funding0"),
+                max_funding1=_opt_int(args, "max_funding1"))
+
+
+#: RebalancePlan fields that are raw u128 amounts — reported as strings so
+#: JSON consumers that cannot represent integers above 2^53 keep them exact
+#: (the tool descriptions promise "raw base units as strings").
+_PLAN_AMOUNT_FIELDS = ("old_liquidity", "fees_accrued0", "fees_accrued1",
+                       "recovered0", "recovered1", "required0", "required1",
+                       "funded0", "funded1", "refund0", "refund1", "liquidity_target")
+
+
+def _plan_json(plan: Any) -> dict[str, Any]:
+    out = _serialize(plan)
+    for key in _PLAN_AMOUNT_FIELDS:
+        if out.get(key) is not None:
+            out[key] = str(out[key])
+    return out
+
+
+def _h_plan_rebalance(dex: Any, args: dict[str, Any]) -> Any:
+    return _plan_json(dex.plan_rebalance(**_rebalance_kwargs(args)))
+
+
+def _h_rebalance_position(dex: Any, args: dict[str, Any]) -> Any:
+    result = _serialize(dex.rebalance_position(**_rebalance_kwargs(args)).delegate())
+    if isinstance(result.get("plan"), dict):
+        for key in _PLAN_AMOUNT_FIELDS:
+            if result["plan"].get(key) is not None:
+                result["plan"][key] = str(result["plan"][key])
+    return result
+
+
 _TOOLS: list[tuple[str, str, dict[str, Any], Callable[[Any, dict[str, Any]], Any]]] = [
     ("setup_account",
-     "Register this machine's shield-swap profile end to end (auth, invite "
-     "redeem, credentials, airdrop, funded check). Pass invite_code on the "
-     "first run; re-running is a safe no-op that reports what was skipped.",
-     _schema({"invite_code": _S}, []), _h_setup_account),
-    ("redeem_invite",
-     "Redeem an invite code for the authenticated account (setup_account "
-     "does this for you; use this only for manual control).",
-     _schema({"code": _S}, ["code"]), _h_redeem_invite),
+     "Register this machine's shield-swap profile end to end (auth, "
+     "credentials, airdrop, funded check). Nothing is required from the "
+     "user: access is granted by authentication alone. referral_code is "
+     "optional — pass one only if the user has a friend's code to credit. "
+     "Re-running is a safe no-op that reports what was skipped.",
+     _schema({"referral_code": _S}, []), _h_setup_account),
+    ("redeem_referral_code",
+     "Credit a referrer by redeeming their referral code (optional, once "
+     "per account; setup_account does this when given referral_code).",
+     _schema({"code": _S}, ["code"]), _h_redeem_referral_code),
     ("request_airdrop",
      "Queue the test-token airdrop (private records; one claim per address "
      "per 15 minutes). Defaults to the profile's own address.",
@@ -154,6 +205,37 @@ _TOOLS: list[tuple[str, str, dict[str, Any], Callable[[Any, dict[str, Any]], Any
      "Claim every finalized swap and collect owed LP fees, from the journal. "
      "Safe to run any time; reports what is still pending.",
      _schema({}, []), _h_collect_all),
+    ("get_swap_execution",
+     "The chain's fill receipt for a swap: executed height and, per pool hop, "
+     "amounts in/out, gross fee, protocol fee, LP fee, and post-trade price/"
+     "tick/liquidity. Survives the claim (unlike the swap output). Returns "
+     "null until the swap finalizes.",
+     _schema({"swap_id": _S}, ["swap_id"]), _h_get_swap_execution),
+    ("plan_rebalance",
+     "Quote moving a position to a new tick range in one transaction (testnet "
+     "only — the rebalance router is not on mainnet). Size with EXACTLY one "
+     "of liquidity_target (exact successor liquidity) or max_funding0 AND "
+     "max_funding1 (extra raw units the user will add; 0 and 0 = reuse only "
+     "what the old position returns). Reports recovered, required, funded, "
+     "and refund amounts per token; show them to the user before executing. "
+     "Amounts are raw base units as strings.",
+     _schema({"pool_key": _S, "position_token_id": _S, "tick_lower": _I,
+              "tick_upper": _I, "liquidity_target": _S, "max_funding0": _S,
+              "max_funding1": _S},
+             ["pool_key", "position_token_id", "tick_lower", "tick_upper"]),
+     _h_plan_rebalance),
+    ("rebalance_position",
+     "Execute the rebalance plan_rebalance described: burn the old position, "
+     "settle its principal and fees, add any funding, and mint the successor "
+     "range — atomically. Same sizing arguments as plan_rebalance (the plan is "
+     "rebuilt at submit time). Reverts if the pool price moved since planning; "
+     "on revert, re-plan and resubmit. Returns the new position id, the "
+     "transaction id, and the submitted plan.",
+     _schema({"pool_key": _S, "position_token_id": _S, "tick_lower": _I,
+              "tick_upper": _I, "liquidity_target": _S, "max_funding0": _S,
+              "max_funding1": _S},
+             ["pool_key", "position_token_id", "tick_lower", "tick_upper"]),
+     _h_rebalance_position),
 ]
 
 

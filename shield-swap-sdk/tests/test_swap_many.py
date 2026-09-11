@@ -36,10 +36,14 @@ def dex(tmp_path, monkeypatch):
     monkeypatch.setattr(ShieldSwap, "get_pool",
                         lambda self, key: type("P", (), {"token0": "t0",
                                                          "token1": "t1"})())
+    # A real batch always has a quote; swap_many refuses without one, because
+    # the spot fallback sets amount_out_min above what the pool can pay.
     monkeypatch.setattr(ShieldSwap, "_quote_expected_out",
-                        lambda self, **kw: None)
+                        lambda self, **kw: 990_000)
     monkeypatch.setattr(ShieldSwap, "_token_program",
                         lambda self, token_id: "tok.aleo")
+    # Nothing used on chain unless a test says otherwise.
+    monkeypatch.setattr(ShieldSwap, "_blinded_address_used", lambda self, ba: False)
     return d
 
 
@@ -59,7 +63,7 @@ def _fake_swap_factory(fail_counters=()):
                                   token_in_id=token_in_id, token_out_id="t1",
                                   pool_key=pool_key, amount_in=amount_in,
                                   transaction_id=f"tx{identity.counter}",
-                                  program="shield_swap_v3.aleo")
+                                  program="shield_swap.aleo")
         return _Call()
 
     return fake_swap, calls
@@ -123,17 +127,24 @@ def test_quote_expected_out_converts_units_both_ways(tmp_path, monkeypatch):
         type("T", (), {"address": "tout", "decimals": 6})()])
     seen = {}
 
-    def fake_route(*, token_in, token_out, amount_in):
+    def fake_route(*, token_in, token_out, amount_in, pool_key=None):
         seen["amount_in"] = str(amount_in)
+        seen["pool_key"] = pool_key
         return type("R", (), {"estimated_amount_out": "1089.461274"})()
 
     monkeypatch.setattr(dex.api, "get_route", fake_route)
     out = dex._quote_expected_out(token_in_id="tin", token_out_id="tout",
-                                  amount_in=10**19)
+                                  amount_in=10**19, pool_key="5field")
     assert seen["amount_in"] == "10"           # base -> canonical decimal
+    # The quote is PINNED to the pool being traded: /route otherwise answers
+    # with the router's best path (possibly multi-hop through a deeper pool),
+    # and a floor derived from that is one the traded pool cannot pay — the
+    # swap proves, broadcasts, and is rejected at finalize (seen live on
+    # testnet, 2026-09-03: a 2-hop quote 165x the direct pool's output).
+    assert seen["pool_key"] == "5field"
     assert out == 1089461274                   # canonical -> base units
     assert dex._quote_expected_out(token_in_id="unknown", token_out_id="tout",
-                                   amount_in=1) is None
+                                   amount_in=1, pool_key="5field") is None
 
 
 def test_swap_many_partitions_distinct_records(dex, monkeypatch):
@@ -166,3 +177,166 @@ def test_swap_many_fails_cleanly_when_records_run_out(dex, monkeypatch):
     assert len(report.handles) == 3        # one per distinct record
     assert len(report.failures) == 2
     assert all("distinct unspent record" in f["error"] for f in report.failures)
+
+
+# ── Quote failures must not become bad trade parameters ──────────────────────
+
+def test_swap_many_refuses_without_a_quote(dex, monkeypatch):
+    """A missing quote would set amount_out_min above what the pool can pay, so
+    every swap would be proved, broadcast and rejected. Refuse first."""
+    from aleo_shield_swap.errors import ShieldSwapError
+
+    monkeypatch.setattr(ShieldSwap, "_quote_expected_out", lambda self, **kw: None)
+    with pytest.raises(ShieldSwapError, match="no route quote"):
+        dex.swap_many(pool_key="5field", token_in_id="t0",
+                      amount_in=10**6, count=3)
+    assert dex.journal.counter_cursor() == 0      # nothing reserved or spent
+
+
+def test_swap_many_allows_no_quote_at_full_slippage(dex, monkeypatch):
+    """slippage_bps=10000 means "accept any output", so no quote is needed."""
+    monkeypatch.setattr(ShieldSwap, "_quote_expected_out", lambda self, **kw: None)
+    dex.swap_many(pool_key="5field", token_in_id="t0", amount_in=10**6,
+                  count=1, slippage_bps=10_000)
+    assert dex.journal.counter_cursor() == 1      # it proceeded
+
+
+def test_quote_propagates_auth_failure():
+    """'could not ask' is not 'no route' — surfacing beats a bad min-out.
+
+    Built outside the ``dex`` fixture on purpose: that fixture patches
+    ``_quote_expected_out`` on the class, which would mask the real method.
+    """
+    from aleo_shield_swap.errors import NotAuthenticatedError
+
+    class _Api:
+        def get_route(self, **_):
+            raise NotAuthenticatedError("no session")
+
+    fresh = ShieldSwap(_Facade())
+    fresh.api = _Api()
+    fresh._token_decimals = lambda _tid: 6   # registry known, route not askable
+    with pytest.raises(NotAuthenticatedError):
+        fresh._quote_expected_out(token_in_id="t0", token_out_id="t1",
+                                  amount_in=10**6, pool_key="5field")
+
+
+def test_swap_many_accepts_a_caller_supplied_quote(dex, monkeypatch):
+    """expected_out skips the route quote — the escape hatch the refusal
+    message points callers at, so it must actually exist."""
+    called = {"n": 0}
+
+    def _never(self, **kw):
+        called["n"] += 1
+        return None
+
+    monkeypatch.setattr(ShieldSwap, "_quote_expected_out", _never)
+    dex.swap_many(pool_key="5field", token_in_id="t0", amount_in=10**6,
+                  count=1, expected_out=990_000)
+    assert called["n"] == 0, "should not have quoted"
+    assert dex.journal.counter_cursor() == 1
+
+
+def test_swap_many_skips_counters_already_used_on_chain(dex, monkeypatch):
+    """A fresh journal for an account with history reserved counters 0 and 1
+    — both long used on chain — and both swaps were rejected at finalize
+    (live, 2026-09-03).  Reservation must seed the cursor past the used run
+    and verify each identity against the chain before spending a proof."""
+    used = {f"ba{c}" for c in range(5)} | {"ba7"}     # 0..4 used, gap at 5,6, 7 used
+    monkeypatch.setattr(ShieldSwap, "_blinded_address_used",
+                        lambda self, ba: ba in used)
+    fake, calls = _fake_swap_factory()
+    monkeypatch.setattr(ShieldSwap, "swap", fake)
+    report = dex.swap_many(pool_key="1field", token_in_id="t0", amount_in=5, count=3)
+    assert calls == [5, 6, 8]                         # skipped 0..4 and 7
+    assert [h.swap_id for h in report.handles] == ["s5", "s6", "s8"]
+    assert report.failures == []
+    assert dex.journal.counter_cursor() == 9
+    # The used run 0..4 is retired in one counters_skipped event; nothing is
+    # logged as a swap failure, because nothing failed.
+    events = dex.journal.events()
+    assert [e["type"] for e in events if e["type"] == "swap_failed"] == []
+    assert any(e["type"] == "counters_skipped" and e["through"] == 4 for e in events)
+
+
+def test_reserve_identities_gallops_when_the_journal_is_behind(dex, monkeypatch):
+    """A journal at cursor 5 for an account that has since swapped 300 times
+    elsewhere (another machine, the async client, track=False) must find the
+    free run in O(log n) probes and retire the used run in one event — not
+    burn ~300 counters one reserve-probe-append at a time."""
+    probes = []
+
+    def used(self, ba):
+        probes.append(ba)
+        return int(ba[2:]) <= 300
+
+    monkeypatch.setattr(ShieldSwap, "_blinded_address_used", used)
+    dex.journal.reserve_counters(5)                  # journal believes 0..4 are issued
+    idents = dex._reserve_identities(object(), 2)
+    assert [i.counter for i in idents] == [301, 302]
+    assert len(probes) < 90                          # 64-window + gallop + bisect, not ~300
+    events = dex.journal.events()
+    assert [e for e in events if e["type"] == "swap_failed"] == []
+    assert any(e["type"] == "counters_skipped" and e["through"] == 300 for e in events)
+    assert dex.journal.counter_cursor() == 303
+
+
+def test_swap_many_scanner_retry_does_not_sleep_after_the_last_attempt(dex, monkeypatch):
+    sleeps = []
+    monkeypatch.setattr("aleo_shield_swap.client.time.sleep", lambda s: sleeps.append(s))
+
+    class _Down:
+        def find(self, *a, **k):
+            raise ConnectionError("scanner down")
+
+    dex._aleo.record_provider = _Down()
+    fake, _ = _fake_swap_factory()
+    monkeypatch.setattr(ShieldSwap, "swap", fake)
+    with pytest.raises(ConnectionError):
+        dex.swap_many(pool_key="1field", token_in_id="t0", amount_in=5, count=1)
+    assert sleeps == [3.0, 6.0]                      # back-off between tries, none after the last
+
+
+def test_reserve_identities_is_shared_by_single_swaps(dex, monkeypatch):
+    used = {"ba0", "ba1"}
+    monkeypatch.setattr(ShieldSwap, "_blinded_address_used",
+                        lambda self, ba: ba in used)
+    idents = dex._reserve_identities(object(), 2)
+    assert [i.counter for i in idents] == [2, 3]
+    assert dex.journal.counter_cursor() == 4
+
+
+def test_swap_many_tolerates_a_transient_scanner_error(dex, monkeypatch):
+    """One reset connection to the record scanner mid-batch must not abort a
+    batch whose earlier swaps are already broadcast (live, 2026-09-03:
+    'Connection aborted' from the scanner between swap 1 and swap 2)."""
+    calls = {"n": 0}
+    real_find = dex._aleo.record_provider.find
+
+    def flaky_find(account, program=None, unspent=True):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise ConnectionError("Connection aborted.")
+        return real_find(account, program=program, unspent=unspent)
+
+    monkeypatch.setattr(dex._aleo.record_provider, "find", flaky_find)
+    monkeypatch.setattr("aleo_shield_swap.client.time.sleep", lambda s: None)
+    fake, calls_made = _fake_swap_factory()
+    monkeypatch.setattr(ShieldSwap, "swap", fake)
+    report = dex.swap_many(pool_key="1field", token_in_id="t0", amount_in=5, count=3)
+    assert calls_made == [0, 1, 2] and report.failures == []
+
+
+def test_reserve_identities_reserves_the_batch_in_one_journal_event(dex, monkeypatch):
+    """One lock + one counters_reserved event per batch, not per counter,
+    and each identity derived exactly once."""
+    derived = []
+    monkeypatch.setattr(
+        "aleo_shield_swap.client.blinded_identity_at",
+        lambda aleo, acct, prog, c: derived.append(c) or type(
+            "I", (), {"counter": c, "blinding_factor": f"bf{c}", "blinded_address": f"ba{c}"})())
+    idents = dex._reserve_identities(object(), 5)
+    assert [i.counter for i in idents] == [0, 1, 2, 3, 4]
+    reserved = [e for e in dex.journal.events() if e["type"] == "counters_reserved"]
+    assert len(reserved) == 1 and reserved[0]["counters"] == [0, 1, 2, 3, 4]
+    assert sorted(derived) == [0, 1, 2, 3, 4]                # no double derivation

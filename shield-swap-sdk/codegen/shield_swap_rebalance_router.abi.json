@@ -1,0 +1,2324 @@
+{
+ "program": "shield_swap_rebalance_router.aleo",
+ "structs": [
+  {
+   "path": [
+    "MerkleProof"
+   ],
+   "fields": [
+    {
+     "name": "siblings",
+     "ty": {
+      "Array": {
+       "element": {
+        "Primitive": "Field"
+       },
+       "length": 16
+      }
+     }
+    },
+    {
+     "name": "leaf_index",
+     "ty": {
+      "Primitive": {
+       "UInt": "U32"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "path": [
+    "RebalanceRequest"
+   ],
+   "fields": [
+    {
+     "name": "old_liquidity",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "recovered0",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "recovered1",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "funded0",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "funded1",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "refund0",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "refund1",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "liquidity_target",
+     "ty": {
+      "Primitive": {
+       "UInt": "U128"
+      }
+     }
+    },
+    {
+     "name": "mint",
+     "ty": {
+      "Struct": {
+       "path": [
+        "MintPositionRequest"
+       ],
+       "program": "shield_swap.aleo"
+      }
+     }
+    },
+    {
+     "name": "deadline",
+     "ty": {
+      "Primitive": {
+       "UInt": "U32"
+      }
+     }
+    }
+   ]
+  }
+ ],
+ "records": [],
+ "mappings": [],
+ "storage_variables": [],
+ "functions": [
+  {
+   "name": "rebalance_plain_plain_none",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "PositionNFT"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "RebalanceRequest"
+        ],
+        "program": "shield_swap_rebalance_router.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "RebalanceAssets"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    }
+   ],
+   "outputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "PositionNFT"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    "DynamicRecord",
+    "DynamicRecord",
+    "DynamicRecord",
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "MintComplianceRecord"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    "Final"
+   ]
+  },
+  {
+   "name": "rebalance_plain_plain_one",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "PositionNFT"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Private"
+     }
+    },
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "RebalanceRequest"
+        ],
+        "program": "shield_swap_rebalance_router.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "RebalanceAssets"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    }
+   ],
+   "outputs": [
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "PositionNFT"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    "DynamicRecord",
+    "DynamicRecord",
+    "DynamicRecord",
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "MintComplianceRecord"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    "Final"
+   ]
+  },
+  {
+   "name": "rebalance_plain_plain_both",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "PositionNFT"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Private"
+     }
+    },
+    "DynamicRecord",
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "RebalanceRequest"
+        ],
+        "program": "shield_swap_rebalance_router.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "RebalanceAssets"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    }
+   ],
+   "outputs": [
+    "DynamicRecord",
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "PositionNFT"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    "DynamicRecord",
+    "DynamicRecord",
+    "DynamicRecord",
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "MintComplianceRecord"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    "Final"
+   ]
+  },
+  {
+   "name": "rebalance_wrapped_plain_none",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "PositionNFT"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap_rebalance_router.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "RebalanceRequest"
+        ],
+        "program": "shield_swap_rebalance_router.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "RebalanceAssets"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    }
+   ],
+   "outputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "PositionNFT"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    "DynamicRecord",
+    "DynamicRecord",
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "MintComplianceRecord"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    "Final"
+   ]
+  },
+  {
+   "name": "rebalance_wrapped_plain_fund0",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "PositionNFT"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Private"
+     }
+    },
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap_rebalance_router.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap_rebalance_router.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "RebalanceRequest"
+        ],
+        "program": "shield_swap_rebalance_router.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "RebalanceAssets"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    }
+   ],
+   "outputs": [
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "PositionNFT"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    "DynamicRecord",
+    "DynamicRecord",
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "MintComplianceRecord"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    "Final"
+   ]
+  },
+  {
+   "name": "rebalance_wrapped_plain_fund1",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "PositionNFT"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Private"
+     }
+    },
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap_rebalance_router.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "RebalanceRequest"
+        ],
+        "program": "shield_swap_rebalance_router.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "RebalanceAssets"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    }
+   ],
+   "outputs": [
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "PositionNFT"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    "DynamicRecord",
+    "DynamicRecord",
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "MintComplianceRecord"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    "Final"
+   ]
+  },
+  {
+   "name": "rebalance_wrapped_plain_both",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "PositionNFT"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Private"
+     }
+    },
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap_rebalance_router.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap_rebalance_router.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "RebalanceRequest"
+        ],
+        "program": "shield_swap_rebalance_router.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "RebalanceAssets"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    }
+   ],
+   "outputs": [
+    "DynamicRecord",
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "PositionNFT"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    "DynamicRecord",
+    "DynamicRecord",
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "MintComplianceRecord"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    "Final"
+   ]
+  },
+  {
+   "name": "rebalance_plain_wrapped_none",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "PositionNFT"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap_rebalance_router.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "RebalanceRequest"
+        ],
+        "program": "shield_swap_rebalance_router.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "RebalanceAssets"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    }
+   ],
+   "outputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "PositionNFT"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    "DynamicRecord",
+    "DynamicRecord",
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "MintComplianceRecord"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    "Final"
+   ]
+  },
+  {
+   "name": "rebalance_plain_wrapped_fund0",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "PositionNFT"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Private"
+     }
+    },
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap_rebalance_router.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "RebalanceRequest"
+        ],
+        "program": "shield_swap_rebalance_router.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "RebalanceAssets"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    }
+   ],
+   "outputs": [
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "PositionNFT"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    "DynamicRecord",
+    "DynamicRecord",
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "MintComplianceRecord"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    "Final"
+   ]
+  },
+  {
+   "name": "rebalance_plain_wrapped_fund1",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "PositionNFT"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Private"
+     }
+    },
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap_rebalance_router.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap_rebalance_router.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "RebalanceRequest"
+        ],
+        "program": "shield_swap_rebalance_router.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "RebalanceAssets"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    }
+   ],
+   "outputs": [
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "PositionNFT"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    "DynamicRecord",
+    "DynamicRecord",
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "MintComplianceRecord"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    "Final"
+   ]
+  },
+  {
+   "name": "rebalance_plain_wrapped_both",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "PositionNFT"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Private"
+     }
+    },
+    "DynamicRecord",
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap_rebalance_router.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap_rebalance_router.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "RebalanceRequest"
+        ],
+        "program": "shield_swap_rebalance_router.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "RebalanceAssets"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    }
+   ],
+   "outputs": [
+    "DynamicRecord",
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "PositionNFT"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    "DynamicRecord",
+    "DynamicRecord",
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "MintComplianceRecord"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    "Final"
+   ]
+  },
+  {
+   "name": "rebalance_wrapped_wrapped_none",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "PositionNFT"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap_rebalance_router.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap_rebalance_router.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "RebalanceRequest"
+        ],
+        "program": "shield_swap_rebalance_router.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "RebalanceAssets"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    }
+   ],
+   "outputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "PositionNFT"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    "DynamicRecord",
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "MintComplianceRecord"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    "Final"
+   ]
+  },
+  {
+   "name": "rebalance_wrapped_wrapped_one",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "PositionNFT"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Private"
+     }
+    },
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap_rebalance_router.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap_rebalance_router.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap_rebalance_router.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "RebalanceRequest"
+        ],
+        "program": "shield_swap_rebalance_router.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "RebalanceAssets"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    }
+   ],
+   "outputs": [
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "PositionNFT"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    "DynamicRecord",
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "MintComplianceRecord"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    "Final"
+   ]
+  },
+  {
+   "name": "rebalance_wrapped_wrapped_both",
+   "inputs": [
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "PositionNFT"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Private"
+     }
+    },
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap_rebalance_router.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap_rebalance_router.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap_rebalance_router.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap_rebalance_router.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "RebalanceRequest"
+        ],
+        "program": "shield_swap_rebalance_router.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "RebalanceAssets"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Array": {
+        "element": {
+         "Struct": {
+          "path": [
+           "MerkleProof"
+          ],
+          "program": "shield_swap.aleo"
+         }
+        },
+        "length": 2
+       }
+      },
+      "mode": "Private"
+     }
+    }
+   ],
+   "outputs": [
+    "DynamicRecord",
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Primitive": "Field"
+      },
+      "mode": "Public"
+     }
+    },
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "PositionNFT"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    "DynamicRecord",
+    "DynamicRecord",
+    {
+     "Plaintext": {
+      "ty": {
+       "Struct": {
+        "path": [
+         "MintComplianceRecord"
+        ],
+        "program": "shield_swap.aleo"
+       }
+      },
+      "mode": "Private"
+     }
+    },
+    "Final"
+   ]
+  }
+ ]
+}

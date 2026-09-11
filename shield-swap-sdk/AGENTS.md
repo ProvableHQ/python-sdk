@@ -14,14 +14,14 @@ lifecycle as tools.
 from aleo_shield_swap import ShieldSwap
 
 dex = ShieldSwap.from_profile()          # key material auto-managed on disk
-dex.onboard(invite_code="...")           # first run only; no-op afterwards
+dex.onboard()                            # first run registers; no-op afterwards
 pools = dex.api.get_pools()
 report = dex.swap_many(pool_key=pools[0].key, token_in_id=pools[0].token0,
                        amount_in=10**6, count=5)
 dex.collect_all()                        # any session, any time
 ```
 
-### `from_profile(home: 'Any' = None) -> "'ShieldSwap'"`
+### `from_profile(home: 'Any' = None, *, network: 'Optional[str]' = None, endpoint: 'Optional[str]' = None) -> "'ShieldSwap'"`
 
 The client for the local participant profile (created on first use).
 
@@ -29,14 +29,29 @@ Wires endpoint, network, signer, and (when present) delegated-proving
 credentials from ``$SHIELD_SWAP_HOME``/``~/.shield-swap``.  Run
 ``onboard()`` next on a fresh profile.
 
-### `onboard(self, invite_code: 'Optional[str]' = None) -> 'OnboardReport'`
+*network* and *endpoint* apply only when the profile is being created —
+an existing one keeps what it was created with, because its derived pool
+keys and blinded identities are network-scoped and would not transfer.
+Give each network its own home directory.
+
+Args:
+    home: Profile directory; defaults to ``$SHIELD_SWAP_HOME`` or
+        ``~/.shield-swap``.
+    network: ``"mainnet"`` or ``"testnet"`` for a NEW profile; defaults
+        to testnet.
+    endpoint: Node API origin for a NEW profile.
+
+### `onboard(self, referral_code: 'Optional[str]' = None) -> 'OnboardReport'`
 
 Register this profile end to end — safe to re-run any time.
 
 Runs only the registration stages not already satisfied (see
 ``lifecycle.REGISTRATION_STAGES``); a registered, funded account is
-a no-op.  The one thing it may need from you: *invite_code*, on the
-first run.  Requires a profile-bound client (``from_profile()``).
+a no-op.  Needs nothing from you: access is granted by
+authentication alone.  *referral_code* is optional — pass one a
+friend shared to credit them as the referrer (recorded once; later
+calls ignore it).  Requires a profile-bound client
+(``from_profile()``).
 
 ### `status(self) -> 'SessionStatus'`
 
@@ -54,7 +69,7 @@ The scan catches positions the journal never saw (account used from
 another machine, journal lost); it needs a registered record
 provider and is skipped silently without one.
 
-### `swap_many(self, *, pool_key: 'str', token_in_id: 'str', amount_in: 'int', count: 'int', slippage_bps: 'int' = 50, record_wait_seconds: 'float' = 120.0, account: 'Any' = None) -> 'SwapBatchReport'`
+### `swap_many(self, *, pool_key: 'str', token_in_id: 'str', amount_in: 'int', count: 'int', slippage_bps: 'int' = 50, expected_out: 'Optional[int]' = None, record_wait_seconds: 'float' = 120.0, account: 'Any' = None) -> 'SwapBatchReport'`
 
 *count* private swaps of *amount_in* each, with reserved counters.
 
@@ -65,6 +80,11 @@ claims whatever finalized.  A swap the network rejects simply never
 becomes claimable (it stays in ``still_pending``).  A failed
 broadcast burns its counter and the batch continues; failures are
 reported, not raised.  Requires ``from_profile()``.
+
+*expected_out* (base units) skips the route quote.  Without it the batch
+quotes once and refuses rather than falling back to a spot estimate,
+which ignores the pool fee and would revert every swap after paying for
+its proof.
 
 ### `collect_all(self, account: 'Any' = None) -> 'CollectReport'`
 
@@ -86,9 +106,12 @@ reports.  Requires ``from_profile()``.
    They supply it out-of-band: `export SHIELD_SWAP_PRIVATE_KEY=...` (or
    `SHIELD_SWAP_PRIVATE_KEY_FILE=path`) in their own shell before the
    profile is first created.
-2. **Invite code.**  Access is invite-gated per account; `onboard()` stops
-   with `NotRedeemedError` until one is supplied.  Ask the user for their
-   code; codes are one-time — never guess or reuse.
+2. **Referral code — optional.**  Access is granted by authentication
+   alone; `onboard()` needs nothing from the user.  Mention that a
+   referral code from a friend can be passed (`onboard(referral_code=)`)
+   to credit them, then proceed whether or not one is offered.  Never
+   block on it, never guess one.  The account gets its own code to share
+   (`dex.api.my_referral_code()`).
 
 ### After startup: ask what's next
 
@@ -100,7 +123,7 @@ business, not the user's):
 1. **Their own playbook.**  Ask whether they have instructions of their
    own — a strategy file, notes, a memory store, output from a previous
    session.  If so, read it and treat it as the plan: their document
-   decides what to do, the verbs here describe how each step works.
+   decides what to do, the methods here describe how each step works.
 
 2. **A suggested journey.**  Frame the setting first — Shield Swap is a
    private exchange on Aleo's test network: trading uses test tokens, and
@@ -135,7 +158,7 @@ business, not the user's):
    and the integration checklist.
 
 4. **A free-form prompt.**  Whatever they describe, map it onto the
-   verbs and journeys above before improvising against the SDK.
+   methods and journeys above before improvising against the SDK.
 
 ### While acting
 
@@ -166,34 +189,48 @@ where the signing keys live:
 | Browser dApp (wallet-signed) | The TypeScript stack: `@provablehq/shield-swap-sdk` + Veil react hooks — not this package | The user's wallet signs and proves. |
 
 What every integration must handle (each enforced or automated by the
-verbs above — this list is the review checklist for code that bypasses
+methods above — this list is the review checklist for code that bypasses
 them):
 
-- **Auth is layered**: a bearer credential (24h session JWT from the
-  challenge/verify handshake, or a durable `ss_…` API token — data/trading
-  endpoints only) AND a one-time invite redemption per account.
+- **Auth is by signature, and it is the whole gate**: a session from the
+  challenge/verify handshake (cookie + CSRF, or a legacy JWT), or a durable
+  `ss_…` API token for data/trading endpoints.  No code is required; a
+  referral code is optional attribution.
 - **Dynamic-dispatch imports**: every record-spending write must register
-  the involved token programs with the prover (the verbs resolve this via
+  the involved token programs with the prover (the methods resolve this via
   the token registry; pass `imports=`/`token_*_program=` to override).
 - **Tokens are private records**: spendable balances do not appear in
   public reads; one covering record funds an amount — no aggregation.
-- **Amounts obey the no-dust rule** both directions (`amount % scale == 0`);
-  quote in canonical decimals, transact in raw base units, display human.
+- **Amounts are raw native units end to end** (the AMM does no decimal
+  scaling); quote in canonical decimals, transact in raw base units,
+  display human.
+- **Wrapped assets route automatically** (swap/claim/LP methods dispatch to
+  the routers per token shape) — fund them with UNDERLYING records; never
+  hand wrapper records around.
 - **A `SwapHandle` is the only key to a swap's output** — persist before
   anything else (the journal does this); claim after finalize with retry.
+  A swap with nothing left over claims through the no-refund entrypoints
+  automatically; `get_swap_execution` reads the per-hop fill receipt (fees
+  paid, price after) at any later time.
+- **Rebalancing is one transaction, testnet only for now** —
+  `plan_rebalance` quotes the close-and-remint (what comes back, what the
+  new range needs, funding vs refund per token) and `rebalance_position`
+  submits it through `shield_swap_rebalance_router.aleo`.  Every amount is
+  asserted at the execution price: a trade in between reverts the whole
+  transaction (fee paid, no funds moved) — re-plan and resubmit.
 - **Concurrency needs partitioned blinded-identity counters AND disjoint
   input records** — `swap_many` implements the recipe; copy it, don't
   improvise.
 
 Suggested path for a new integrator: (1) `onboard()` a profile — it
 doubles as a test fixture; (2) walk swap → `collect_all()` once with the
-Tier 1 verbs so the mechanics are concrete; (3) read the reference below
+Tier 1 methods so the mechanics are concrete; (3) read the reference below
 for the surface your app needs; (4) `tests/integration/` and
 `scripts/rehearsal.py` in the repo are working reference implementations
 of the full journey.
 
-Every write verb returns a prepared `DexCall`: nothing touches the
-network until a terminal verb — `.simulate()` (local, free),
+Every write method returns a prepared `DexCall`: nothing touches the
+network until a terminal method — `.simulate()` (local, free),
 `.transact()` (local proving, slow), or `.delegate()` (delegated
 proving — the practical path).
 
@@ -204,7 +241,7 @@ introspect `lifecycle.REGISTRATION_STAGES`, never hard-code the
 sequence.  Current stages:
 
 - `authenticate`
-- `redeem`
+- `referral`
 - `credentials`
 - `airdrop`
 - `funded`
@@ -214,7 +251,14 @@ the stages use:
 
 ### `api.authenticate(self, address: 'str', sign: 'Any') -> 'str'`
 
-Challenge/verify handshake; stores and returns the JWT.
+Challenge/verify handshake; establishes the session.
+
+The staging API issues the session as httpOnly cookies on this
+client's HTTP session plus a CSRF token (stored and echoed as
+``X-CSRF-Token``); older deployments return a bearer JWT in the
+body — both are handled.  Returns the stored credential (CSRF token
+or JWT).  Sessions are short-lived — mint a durable ``ss_…`` token
+via :meth:`create_api_token` for anything long-running.
 
 *sign* is a callable taking the challenge message string and
 returning an Aleo signature literal (``sign1…``) — e.g.::
@@ -223,13 +267,39 @@ returning an Aleo signature literal (``sign1…``) — e.g.::
     api.authenticate(str(pk.address),
                      lambda msg: str(pk.sign(msg.encode())))
 
-### `api.access_status(self) -> 'models.AccessStatusResponse'`
+### `api.referral_status(self) -> 'models.ReferralStatusResponse'`
 
-Whether this authenticated account has redeemed an invite code.
+This account's referral picture: ``referred_by`` (the referrer's
+address once a code was redeemed, else None), ``my_code`` (the code
+this account shares), and ``has_access``.  Network read.
 
-### `api.redeem_code(self, code: 'str') -> 'models.AccessRedeemResponse'`
+``has_access`` is always true for an authenticated account — access
+is granted by authentication alone, no code required — and the call
+raises :class:`NotAuthenticatedError` when the session is missing or
+expired, which makes this the session liveness probe (the dedicated
+``/access/status`` route was retired in 2026-09).
 
-Redeem an invite code; adopts the fresh token the API returns.
+### `api.my_referral_code(self) -> 'Optional[str]'`
+
+The referral code this account hands to others.
+
+The API issues the code on the first request, so this normally
+returns a value; None means issuance is disabled for the account.
+Network read.
+
+### `api.redeem_code(self, code: 'str') -> 'models.ReferralRedeemResponse'`
+
+Redeem a referral code (``POST /referral/redeem``) — optional.
+
+Access does not depend on this: authentication alone unlocks every
+endpoint.  Redeeming records who referred the account, once: a
+repeat returns ``status="already_redeemed"`` without changing
+anything, while an unknown code or the account's own code is a 400
+(:class:`DexApiError`).
+
+Sessions live on the ``/auth/*`` endpoints, so no token comes
+back (one is still adopted if the API resurrects the legacy
+body-JWT).
 
 ### `api.request_airdrop(self, address: 'str') -> 'models.AirdropStartResult'`
 
@@ -254,25 +324,60 @@ management still require a session JWT.
 
 ### `api.get_pools(self) -> 'list[PoolEntry]'`
 
+Every pool the DEX lists, each with its two tokens' metadata.
 
+An entry exposes the pool's own fields directly — ``entry.key`` is the
+``pool_key`` that ``swap``, ``mint``, and ``collect`` take.  Its
+``token0_info`` / ``token1_info`` carry that token's ``symbol`` and
+``decimals``, but the API does not guarantee them — check for ``None``
+before reading.
 
 ### `api.get_tokens(self) -> 'list[models.TokenDoc]'`
 
+Every token the DEX lists, with its id, symbol, and decimals.
 
+``decimals`` converts between the two amount conventions.
+The API returns canonical decimal amounts (``"1.5"``), if using this
+value to call on-chain methods — ``swap(amount_in=…)``, ``mint``,
+``collect`` — conversion to raw base units is necessary.
 
-### `api.get_route(self, *, token_in: 'str', token_out: 'str', amount_in: 'Any' = None) -> 'models.RouteResultDoc'`
+### `api.get_route(self, *, token_in: 'str', token_out: 'str', amount_in: 'Any' = None, pool_key: 'Optional[str]' = None) -> 'models.RouteResultDoc'`
 
 Best route between two tokens.  *amount_in* is a CANONICAL
 decimal amount (human units, e.g. ``1.5``) — not base units —
-and the returned ``estimated_amount_out`` is decimal too.
+and the returned ``estimated_amount_out`` is decimal too.  *pool_key*
+pins the quote to one pool instead of the router's best path.
+
+### `api.get_route_topology(self) -> 'models.RouteTopologyDoc'`
+
+The routable token graph: every (token0, token1) edge with an
+enabled pool and the router's ``max_hops``.  Lets a client enumerate
+reachable pairs without probing ``/route`` per pair.
+
+### `api.get_unclaimed(self) -> 'models.UnclaimedPayloadDoc'`
+
+Everything the authenticated account can still collect, as the
+indexer sees it: swaps with finalized-but-unclaimed output and
+positions with owed balances.  A cross-check for a local journal —
+the chain, not this, gates the claim amounts.
+
+### `api.get_protocol_state(self, *, minimum_revision: 'Optional[int]' = None) -> 'models.ProtocolStateResponse'`
+
+The indexer's view of protocol configuration and its own freshness.
+
+``freshness.ready_for_quote`` says whether quotes reflect the chain
+head; ``revision`` increments on every config change and is echoed by
+``/route`` as ``protocol_revision`` — pass *minimum_revision* to wait
+for the indexer to reach one.  Returned unwrapped (no ``data``).
 
 ### Counters & blinding
 
 Blinded identities derive deterministically from (view key, counter,
-program).  Counters must NEVER be reused: reserve them via
-`dex.journal.reserve_counters(n)` (what `swap_many` does), or probe
-on-chain when no journal exists.  Persist `SwapHandle`s — the
-blinding factor is the claim secret.
+program).  Counters must NEVER be reused (the finalize rejects a reused
+blinded address after the proof is paid for).  Let `swap`/`swap_many`
+pick them: with a journal they reserve under its lock AND verify each
+counter on chain; without one they probe the chain.  Persist
+`SwapHandle`s — the blinding factor is the claim secret.
 
 ### `blinded_identity_at(aleo: 'Any', account: 'Any', program: 'str', counter: 'int') -> 'BlindedIdentity'`
 
@@ -282,44 +387,66 @@ Use with journal-reserved counters for concurrent swaps;
 :func:`next_blinded_identity` (probe-based) remains the recovery path
 when no journal exists.
 
-### `next_blinded_identity(aleo: 'Any', account: 'Any', program: 'str' = 'shield_swap_v3.aleo', *, start_counter: 'int' = 0, max_scan: 'int' = 64) -> 'BlindedIdentity'`
+### `next_blinded_identity(aleo: 'Any', account: 'Any', program: 'str' = 'shield_swap.aleo', *, start_counter: 'int' = 0, max_scan: 'int' = 64, gallop: 'bool' = True) -> 'BlindedIdentity'`
 
-First unused single-use identity for *account*.
+An unused single-use identity for *account*.
 
 Derives at ``start_counter, +1, …`` and probes the program's
-``used_blinded_addresses`` mapping until one is free.  ``max_scan`` fails
-fast when something is systematically wrong (e.g. wrong program).
+``used_blinded_addresses`` mapping until one is free.  When the whole
+linear window is used — an account that has swapped more than *max_scan*
+times without a journal — *gallop* extends the search in O(log n) probes:
+double the stride past the window until a free counter appears, then
+bisect back to the lowest free one in that span.  Any free counter is a
+valid identity (a gap left by a failed swap is fine), so the search only
+needs SOME unused address, not the exact end of the used run.
 
-### Chain verbs
+With ``gallop=False`` the linear window is the whole search and
+exhausting it raises — the fail-fast for a systematically wrong program.
 
-### `swap(self, *, pool_key: 'str', token_in_id: 'str', amount_in: 'int', slippage_bps: 'int' = 50, expected_out: 'Optional[int]' = None, sqrt_price_limit: 'Optional[int]' = None, deadline_offset_blocks: 'int' = 10000, nonce: 'Optional[int]' = None, identity: 'Optional[BlindedIdentity]' = None, token_in_program: 'Optional[str]' = None, token_record: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[SwapHandle]'`
+### Chain methods
+
+### `swap(self, *, pool_key: 'str', token_in_id: 'str', amount_in: 'int', slippage_bps: 'int' = 50, expected_out: 'Optional[int]' = None, sqrt_price_limit: 'Optional[int]' = None, deadline_offset_blocks: 'int' = 10000, nonce: 'Optional[int]' = None, identity: 'Optional[BlindedIdentity]' = None, token_in_program: 'Optional[str]' = None, token_record: 'Optional[str]' = None, wrapper_proofs: 'Optional[str]' = None, track: 'bool' = True, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[SwapHandle]'`
 
 Request a private swap — phase one of the two-transaction flow.
+
+Wrapped inputs route via the swap router automatically; fund them
+with UNDERLYING records — the deposit happens in-transaction.
 
 Resolves the intent against live pool state, derives a single-use
 blinded identity from the signer's view key, selects an unspent token
 record (or takes *token_record* verbatim), and returns a prepared
-call.  The terminal verb (``transact``/``delegate``) returns a
+call.  The terminal method (``transact``/``delegate``) returns a
 :class:`~aleo_shield_swap.types.SwapHandle` — persist it if the
 process might die before the claim.
 
 Quote first (``dex.api.get_route``) and pass *expected_out*: without
 it a spot estimate is used, which ignores fees and price impact.
-Pass *identity* (from journal-reserved counters) to skip the
-on-chain probe — required for concurrent swaps.  The default
+**Building is not free with a journal.**  The blinded address is a
+transition input, so a counter is reserved *here*, not at the terminal
+method — discarding the call, or only simulating, still spends it.  That
+reservation is what makes concurrent swaps safe: it serializes under a
+file lock where the probe it replaces could hand two callers the same
+counter.  The handle is journaled once the broadcast is accepted, so a
+crash before the claim keeps the blinding factor.  ``track=False`` builds
+on the racing probe instead; *identity* supplies your own.
+
+The default
 *deadline_offset_blocks* (~8h at ~3s blocks) absorbs delegated-
 proving latency; a tight deadline aborts at finalize when proving
 outlives it.
 
-### `claim_swap_output(self, handle: 'SwapHandle', *, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[ClaimResult]'`
+### `claim_swap_output(self, handle: 'SwapHandle', *, wrapper_proofs: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[ClaimResult]'`
 
 Claim a private swap's output — phase two of the lifecycle.
 
 Reads the chain-computed result from ``swap_outputs`` (never an
 off-chain service — these amounts gate money movement), proves
-ownership of the blinded identity, and prepares ``claim_swap_output``.
-The output and any refund arrive as private records owned by the
-signer; the mapping entry is consumed.
+ownership of the blinded identity, and claims.  A wrapped output or
+refund routes automatically through the router, which unwraps to
+the signer in the same transaction — even for swaps that started
+as direct core calls.  The output and any refund arrive as private
+records owned by the signer (output first, refund second); the
+mapping entry is consumed.
 
 Raises :class:`SwapOutputNotFinalizedError` **at prepare time** when
 the output is not readable yet (retry after a few blocks) or was
@@ -333,28 +460,79 @@ The fee tier must be registered with the program (validated before
 submission); tick spacing defaults to the tier's on-chain binding and
 the opening price to the tick's sqrt price.
 
-### `mint(self, *, pool_key: 'str', tick_lower: 'int', tick_upper: 'int', amount0_desired: 'int', amount1_desired: 'int', amount0_min: 'int' = 0, amount1_min: 'int' = 0, token0_program: 'Optional[str]' = None, token1_program: 'Optional[str]' = None, token0_record: 'Optional[str]' = None, token1_record: 'Optional[str]' = None, tick_lower_hint: 'Optional[int]' = None, tick_upper_hint: 'Optional[int]' = None, recipient: 'Optional[str]' = None, nonce: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[MintResult]'`
+### `mint(self, *, pool_key: 'str', tick_lower: 'int', tick_upper: 'int', amount0_desired: 'int', amount1_desired: 'int', amount0_min: 'int' = 0, amount1_min: 'int' = 0, token0_program: 'Optional[str]' = None, token1_program: 'Optional[str]' = None, token0_record: 'Optional[str]' = None, token1_record: 'Optional[str]' = None, tick_lower_hint: 'Optional[int]' = None, tick_upper_hint: 'Optional[int]' = None, recipient: 'Optional[str]' = None, withdrawal: 'Optional[str]' = None, nonce: 'Optional[str]' = None, wrapper_proofs: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[MintResult]'`
 
 Mint a concentrated-liquidity position as a private PositionNFT.
 
 Tick bounds are rounded to the pool's spacing; insert hints derive
-from the slot's neighbors unless given explicitly.
+from the slot's neighbors unless given explicitly.  *withdrawal* is
+the immutable payout address stored on the NFT — ``collect`` always
+pays it and it can never be changed; defaults to *recipient*.
+Wrapped pool sides route via the LP router; fund with UNDERLYING records.
 
-### `increase_liquidity(self, *, pool_key: 'str', amount0_desired: 'int', amount1_desired: 'int', amount0_min: 'int' = 0, amount1_min: 'int' = 0, token0_program: 'Optional[str]' = None, token1_program: 'Optional[str]' = None, token0_record: 'Optional[str]' = None, token1_record: 'Optional[str]' = None, position_record: 'Optional[str]' = None, tick_lower_hint: 'Optional[int]' = None, tick_upper_hint: 'Optional[int]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[TxResult]'`
+### `increase_liquidity(self, *, pool_key: 'str', amount0_desired: 'int', amount1_desired: 'int', amount0_min: 'int' = 0, amount1_min: 'int' = 0, token0_program: 'Optional[str]' = None, token1_program: 'Optional[str]' = None, token0_record: 'Optional[str]' = None, token1_record: 'Optional[str]' = None, position_record: 'Optional[str]' = None, tick_lower_hint: 'Optional[int]' = None, tick_upper_hint: 'Optional[int]' = None, wrapper_proofs: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[TxResult]'`
 
 Add funds to an existing position (range fixed at mint).
+Wrapped pool sides route via the LP router; fund with UNDERLYING records.
 
 ### `decrease_liquidity(self, *, pool_key: 'str', liquidity_to_remove: 'int', amount0_min: 'int' = 0, amount1_min: 'int' = 0, position_record: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[TxResult]'`
 
 Remove liquidity from a position; owed amounts become collectable.
 
-### `collect(self, *, pool_key: 'str', amount0_requested: 'int', amount1_requested: 'int', recipient: 'Optional[str]' = None, position_record: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[TxResult]'`
+### `collect(self, *, pool_key: 'str', amount0_requested: 'int', amount1_requested: 'int', position_record: 'Optional[str]' = None, wrapper_proofs: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[TxResult]'`
 
 Collect owed token amounts from a position.
+
+The payout always goes to the position's immutable ``withdrawal``
+address — set at mint, not redirectable here.  Wrapped pool sides
+route via the LP router, unwrapping to that address in-transaction.
 
 ### `burn(self, *, pool_key: 'str', position_record: 'Optional[str]' = None, account: 'Any' = None) -> 'DexCall[TxResult]'`
 
 Burn an empty position NFT.
+
+### `plan_rebalance(self, *, pool_key: 'str', position_token_id: 'str', tick_lower: 'int', tick_upper: 'int', liquidity_target: 'Optional[int]' = None, max_funding0: 'Optional[int]' = None, max_funding1: 'Optional[int]' = None) -> 'RebalancePlan'`
+
+Quote a close-and-remint of one position into a new range.  Reads only.
+
+Reads the pool, slot, ``positions`` entry, both current boundary ticks,
+and each side's wrapped-ness, then derives what the close returns, what
+the successor range needs, and per side the funding to add or surplus
+to refund.  Size the successor with exactly one of *liquidity_target*
+(exact) or *max_funding0*/*max_funding1* (a budget the planner solves
+for; ``0, 0`` rebalances on recovered funds alone).
+
+The plan is only valid at the pool price it was built against — the
+contract asserts every amount at finalize — so build it right before
+:meth:`rebalance_position` and never cache one.
+
+Raises:
+    PoolNotFoundError / PoolNotInitializedError: For an unknown pool.
+    ValueError: If the position or a boundary tick does not exist, the
+        aligned range is empty, the sizing is ambiguous, or the budget
+        supports no liquidity.
+
+### `rebalance_position(self, *, plan: 'Optional[RebalancePlan]' = None, pool_key: 'Optional[str]' = None, position_token_id: 'Optional[str]' = None, tick_lower: 'Optional[int]' = None, tick_upper: 'Optional[int]' = None, liquidity_target: 'Optional[int]' = None, max_funding0: 'Optional[int]' = None, max_funding1: 'Optional[int]' = None, position_record: 'Optional[str]' = None, token0_program: 'Optional[str]' = None, token1_program: 'Optional[str]' = None, token0_record: 'Optional[str]' = None, token1_record: 'Optional[str]' = None, tick_lower_hint: 'Optional[int]' = None, tick_upper_hint: 'Optional[int]' = None, deadline_offset_blocks: 'int' = 20, nonce: 'Optional[str]' = None, wrapper_proofs: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[RebalanceResult]'`
+
+Close a position and mint its successor range in ONE transaction.
+
+Burns the old position, settles its principal and every fee it earned,
+adds funding from the signer's records where the new range needs more,
+mints the successor with the same owner and withdrawal address, and
+pays any surplus to the withdrawal address — atomically, through
+``shield_swap_rebalance_router.aleo`` (deployed on testnet).  Either
+pass a *plan* from :meth:`plan_rebalance` (submitted verbatim), or the
+pool, range, and one sizing mode and the plan is built here.
+
+Every amount is asserted against the pool price at execution: a trade
+that moves the price between planning and finalize reverts the whole
+transaction (fee paid, no funds moved).  Rebuild and resubmit when
+that happens; the short default deadline fails stale requests cheaply.
+Funding records for a wrapped side are the UNDERLYING asset's records.
+
+Raises:
+    ValueError: Without a plan or a complete (pool, range, sizing).
+    InsufficientRecordsError: If no record covers a funded side.
 
 ### `get_pool(self, pool_key: 'str') -> 'g.PoolState'`
 
@@ -375,7 +553,21 @@ Accepts the :class:`SwapHandle` from ``swap()`` or a bare swap id.
 Raises :class:`SwapOutputNotFinalizedError` when the entry is absent —
 not finalized yet (retry after a few blocks) or already claimed.
 
-### `get_balances(self, address: 'Optional[str]' = None, account: 'Any' = None) -> 'dict[str, dict[str, Any]]'`
+### `get_swap_execution(self, swap: "'SwapHandle | str'") -> 'Optional[SwapExecution]'`
+
+Per-hop fill receipt of an executed swap — what each pool leg paid.
+
+Reads ``swap_execution_headers`` then one ``swap_execution_hops`` entry
+per hop.  Returns None while the swap has not finalized.  Unlike
+:meth:`get_swap_output` the receipt survives the claim, so it answers
+"what did this trade actually cost" at any later time.  Reads
+``1 + hop_count`` mapping entries.
+
+Raises:
+    ValueError: If the header names a hop the node did not return —
+        a node lagging its own finalize; retry.
+
+### `get_balances(self, address: 'Optional[str]' = None, account: 'Any' = None, *, include_private: 'bool' = True) -> 'dict[str, dict[str, Any]]'`
 
 Public + private + total per token id, joined via the API's
 token registry.  Defaults to the bound account's address; returns
@@ -384,7 +576,19 @@ only tokens actually held.
 Private balances can only be scanned for the bound account's view
 key — when *address* names someone else, ``private`` is 0 for every
 token (their records are not scannable) rather than silently mixing
-in the caller's own private holdings.
+in the caller's own private holdings.  ``include_private=False``
+skips the record scan (public only — before scanner credentials).
+
+### `get_public_balances(self, programs: 'list[str]', address: 'Optional[str]' = None) -> 'dict[str, int]'`
+
+Public balances per token program from each program's on-chain
+``balances`` mapping (plain-address key; one read per program, any
+address) — the public counterpart to :meth:`get_private_balances`.
+Pass the registry's ``amm_token_program`` values.  Raw base units
+keyed by program; an absent entry reads as ``0``.  A program this
+network lacks, or a non-ARC-20 value, is skipped with a warning
+rather than failing every other token.  *address* defaults to the
+bound account's (ValueError when there is none).
 
 ### `get_private_balances(self, programs: 'list[str]', account: 'Any' = None) -> 'dict[str, int]'`
 
@@ -393,9 +597,20 @@ privately).  Requires a configured record provider.
 
 ### `derive_pool_key(self, token0: 'str', token1: 'str', fee: 'int') -> 'str'`
 
+Compute the pool key for a token pair and fee tier. Local — no network.
 
+Deriving a key never implies the pool exists; pass the result to
+:meth:`is_pool_initialized` before quoting or trading against it.  The
+derivation is sensitive to token order and is network-scoped, so swapping
+*token0* and *token1*, or reusing a key across mainnet and testnet, yields
+a valid-looking ``field`` that matches nothing on chain.  *fee* is the
+contract's ``u16`` fee tier.
 
 ### `derive_tick_key(self, pool_key: 'str', tick: 'int') -> 'str'`
 
+Compute the key of one tick within a pool. Local — no network.
 
+*tick* is a signed index, and the returned ``field`` is what reads that
+tick's on-chain state — the initialized-tick list ``mint`` validates its
+hints against.  Network-scoped like :meth:`derive_pool_key`.
 

@@ -1,8 +1,10 @@
 """Live proof of the full agent lifecycle — fresh profile to collected swap.
 
 Opt in: python -m pytest tests/integration/test_agent_lifecycle_live.py -m live
-Env:    ALEO_E2E_PRIVATE_KEY     mints a fresh invite code (or set
-                                 SHIELD_SWAP_INVITE_CODE explicitly)
+Env:    SHIELD_SWAP_REFERRAL_CODE   optional — a referral code to credit; when
+                                    set, the referral stage must run and
+                                    record the referrer.  Access itself needs
+                                    nothing beyond authentication.
 Provable + DEX API credentials self-provision during onboarding.
 
 One ordered test: onboarding a fresh account is rate-limited and slow, so
@@ -19,47 +21,39 @@ import pytest
 
 pytestmark = pytest.mark.live
 
-_HAS_CODE_SOURCE = bool(os.environ.get("SHIELD_SWAP_INVITE_CODE")
-                        or os.environ.get("ALEO_E2E_PRIVATE_KEY"))
 
-
-def _invite_code() -> str:
-    explicit = os.environ.get("SHIELD_SWAP_INVITE_CODE")
-    if explicit:
-        return explicit
-    import aleo
-
-    from aleo_shield_swap import ApiClient
-
-    pk = aleo.testnet.PrivateKey.from_string(os.environ["ALEO_E2E_PRIVATE_KEY"])
-    api = ApiClient()
-    api.authenticate(str(pk.address), lambda m: str(pk.sign(m.encode())))
-    return api._post("/access/generate", {"count": 1})["data"]["codes"][0]
-
-
-@pytest.mark.skipif(not _HAS_CODE_SOURCE,
-                    reason="no invite code source (SHIELD_SWAP_INVITE_CODE "
-                           "or ALEO_E2E_PRIVATE_KEY)")
 def test_full_lifecycle_from_fresh_profile(tmp_path, monkeypatch):
-    # Prove the participant path: credentials must SELF-provision.
+    # Prove the participant path: credentials must SELF-provision and the
+    # profile key must be genuinely fresh (a developer shell may carry
+    # SHIELD_SWAP_PRIVATE_KEY, which would import a funded, already-redeemed
+    # account and void every "fresh account" assertion below).
     monkeypatch.delenv("ALEO_E2E_API_KEY", raising=False)
     monkeypatch.delenv("ALEO_E2E_CONSUMER_ID", raising=False)
+    monkeypatch.delenv("SHIELD_SWAP_PRIVATE_KEY", raising=False)
+    monkeypatch.delenv("SHIELD_SWAP_PRIVATE_KEY_FILE", raising=False)
     from aleo_shield_swap import ShieldSwap
 
     # ── Startup: fresh key material, full registration, airdrop ────────────
+    # No code is required: authentication alone grants access.  A referral
+    # code, when the environment offers one, is optional attribution.
+    referral_code = os.environ.get("SHIELD_SWAP_REFERRAL_CODE")
     dex = ShieldSwap.from_profile(tmp_path / "home")
-    report = dex.onboard(invite_code=_invite_code())
+    report = dex.onboard(referral_code=referral_code)
     assert report.funded, f"onboard did not fund: {report.outcomes}"
     ran = {o.name for o in report.outcomes if o.action == "ran"}
-    assert "authenticate" in ran and "redeem" in ran   # genuinely fresh
+    assert "authenticate" in ran and "credentials" in ran   # genuinely fresh
+    assert ("referral" in ran) == bool(referral_code)
 
-    # Idempotence: a second onboard is a no-op.
-    again = dex.onboard()
+    # Idempotence: a second onboard is a no-op, even if the code is repeated.
+    again = dex.onboard(referral_code=referral_code)
     assert all(o.action == "skipped" for o in again.outcomes)
 
     # ── Discovery: pools, balances, positions ──────────────────────────────
     st = dex.status()
     assert st.authenticated and st.has_access
+    if referral_code:
+        assert dex.api.referral_status().referred_by
+    assert dex.api.my_referral_code()          # every account gets one
     held = {tid for tid, v in st.balances.items() if v.get("private", 0) > 0}
     assert held, "airdrop records not visible in private balances"
     pools = dex.api.get_pools()
@@ -68,12 +62,14 @@ def test_full_lifecycle_from_fresh_profile(tmp_path, monkeypatch):
     # Pick a pool whose tokens we actually hold (the conversation pattern).
     pool = next(p for p in pools if p.token0 in held or p.token1 in held)
     token_in = pool.token0 if pool.token0 in held else pool.token1
-    state = dex.get_pool(pool.key)
-    scale_in = state.scale0 if token_in == pool.token0 else state.scale1
+    # Raw native units (the AMM no longer scales): ~1e-5 of a token.
+    d0 = pool.token0_info.decimals if pool.token0_info else 9
+    d1 = pool.token1_info.decimals if pool.token1_info else 9
+    dec_in = d0 if token_in == pool.token0 else d1
 
     # ── Swaps: concurrent counters, journaled handles ───────────────────────
     batch = dex.swap_many(pool_key=pool.key, token_in_id=token_in,
-                          amount_in=10**4 * int(scale_in), count=2)
+                          amount_in=10 ** max(dec_in - 5, 1), count=2)
     assert len(batch.handles) == 2, f"swap failures: {batch.failures}"
     assert len({h.blinded_address for h in batch.handles}) == 2
 
@@ -89,23 +85,39 @@ def test_full_lifecycle_from_fresh_profile(tmp_path, monkeypatch):
 
     # ── Liquidity: mint, resize, collect the owed earnings ─────────────────
     lo, hi = dex.get_slot(pool.key).tick_range(width=4)
-    scale0, scale1 = int(state.scale0), int(state.scale1)
+    # ~1e-7 of each token, raw native units.
+    amt0, amt1 = 10 ** max(d0 - 7, 1), 10 ** max(d1 - 7, 1)
 
     # Right after claims, the scanner can still serve just-spent records; a
     # mint built on one is silently dropped.  Model the careful client:
     # verify the drop, let the scanner refresh, re-select records, retry.
+    # "Confirmed" is not "landed": such a mint confirms as REJECTED with no
+    # exception raised, so the positions mapping is the only truth.  An
+    # attempt counts once its position is readable on chain; a dropped one
+    # is retired from the journal so it leaves no phantom position behind.
     minted = None
     for attempt in range(3):
         try:
-            minted = dex.mint(pool_key=pool.key, tick_lower=lo, tick_upper=hi,
-                              amount0_desired=100 * scale0,
-                              amount1_desired=100 * scale1).delegate()
-            break
+            candidate = dex.mint(pool_key=pool.key, tick_lower=lo, tick_upper=hi,
+                                 amount0_desired=amt0,
+                                 amount1_desired=amt1).delegate()
         except Exception:
-            if attempt == 2:
-                raise
-            time.sleep(60)               # scanner catches up; records re-scan
-    assert minted and minted.position_token_id, "mint returned no position id"
+            candidate = None
+        if candidate is not None and candidate.position_token_id:
+            landed_by = time.monotonic() + 120
+            while time.monotonic() < landed_by:
+                if dex._position_state(candidate.position_token_id) is not None:
+                    minted = candidate
+                    break
+                time.sleep(10)
+            if minted is not None:
+                break
+            dex.journal.record_position_burned(candidate.position_token_id,
+                                               candidate.transaction_id)
+        if attempt == 2:
+            pytest.fail("mint never landed on chain in 3 attempts (stale records?)")
+        time.sleep(60)               # scanner catches up; records re-scan
+    assert minted.position_token_id, "mint returned no position id"
     assert any(v.position_token_id == minted.position_token_id
                for v in dex.get_positions())
 

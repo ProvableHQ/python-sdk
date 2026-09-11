@@ -1,6 +1,6 @@
 # Aleo Python SDK (MainnetV0)
 
-The Aleo Python SDK provides Python bindings to Aleo's zero-knowledge cryptographic primitives, built with snarkvm 4.8.1.
+The Aleo Python SDK provides Python bindings to Aleo's zero-knowledge cryptographic primitives, built with snarkvm 4.9.1.
 
 It ships two layers:
 
@@ -13,7 +13,7 @@ It ships two layers:
 from aleo import Aleo
 
 # Connect (construction is offline — no I/O until you make a call)
-aleo = Aleo(Aleo.HTTPProvider("https://api.provable.com/v2"))
+aleo = Aleo(Aleo.HTTPProvider("https://edge.provable.com/api"))
 print(aleo.network_name)   # "mainnet"
 print(aleo.network_id)     # 0
 
@@ -37,7 +37,7 @@ The facade follows a clean top-to-bottom narrative: **connect → account → re
 ```python
 from aleo import Aleo
 
-aleo = Aleo(Aleo.HTTPProvider("https://api.provable.com/v2"))
+aleo = Aleo(Aleo.HTTPProvider("https://edge.provable.com/api"))
 
 # Optional: check reachability  # requires a live node
 if aleo.is_connected():
@@ -162,7 +162,7 @@ credits.functions.transfer_private(record, str(recipient.address), 1) \
     .delegate(account)
 ```
 
-`aleo.record_provider` is swappable: set it to your own object implementing the `RecordProvider` protocol (`get_unspent_credits_record` / `find`) — e.g. a self-hosted scanner — and the whole facade (including private-fee auto-sourcing) uses it, with no view-key sharing.
+`aleo.record_provider` is swappable: set it to your own object implementing the `RecordProvider` protocol (`get_unspent_credits_record` / `find`), and the whole facade (including private-fee auto-sourcing) uses it, with no view-key sharing.
 
 ## Async (`AsyncAleo`)
 
@@ -173,7 +173,7 @@ import asyncio
 from aleo import AsyncAleo
 
 async def main():
-    aleo = AsyncAleo(AsyncAleo.HTTPProvider("https://api.provable.com/v2"))
+    aleo = AsyncAleo(AsyncAleo.HTTPProvider("https://edge.provable.com/api"))
     print(aleo.network_name)   # sync — no I/O
 
     # Account ops are sync (purely local), even on AsyncAleo

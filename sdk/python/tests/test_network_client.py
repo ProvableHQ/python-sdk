@@ -875,3 +875,63 @@ def test_set_prover_uri() -> None:
     c = make_client()
     c.set_prover_uri("https://prover.example.com")
     assert c._prover_uri == f"https://prover.example.com/{NET}"
+
+
+# ── Hosted API topology: open edge (default) vs credentialed legacy host ────
+
+def test_default_host_is_the_open_edge() -> None:
+    from aleo._client_common import DEFAULT_HOST, LEGACY_HOST, requires_credentials
+    assert DEFAULT_HOST == "https://edge.provable.com/api"
+    assert LEGACY_HOST == "https://api.provable.com"
+    assert not requires_credentials(DEFAULT_HOST)
+    assert requires_credentials(LEGACY_HOST)
+    assert not requires_credentials("http://127.0.0.1:3030")     # nothing to auth to
+
+
+def test_service_root_keeps_the_edge_prefix_and_strips_legacy_v2() -> None:
+    from aleo._client_common import service_root
+    assert service_root("https://edge.provable.com/api") == "https://edge.provable.com/api"
+    assert service_root("https://edge.provable.com/api/") == "https://edge.provable.com/api"
+    assert service_root("https://edge.provable.com/api/v2") == "https://edge.provable.com/api"
+    assert service_root("https://edge.provable.com/api/v2/testnet") == "https://edge.provable.com/api"
+    assert service_root("https://api.provable.com") == "https://api.provable.com"
+    assert service_root("https://api.provable.com/v2/mainnet/") == "https://api.provable.com"
+    assert service_root("http://localhost:3030/v2") == "http://localhost:3030"
+
+
+def test_edge_client_hangs_every_service_off_the_api_prefix() -> None:
+    # The whole point of service_root: a jwt_origin-style derivation would
+    # drop /api and every read, prove, and scan would 404.
+    c = AleoNetworkClient("https://edge.provable.com/api", network="testnet")
+    assert c._host == "https://edge.provable.com/api/v2/testnet"
+    assert c.prover_uri == "https://edge.provable.com/api/prove/testnet"
+    assert c.scanner_uri == "https://edge.provable.com/api/scanner/testnet"
+    assert c.origin == "https://edge.provable.com/api"
+    # No credentials → no JWT header and no /jwts round trip.
+    assert c._ensure_jwt(None, None, None) is None
+
+
+def test_default_client_targets_the_edge() -> None:
+    c = AleoNetworkClient(network="mainnet")
+    assert c._host == "https://edge.provable.com/api/v2/mainnet"
+    assert c.prover_uri == "https://edge.provable.com/api/prove/mainnet"
+
+
+def test_open_edge_ignores_ambient_credentials() -> None:
+    """A client on the open edge configured with legacy api_key/consumer_id
+    (e.g. from a shell that also targets api.provable.com) must not try to
+    mint a JWT at /api/jwts — the route does not exist there and the prover
+    and scanner need no credential."""
+    calls: list[str] = []
+
+    def transport(method: str, url: str, **kwargs: Any) -> Any:
+        calls.append(url)
+        raise AssertionError(f"unexpected HTTP call {method} {url}")
+
+    c = AleoNetworkClient("https://edge.provable.com/api", network="testnet",
+                          api_key="legacy-key", consumer_id="legacy-consumer", transport=transport)
+    assert c._ensure_jwt(None, None, None) is None
+    assert calls == []
+    # The legacy host still mints as before (covered by the JWT tests above).
+    legacy = AleoNetworkClient("https://api.provable.com", network="testnet")
+    assert legacy._ensure_jwt(None, None, None) is None            # no creds → nothing to mint

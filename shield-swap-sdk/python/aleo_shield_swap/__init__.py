@@ -5,7 +5,7 @@
     from aleo import Aleo
     from aleo_shield_swap import ShieldSwap
 
-    aleo = Aleo(Aleo.HTTPProvider("https://api.provable.com"))
+    aleo = Aleo(Aleo.HTTPProvider("https://edge.provable.com/api"))
     aleo.default_account = account
     dex = ShieldSwap(aleo)
 
@@ -17,7 +17,15 @@
 from .client import ShieldSwap as ShieldSwap
 from .async_client import AsyncShieldSwap as AsyncShieldSwap
 from .api import ApiClient as ApiClient, AsyncApiClient as AsyncApiClient
+from .rebalance import (
+    RebalancePlan as RebalancePlan,
+    RebalanceResult as RebalanceResult,
+)
 from .types import (
+    OwnedPosition as OwnedPosition,
+    OwnedPositionState as OwnedPositionState,
+    HopFill as HopFill,
+    SwapExecution as SwapExecution,
     ClaimResult as ClaimResult,
     CollectReport as CollectReport,
     MintResult as MintResult,
@@ -48,7 +56,6 @@ from .errors import (
     DexApiError as DexApiError,
     NotAuthenticatedError as NotAuthenticatedError,
     NotFundedError as NotFundedError,
-    NotRedeemedError as NotRedeemedError,
     InsufficientRecordsError as InsufficientRecordsError,
     InvalidFeeTierError as InvalidFeeTierError,
     PoolNotFoundError as PoolNotFoundError,
@@ -70,7 +77,7 @@ def agent_guide() -> str:
     return files(__name__).joinpath("AGENTS.md").read_text()
 
 
-__version__ = "0.2.2"
+__version__ = "0.5.0"
 
 __all__ = [
     "ShieldSwap", "AsyncShieldSwap", "ApiClient", "AsyncApiClient",
@@ -80,9 +87,11 @@ __all__ = [
     "ShieldSwapError", "SwapOutputNotFinalizedError", "PoolNotFoundError",
     "PoolNotInitializedError", "InsufficientRecordsError",
     "InvalidFeeTierError", "DexApiError",
-    "NotAuthenticatedError", "NotRedeemedError", "NotFundedError",
+    "NotAuthenticatedError", "NotFundedError",
     "AirdropPendingError", "AirdropRateLimitedError",
     "CredentialsMissingError",
+    "OwnedPosition", "OwnedPositionState", "HopFill", "SwapExecution",
+    "RebalancePlan", "RebalanceResult",
     "Profile", "Journal", "REGISTRATION_STAGES",
     "OnboardReport", "StageOutcome", "SessionStatus", "PositionView",
     "SwapBatchReport", "CollectReport", "blinded_identity_at",

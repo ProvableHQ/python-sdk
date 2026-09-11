@@ -1,3 +1,9 @@
+"""Password-based encryption for Aleo private keys.
+
+Wraps a private key in a ciphertext that only the original secret reopens, so key
+material can be written to disk or shipped between processes. All local — nothing
+here touches the network.
+"""
 from __future__ import annotations
 
 # Intentionally network-agnostic: private-key encryption (keys/ciphertext) does

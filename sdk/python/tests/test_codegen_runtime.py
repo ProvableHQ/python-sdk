@@ -86,3 +86,33 @@ def test_fmt_fieldlike_and_address():
     assert fmt_address("aleo1abc") == "aleo1abc"
     with pytest.raises(ValueError):
         fmt_address("0xdeadbeef")
+
+
+def test_fmt_array_encodes_fixed_length_list():
+    from aleo.codegen.runtime import fmt_array
+    out = fmt_array(["1field", "2field"], lambda x: fmt_fieldlike(x, "field"), 2)
+    assert out == "[1field, 2field]"
+
+
+def test_fmt_array_rejects_wrong_length_and_type():
+    from aleo.codegen.runtime import fmt_array
+    with pytest.raises(ValueError, match="length 2"):
+        fmt_array(["1field"], str, 2)
+    with pytest.raises(ValueError, match="Expected a list"):
+        fmt_array("1field", str, 2)
+
+
+def test_dec_array_decodes_fixed_length_list():
+    from aleo.codegen.runtime import dec_array
+    assert dec_array(["1", "2"], int, 2) == [1, 2]
+
+
+def test_dec_array_rejects_wrong_length_and_type():
+    # A `[field; 16]` with 15 siblings is not the declared type — decoding
+    # must refuse it just as encoding does, or generated dataclasses would
+    # carry shapes the program rejects.
+    from aleo.codegen.runtime import dec_array
+    with pytest.raises(ValueError, match="length 2"):
+        dec_array(["1"], int, 2)
+    with pytest.raises(ValueError, match="length 2"):
+        dec_array("12", int, 2)

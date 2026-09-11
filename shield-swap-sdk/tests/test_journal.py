@@ -8,7 +8,7 @@ from aleo_shield_swap.types import SwapHandle
 def _handle(swap_id="s1", **kw):
     base = dict(swap_id=swap_id, blinding_factor="bf", blinded_address="ba",
                 token_in_id="t0", token_out_id="t1", pool_key="pk",
-                amount_in=5, transaction_id="tx1", program="shield_swap_v3.aleo")
+                amount_in=5, transaction_id="tx1", program="shield_swap.aleo")
     base.update(kw)
     return SwapHandle(**base)
 
@@ -71,3 +71,16 @@ def test_failed_swap_burns_counter_and_is_not_pending(tmp_path):
     j.record_swap_failed(cs[0], "boom")
     assert j.pending_claims() == []
     assert j.reserve_counters(1) == [1]                # 0 never reused
+
+
+def test_skip_counters_through_advances_the_cursor(tmp_path):
+    """A fresh journal for an account with swap history must start past the
+    counters already consumed on chain; skipping is durable and never
+    reissues the skipped range."""
+    j = Journal(tmp_path / "journal.jsonl")
+    j.skip_counters_through(9)
+    assert j.counter_cursor() == 10
+    assert j.reserve_counters(2) == [10, 11]
+    assert Journal(tmp_path / "journal.jsonl").counter_cursor() == 12
+    j.skip_counters_through(5)                       # never moves backwards
+    assert j.counter_cursor() == 12

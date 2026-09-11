@@ -30,16 +30,24 @@ def test_messages():
 def test_lifecycle_errors_teach_the_fix():
     from aleo_shield_swap.errors import (
         AirdropPendingError, AirdropRateLimitedError, CredentialsMissingError,
-        NotAuthenticatedError, NotFundedError, NotRedeemedError, ShieldSwapError,
+        NotAuthenticatedError, NotFundedError, ShieldSwapError,
     )
     assert "dex.onboard(" in str(NotAuthenticatedError())
-    assert "invite" in str(NotRedeemedError())
-    assert "dex.onboard(" in str(NotRedeemedError())
     assert "airdrop" in str(NotFundedError())
     assert "dex.status()" in str(AirdropPendingError("job1"))
     assert AirdropPendingError("job1").job_id == "job1"
     assert "15 minutes" in str(AirdropRateLimitedError())
     assert "ALEO_E2E_API_KEY" in str(CredentialsMissingError())
-    for cls in (NotAuthenticatedError, NotRedeemedError, NotFundedError,
+    for cls in (NotAuthenticatedError, NotFundedError,
                 AirdropRateLimitedError, CredentialsMissingError):
         assert issubclass(cls, ShieldSwapError)
+
+
+def test_no_invite_gate_error_class():
+    # Access is granted by authentication alone; the invite-gate error is gone
+    # from the taxonomy and the package surface.
+    import aleo_shield_swap
+    import aleo_shield_swap.errors as errors
+    assert not hasattr(errors, "NotRedeemedError")
+    assert not hasattr(aleo_shield_swap, "NotRedeemedError")
+    assert "NotRedeemedError" not in aleo_shield_swap.__all__

@@ -50,8 +50,9 @@ dependents:
 
 ```python
 abi_json = aleo_abi.generate_abi(
-    "shield_swap_v3.aleo", amm_bytecode, "testnet",
-    [("test_shield_swap_multisig_core.aleo", multisig_bytecode)],
+    "shield_swap.aleo", amm_bytecode, "testnet",
+    [("shield_swap_multisig_core.aleo", multisig_bytecode),
+     ("shield_swap_freezelist.aleo", freezelist_bytecode)],
 )
 ```
 

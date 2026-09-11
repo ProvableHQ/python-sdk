@@ -471,8 +471,11 @@ def test_authorize_fee_private_uses_provider_record() -> None:
         execution_id = "exec-id"
 
     class _ProcessShim:
-        def execution_cost(self, _execution: Any) -> Any:
+        def execution_cost(self, _execution: Any, block_height: Any = None) -> Any:
+            self.cost_heights.append(block_height)
             return (1000, (900, 100))
+
+        cost_heights: list = []
 
         def authorize_fee_private(
             self, _pk: Any, record: Any, base_fee: int, priority: int, exec_id: Any
@@ -512,3 +515,25 @@ def test_private_fee_no_provider_errors() -> None:
 
     with pytest.raises(ExecutionError, match="record provider"):
         bc._resolve_fee_record(None, min_microcredits=5000)
+
+
+def test_scanner_base_keeps_the_edge_api_prefix() -> None:
+    from aleo.facade.provider import scanner_base
+    assert scanner_base(HTTPProvider("https://edge.provable.com/api", network="testnet")) \
+        == "https://edge.provable.com/api/scanner"
+    assert scanner_base(HTTPProvider("https://api.provable.com/v2", network="testnet")) \
+        == "https://api.provable.com/scanner"
+    a = Aleo(HTTPProvider(network="testnet"))                     # the default: edge, no creds
+    assert a.records.scanner.url == "https://edge.provable.com/api/scanner/testnet"
+    assert a.records.scanner._api_key is None                   # no credentials wired
+
+
+def test_scanner_drops_credentials_on_the_open_edge() -> None:
+    # Ambient legacy credentials must not reach the edge scanner (it would try
+    # /api/jwts, which does not exist); on the legacy host they are forwarded.
+    edge = Aleo(HTTPProvider("https://edge.provable.com/api", network="testnet",
+                             api_key="k", consumer_id="c"))
+    assert edge.records.scanner._api_key is None and edge.records.scanner.consumer_id is None
+    legacy = Aleo(HTTPProvider("https://api.provable.com", network="testnet",
+                               api_key="k", consumer_id="c"))
+    assert legacy.records.scanner._api_key is not None and legacy.records.scanner.consumer_id == "c"

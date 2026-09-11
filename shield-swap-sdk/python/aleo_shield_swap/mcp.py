@@ -6,11 +6,11 @@ Uses the low-level ``mcp.server.Server`` (not FastMCP) so each tool
 advertises the exact JSON schema from :func:`~aleo_shield_swap.agent
 .shield_swap_tools` — FastMCP infers schemas from handler signatures, which
 would collapse every tool to one opaque ``args`` object.  Tools run against
-the synchronous :class:`~aleo_shield_swap.client.ShieldSwap` (the full verb
+the synchronous :class:`~aleo_shield_swap.client.ShieldSwap` (its full method
 surface) in a worker thread, keeping the event loop free.
 
 Environment:
-    ALEO_ENDPOINT     API origin (default ``https://api.provable.com`` —
+    ALEO_ENDPOINT     API service root (default ``https://edge.provable.com/api``, no credentials —
                       the provider derives ``/v2`` reads, ``/prove``, and
                       ``/scanner`` from it)
     ALEO_PRIVATE_KEY  Explicit signer (overrides the profile); without it
@@ -73,7 +73,7 @@ def _build_dex() -> Any:
 
     from .client import ShieldSwap
 
-    endpoint = os.environ.get("ALEO_ENDPOINT", "https://api.provable.com")
+    endpoint = os.environ.get("ALEO_ENDPOINT", "https://edge.provable.com/api")
     network = os.environ.get("ALEO_NETWORK", "testnet")
     api_key = os.environ.get("ALEO_E2E_API_KEY")
     aleo = Aleo(HTTPProvider(endpoint, network=network, api_key=api_key))
@@ -90,6 +90,12 @@ def _build_dex() -> Any:
 
 
 def main() -> None:
+    """Serve the shield_swap MCP tools over stdio until the client disconnects.
+
+    Builds a DEX client first, which binds a key from ``ALEO_PRIVATE_KEY`` or
+    else creates/loads the local participant profile on disk. Blocks for the
+    lifetime of the server; requires the ``[mcp]`` extra.
+    """
     import anyio
     from mcp.server.stdio import stdio_server
 

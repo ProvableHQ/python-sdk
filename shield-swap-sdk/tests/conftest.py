@@ -10,28 +10,28 @@ from __future__ import annotations
 
 import pytest
 
-from aleo_shield_swap.tick_math import Q64
-
-SLOT_TEXT = ("{ tick: 4055i32, tick_spacing: 60i32, sqrt_price: " + str(Q64) + "u128, "
-             "fee_protocol: 0u8, liquidity: 1000u128, fee_growth_global0_x_64: 0u128, "
-             "fee_growth_global1_x_64: 0u128, fee_residual0_x_64: 0u128, "
-             "fee_residual1_x_64: 0u128, max_liquidity_per_tick: 0u128, "
+SLOT_TEXT = ("{ tick: 4055i32, tick_spacing: 60u32, "
+             "sqrt_price: { hi: 1u128, lo: 0u128 }, "
+             "fee_protocol: 0u8, liquidity: 1000u128, "
+             "fee_growth_global0_x_128: { hi: 0u128, lo: 0u128 }, "
+             "fee_growth_global1_x_128: { hi: 0u128, lo: 0u128 }, "
+             "max_liquidity_per_tick: 0u128, "
              "protocol_fees0: 0u128, protocol_fees1: 0u128, "
              "next_init_below: 3960i32, next_init_above: 4080i32 }")
 
-POOL_TEXT = ("{ token0: 1field, token1: 2field, fee: 3000u16, enabled: true, "
-             "scale0: 1000000000u128, scale1: 1u128 }")
+POOL_TEXT = "{ token0: 1field, token1: 2field, fee: 3000u16, enabled: true }"
 
 RECORD_TEXT = ("{ owner: aleo1me.private, amount: 2000000000u128.private, "
                "_nonce: 7group.public }")
 
-# Vector account from test_blinding.py — next_blinded_identity derives real values.
+# Vector account from test_blinding.py — next_blinded_identity derives real
+# values.  Counter-0 identity pinned for shield_swap.aleo.
 VIEW_KEY_SCALAR = "334926304971763782347498121479281870911723639068413954564748091722770623877scalar"
 SIGNER = "aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px"
-BLINDING_FACTOR_0 = "4588552248780721950435785476596782217652350429588181106944985529417784595808field"
-BLINDED_ADDRESS_0 = "aleo1tucdl48jvu54emu9atq3vf0rslwtdpze83zcc2jrc8zxema0r5gq3zd76l"
+BLINDING_FACTOR_0 = "1084832000575072863530983109046262857691989153364570676666410266416291033880field"
+BLINDED_ADDRESS_0 = "aleo15mstsvdtzqf5nw8rfzx8mrllwxt907amfpt8nx3p8cskj4wd3uxq4uywn9"
 
-PROGRAM_ID = "shield_swap_v3.aleo"
+PROGRAM_ID = "shield_swap.aleo"
 
 # A decoy child transition emitting a field output — root-scoped harvesting
 # must NEVER pick this up.
@@ -83,8 +83,9 @@ class _Tx:
     id = "at1stubtx"
     raw = object()
 
-    def __init__(self, fn):
+    def __init__(self, fn, pid=PROGRAM_ID):
         self._fn = fn
+        self._pid = pid
 
     @property
     def outputs(self):
@@ -92,39 +93,42 @@ class _Tx:
 
     def decoded(self):
         return [dict(CHILD_TRANSITION),
-                {"program": PROGRAM_ID, "function": self._fn,
+                {"program": self._pid, "function": self._fn,
                  "outputs": [{"value": "77field"}]}]
 
     def transitions(self):
         return [_StubTransition("tok.aleo", "transfer", ["999field"]),
-                _StubTransition(PROGRAM_ID, self._fn, ["77field"])]
+                _StubTransition(self._pid, self._fn, ["77field"])]
 
 
 class _BoundCall:
-    def __init__(self, recorder, fn, args):
-        self.program_id = PROGRAM_ID
+    def __init__(self, recorder, fn, args, pid=PROGRAM_ID):
+        self.program_id = pid
         self.function_name = fn
         self._recorder = recorder
         self._recorder.last_call = (fn, list(args))
+        self._recorder.last_program = pid
 
     def simulate(self, account=None):
         return "simulated"
 
     def build_transaction(self, account=None, **kw):
-        return _Tx(self.function_name)
+        return _Tx(self.function_name, self.program_id)
 
     def delegate(self, account=None, **kw):
         self._recorder.delegated_fn = self.function_name
+        self._recorder.delegated_program = self.program_id
         return {"transaction_id": "at1delegated"}
 
 
 class _Functions:
-    def __init__(self, recorder):
+    def __init__(self, recorder, pid):
         self._recorder = recorder
+        self._pid = pid
 
     def __getattr__(self, fn):
         def call(*args):
-            return _BoundCall(self._recorder, fn, args)
+            return _BoundCall(self._recorder, fn, args, self._pid)
         return call
 
 
@@ -132,7 +136,7 @@ class _Program:
     def __init__(self, recorder, mappings, pid):
         self._recorder = recorder
         self._mappings = mappings
-        self.functions = _Functions(recorder)
+        self.functions = _Functions(recorder, pid)
         self.source = _valid_source(pid)
 
     def mapping(self, name):
@@ -178,7 +182,18 @@ class _Network:
         return {"status": "confirmed"}
 
     def get_transaction_object(self, tx_id):
-        return _Tx(self._recorder.delegated_fn)
+        return _Tx(self._recorder.delegated_fn,
+                   self._recorder.delegated_program or PROGRAM_ID)
+
+    def get_program_mapping_value(self, program_id, mapping_name, key):
+        """The node's mapping endpoint: no program handle involved.  The
+        stub keys mappings by name only; a program listed in
+        ``missing_programs`` answers the node's 404."""
+        self._recorder.mapping_reads.append((program_id, mapping_name, key))
+        if program_id in self._recorder.missing_programs:
+            from aleo import AleoNetworkError
+            raise AleoNetworkError(f"GET /program/{program_id}/... returned 404", status=404)
+        return self._recorder._mappings.get(mapping_name, {}).get(key)
 
 
 class _Provider:
@@ -196,12 +211,17 @@ class StubAleo:
 
     def __init__(self, mappings=None, records=None):
         self.last_call = None
+        self.last_program = None
         self.delegated_fn = None
+        self.delegated_program = None
         self.submitted = []
         self.waited = []
         self.fetched_programs = []
         self.registered_programs = []
-        self.programs = _Programs(self, mappings or {})
+        self.mapping_reads = []
+        self.missing_programs = set()
+        self._mappings = mappings or {}
+        self.programs = _Programs(self, self._mappings)
         self.record_provider = _Provider(records if records is not None
                                          else [{"record_plaintext": RECORD_TEXT}])
         self.network = _Network(self)

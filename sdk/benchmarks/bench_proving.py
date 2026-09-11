@@ -12,8 +12,8 @@ Functions benchmarked:
 
 * ``credits.aleo/transfer_public``
 * ``credits.aleo/transfer_private``   (spends a real credits record)
-* ``shield_swap_v3.aleo/swap``        (spends a token record, blinded output)
-* ``shield_swap_v3.aleo/mint``        (spends two token records)
+* ``shield_swap.aleo/swap``        (spends a token record, blinded output)
+* ``shield_swap.aleo/mint``        (spends two token records)
 
 The first prove of each function synthesizes its proving key (and may
 download SNARK parameters into ``~/.aleo/resources``) — that iteration is

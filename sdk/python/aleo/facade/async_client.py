@@ -32,10 +32,15 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+from decimal import Decimal
 from typing import Any, AsyncGenerator
 
-from .._client_common import AleoNetworkError
-from .._facade_common import credits_to_microcredits, microcredits_to_credits
+from .._client_common import AleoNetworkError, is_provable_host
+from .._facade_common import (
+    CreditsAmount,
+    credits_to_microcredits,
+    microcredits_to_credits,
+)
 from .._scanner_common import OwnedRecord, RecordNotFoundError
 from .errors import (
     ExecutionError,
@@ -116,6 +121,7 @@ class AsyncProgram:
 
     @property
     def source(self) -> str:
+        """The program's Leo/Aleo source text."""
         return str(self._raw.source)
 
     @property
@@ -257,6 +263,17 @@ class AsyncRecordsModule:
 
     @scanner.setter
     def scanner(self, scanner: Any) -> None:
+        """Replace the underlying async record scanner.
+
+        Assigning here bypasses the lazy default, so the client's provider config
+        is not consulted afterwards.
+
+        Parameters
+        ----------
+        scanner:
+            A pre-configured
+            :class:`~aleo.async_record_scanner.AsyncRecordScanner`.
+        """
         self._scanner = scanner
 
     async def register(self, account: Any, start: int = 0) -> dict[str, Any]:
@@ -268,9 +285,18 @@ class AsyncRecordsModule:
         return await scanner.register(account.view_key, start)
 
     async def revoke(self) -> dict[str, Any]:
+        """Revoke the registered account's scanning registration.
+
+        Delegates to :meth:`~aleo.async_record_scanner.AsyncRecordScanner.revoke` using the
+        scanner's configured UUID (derived from the registered account's view key).
+        """
         return await self.scanner.revoke()
 
     async def status(self) -> dict[str, Any]:
+        """Return the scanning status for the registered account.
+
+        Delegates to :meth:`~aleo.async_record_scanner.AsyncRecordScanner.status`.
+        """
         return await self.scanner.status()
 
     async def find(
@@ -407,43 +433,183 @@ class AsyncNetworkModule:
         return self._client.network_client
 
     async def get_latest_height(self) -> int:
+        """Return the latest block height.
+
+        Returns
+        -------
+        int
+            The current chain height.
+        """
         return int(await self._nc().get_latest_height())
 
     async def get_latest_block(self) -> Any:
+        """Return the latest block object (raw JSON dict).
+
+        Returns
+        -------
+        Any
+            Latest block as returned by the node.
+        """
         return await self._nc().get_latest_block()
 
     async def get_block(self, height: int) -> Any:
+        """Return the block at *height*.
+
+        Parameters
+        ----------
+        height:
+            Block height (non-negative integer).
+
+        Returns
+        -------
+        Any
+            Block data dict.
+        """
         return await self._nc().get_block(height)
 
     async def get_block_by_hash(self, block_hash: str) -> Any:
+        """Return the block identified by *block_hash*.
+
+        Parameters
+        ----------
+        block_hash:
+            Hex block hash string.
+
+        Returns
+        -------
+        Any
+            Block data dict.
+        """
         return await self._nc().get_block_by_hash(block_hash)
 
     async def get_block_range(self, start: int, end: int) -> list[Any]:
+        """Return blocks in the range [*start*, *end*].
+
+        Parameters
+        ----------
+        start:
+            Inclusive start height.
+        end:
+            Inclusive end height.
+
+        Returns
+        -------
+        list[Any]
+            Sequence of block dicts.
+        """
         return await self._nc().get_block_range(start, end)
 
     async def get_latest_block_hash(self) -> str:
+        """Return the hash of the latest block.
+
+        Returns
+        -------
+        str
+            Block hash string.
+        """
         return str(await self._nc().get_latest_block_hash())
 
     async def get_state_root(self) -> str:
+        """Return the latest state root.
+
+        Returns
+        -------
+        str
+            State root string (``"sr1…"``).
+        """
         return str(await self._nc().get_state_root())
 
     async def get_program(self, program_id: str, edition: int | None = None) -> str:
+        """Return the Leo source for *program_id*.
+
+        Parameters
+        ----------
+        program_id:
+            Aleo program identifier (e.g. ``"credits.aleo"``).
+        edition:
+            Optional edition number.
+
+        Returns
+        -------
+        str
+            Program source text.
+        """
         return await self._nc().get_program(program_id, edition)
 
     async def get_program_mapping_names(self, program_id: str) -> list[str]:
+        """Return the mapping names defined in *program_id*.
+
+        Parameters
+        ----------
+        program_id:
+            Aleo program identifier.
+
+        Returns
+        -------
+        list[str]
+            List of mapping names.
+        """
         return await self._nc().get_program_mapping_names(program_id)
 
     async def get_program_mapping_value(
         self, program_id: str, mapping_name: str, key: str
     ) -> str:
+        """Return the current value at (*program_id*, *mapping_name*, *key*).
+
+        Parameters
+        ----------
+        program_id:
+            Aleo program identifier.
+        mapping_name:
+            Name of the mapping.
+        key:
+            Mapping key.
+
+        Returns
+        -------
+        str
+            Serialised mapping value.
+        """
         return await self._nc().get_program_mapping_value(
             program_id, mapping_name, key
         )
 
     async def get_public_balance(self, address: str) -> int:
+        """Return the public credits balance for *address* in microcredits.
+
+        Queries the ``credits.aleo`` ``account`` mapping.  Returns ``0`` when
+        the address has no balance or the mapping value is absent.
+
+        Parameters
+        ----------
+        address:
+            Aleo address string (``"aleo1…"``).
+
+        Returns
+        -------
+        int
+            Balance in microcredits.
+        """
         return int(await self._nc().get_public_balance(address))
 
     async def get_transaction(self, tx_id: str) -> Any:
+        """Return the (possibly unconfirmed) transaction for *tx_id*.
+
+        Parameters
+        ----------
+        tx_id:
+            Transaction ID string.
+
+        Returns
+        -------
+        Any
+            Transaction data dict.
+
+        Raises
+        ------
+        TransactionNotFound
+            If no transaction exists for *tx_id* (a 404 from the node).
+        """
         try:
             return await self._nc().get_transaction(tx_id)
         except AleoNetworkError as exc:
@@ -452,6 +618,23 @@ class AsyncNetworkModule:
             raise
 
     async def get_confirmed_transaction(self, tx_id: str) -> Any:
+        """Return the confirmed transaction for *tx_id*.
+
+        Parameters
+        ----------
+        tx_id:
+            Transaction ID string.
+
+        Returns
+        -------
+        Any
+            Confirmed transaction data dict.
+
+        Raises
+        ------
+        TransactionNotFound
+            If no confirmed transaction exists for *tx_id* (a 404 from the node).
+        """
         try:
             return await self._nc().get_confirmed_transaction(tx_id)
         except AleoNetworkError as exc:
@@ -472,9 +655,36 @@ class AsyncNetworkModule:
             raise
 
     async def get_transactions(self, block_height: int) -> list[Any]:
+        """Return all transactions in the block at *block_height*.
+
+        Parameters
+        ----------
+        block_height:
+            Block height to query.
+
+        Returns
+        -------
+        list[Any]
+            List of transaction dicts.
+        """
         return await self._nc().get_transactions(block_height)
 
     async def submit_transaction(self, transaction: Any) -> str:
+        """Broadcast *transaction* to the network and return the transaction ID.
+
+        Accepts either a :class:`Transaction` object (anything with a
+        ``__str__`` serialisation the node accepts) or a raw JSON string.
+
+        Parameters
+        ----------
+        transaction:
+            A :class:`Transaction` object or a serialised transaction string.
+
+        Returns
+        -------
+        str
+            The transaction ID returned by the node.
+        """
         return str(await self._nc().submit_transaction(transaction))
 
     send_raw_transaction = submit_transaction
@@ -486,6 +696,36 @@ class AsyncNetworkModule:
         timeout: float = 45.0,
         poll_interval: float = 2.0,
     ) -> Any:
+        """Poll until *tx_id* is confirmed, then return the transaction data.
+
+        Delegates to
+        :meth:`~aleo.async_network_client.AsyncAleoNetworkClient.wait_for_transaction_confirmation`
+        and maps its :exc:`TimeoutError` to the facade-typed
+        :exc:`~aleo.facade.errors.TransactionConfirmationTimeout`.
+
+        Parameters
+        ----------
+        tx_id:
+            Transaction ID to wait on.
+        timeout:
+            Maximum seconds to wait before raising
+            :exc:`~aleo.facade.errors.TransactionConfirmationTimeout`.
+            Default is 45 s.
+        poll_interval:
+            Seconds between polls.  Default is 2 s.
+
+        Returns
+        -------
+        Any
+            Confirmed transaction data dict.
+
+        Raises
+        ------
+        TransactionConfirmationTimeout
+            If the transaction is not confirmed within *timeout* seconds.
+        AleoNetworkError
+            If the node explicitly rejects the transaction.
+        """
         try:
             return await self._nc().wait_for_transaction_confirmation(
                 tx_id,
@@ -721,7 +961,16 @@ class AsyncBoundCall(PreparedCall):
         process = self._client.process
         execution_id = execution.execution_id
         if base_fee is None:
-            total, _ = process.execution_cost(execution)
+            # The version in force at the inclusion height — hosted API only;
+            # see BoundCall._current_height in call.py for why a devnode's
+            # height must NOT be mapped through the SDK's activation table.
+            height: int | None = None
+            if is_provable_host(self._client._provider.url):
+                try:
+                    height = int(await self._client.network.get_latest_height())
+                except Exception:  # noqa: BLE001 - estimate still possible without it
+                    height = None
+            total, _ = process.execution_cost(execution, height)
             base_fee = int(total)
         else:
             base_fee = int(base_fee)
@@ -888,6 +1137,7 @@ class AsyncAleo:
 
     @property
     def provider(self) -> HTTPProvider:
+        """The :class:`~aleo.facade.provider.HTTPProvider` used to build this client."""
         return self._provider
 
     @property
@@ -911,10 +1161,19 @@ class AsyncAleo:
 
     @property
     def default_account(self) -> Any:
+        """The default account used when a verb omits a signer."""
         return self._default_account
 
     @default_account.setter
     def default_account(self, account: Any) -> None:
+        """Set the account verbs fall back to when no signer is passed.
+
+        Parameters
+        ----------
+        account:
+            The account to sign with by default.  Set to ``None`` to require an
+            explicit signer on every verb.
+        """
         self._default_account = account
 
     # ── Record provider ────────────────────────────────────────────────────
@@ -926,6 +1185,15 @@ class AsyncAleo:
 
     @record_provider.setter
     def record_provider(self, provider: Any) -> None:
+        """Replace the provider that auto-sources records for private fees.
+
+        Parameters
+        ----------
+        provider:
+            An async record provider — its ``get_unspent_credits_record`` must be
+            ``async def``.  ``None`` disables automatic sourcing, which makes
+            private fees require an explicit ``fee_record``.
+        """
         self._record_provider = provider
 
     # ── Network identity (sync — local) ────────────────────────────────────
@@ -942,6 +1210,11 @@ class AsyncAleo:
 
     @property
     def network_name(self) -> str:
+        """Human-readable network name string.
+
+        Returns ``"mainnet"`` or ``"testnet"`` (the normalised provider
+        value, not the full snarkvm network display name).
+        """
         return self._provider.network
 
     # ── Connectivity (async) ────────────────────────────────────────────────
@@ -977,15 +1250,54 @@ class AsyncAleo:
 
     # ── Unit conversions (sync) ─────────────────────────────────────────────
 
-    def to_microcredits(self, credits: float | int) -> int:
-        return credits_to_microcredits(credits)
+    def to_microcredits(
+        self, credits: CreditsAmount, *, allow_rounding: bool = False
+    ) -> int:
+        """Convert a credits amount to integer microcredits, exactly.
 
-    def from_microcredits(self, microcredits: int) -> float:
+        Local and synchronous.  See :meth:`Aleo.to_microcredits` — computed in
+        decimal, so ``1.005`` gives 1_005_000 rather than 1_004_999.
+
+        Parameters
+        ----------
+        credits:
+            Credits amount; ``str`` and ``Decimal`` are exact.
+        allow_rounding:
+            Permit input finer than one microcredit, truncating toward zero.
+
+        Raises
+        ------
+        ValueError
+            If *credits* is finer than a microcredit and *allow_rounding* is
+            False, or is not a usable number.
+        """
+        return credits_to_microcredits(credits, allow_rounding=allow_rounding)
+
+    def from_microcredits(self, microcredits: int) -> Decimal:
+        """Convert an integer microcredits amount to credits, exactly.
+
+        Local and synchronous.  Returns a :class:`~decimal.Decimal` — see
+        :meth:`Aleo.from_microcredits` for why a float will not do.
+
+        Parameters
+        ----------
+        microcredits:
+            Integer microcredits (e.g. ``1_500_000``).
+        """
         return microcredits_to_credits(microcredits)
 
     # ── Address validation (sync) ───────────────────────────────────────────
 
     def is_valid_address(self, s: str) -> bool:
+        """Return ``True`` if *s* is a valid Aleo address.
+
+        Wraps the network module's ``Address.is_valid`` class method.
+
+        Parameters
+        ----------
+        s:
+            The candidate address string.
+        """
         try:
             net = self._provider.network
             if net == "testnet":

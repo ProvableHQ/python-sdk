@@ -7,10 +7,15 @@ to later phases.
 """
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any
 
 from .._client_common import AleoNetworkError
-from .._facade_common import credits_to_microcredits, microcredits_to_credits
+from .._facade_common import (
+    CreditsAmount,
+    credits_to_microcredits,
+    microcredits_to_credits,
+)
 from .provider import HTTPProvider
 
 # AleoNetworkClient imported at runtime (avoid circular at module-level)
@@ -99,6 +104,14 @@ class Aleo:
 
     @default_account.setter
     def default_account(self, account: Any) -> None:
+        """Set the account verbs fall back to when no signer is passed.
+
+        Parameters
+        ----------
+        account:
+            The account to sign with by default.  Set to ``None`` to require an
+            explicit signer on every verb.
+        """
         self._default_account = account
 
     # ── Record provider ──────────────────────────────────────────────────────
@@ -108,15 +121,23 @@ class Aleo:
         """The :class:`~aleo._facade_common.RecordProvider` used to auto-source records.
 
         Defaults to :attr:`records` (``aleo.records``), which wraps a delegated
-        record scanner.  Assign a custom provider (e.g. a self-hosted scanner
-        wrapper) to keep your view key private, or set it to ``None`` to disable
-        automatic record sourcing (private fees then require an explicit
-        ``fee_record``).
+        record scanner.  Assign a custom provider to keep your view key out of
+        that service, or set it to ``None`` to disable automatic record sourcing
+        (private fees then require an explicit ``fee_record``).
         """
         return self._record_provider
 
     @record_provider.setter
     def record_provider(self, provider: Any) -> None:
+        """Replace the provider that auto-sources records for private fees.
+
+        Parameters
+        ----------
+        provider:
+            A :class:`~aleo._facade_common.RecordProvider`, or ``None`` to disable
+            automatic sourcing — private fees then require an explicit
+            ``fee_record``.
+        """
         self._record_provider = provider
 
     # ── Network identity ───────────────────────────────────────────────────
@@ -193,20 +214,41 @@ class Aleo:
 
     # ── Unit conversions ───────────────────────────────────────────────────
 
-    def to_microcredits(self, credits: float | int) -> int:
-        """Convert a credits amount to integer microcredits.
+    def to_microcredits(
+        self, credits: CreditsAmount, *, allow_rounding: bool = False
+    ) -> int:
+        """Convert a credits amount to integer microcredits, exactly.
 
-        ``1 credit == 1_000_000 microcredits``
+        ``1 credit == 1_000_000 microcredits``.  Computed in decimal, so
+        ``1.005`` gives 1_005_000 rather than the 1_004_999 a binary float
+        multiply would truncate to.
 
         Parameters
         ----------
         credits:
-            Credits amount as a float or integer (e.g. ``1.5``).
-        """
-        return credits_to_microcredits(credits)
+            Credits amount.  ``str`` and ``Decimal`` are exact; a ``float`` is
+            read as the decimal literal it prints as, so prefer ``"1.005"`` over
+            ``1.005`` when the amount comes from text.
+        allow_rounding:
+            Permit input finer than one microcredit, truncating toward zero.
+            Off by default, so precision loss raises instead of silently
+            underpaying.
 
-    def from_microcredits(self, microcredits: int) -> float:
-        """Convert an integer microcredits amount to credits.
+        Raises
+        ------
+        ValueError
+            If *credits* is finer than a microcredit and *allow_rounding* is
+            False, or is not a usable number.
+        """
+        return credits_to_microcredits(credits, allow_rounding=allow_rounding)
+
+    def from_microcredits(self, microcredits: int) -> Decimal:
+        """Convert an integer microcredits amount to credits, exactly.
+
+        Returns a :class:`~decimal.Decimal`, not a float — microcredits are a
+        ``u64`` and past 2**53 a float cannot hold the integer.  It compares
+        equal to the obvious float, but mixing it into float arithmetic raises;
+        call ``float(...)`` deliberately if you want that.
 
         Parameters
         ----------

@@ -2,14 +2,14 @@ import aleo_shield_swap
 
 
 def test_version():
-    assert aleo_shield_swap.__version__ == "0.2.2"
+    assert aleo_shield_swap.__version__ == "0.5.0"
 
 
 def test_lifecycle_exports():
     import aleo_shield_swap as pkg
     for name in ("Profile", "Journal", "OnboardReport", "SessionStatus",
                  "PositionView", "SwapBatchReport", "CollectReport",
-                 "StageOutcome", "NotAuthenticatedError", "NotRedeemedError",
+                 "StageOutcome", "NotAuthenticatedError",
                  "NotFundedError", "AirdropPendingError",
                  "AirdropRateLimitedError", "CredentialsMissingError",
                  "blinded_identity_at", "REGISTRATION_STAGES"):

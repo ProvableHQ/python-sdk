@@ -12,7 +12,7 @@ Slow tests (`@pytest.mark.slow`) require:
 Run them locally with: python -m pytest python/tests -v -m slow
 They are excluded from CI via -m "not slow".
 
-Endpoint note (verified empirically): Query.rest() wants the BASE url
+Endpoint note (verified empirically): Query.rest() requires the BASE url
 `https://api.explorer.provable.com/v2` — snarkvm's REST query appends the
 network path (`/mainnet/stateRoot/latest`) itself; passing `.../v2/mainnet`
 would double the network segment.
@@ -174,6 +174,14 @@ def test_prove_and_verify_execution(process, proven_execution):
     assert storage > 0
     assert finalize >= 0
     assert total == storage + finalize
+    # The consensus version comes from the network's activation table, not a
+    # hardcoded literal: the default is the newest scheduled version, which
+    # a far-future height also resolves to; a height before V2 uses the v1
+    # formula and prices differently.
+    assert process.execution_cost(execution, block_height=2**32 - 1) == (total, (storage, finalize))
+    assert process.verify_execution(execution, block_height=2**32 - 1) is None
+    genesis_total, _ = process.execution_cost(execution, block_height=0)
+    assert genesis_total > 0
 
     # Negative: tamper with the signer commitment (scm). Determined
     # empirically: tampering tcm/inputs/outputs is rejected already at

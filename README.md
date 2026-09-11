@@ -7,14 +7,14 @@ The SDK ships two layers:
 - A **Web3.py-style facade** (`aleo.Aleo` / `aleo.AsyncAleo`) — a high-level, batteries-included client for connecting to a node, managing accounts, reading state, and building/proving/broadcasting transactions.
 - **Low-level primitives** (`aleo.mainnet`, `aleo.testnet`) — direct Python bindings to Aleo's zero-knowledge cryptographic types, for when you need full control.
 
-Built with snarkvm 4.8.1 (MainnetV0). For build instructions, see [sdk/Readme.md](./sdk/Readme.md).
+Built with snarkvm 4.9.1 (MainnetV0). For build instructions, see [sdk/Readme.md](./sdk/Readme.md).
 
 ## Agent skills (trade on Shield Swap by chatting)
 
 The [`shield-swap-sdk`](./shield-swap-sdk) package ships everything an AI
-agent needs to drive the shield_swap AMM — set up an account, redeem an
-invite code, get the airdrop, make private swaps, manage liquidity, and
-collect earnings — from a single generated guide.
+agent needs to drive the shield_swap AMM — set up an account, get the
+airdrop, make private swaps, manage liquidity, and collect earnings — from
+a single generated guide.
 
 **Any agent (Claude Code, Codex, Cursor, custom):**
 
@@ -27,9 +27,10 @@ Most coding agents (Codex, Cursor, Claude Code, …) automatically read a
 repo-root `AGENTS.md`, so after that one command just chat: *"set up a
 shield-swap account and get tokens"*, *"find pools and start swapping"*.
 (Equivalently, open with "run `python -m aleo_shield_swap` and follow that
-guide", or paste the output into the agent's instructions.) The one thing
-the agent will ask you for is an invite code; everything else — key
-material, API credentials, airdrop — is handled by the SDK. Bring an existing account by exporting
+guide", or paste the output into the agent's instructions.) The agent needs
+nothing from you to get started — key material, API credentials, and the
+airdrop are all handled by the SDK; a friend's referral code is optional.
+Bring an existing account by exporting
 `SHIELD_SWAP_PRIVATE_KEY` (or `SHIELD_SWAP_PRIVATE_KEY_FILE`) before the
 first run — never paste a private key into the chat.
 
@@ -54,7 +55,7 @@ python -m aleo_shield_swap.mcp      # stdio server with the lifecycle tools
 from aleo import Aleo
 
 # Connect (construction is offline — no I/O until you make a call)
-aleo = Aleo(Aleo.HTTPProvider("https://api.provable.com/v2"))
+aleo = Aleo(Aleo.HTTPProvider("https://edge.provable.com/api"))
 print(aleo.network_name)   # "mainnet"
 print(aleo.network_id)     # 0
 
@@ -78,7 +79,7 @@ The facade follows a clean top-to-bottom narrative: **connect → account → re
 ```python
 from aleo import Aleo
 
-aleo = Aleo(Aleo.HTTPProvider("https://api.provable.com/v2"))
+aleo = Aleo(Aleo.HTTPProvider("https://edge.provable.com/api"))
 
 # Optional: check reachability  # requires a live node
 if aleo.is_connected():
@@ -203,7 +204,7 @@ credits.functions.transfer_private(record, str(recipient.address), 1) \
     .delegate(account)
 ```
 
-`aleo.record_provider` is swappable: set it to your own object implementing the `RecordProvider` protocol (`get_unspent_credits_record` / `find`) — e.g. a self-hosted scanner — and the whole facade (including private-fee auto-sourcing) uses it, with no view-key sharing.
+`aleo.record_provider` is swappable: set it to your own object implementing the `RecordProvider` protocol (`get_unspent_credits_record` / `find`), and the whole facade (including private-fee auto-sourcing) uses it, with no view-key sharing.
 
 ## Async (`AsyncAleo`)
 
@@ -214,7 +215,7 @@ import asyncio
 from aleo import AsyncAleo
 
 async def main():
-    aleo = AsyncAleo(AsyncAleo.HTTPProvider("https://api.provable.com/v2"))
+    aleo = AsyncAleo(AsyncAleo.HTTPProvider("https://edge.provable.com/api"))
     print(aleo.network_name)   # sync — no I/O
 
     # Account ops are sync (purely local), even on AsyncAleo

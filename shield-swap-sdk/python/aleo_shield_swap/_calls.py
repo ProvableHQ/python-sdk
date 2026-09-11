@@ -1,6 +1,6 @@
 """DexCall — a facade BoundCall plus a typed result builder.
 
-Preserves the facade's verb ladder on every DEX write: the consumer picks
+Preserves the facade's call semantics on every DEX write: the consumer picks
 the proving path (``simulate`` / ``transact`` / ``delegate``) and gets a
 typed result back instead of a bare transaction id.
 
@@ -71,7 +71,7 @@ def root_outputs(decoded_transitions: list[dict[str, Any]],
 
 class DexCall(Generic[R]):
     """A prepared DEX write.  ``build_result(transaction_id, root_outputs)
-    -> R`` turns the submitted transaction into the verb's typed result."""
+    -> R`` turns the submitted transaction into the method's typed result."""
 
     def __init__(self, aleo: Any, bound: Any,
                  build_result: Callable[[str, list[str]], R]) -> None:

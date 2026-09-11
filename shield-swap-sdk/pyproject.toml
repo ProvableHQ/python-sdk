@@ -1,14 +1,16 @@
 [project]
 name = "shield-swap-sdk"
-version = "0.2.2"
+version = "0.5.0"
 description = "Python SDK for the shield swap AMM Dex on Aleo"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["aleo-sdk>=0.2", "requests>=2"]
+dependencies = ["aleo-sdk>=0.5.0", "requests>=2"]   # 0.5.0: codegen runtime fmt_array/dec_array
 
 [project.optional-dependencies]
 async = ["httpx>=0.27"]
-mcp = ["mcp>=1.0"]
+# mcp 2.0 renamed the Server registration API and Tool fields — pin to 1.x
+# until the server is ported.
+mcp = ["mcp>=1.0,<2"]
 dev = ["datamodel-code-generator>=0.25", "pytest>=8", "pytest-asyncio>=0.23"]
 
 [build-system]

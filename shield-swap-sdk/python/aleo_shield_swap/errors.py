@@ -28,12 +28,24 @@ class SwapOutputNotFinalizedError(ShieldSwapError):
 
 
 class PoolNotFoundError(ShieldSwapError):
+    """No pool exists at this key.
+
+    Usually a key derived for the wrong token order, fee tier, or network — the
+    derivation succeeds regardless, so a bad key only surfaces on the first read.
+    """
+
     def __init__(self, pool_key: str) -> None:
         super().__init__(f"Pool {pool_key} does not exist on-chain.")
         self.pool_key = pool_key
 
 
 class PoolNotInitializedError(ShieldSwapError):
+    """The pool exists but has no slot yet, so it cannot quote or trade.
+
+    Distinct from :class:`PoolNotFoundError`: the pool was created but never
+    initialized. Trading against it only works once someone initializes it.
+    """
+
     def __init__(self, pool_key: str) -> None:
         super().__init__(f"Pool {pool_key} exists but is not initialized.")
         self.pool_key = pool_key
@@ -48,13 +60,30 @@ class InvalidFeeTierError(ShieldSwapError):
 
 
 class DexApiError(ShieldSwapError):
-    """A DEX REST API request failed; carries the HTTP status and body."""
+    """A DEX REST API request failed; carries the HTTP status and body.
+
+    ``code`` is the API's machine-readable error code when the body is its
+    JSON error envelope (``{"error": …, "code": …, "ref": …}``), else None —
+    branch on it rather than on the human-readable message.
+    """
 
     def __init__(self, status: int, body: str,
                  message: "str | None" = None) -> None:
         super().__init__(message or f"DEX API error {status}: {body[:200]}")
         self.status = status
         self.body = body
+        self.code: "str | None" = None
+        self.ref: "str | None" = None
+        try:
+            import json
+            envelope = json.loads(body)
+        except (TypeError, ValueError):
+            envelope = None
+        if isinstance(envelope, dict):
+            code = envelope.get("code")
+            self.code = str(code) if code is not None else None
+            ref = envelope.get("ref")
+            self.ref = str(ref) if ref is not None else None
 
 
 class NotAuthenticatedError(DexApiError):
@@ -68,17 +97,6 @@ class NotAuthenticatedError(DexApiError):
             401, body,
             "Not authenticated with the DEX API — run dex.onboard() (or "
             "api.authenticate(address, sign) for manual control)."
-        )
-
-
-class NotRedeemedError(DexApiError):
-    """Authenticated, but the account has not redeemed an invite code (403)."""
-
-    def __init__(self, body: str = "") -> None:
-        super().__init__(
-            403, body,
-            "This account has not redeemed an invite code — run "
-            "dex.onboard(invite_code=...). Codes are distributed by the team."
         )
 
 

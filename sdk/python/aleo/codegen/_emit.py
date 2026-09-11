@@ -12,7 +12,7 @@ from __future__ import annotations
 import keyword
 import re
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 _PROGRAM_ID_RE = re.compile(r"[a-zA-Z0-9_.]+")
 
@@ -75,6 +75,19 @@ def resolve_ty(ty: Any) -> PyType:
             lambda e: f"{e}.to_plaintext()",
             lambda e, n=name: f"{n}.from_decoded({e})",
         )
+    if isinstance(ty, dict) and "Array" in ty:
+        elem = resolve_ty(ty["Array"]["element"])
+        length = int(ty["Array"]["length"])
+        # Both directions enforce the declared length: encoding via fmt_array,
+        # decoding via dec_array — a `[field; 16]` with 15 siblings is not the
+        # declared type, whichever way it travels.
+        return PyType(
+            f"list[{elem.annotation}]",
+            lambda e, el=elem, n=length:
+                f"fmt_array({e}, lambda _x: {el.encode_expr('_x')}, {n})",
+            lambda e, el=elem, n=length:
+                f"dec_array({e}, lambda _x: {el.decode_expr('_x')}, {n})",
+        )
     raise ValueError(f"Unsupported ABI type: {ty!r}")
 
 
@@ -125,16 +138,23 @@ _IMPORTS = (
     "from dataclasses import dataclass\n"
     "from typing import Any, Callable, Optional\n"
     "from aleo.codegen.runtime import (parse_plaintext, fmt_int, fmt_bool,"
-    " fmt_fieldlike, fmt_address)\n\n"
+    " fmt_fieldlike, fmt_address, fmt_array, dec_array)\n\n"
 )
+
+
+def _iter_struct_refs(ty: Any) -> "Iterator[dict[str, Any]]":
+    """Yield every ``{"Struct": ...}`` reference in a ty tree (arrays included)."""
+    if isinstance(ty, dict) and "Struct" in ty:
+        yield ty
+    elif isinstance(ty, dict) and "Array" in ty:
+        yield from _iter_struct_refs(ty["Array"]["element"])
 
 
 def _struct_deps(struct: dict[str, Any]) -> set[str]:
     deps: set[str] = set()
     for f in struct["fields"]:
-        ty = f["ty"]
-        if isinstance(ty, dict) and "Struct" in ty:
-            deps.add(ty["Struct"]["path"][-1])
+        for ref in _iter_struct_refs(f["ty"]):
+            deps.add(ref["Struct"]["path"][-1])
     return deps
 
 
@@ -145,6 +165,11 @@ def _toposort(structs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     seen: set[str] = set()
 
     def visit(name: str) -> None:
+        """Append *name* after its dependencies, skipping repeats.
+
+        Names absent from this ABI are ignored — cross-program references are
+        rejected earlier, by ``_check_struct_refs``.
+        """
         if name in seen or name not in by_name:
             return
         seen.add(name)
@@ -206,8 +231,19 @@ def _check_struct_refs(abi: dict[str, Any]) -> None:
     local = set(names)
 
     def check(ty: Any, context: str) -> None:
-        if isinstance(ty, dict) and "Struct" in ty:
-            ref = ty["Struct"]
+        """Assert every struct *ty* references is defined in this program.
+
+        Args:
+            ty: An ABI type to walk for struct references.
+            context: Where the type came from, quoted in the error so a failure
+                names the offending field.
+
+        Raises:
+            ValueError: If a reference is undefined or points at another program —
+                the generated class would not exist.
+        """
+        for entry in _iter_struct_refs(ty):
+            ref = entry["Struct"]
             name, prog = ref["path"][-1], ref.get("program", program)
             if name not in local or prog != program:
                 raise ValueError(

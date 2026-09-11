@@ -75,17 +75,12 @@ def test_collect_all_requests_exactly_owed_fees(dex, monkeypatch):
         tokens_owed0 = 3
         tokens_owed1 = 0
 
-    class _Pool:
-        scale0 = 1000
-        scale1 = 10
-
     monkeypatch.setattr(ShieldSwap, "get_positions", lambda self, account=None: [
         PositionView("11field", "1field", "journal"),
         PositionView("22field", "2field", "scanned"),   # skipped: no journal context
     ])
     monkeypatch.setattr(ShieldSwap, "_position_state",
                         lambda self, pid: _Pos() if pid == "11field" else None)
-    monkeypatch.setattr(ShieldSwap, "get_pool", lambda self, key: _Pool())
     collected = []
 
     def fake_collect(self, *, pool_key, amount0_requested, amount1_requested,
@@ -99,7 +94,7 @@ def test_collect_all_requests_exactly_owed_fees(dex, monkeypatch):
 
     monkeypatch.setattr(ShieldSwap, "collect", fake_collect)
     report = dex.collect_all()
-    assert collected == [("1field", 3000, 0)]          # owed * scale, exactly
+    assert collected == [("1field", 3, 0)]             # exactly owed, raw units
     assert report.fees == [{"position_token_id": "11field",
                             "pool_key": "1field", "transaction_id": "txf"}]
 
