@@ -336,7 +336,7 @@ def test_current_height_is_only_consulted_on_the_hosted_api() -> None:
             return height
         return NS(_client=NS(_provider=NS(url=url), network=NS(get_latest_height=latest)))
 
-    assert BoundCall._current_height(fake("https://edge.provable.com/api")) == 4242
+    assert BoundCall._current_height(fake("https://api.provable.com")) == 4242
     assert BoundCall._current_height(fake("https://api.provable.com/v2")) == 4242
     assert BoundCall._current_height(fake("http://127.0.0.1:3030")) is None            # devnode
-    assert BoundCall._current_height(fake("https://edge.provable.com/api", RuntimeError("down"))) is None
+    assert BoundCall._current_height(fake("https://api.provable.com", RuntimeError("down"))) is None
