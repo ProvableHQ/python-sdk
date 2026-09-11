@@ -515,3 +515,14 @@ def test_private_fee_no_provider_errors() -> None:
 
     with pytest.raises(ExecutionError, match="record provider"):
         bc._resolve_fee_record(None, min_microcredits=5000)
+
+
+def test_scanner_base_keeps_the_edge_api_prefix() -> None:
+    from aleo.facade.provider import scanner_base
+    assert scanner_base(HTTPProvider("https://edge.provable.com/api", network="testnet")) \
+        == "https://edge.provable.com/api/scanner"
+    assert scanner_base(HTTPProvider("https://api.provable.com/v2", network="testnet")) \
+        == "https://api.provable.com/scanner"
+    a = Aleo(HTTPProvider(network="testnet"))                     # the default: edge, no creds
+    assert a.records.scanner.url == "https://edge.provable.com/api/scanner/testnet"
+    assert a.records.scanner._api_key is None                   # no credentials wired

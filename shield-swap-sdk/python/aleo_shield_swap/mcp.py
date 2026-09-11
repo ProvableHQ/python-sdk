@@ -10,7 +10,7 @@ the synchronous :class:`~aleo_shield_swap.client.ShieldSwap` (its full method
 surface) in a worker thread, keeping the event loop free.
 
 Environment:
-    ALEO_ENDPOINT     API origin (default ``https://api.provable.com`` —
+    ALEO_ENDPOINT     API service root (default ``https://edge.provable.com/api``, no credentials —
                       the provider derives ``/v2`` reads, ``/prove``, and
                       ``/scanner`` from it)
     ALEO_PRIVATE_KEY  Explicit signer (overrides the profile); without it
@@ -73,7 +73,7 @@ def _build_dex() -> Any:
 
     from .client import ShieldSwap
 
-    endpoint = os.environ.get("ALEO_ENDPOINT", "https://api.provable.com")
+    endpoint = os.environ.get("ALEO_ENDPOINT", "https://edge.provable.com/api")
     network = os.environ.get("ALEO_NETWORK", "testnet")
     api_key = os.environ.get("ALEO_E2E_API_KEY")
     aleo = Aleo(HTTPProvider(endpoint, network=network, api_key=api_key))

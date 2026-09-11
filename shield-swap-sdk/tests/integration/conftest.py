@@ -20,7 +20,7 @@ from typing import Any, Callable, Optional
 
 import pytest
 
-ENDPOINT = os.environ.get("ALEO_E2E_ENDPOINT", "https://api.provable.com")  # origin, no /v2
+ENDPOINT = os.environ.get("ALEO_E2E_ENDPOINT", "https://edge.provable.com/api")  # service root, no /v2
 PRIVATE_KEY = os.environ.get("ALEO_E2E_PRIVATE_KEY")
 
 account_tier = pytest.mark.skipif(not PRIVATE_KEY, reason="ALEO_E2E_PRIVATE_KEY not set")
@@ -32,14 +32,21 @@ _CREDS: Optional[tuple[str, str]] = None
 def dps_credentials() -> tuple[str, str]:
     """``(api_key, consumer_id)`` for the scanner + delegated proving.
 
-    Env first; otherwise provisioned once per session and cached (a fresh
-    consumer per run is fine — the key/id pair is what matters, not the name).
+    ``(None, None)`` on the open edge (the default endpoint).  On the legacy
+    credentialed host: env first, otherwise provisioned once per session and
+    cached (a fresh consumer per run is fine — the key/id pair is what
+    matters, not the name).
     """
     global _CREDS
     if _CREDS is None:
+        from aleo._client_common import requires_credentials
         key = os.environ.get("ALEO_E2E_API_KEY")
         cid = os.environ.get("ALEO_E2E_CONSUMER_ID")
-        if not (key and cid):
+        if not requires_credentials(ENDPOINT):
+            # The default edge is open: no key, no consumer, no JWTs.  Env
+            # creds are still honoured if someone points at the legacy host.
+            key, cid = key or None, cid or None
+        elif not (key and cid):
             from aleo_shield_swap.lifecycle import provision_provable_credentials
             key, cid = provision_provable_credentials(
                 ENDPOINT, f"shield-swap-itest-{int(time.time())}")

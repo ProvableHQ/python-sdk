@@ -30,6 +30,7 @@ from ._client_common import (
     is_provable_host,
     jwt_expired,
     jwt_origin,
+    service_root,
     make_default_headers,
     method_headers,
     strip_quotes,
@@ -128,16 +129,18 @@ class AleoNetworkClient:
         services do not exist off the Provable API, so we leave them unset rather
         than point at a bogus URL.  An explicit ``prover_uri`` still works anywhere.
         """
-        origin = jwt_origin(host)
         network = self._network
         if is_provable_host(host):
+            # The service root keeps the edge's /api prefix; /jwts hangs off
+            # it too (unused when the host needs no credentials).
+            root = service_root(host)
             return (
-                f"{origin}/v2/{network}",
-                origin,
-                f"{origin}/prove/{network}",
-                f"{origin}/scanner/{network}",
+                f"{root}/v2/{network}",
+                root,
+                f"{root}/prove/{network}",
+                f"{root}/scanner/{network}",
             )
-        return (f"{host.rstrip('/')}/{network}", origin, None, None)
+        return (f"{host.rstrip('/')}/{network}", jwt_origin(host), None, None)
 
     # ── Network module selection ──────────────────────────────────────────
 

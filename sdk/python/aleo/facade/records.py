@@ -82,7 +82,8 @@ class RecordsModule:
         if base is None:
             raise RuntimeError(
                 "The hosted record scanner is only available on the Provable API "
-                f"(api.provable.com); this client points at {provider.url!r}. "
+                f"(edge.provable.com/api or api.provable.com); this client points at "
+                f"{provider.url!r}. "
                 "Assign your own scanner (aleo.records.scanner = RecordScanner(...)) "
                 "or a custom aleo.record_provider to scan against this endpoint."
             )

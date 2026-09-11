@@ -157,9 +157,18 @@ CAP_RETRY_SECONDS = 24 * 3600
 TOKEN_IDLE_SECONDS = 24 * 3600
 
 
+def _needs_provable_credentials(ctx: _Ctx) -> bool:
+    """Whether the profile's node endpoint gates the prover and scanner behind
+    api_key/consumer JWTs.  The default edge (``edge.provable.com/api``) is
+    open; only the legacy ``api.provable.com`` needs them."""
+    from aleo._client_common import requires_credentials
+    return requires_credentials(ctx.profile.endpoint)
+
+
 def _creds_done(ctx: _Ctx) -> bool:
     c = ctx.profile.credentials
-    if not (c.get("dps_api_key") and c.get("dps_consumer_id")):
+    if _needs_provable_credentials(ctx) and not (c.get("dps_api_key")
+                                                 and c.get("dps_consumer_id")):
         return False
     if c.get("dex_api_token"):
         return True
@@ -227,7 +236,9 @@ def _creds_run(ctx: _Ctx) -> str:
     """
     details: list[str] = []
     creds = ctx.profile.credentials
-    if not (creds.get("dps_api_key") and creds.get("dps_consumer_id")):
+    if not _needs_provable_credentials(ctx):
+        details.append("endpoint needs no Provable credentials (open edge)")
+    elif not (creds.get("dps_api_key") and creds.get("dps_consumer_id")):
         key = os.environ.get("ALEO_E2E_API_KEY")
         cid = os.environ.get("ALEO_E2E_CONSUMER_ID")
         if key and cid:

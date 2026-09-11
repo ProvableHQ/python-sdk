@@ -35,20 +35,56 @@ class AleoProvingError(AleoError):
 
 
 FIVE_MINUTES_MS: int = 5 * 60 * 1000
-DEFAULT_HOST: str = "https://api.provable.com"
+#: The hosted Provable API's open edge: no API key, consumer id, or JWT is
+#: needed for reads, the delegated prover, or the hosted scanner.
+DEFAULT_HOST: str = "https://edge.provable.com/api"
+#: The credentialed legacy origin; still fully supported with api_key +
+#: consumer_id (JWTs minted at ``/jwts``).
+LEGACY_HOST: str = "https://api.provable.com"
 DEFAULT_NETWORK: str = "mainnet"
 
 # The hosted Provable API splits its services across path prefixes off a single
-# origin (reads at /v2, delegated proving at /prove, hosted scanner at /scanner,
-# JWT auth at /jwts). We detect it by host so that EVERY other endpoint (devnode,
-# local, or any custom node) is treated as a literal read base — no /v2 magic,
-# and no prover/scanner wired up (those services only exist on the hosted API).
-PROVABLE_API_HOSTS: frozenset[str] = frozenset({"api.provable.com"})
+# service root (reads at /v2, delegated proving at /prove, hosted scanner at
+# /scanner, JWT auth at /jwts).  The root is the origin on the legacy host and
+# ``{origin}/api`` on the edge — see service_root().  We detect the hosted API
+# by host so that EVERY other endpoint (devnode, local, or any custom node) is
+# treated as a literal read base — no /v2 magic, and no prover/scanner wired up
+# (those services only exist on the hosted API).
+PROVABLE_API_HOSTS: frozenset[str] = frozenset({"api.provable.com", "edge.provable.com"})
+#: Hosted API hosts that gate the prover and scanner behind api_key/consumer JWTs.
+CREDENTIALED_HOSTS: frozenset[str] = frozenset({"api.provable.com"})
+
+_NETWORK_SEGMENTS: frozenset[str] = frozenset({"mainnet", "testnet", "canary"})
 
 
 def is_provable_host(url: str) -> bool:
-    """True if *url* points at the hosted Provable API (api.provable.com)."""
+    """True if *url* points at the hosted Provable API (edge or legacy host)."""
     return (urlparse(url).hostname or "").lower() in PROVABLE_API_HOSTS
+
+
+def requires_credentials(url: str) -> bool:
+    """True if the hosted API at *url* needs api_key/consumer_id for the prover
+    and scanner.  The edge does not; the legacy ``api.provable.com`` does.
+    Off the hosted API there is nothing to authenticate to, so False."""
+    return (urlparse(url).hostname or "").lower() in CREDENTIALED_HOSTS
+
+
+def service_root(url: str) -> str:
+    """The root the hosted API's services hang off, path prefix included.
+
+    ``https://edge.provable.com/api`` → itself; ``https://api.provable.com``
+    → itself; a legacy ``.../v2`` or ``.../v2/{network}`` read base has that
+    suffix stripped so older configs keep working.  Unlike :func:`jwt_origin`
+    this keeps a path prefix — on the edge every service lives under ``/api``.
+    """
+    parsed = urlparse(url)
+    parts = [p for p in parsed.path.split("/") if p]
+    if len(parts) >= 2 and parts[-2] == "v2" and parts[-1] in _NETWORK_SEGMENTS:
+        parts = parts[:-2]
+    elif parts and parts[-1] == "v2":
+        parts = parts[:-1]
+    prefix = "/" + "/".join(parts) if parts else ""
+    return f"{parsed.scheme}://{parsed.netloc}{prefix}"
 SDK_HEADERS: set[str] = {"x-aleo-sdk-version", "x-aleo-environment", "x-aleo-method"}
 
 
