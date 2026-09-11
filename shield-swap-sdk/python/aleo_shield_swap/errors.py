@@ -60,13 +60,30 @@ class InvalidFeeTierError(ShieldSwapError):
 
 
 class DexApiError(ShieldSwapError):
-    """A DEX REST API request failed; carries the HTTP status and body."""
+    """A DEX REST API request failed; carries the HTTP status and body.
+
+    ``code`` is the API's machine-readable error code when the body is its
+    JSON error envelope (``{"error": …, "code": …, "ref": …}``), else None —
+    branch on it rather than on the human-readable message.
+    """
 
     def __init__(self, status: int, body: str,
                  message: "str | None" = None) -> None:
         super().__init__(message or f"DEX API error {status}: {body[:200]}")
         self.status = status
         self.body = body
+        self.code: "str | None" = None
+        self.ref: "str | None" = None
+        try:
+            import json
+            envelope = json.loads(body)
+        except (TypeError, ValueError):
+            envelope = None
+        if isinstance(envelope, dict):
+            code = envelope.get("code")
+            self.code = str(code) if code is not None else None
+            ref = envelope.get("ref")
+            self.ref = str(ref) if ref is not None else None
 
 
 class NotAuthenticatedError(DexApiError):

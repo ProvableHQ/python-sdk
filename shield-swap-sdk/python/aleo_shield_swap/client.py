@@ -29,6 +29,7 @@ from ._core import (
     select_token_record,
 )
 from .api import ApiClient, api_url_for
+from .types import SwapExecution
 from .derivations import (
     BlindedIdentity,
     blinded_identity_at,
@@ -74,7 +75,14 @@ from ._routing import (
     collect_route,
     increase_route,
     mint_route,
+    rebalance_route,
     swap_route,
+)
+from .rebalance import (
+    REBALANCE_DEADLINE_OFFSET_BLOCKS,
+    RebalancePlan,
+    RebalanceResult,
+    plan_rebalance as _plan_rebalance,
 )
 from .tick_math import (
     MAX_TICK,
@@ -260,6 +268,37 @@ class ShieldSwap:
         if raw is None:
             raise SwapOutputNotFinalizedError(swap_id)
         return g.SwapOutput.from_plaintext(raw)
+
+    def get_swap_execution(self, swap: "SwapHandle | str") -> Optional[SwapExecution]:
+        """Per-hop fill receipt of an executed swap — what each pool leg paid.
+
+        Reads ``swap_execution_headers`` then one ``swap_execution_hops`` entry
+        per hop.  Returns None while the swap has not finalized.  Unlike
+        :meth:`get_swap_output` the receipt survives the claim, so it answers
+        "what did this trade actually cost" at any later time.  Reads
+        ``1 + hop_count`` mapping entries.
+
+        Raises:
+            ValueError: If the header names a hop the node did not return —
+                a node lagging its own finalize; retry.
+        """
+        swap_id = swap.swap_id if isinstance(swap, SwapHandle) else swap
+        if not swap_id:
+            raise ValueError("SwapHandle has no swap_id yet — wait for the "
+                             "request transaction and recover it first.")
+        header = self._mapping_value("swap_execution_headers", swap_id)
+        if header is None:
+            return None
+        count = g.SwapExecutionHeader.from_plaintext(header).hop_count
+        hops = [self._mapping_value("swap_execution_hops",
+                                    SwapExecution.hop_key(swap_id, i))
+                for i in range(count)]
+        return SwapExecution.from_plaintexts(swap_id, header, hops)
+
+    def get_pool_creator(self, pool_key: str) -> Optional[str]:
+        """The address that created *pool_key*, or None for a pool created
+        before creators were tracked (or an unknown key).  Reads a mapping."""
+        return self._mapping_value("pool_creators", pool_key)
 
     def is_pool_initialized(self, pool_key: str) -> bool:
         """True once *pool_key* has been initialized on chain. Reads a mapping.
@@ -844,7 +883,8 @@ class ShieldSwap:
         out = self.get_swap_output(handle.swap_id)
         w_out = self._is_wrapped(str(out.token_out))
         w_in = self._is_wrapped(str(out.token_in))
-        route = claim_route(w_out, w_in)
+        no_refund = int(out.amount_remaining) == 0
+        route = claim_route(w_out, w_in, no_refund=no_refund)
         # The claim dynamically calls BOTH token programs (payout + refund),
         # and a routed claim additionally calls the router + wrapper(s) —
         # register them; a fresh process has none cached.
@@ -866,14 +906,17 @@ class ShieldSwap:
             out.token_in,
             out.token_out,
             f"{out.amount_out}u128",
-            f"{out.amount_remaining}u128",
-            default_merkle_proofs(),
         ]
+        if not no_refund:
+            inputs.append(f"{out.amount_remaining}u128")
+        inputs.append(default_merkle_proofs())
+        # Wrapper receiver proofs: one per wrapped leg being paid — the output
+        # first, then the refund.  A no-refund claim pays only the output.
         wp = wrapper_proofs or default_merkle_proofs()
-        if w_out and w_in:
-            inputs += [wp, wp]            # wp for the output, then the refund
-        elif w_out or w_in:
-            inputs += [wp]
+        if w_out:
+            inputs.append(wp)
+        if w_in and not no_refund:
+            inputs.append(wp)
         bound = getattr(self._aleo.programs.get(route.program).functions,
                         route.function)(*inputs)
 
@@ -1198,6 +1241,230 @@ class ShieldSwap:
             """
             key = next((o for o in outputs if isinstance(o, str) and o.endswith("field")), None)
             return TxResult(position_token_id=key, transaction_id=tx_id)
+
+        return DexCall(self._aleo, bound, build_result)
+
+    # ── Rebalance ────────────────────────────────────────────────────────────
+
+    def _underlying_token_id(self, token_id: str) -> str:
+        """The settlement asset behind *token_id*: the ``from_wrapper_token_id``
+        entry for a wrapper, the token itself for a plain ARC-20."""
+        under = self._mapping_value("from_wrapper_token_id", str(token_id))
+        return str(under) if under is not None else str(token_id)
+
+    def plan_rebalance(self, *, pool_key: str, position_token_id: str,
+                       tick_lower: int, tick_upper: int,
+                       liquidity_target: Optional[int] = None,
+                       max_funding0: Optional[int] = None,
+                       max_funding1: Optional[int] = None) -> RebalancePlan:
+        """Quote a close-and-remint of one position into a new range.  Reads only.
+
+        Reads the pool, slot, ``positions`` entry, both current boundary ticks,
+        and each side's wrapped-ness, then derives what the close returns, what
+        the successor range needs, and per side the funding to add or surplus
+        to refund.  Size the successor with exactly one of *liquidity_target*
+        (exact) or *max_funding0*/*max_funding1* (a budget the planner solves
+        for; ``0, 0`` rebalances on recovered funds alone).
+
+        The plan is only valid at the pool price it was built against — the
+        contract asserts every amount at finalize — so build it right before
+        :meth:`rebalance_position` and never cache one.
+
+        Raises:
+            PoolNotFoundError / PoolNotInitializedError: For an unknown pool.
+            ValueError: If the position or a boundary tick does not exist, the
+                aligned range is empty, the sizing is ambiguous, or the budget
+                supports no liquidity.
+        """
+        pool = self.get_pool(pool_key)
+        slot = self.get_slot(pool_key).raw
+        position = self._position_state(position_token_id)
+        if position is None:
+            raise ValueError(f"Position does not exist: {position_token_id}")
+        lower = self._tick_info(pool_key, int(position.tick_lower))
+        upper = self._tick_info(pool_key, int(position.tick_upper))
+        if lower is None or upper is None:
+            raise ValueError("The position's boundary ticks are not initialized: "
+                             f"{position_token_id}")
+        return _plan_rebalance(
+            pool_key=pool_key, position_token_id=position_token_id,
+            tick_lower=tick_lower, tick_upper=tick_upper,
+            slot=slot, position=position, lower_tick=lower, upper_tick=upper,
+            wrapped0=self._is_wrapped(str(pool.token0)),
+            wrapped1=self._is_wrapped(str(pool.token1)),
+            liquidity_target=liquidity_target,
+            max_funding0=max_funding0, max_funding1=max_funding1)
+
+    def rebalance_position(
+        self,
+        *,
+        plan: Optional[RebalancePlan] = None,
+        pool_key: Optional[str] = None,
+        position_token_id: Optional[str] = None,
+        tick_lower: Optional[int] = None,
+        tick_upper: Optional[int] = None,
+        liquidity_target: Optional[int] = None,
+        max_funding0: Optional[int] = None,
+        max_funding1: Optional[int] = None,
+        position_record: Optional[str] = None,
+        token0_program: Optional[str] = None,
+        token1_program: Optional[str] = None,
+        token0_record: Optional[str] = None,
+        token1_record: Optional[str] = None,
+        tick_lower_hint: Optional[int] = None,
+        tick_upper_hint: Optional[int] = None,
+        deadline_offset_blocks: int = REBALANCE_DEADLINE_OFFSET_BLOCKS,
+        nonce: Optional[str] = None,
+        wrapper_proofs: Optional[str] = None,
+        imports: Optional[dict[str, str]] = None,
+        account: Any = None,
+    ) -> DexCall[RebalanceResult]:
+        """Close a position and mint its successor range in ONE transaction.
+
+        Burns the old position, settles its principal and every fee it earned,
+        adds funding from the signer's records where the new range needs more,
+        mints the successor with the same owner and withdrawal address, and
+        pays any surplus to the withdrawal address — atomically, through
+        ``shield_swap_rebalance_router.aleo`` (deployed on testnet).  Either
+        pass a *plan* from :meth:`plan_rebalance` (submitted verbatim), or the
+        pool, range, and one sizing mode and the plan is built here.
+
+        Every amount is asserted against the pool price at execution: a trade
+        that moves the price between planning and finalize reverts the whole
+        transaction (fee paid, no funds moved).  Rebuild and resubmit when
+        that happens; the short default deadline fails stale requests cheaply.
+        Funding records for a wrapped side are the UNDERLYING asset's records.
+
+        Raises:
+            ValueError: Without a plan or a complete (pool, range, sizing).
+            InsufficientRecordsError: If no record covers a funded side.
+        """
+        acct = self._account(account)
+        if plan is None:
+            if pool_key is None or tick_lower is None or tick_upper is None:
+                raise ValueError("Pass plan=, or pool_key, tick_lower, and "
+                                 "tick_upper with one sizing mode.")
+            # Validate the sizing before any chain read.
+            from .rebalance import _sizing
+            _sizing(liquidity_target, max_funding0, max_funding1)
+        else:
+            pool_key, position_token_id = plan.pool_key, plan.position_token_id
+        assert pool_key is not None
+        pool = self.get_pool(pool_key)
+        position = position_record or self._select_position_record(pool_key, acct)
+        decoded = parse_plaintext(position)
+        if position_token_id is None:
+            position_token_id = str(decoded["token_id"])
+        if plan is None:
+            assert tick_lower is not None and tick_upper is not None
+            plan = self.plan_rebalance(
+                pool_key=pool_key, position_token_id=position_token_id,
+                tick_lower=tick_lower, tick_upper=tick_upper,
+                liquidity_target=liquidity_target,
+                max_funding0=max_funding0, max_funding1=max_funding1)
+
+        w0 = self._is_wrapped(str(pool.token0))
+        w1 = self._is_wrapped(str(pool.token1))
+        route = rebalance_route(w0, w1, plan.funded0 > 0, plan.funded1 > 0)
+
+        # The close runs in the same finalize and unlinks an old boundary tick
+        # whose whole liquidity_gross belongs to this position; the insert
+        # rejects a hint at an unlinked tick, so step computed hints past the
+        # dying ticks onto their surviving predecessors.
+        dying: dict[int, int] = {}
+        if tick_lower_hint is None or tick_upper_hint is None:
+            for old in (int(decoded["tick_lower"]), int(decoded["tick_upper"])):
+                info = self._tick_info(pool_key, old)
+                if info is not None and int(info.liquidity_gross) == plan.old_liquidity:
+                    dying[old] = int(info.prev)
+
+        def survivor(hint: int) -> int:
+            for _ in range(2):
+                if hint not in dying:
+                    break
+                hint = dying[hint]
+            return hint
+
+        lo_hint = (tick_lower_hint if tick_lower_hint is not None
+                   else survivor(self.find_tick_predecessor(pool_key, plan.tick_lower)))
+        upper_pred = (tick_upper_hint if tick_upper_hint is not None
+                      else survivor(self.find_tick_predecessor(pool_key, plan.tick_upper)))
+        # As in mint: the finalize inserts tick_lower first, so with nothing
+        # initialized between the bounds the upper hint is the fresh lower tick.
+        hi_hint = (plan.tick_lower if (tick_upper_hint is None and plan.tick_lower > upper_pred)
+                   else upper_pred)
+
+        deadline = get_deadline(self._aleo, deadline_offset_blocks)
+        request = g.CoreRebalanceRequest(
+            old_liquidity=plan.old_liquidity,
+            recovered0=plan.recovered0, recovered1=plan.recovered1,
+            funded0=plan.funded0, funded1=plan.funded1,
+            refund0=plan.refund0, refund1=plan.refund1,
+            liquidity_target=plan.liquidity_target,
+            mint=g.MintPositionRequest(
+                pool=pool_key, tick_lower=plan.tick_lower, tick_upper=plan.tick_upper,
+                amount0_desired=plan.required0, amount1_desired=plan.required1,
+                amount0_min=plan.required0, amount1_min=plan.required1,
+                tick_lower_hint=lo_hint, tick_upper_hint=hi_hint),
+            deadline=deadline,
+        ).to_plaintext()
+        assets = g.RebalanceAssets(
+            token0=g.RebalanceAsset(token_id=str(pool.token0),
+                                    underlying_id=self._underlying_token_id(str(pool.token0))),
+            token1=g.RebalanceAsset(token_id=str(pool.token1),
+                                    underlying_id=self._underlying_token_id(str(pool.token1))),
+        ).to_plaintext()
+
+        # Slot rule shared by all 14 entries: each funded side's record (with
+        # the wrapped side's sender proof right after it), then every wrapped
+        # side's receiver proof, then the common tail.
+        wp = wrapper_proofs or default_merkle_proofs()
+        programs: list[str] = [route.program]
+        funding: list[str] = []
+        sides = ((pool.token0, w0, plan.funded0, token0_record, token0_program),
+                 (pool.token1, w1, plan.funded1, token1_record, token1_program))
+        for token_id, wrapped, funded, rec, prog in sides:
+            if funded > 0:
+                record, program = self._fund_side(
+                    record=rec, program=prog, token_id=str(token_id),
+                    min_amount=funded, account=acct)
+                if program:
+                    programs.append(program)
+                funding.append(record)
+                if wrapped:
+                    funding.append(wp)
+        receivers = [wp for wrapped in (w0, w1) if wrapped]
+        # Refunds pay through both settlement token programs; wrapped sides
+        # also dispatch into their wrapper.
+        for token_id, wrapped in ((pool.token0, w0), (pool.token1, w1)):
+            if wrapped:
+                wrapper = self._amm_token_program(str(token_id))
+                if wrapper:
+                    programs.append(wrapper)
+            try:
+                programs.append(self._token_program(str(token_id)))
+            except ValueError:
+                pass                      # unknown to the registry — imports= override
+        self._ensure(programs, imports)
+
+        field_nonce = nonce if nonce is not None else generate_field_nonce()
+        proofs = default_merkle_proofs()
+        inputs = [position, field_nonce, *funding, *receivers,
+                  request, assets, proofs, proofs]
+        bound = getattr(self._aleo.programs.get(route.program).functions,
+                        route.function)(*inputs)
+        final_plan = plan
+        base_build = self._position_result(MintResult)
+
+        def build_result(tx_id: str, outputs: list[Any]) -> RebalanceResult:
+            """Pair the successor's id (first public field output) with the plan,
+            journaling the new position and retiring the old one."""
+            minted = base_build(tx_id, outputs)
+            if self.journal is not None:
+                if minted.position_token_id:
+                    self.journal.record_position(minted.position_token_id, pool_key, tx_id)
+                self.journal.record_position_burned(final_plan.position_token_id, tx_id)
+            return RebalanceResult(minted.position_token_id, tx_id, final_plan)
 
         return DexCall(self._aleo, bound, build_result)
 

@@ -32,8 +32,12 @@ def test_tier2_covers_building_blocks_and_stages():
                  "increase_liquidity", "decrease_liquidity",
                  "derive_pool_key", "simulate", "blinded_identity_at",
                  "redeem_code", "referral_status", "my_referral_code",
-                 "request_airdrop"):
+                 "request_airdrop",
+                 # 2026-09 surface: fill receipts, rebalancing, routing graph
+                 "get_swap_execution", "plan_rebalance", "rebalance_position",
+                 "get_route_topology", "get_unclaimed", "get_protocol_state"):
         assert method in page, method
+    assert "rebalance" in page.lower() and "testnet" in page.lower()
     # stages rendered FROM the list, not hand-written
     from aleo_shield_swap.lifecycle import REGISTRATION_STAGES
     for stage in REGISTRATION_STAGES:
@@ -54,5 +58,8 @@ def test_page_stays_compact():
     # docstrings (they rendered blank before); 24k → 26k for the swap/swap_many
     # footgun warnings (build-time counter reservation, refusing an unusable
     # quote). 24k had been squeezed to 134 chars of headroom, which any further
-    # edit broke — this is deliberate room, not another squeeze.
-    assert len(_render()) < 26_000
+    # edit broke — this is deliberate room, not another squeeze.  26k → 32k
+    # (2026-09) for the upstream sync: rebalancing (plan + execute, with the
+    # price-fragility warning agents must relay), fill receipts, the routing
+    # graph, and the indexer's unclaimed/protocol-state views.
+    assert len(_render()) < 32_000

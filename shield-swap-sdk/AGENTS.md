@@ -209,6 +209,15 @@ them):
   hand wrapper records around.
 - **A `SwapHandle` is the only key to a swap's output** — persist before
   anything else (the journal does this); claim after finalize with retry.
+  A swap with nothing left over claims through the no-refund entrypoints
+  automatically; `get_swap_execution` reads the per-hop fill receipt (fees
+  paid, price after) at any later time.
+- **Rebalancing is one transaction, testnet only for now** —
+  `plan_rebalance` quotes the close-and-remint (what comes back, what the
+  new range needs, funding vs refund per token) and `rebalance_position`
+  submits it through `shield_swap_rebalance_router.aleo`.  Every amount is
+  asserted at the execution price: a trade in between reverts the whole
+  transaction (fee paid, no funds moved) — re-plan and resubmit.
 - **Concurrency needs partitioned blinded-identity counters AND disjoint
   input records** — `swap_many` implements the recipe; copy it, don't
   improvise.
@@ -335,11 +344,34 @@ The API returns canonical decimal amounts (``"1.5"``), if using this
 value to call on-chain methods — ``swap(amount_in=…)``, ``mint``,
 ``collect`` — conversion to raw base units is necessary.
 
-### `api.get_route(self, *, token_in: 'str', token_out: 'str', amount_in: 'Any' = None) -> 'models.RouteResultDoc'`
+### `api.get_route(self, *, token_in: 'str', token_out: 'str', amount_in: 'Any' = None, pool_key: 'Optional[str]' = None) -> 'models.RouteResultDoc'`
 
 Best route between two tokens.  *amount_in* is a CANONICAL
 decimal amount (human units, e.g. ``1.5``) — not base units —
-and the returned ``estimated_amount_out`` is decimal too.
+and the returned ``estimated_amount_out`` is decimal too.  *pool_key*
+pins the quote to one pool instead of the router's best path.
+
+### `api.get_route_topology(self) -> 'models.RouteTopologyDoc'`
+
+The routable token graph: every (token0, token1) edge with an
+enabled pool and the router's ``max_hops``.  Lets a client enumerate
+reachable pairs without probing ``/route`` per pair.
+
+### `api.get_unclaimed(self) -> 'models.UnclaimedPayloadDoc'`
+
+Everything the authenticated account can still collect, as the
+indexer sees it: swaps with finalized-but-unclaimed output and
+positions with owed balances.  A cross-check for a local journal —
+the chain, not this, gates the claim amounts.
+
+### `api.get_protocol_state(self, *, minimum_revision: 'Optional[int]' = None) -> 'models.ProtocolStateResponse'`
+
+The indexer's view of protocol configuration and its own freshness.
+
+``freshness.ready_for_quote`` says whether quotes reflect the chain
+head; ``revision`` increments on every config change and is echoed by
+``/route`` as ``protocol_revision`` — pass *minimum_revision* to wait
+for the indexer to reach one.  Returned unwrapped (no ``data``).
 
 ### Counters & blinding
 
@@ -453,6 +485,49 @@ route via the LP router, unwrapping to that address in-transaction.
 
 Burn an empty position NFT.
 
+### `plan_rebalance(self, *, pool_key: 'str', position_token_id: 'str', tick_lower: 'int', tick_upper: 'int', liquidity_target: 'Optional[int]' = None, max_funding0: 'Optional[int]' = None, max_funding1: 'Optional[int]' = None) -> 'RebalancePlan'`
+
+Quote a close-and-remint of one position into a new range.  Reads only.
+
+Reads the pool, slot, ``positions`` entry, both current boundary ticks,
+and each side's wrapped-ness, then derives what the close returns, what
+the successor range needs, and per side the funding to add or surplus
+to refund.  Size the successor with exactly one of *liquidity_target*
+(exact) or *max_funding0*/*max_funding1* (a budget the planner solves
+for; ``0, 0`` rebalances on recovered funds alone).
+
+The plan is only valid at the pool price it was built against — the
+contract asserts every amount at finalize — so build it right before
+:meth:`rebalance_position` and never cache one.
+
+Raises:
+    PoolNotFoundError / PoolNotInitializedError: For an unknown pool.
+    ValueError: If the position or a boundary tick does not exist, the
+        aligned range is empty, the sizing is ambiguous, or the budget
+        supports no liquidity.
+
+### `rebalance_position(self, *, plan: 'Optional[RebalancePlan]' = None, pool_key: 'Optional[str]' = None, position_token_id: 'Optional[str]' = None, tick_lower: 'Optional[int]' = None, tick_upper: 'Optional[int]' = None, liquidity_target: 'Optional[int]' = None, max_funding0: 'Optional[int]' = None, max_funding1: 'Optional[int]' = None, position_record: 'Optional[str]' = None, token0_program: 'Optional[str]' = None, token1_program: 'Optional[str]' = None, token0_record: 'Optional[str]' = None, token1_record: 'Optional[str]' = None, tick_lower_hint: 'Optional[int]' = None, tick_upper_hint: 'Optional[int]' = None, deadline_offset_blocks: 'int' = 20, nonce: 'Optional[str]' = None, wrapper_proofs: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[RebalanceResult]'`
+
+Close a position and mint its successor range in ONE transaction.
+
+Burns the old position, settles its principal and every fee it earned,
+adds funding from the signer's records where the new range needs more,
+mints the successor with the same owner and withdrawal address, and
+pays any surplus to the withdrawal address — atomically, through
+``shield_swap_rebalance_router.aleo`` (deployed on testnet).  Either
+pass a *plan* from :meth:`plan_rebalance` (submitted verbatim), or the
+pool, range, and one sizing mode and the plan is built here.
+
+Every amount is asserted against the pool price at execution: a trade
+that moves the price between planning and finalize reverts the whole
+transaction (fee paid, no funds moved).  Rebuild and resubmit when
+that happens; the short default deadline fails stale requests cheaply.
+Funding records for a wrapped side are the UNDERLYING asset's records.
+
+Raises:
+    ValueError: Without a plan or a complete (pool, range, sizing).
+    InsufficientRecordsError: If no record covers a funded side.
+
 ### `get_pool(self, pool_key: 'str') -> 'g.PoolState'`
 
 Static pool configuration (token pair, fee, decimal scales).
@@ -471,6 +546,20 @@ Chain-computed output of a finalized swap request.
 Accepts the :class:`SwapHandle` from ``swap()`` or a bare swap id.
 Raises :class:`SwapOutputNotFinalizedError` when the entry is absent —
 not finalized yet (retry after a few blocks) or already claimed.
+
+### `get_swap_execution(self, swap: "'SwapHandle | str'") -> 'Optional[SwapExecution]'`
+
+Per-hop fill receipt of an executed swap — what each pool leg paid.
+
+Reads ``swap_execution_headers`` then one ``swap_execution_hops`` entry
+per hop.  Returns None while the swap has not finalized.  Unlike
+:meth:`get_swap_output` the receipt survives the claim, so it answers
+"what did this trade actually cost" at any later time.  Reads
+``1 + hop_count`` mapping entries.
+
+Raises:
+    ValueError: If the header names a hop the node did not return —
+        a node lagging its own finalize; retry.
 
 ### `get_balances(self, address: 'Optional[str]' = None, account: 'Any' = None) -> 'dict[str, dict[str, Any]]'`
 

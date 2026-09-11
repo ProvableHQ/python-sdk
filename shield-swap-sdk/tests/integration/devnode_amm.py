@@ -40,6 +40,7 @@ FIXTURES = Path(__file__).parents[1] / "fixtures" / "programs"
 AMM_PROGRAM = "shield_swap.aleo"
 MULTISIG_PROGRAM = "shield_swap_multisig_core.aleo"
 FREEZELIST_PROGRAM = "shield_swap_freezelist.aleo"
+REBALANCE_ROUTER_PROGRAM = "shield_swap_rebalance_router.aleo"
 TOKEN_A = "test_token_a.aleo"
 TOKEN_B = "test_token_b.aleo"
 
@@ -140,7 +141,12 @@ class AmmDevnode:
         program = net.Program.from_source(source)
 
         deployment = net.Deployment.from_program_unproven(program, self.admin.address)
+        # SDK↔devnode skew: the bundled snarkVM's deployment_cost undershoots
+        # the devnode's consensus by a few percent ("insufficient base fee
+        # (deployment) — has 35845454, requires 36763084" on 2026-09-03), so
+        # overpay; a base fee above the requirement is always accepted.
         cost = process.deployment_cost(deployment)
+        cost += max(cost // 10, 1_000_000)
         fee_auth = process.authorize_fee_public(
             self.admin.private_key, cost, 0, deployment.deployment_id())
         fee = net.Fee.from_authorization_unproven(fee_auth, self.state_root())
@@ -226,6 +232,10 @@ def setup_amm_devnode() -> AmmDevnode:
     freezelist_source = patch_admin_address(read_fixture(FREEZELIST_PROGRAM),
                                             str(admin.address))
     amm_source = patch_admin_address(read_fixture(AMM_PROGRAM), str(admin.address))
+    # The rebalance router is stateless and bakes no admin; the core gates
+    # rebalance_position on the router's PROGRAM address, which derives from
+    # the program id and is therefore identical on the devnode.
+    rebalance_source = read_fixture(REBALANCE_ROUTER_PROGRAM)
     token_a_source = read_fixture(f"{TOKEN_A.removesuffix('.aleo')}.aleo")
     token_b_source = read_fixture(f"{TOKEN_B.removesuffix('.aleo')}.aleo")
     credits_source = str(aleo.network.get_program("credits.aleo"))
@@ -234,6 +244,7 @@ def setup_amm_devnode() -> AmmDevnode:
         MULTISIG_PROGRAM: multisig_source,
         FREEZELIST_PROGRAM: freezelist_source,
         AMM_PROGRAM: amm_source,
+        REBALANCE_ROUTER_PROGRAM: rebalance_source,
         TOKEN_A: token_a_source,
         TOKEN_B: token_b_source,
         "credits.aleo": credits_source,
@@ -256,6 +267,7 @@ def setup_amm_devnode() -> AmmDevnode:
     ctx.deploy_program(multisig_source, MULTISIG_PROGRAM)
     ctx.deploy_program(freezelist_source, FREEZELIST_PROGRAM)
     ctx.deploy_program(amm_source, AMM_PROGRAM)
+    ctx.deploy_program(rebalance_source, REBALANCE_ROUTER_PROGRAM)
     ctx.deploy_program(token_a_source, TOKEN_A)
     ctx.deploy_program(token_b_source, TOKEN_B)
 

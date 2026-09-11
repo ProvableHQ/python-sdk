@@ -32,6 +32,10 @@ class _Session:
         self.calls.append(("POST", url, json, headers))
         return self.responses.pop(0)
 
+    def delete(self, url, timeout=None, headers=None):
+        self.calls.append(("DELETE", url, None, headers))
+        return self.responses.pop(0)
+
 
 def test_get_pools_parses_models_and_token_info():
     s = _Session([_Resp(200, POOLS)])
@@ -198,6 +202,10 @@ class _AsyncClient:
         self.calls.append(("POST", url, json, headers))
         return self.responses.pop(0)
 
+    async def delete(self, url, headers=None):
+        self.calls.append(("DELETE", url, None, headers))
+        return self.responses.pop(0)
+
 
 @pytest.mark.asyncio
 async def test_async_lifecycle_endpoints():
@@ -306,3 +314,205 @@ def test_client_picks_the_api_for_its_network(monkeypatch):
         assert ShieldSwap(_Net(net)).api.base_url == SHIELD_SWAP_API_URLS[net]
     # an explicit api_url still wins
     assert ShieldSwap(_Net("mainnet"), api_url="http://x").api.base_url == "http://x"
+
+
+# ── Endpoints added with the 2026-09 API (pool analytics, positions, routing
+#    topology, rebalance state, token management, referral reporting) ─────────
+
+def test_get_pool_and_pool_stats():
+    api, s = _lifecycle_client(
+        _Resp(200, {"data": {"key": "5field", "token0": "1field", "token1": "2field",
+                             "fee": "3000", "stats": {"volume_24h": "10"}}}),
+        _Resp(200, {"data": {"price": "1.5", "display_price": "0.66", "display_flipped": True,
+                             "fee_24h": "12", "fee_7d": "80", "volume_7d": "900",
+                             "reserve0": "100", "reserve1": "200",
+                             "high_24h": "2", "low_24h": "1"}}),
+    )
+    pool = api.get_pool("5field")
+    assert pool.key == "5field"
+    stats = api.get_pool_stats("5field")
+    assert stats.fee_24h == "12" and stats.reserve1 == "200" and stats.display_flipped is True
+    assert [c[1] for c in s.calls] == ["https://x/pools/5field", "https://x/pools/5field/stats"]
+
+
+def test_get_pool_trades_passes_paging_and_filter():
+    api, s = _lifecycle_client(_Resp(200, {"data": [
+        {"id": "t1", "pool": "5field", "amount0": "1", "amount1": "2", "executedAt": "now",
+         "tradeType": "swap", "transactionHash": "at1", "legIndex": 0,
+         "fee0": "3", "protocolFee0": "1", "liquidityAfter": "555", "tickAfter": 12}]}))
+    trades = api.get_pool_trades("5field", limit=10, offset=20, trade_type="swap")
+    assert trades[0].fee0 == "3" and trades[0].tickAfter == 12 and trades[0].legIndex == 0
+    assert s.calls[0][1] == "https://x/pools/5field/trades"
+    assert s.calls[0][2] == {"limit": 10, "offset": 20, "trade_type": "swap"}
+
+
+def test_get_initialized_ticks():
+    api, s = _lifecycle_client(_Resp(200, {"data": [-1200, 300, 4080]}))
+    assert api.get_initialized_ticks("5field") == [-1200, 300, 4080]
+    assert s.calls[0][1] == "https://x/pools/5field/initialized-ticks"
+
+
+def test_get_swaps_and_positions_are_session_scoped():
+    # /swaps and /positions list the authenticated account's own history —
+    # no user parameter exists; paging and a pool filter are the only knobs.
+    api, s = _lifecycle_client(
+        _Resp(200, {"data": [{"swap_id": "77field", "pool": "5field", "status": "claimed"}]}),
+        _Resp(200, {"data": [{"token_id": "42field", "pool": "5field", "liquidity": "500"}]}),
+        _Resp(200, {"data": {"token_id": "42field", "pool": "5field", "liquidity": "500",
+                             "tokens_owed0": "1", "tokens_owed1": "2"}}),
+    )
+    swaps = api.get_swaps(pool="5field", limit=5)
+    assert swaps[0].swap_id == "77field"
+    assert s.calls[0][2] == {"pool": "5field", "limit": 5}
+    positions = api.get_positions()
+    assert positions[0].token_id == "42field"
+    assert s.calls[1][2] in (None, {})
+    assert api.get_position("42field").liquidity == "500"
+    assert s.calls[2][1] == "https://x/positions/42field"
+
+
+def test_get_fee_tiers_and_tick_spacings():
+    api, s = _lifecycle_client(
+        _Resp(200, {"data": [{"id": "f1", "fee_tier": 3000, "tick_spacing": 60,
+                              "created_at": "t", "transaction": "at1"}]}),
+        _Resp(200, {"data": [{"id": "s1", "tick_spacing": 60}]}),
+    )
+    tier = api.get_fee_tiers()[0]
+    assert tier.fee_tier == 3000 and tier.tick_spacing == 60
+    assert api.get_tick_spacings()[0].tick_spacing == 60
+    assert [c[1] for c in s.calls] == ["https://x/fee-tiers", "https://x/tick-spacings"]
+
+
+def test_get_route_accepts_a_pool_key_pin():
+    api, s = _lifecycle_client(_Resp(200, {"data": {
+        "token_in": "1field", "token_out": "2field", "estimated_amount_out": "0.9",
+        "hops": [], "protocol_revision": 3}}))
+    api.get_route(token_in="1field", token_out="2field", amount_in="1", pool_key="5field")
+    assert s.calls[0][2] == {"token_in": "1field", "token_out": "2field",
+                             "amount_in": "1", "pool_key": "5field"}
+
+
+def test_get_route_topology():
+    api, s = _lifecycle_client(_Resp(200, {"data": {
+        "edges": [{"token0": "1field", "token1": "2field"}], "max_hops": 3,
+        "protocol_revision": 3, "protocol_config_observed_block": 100}}))
+    topo = api.get_route_topology()
+    assert topo.max_hops == 3 and topo.edges[0].token1 == "2field"
+    assert s.calls[0][1] == "https://x/route/topology"
+
+
+def test_get_rebalance_state_sends_every_query_param():
+    api, s = _lifecycle_client(_Resp(200, {"data": {
+        "tick": 5, "tick_spacing": 60, "sqrt_price_x_128": "340282366920938463463374607431768211456",
+        "fee_growth_global0_x_128": "0", "fee_growth_global1_x_128": "0",
+        "lower": {"tick": -60, "fee_growth_outside0_x_128": "0", "fee_growth_outside1_x_128": "0"},
+        "upper": {"tick": 60, "fee_growth_outside0_x_128": "0", "fee_growth_outside1_x_128": "0"},
+        "tick_lower_hint": -400001, "tick_upper_hint": -60, "observed_block": 4242}}))
+    st = api.get_rebalance_state("5field", tick_lower=-60, tick_upper=60,
+                                 old_liquidity=1000, mint_tick_lower=-120, mint_tick_upper=120)
+    assert st.tick_lower_hint == -400001 and st.lower.tick == -60 and st.observed_block == 4242
+    assert s.calls[0][1] == "https://x/pools/5field/rebalance-state"
+    assert s.calls[0][2] == {"tick_lower": -60, "tick_upper": 60, "old_liquidity": "1000",
+                             "mint_tick_lower": -120, "mint_tick_upper": 120}
+
+
+def test_api_token_list_and_revoke():
+    api, s = _lifecycle_client(
+        _Resp(200, {"data": {"tokens": [{"id": "u1", "name": "bot", "token_prefix": "ss_ab",
+                                         "created_at": "2026-09-01", "expires_at": None}]}}),
+        _Resp(200, {"data": {"id": "u1", "revoked": True}}),
+    )
+    tokens = api.list_api_tokens()
+    assert tokens[0].name == "bot" and tokens[0].token_prefix == "ss_ab"
+    assert api.revoke_api_token("u1").revoked is True
+    assert s.calls[0][:2] == ("GET", "https://x/api-tokens")
+    assert s.calls[1][:2] == ("DELETE", "https://x/api-tokens/u1")
+
+
+def test_referral_reporting_endpoints():
+    api, s = _lifecycle_client(
+        _Resp(200, {"data": {"recorded": True}}),
+        _Resp(200, {"data": {"recorded": True}}),
+        _Resp(200, {"data": {"recorded": 2, "duplicate": 1, "conflict": 0}}),
+        _Resp(200, {"data": {"codes": [{"code": "ABC", "redemption_count": 3,
+                                        "redeemed_at": None, "redeemed_by": None}], "quota": 5}}),
+    )
+    assert api.report_referral_activity(action="create_pool", tx_id="at1x",
+                                        metadata={"pool": "5field"}).recorded is True
+    assert s.calls[0][1] == "https://x/referral/activity"
+    assert s.calls[0][2] == {"action": "create_pool", "tx_id": "at1x", "metadata": {"pool": "5field"}}
+    assert api.report_referral_swap_claim(code="ABC", blinded_address="aleo1b").recorded is True
+    assert s.calls[1][2] == {"code": "ABC", "blinded_address": "aleo1b"}
+    batch = api.report_referral_address_batch(code="ABC", blinded_addresses=["aleo1b", "aleo1c", "aleo1d"])
+    assert (batch.recorded, batch.duplicate, batch.conflict) == (2, 1, 0)
+    assert s.calls[2][2] == {"code": "ABC", "blinded_addresses": ["aleo1b", "aleo1c", "aleo1d"]}
+    mine = api.my_referral_codes()
+    assert mine.quota == 5 and mine.codes[0].redemption_count == 3
+    assert s.calls[3][1] == "https://x/referral/my-codes"
+
+
+def test_dex_api_error_carries_the_machine_code():
+    s = _Session([_Resp(409, {"error": "stale quote", "code": "protocol_revision_mismatch",
+                              "ref": "r-1"})])
+    with pytest.raises(DexApiError) as exc:
+        ApiClient(base_url="https://x", session=s, token="t")._get("/route")
+    assert exc.value.status == 409
+    assert exc.value.code == "protocol_revision_mismatch"
+    # A body that is not the API's JSON envelope still parses.
+    s = _Session([_Resp(502, {"unexpected": True})])
+    with pytest.raises(DexApiError) as exc:
+        ApiClient(base_url="https://x", session=s, token="t")._get("/route")
+    assert exc.value.code is None
+
+
+def test_get_protocol_state_is_unwrapped_and_takes_minimum_revision():
+    # /protocol/state returns the document directly (no {"data": ...} envelope).
+    api, s = _lifecycle_client(_Resp(200, {
+        "revision": 7, "observed_block": 4242, "changed_at": None,
+        "freshness": {"ready_for_quote": True, "ready_for_entry": False,
+                      "lag_blocks": 2, "confirmed_head": 4244, "indexed_block": 4242,
+                      "updated_at": None},
+        "capabilities": {}, "controls": {}, "deployment": {}, "fee_configuration": {},
+        "live_compatibility": {}}))
+    st = api.get_protocol_state(minimum_revision=5)
+    assert st.revision == 7 and st.freshness.ready_for_quote is True
+    assert st.freshness.ready_for_entry is False
+    assert s.calls[0][1] == "https://x/protocol/state"
+    assert s.calls[0][2] == {"minimum_revision": 5}
+
+
+def test_get_unclaimed_lists_pending_swaps_and_owed_positions():
+    api, s = _lifecycle_client(_Resp(200, {"data": {
+        "pending_swaps": [{"swap_id": "77field", "swap_tx_hash": "at1s", "is_multi_hop": False,
+                           "is_private": True, "output": {"amount_out": "9"},
+                           "token_in_info": None, "token_out_info": None}],
+        "positions_with_owed": [{"token_id": "42field", "pool": "5field", "tick_lower": -60,
+                                 "tick_upper": 60, "tokens_owed0": "1", "tokens_owed1": "2",
+                                 "is_frozen": False, "is_private": True, "frozen_at": None,
+                                 "last_transaction_hash": None,
+                                 "token0_info": None, "token1_info": None}]}}))
+    un = api.get_unclaimed()
+    assert un.pending_swaps[0].swap_id == "77field"
+    assert un.positions_with_owed[0].tokens_owed1 == "2"
+    assert s.calls[0][1] == "https://x/unclaimed"
+
+
+@pytest.mark.asyncio
+async def test_async_client_mirrors_the_new_endpoints():
+    from aleo_shield_swap.api import AsyncApiClient
+    c = _AsyncClient([
+        _AsyncResp(200, {"data": [-60, 60]}),
+        _AsyncResp(200, {"data": {"edges": [], "max_hops": 3, "protocol_revision": 1}}),
+        _AsyncResp(200, {"data": {"recorded": True}}),
+        _AsyncResp(200, {"data": {"id": "u1", "revoked": True}}),
+    ])
+    api = AsyncApiClient(base_url="https://x", client=c, token="t")
+    assert await api.get_initialized_ticks("5field") == [-60, 60]
+    assert (await api.get_route_topology()).max_hops == 3
+    assert (await api.report_referral_swap_claim(code="ABC", blinded_address="aleo1b")).recorded
+    assert (await api.revoke_api_token("u1")).revoked is True
+    assert c.calls[3][:2] == ("DELETE", "https://x/api-tokens/u1")
+    # Every sync endpoint wrapper has an async twin.
+    sync_api = {n for n in dir(ApiClient) if not n.startswith("_")}
+    async_api = {n for n in dir(AsyncApiClient) if not n.startswith("_")}
+    assert sync_api - async_api == set()

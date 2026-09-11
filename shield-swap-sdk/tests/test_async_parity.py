@@ -16,6 +16,7 @@ SYNC_ONLY = {
     "swap_many", "collect_all",                     # require a journal
     "create_pool", "mint", "increase_liquidity",    # LP surface
     "decrease_liquidity", "collect", "burn",
+    "rebalance_position",
     "get_positions", "find_tick_predecessor",
 }
 

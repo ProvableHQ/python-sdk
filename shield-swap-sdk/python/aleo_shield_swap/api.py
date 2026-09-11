@@ -10,7 +10,11 @@ token info is surfaced through :class:`PoolEntry`.
 """
 from __future__ import annotations
 
+import dataclasses
+import functools
 import os
+import types
+import typing
 from dataclasses import dataclass, fields
 from typing import Any, Optional, TypeVar
 
@@ -85,12 +89,55 @@ _TIMEOUT = 30.0
 T = TypeVar("T")
 
 
+@functools.lru_cache(maxsize=None)
+def _hints(cls: type) -> dict[str, Any]:
+    """Resolved field annotations of a generated model (they are strings under
+    ``from __future__ import annotations``)."""
+    return typing.get_type_hints(cls, globalns=dict(vars(models)))
+
+
+def _coerce(hint: Any, value: Any) -> Any:
+    """Build nested generated models where the annotation names one."""
+    origin = typing.get_origin(hint)
+    if origin in (typing.Union, types.UnionType):
+        for arg in typing.get_args(hint):
+            if arg is not type(None) and dataclasses.is_dataclass(arg) \
+                    and isinstance(value, dict):
+                return _build(arg, value)  # type: ignore[arg-type]
+        return value
+    if origin is list and isinstance(value, list):
+        args = typing.get_args(hint)
+        if args and dataclasses.is_dataclass(args[0]):
+            return [_build(args[0], v) if isinstance(v, dict) else v  # type: ignore[arg-type]
+                    for v in value]
+        return value
+    if dataclasses.is_dataclass(hint) and isinstance(value, dict):
+        return _build(hint, value)  # type: ignore[arg-type]
+    return value
+
+
 def _build(cls: type[T], d: Any) -> T:
-    """Build a generated model from a response dict, dropping unknown keys."""
+    """Build a generated model from a response dict, dropping unknown keys.
+
+    Nested models (a ``TokenDoc`` inside a pool, the hops of a route, the
+    boundary ticks of a rebalance state) are built recursively from the
+    field annotations, so ``route.hops[0].pool_key`` is attribute access all
+    the way down rather than a dict at the second level.
+    """
     if not isinstance(d, dict):
         raise DexApiError(200, f"expected an object for {cls.__name__}, got {d!r}")
-    names = {f.name for f in fields(cls)}  # type: ignore[arg-type]
-    return cls(**{k: v for k, v in d.items() if k in names})
+    hints = _hints(cls)
+    model_fields = fields(cls)  # type: ignore[arg-type]
+    names = {f.name for f in model_fields}
+    kwargs = {k: _coerce(hints.get(k), v) for k, v in d.items() if k in names}
+    # A field the API stopped sending reads as None rather than failing the
+    # whole response: the spec drifts faster than releases, and one dropped
+    # column must not take every pool read down with it.
+    for f in model_fields:
+        if (f.name not in kwargs and f.default is dataclasses.MISSING
+                and f.default_factory is dataclasses.MISSING):
+            kwargs[f.name] = None
+    return cls(**kwargs)
 
 
 @dataclass(frozen=True)
@@ -175,6 +222,15 @@ class ApiClient:
         if self._expired_session(resp):
             resp = self._session.post(f"{self.base_url}{path}", json=body,
                                       headers=self._headers(), timeout=_TIMEOUT)
+        _check(resp)
+        return resp.json()
+
+    def _delete(self, path: str) -> Any:
+        resp = self._session.delete(f"{self.base_url}{path}",
+                                    headers=self._headers(), timeout=_TIMEOUT)
+        if self._expired_session(resp):
+            resp = self._session.delete(f"{self.base_url}{path}",
+                                        headers=self._headers(), timeout=_TIMEOUT)
         _check(resp)
         return resp.json()
 
@@ -301,6 +357,53 @@ class ApiClient:
         return _build(models.ApiTokenCreatedResponse,
                       self._post("/api-tokens", body)["data"])
 
+    def list_api_tokens(self) -> list[models.ApiTokenRow]:
+        """The account's durable API tokens — prefixes and metadata only, the
+        secrets are never returned again.  Needs a session (not an ``ss_`` token)."""
+        data = self._get("/api-tokens")["data"]
+        return _build(models.ApiTokenListResponse, data).tokens
+
+    def revoke_api_token(self, token_id: str) -> models.ApiTokenRevokeResponse:
+        """Revoke one durable API token by its id (from :meth:`list_api_tokens`).
+        Needs a session; takes effect immediately for every holder of the secret."""
+        return _build(models.ApiTokenRevokeResponse,
+                      self._delete(f"/api-tokens/{token_id}")["data"])
+
+    # ── Referral reporting ─────────────────────────────────────────────────
+
+    def my_referral_codes(self) -> models.ReferralMyCodesResponse:
+        """Every referral code this account has been issued, with redemption
+        counts, plus the issuance ``quota``.  Network read."""
+        return _build(models.ReferralMyCodesResponse,
+                      self._get("/referral/my-codes")["data"])
+
+    def report_referral_activity(self, *, action: str, tx_id: str,
+                                 metadata: Any = None
+                                 ) -> models.ReferralActivityResponse:
+        """Attribute an on-chain action (``"create_pool"``) to this account's
+        referral link.  Best-effort analytics — nothing on chain depends on it."""
+        body: dict[str, Any] = {"action": action, "tx_id": tx_id}
+        if metadata is not None:
+            body["metadata"] = metadata
+        return _build(models.ReferralActivityResponse,
+                      self._post("/referral/activity", body)["data"])
+
+    def report_referral_swap_claim(self, *, code: str, blinded_address: str
+                                   ) -> models.ReferralSwapClaimResponse:
+        """Link one private swap (by its blinded address) to a referral code so
+        the referrer is credited without revealing the trader.  Best-effort."""
+        return _build(models.ReferralSwapClaimResponse,
+                      self._post("/referral/swap-claims",
+                                 {"code": code, "blinded_address": blinded_address})["data"])
+
+    def report_referral_address_batch(self, *, code: str, blinded_addresses: list[str]
+                                      ) -> models.ReferralAddressBatchResponse:
+        """Batch form of :meth:`report_referral_swap_claim` — returns how many
+        were recorded, already known, or claimed by another code."""
+        return _build(models.ReferralAddressBatchResponse,
+                      self._post("/referral/address-batches",
+                                 {"code": code, "blinded_addresses": blinded_addresses})["data"])
+
     # ── Pools & tokens ─────────────────────────────────────────────────────
 
     def get_pools(self) -> list[PoolEntry]:
@@ -332,17 +435,123 @@ class ApiClient:
         """
         return [_build(models.TokenDoc, t) for t in self._get("/tokens")["data"]]
 
+    def get_pool(self, pool_key: str) -> models.PoolWithStatsDoc:
+        """One pool with its token metadata, reserves, display orientation, and
+        rolling stats.  Network read; 404 for an unknown key."""
+        return _build(models.PoolWithStatsDoc, self._get(f"/pools/{pool_key}")["data"])
+
+    def get_pool_stats(self, pool_key: str) -> models.PoolStats24hDoc:
+        """Rolling 24h/7d analytics for a pool: price and change, highs/lows,
+        volume, LP fees (raw token0 units), and reserves.  Auth-gated."""
+        return _build(models.PoolStats24hDoc,
+                      self._get(f"/pools/{pool_key}/stats")["data"])
+
+    def get_pool_trades(self, pool_key: str, *, limit: Optional[int] = None,
+                        offset: Optional[int] = None,
+                        trade_type: Optional[str] = None) -> list[models.PoolTradeDoc]:
+        """Recent fills in a pool, newest first, with per-leg fee split
+        (``fee0`` is gross and includes ``protocolFee0``), post-trade price,
+        liquidity, and tick.  Auth-gated; page with *limit*/*offset*."""
+        params = {k: v for k, v in (("limit", limit), ("offset", offset),
+                                    ("trade_type", trade_type)) if v is not None}
+        data = self._get(f"/pools/{pool_key}/trades", params or None)["data"]
+        return [_build(models.PoolTradeDoc, t) for t in data]
+
+    def get_initialized_ticks(self, pool_key: str) -> list[int]:
+        """The pool's initialized ticks, ascending — the indexer's copy of the
+        on-chain tick list, usable for insert hints when a node walk is too
+        slow.  Auth-gated."""
+        return [int(t) for t in self._get(f"/pools/{pool_key}/initialized-ticks")["data"]]
+
+    def get_fee_tiers(self) -> list[models.FeeTierDoc]:
+        """Registered fee tiers (``fee_tier`` in hundredths of a bip) and the
+        tick spacing each is bound to, or None when unbound.  Auth-gated."""
+        return [_build(models.FeeTierDoc, t) for t in self._get("/fee-tiers")["data"]]
+
+    def get_tick_spacings(self) -> list[models.TickSpacingDoc]:
+        """Registered tick spacings.  Auth-gated."""
+        return [_build(models.TickSpacingDoc, t) for t in self._get("/tick-spacings")["data"]]
+
+    def get_protocol_state(self, *, minimum_revision: Optional[int] = None
+                           ) -> models.ProtocolStateResponse:
+        """The indexer's view of protocol configuration and its own freshness.
+
+        ``freshness.ready_for_quote`` says whether quotes reflect the chain
+        head; ``revision`` increments on every config change and is echoed by
+        ``/route`` as ``protocol_revision`` — pass *minimum_revision* to wait
+        for the indexer to reach one.  Returned unwrapped (no ``data``).
+        """
+        params = {"minimum_revision": minimum_revision} if minimum_revision is not None else None
+        return _build(models.ProtocolStateResponse, self._get("/protocol/state", params))
+
+    # ── Account views ──────────────────────────────────────────────────────
+
+    def get_swaps(self, *, pool: Optional[str] = None, limit: Optional[int] = None,
+                  offset: Optional[int] = None) -> list[models.SwapDoc]:
+        """The authenticated account's swaps (the session decides whose — there
+        is no user parameter), newest first, each with its full hop route and
+        claim status.  Filter by *pool*; page with *limit*/*offset*."""
+        params = {k: v for k, v in (("pool", pool), ("limit", limit),
+                                    ("offset", offset)) if v is not None}
+        return [_build(models.SwapDoc, s) for s in self._get("/swaps", params or None)["data"]]
+
+    def get_positions(self, *, limit: Optional[int] = None,
+                      offset: Optional[int] = None) -> list[models.PositionDoc]:
+        """The authenticated account's positions as the indexer sees them —
+        public amounts and owed balances, no record identity.  For the
+        private side use ``ShieldSwap.get_owned_positions``."""
+        params = {k: v for k, v in (("limit", limit), ("offset", offset)) if v is not None}
+        return [_build(models.PositionDoc, p)
+                for p in self._get("/positions", params or None)["data"]]
+
+    def get_position(self, token_id: str) -> models.PositionDoc:
+        """One indexed position by token id — 404 (:class:`DexApiError`) if the
+        indexer has not seen it or it was burned."""
+        return _build(models.PositionDoc, self._get(f"/positions/{token_id}")["data"])
+
+    def get_unclaimed(self) -> models.UnclaimedPayloadDoc:
+        """Everything the authenticated account can still collect, as the
+        indexer sees it: swaps with finalized-but-unclaimed output and
+        positions with owed balances.  A cross-check for a local journal —
+        the chain, not this, gates the claim amounts."""
+        return _build(models.UnclaimedPayloadDoc, self._get("/unclaimed")["data"])
+
     # ── Trading ────────────────────────────────────────────────────────────
 
     def get_route(self, *, token_in: str, token_out: str,
-                  amount_in: Any = None) -> models.RouteResultDoc:
+                  amount_in: Any = None,
+                  pool_key: Optional[str] = None) -> models.RouteResultDoc:
         """Best route between two tokens.  *amount_in* is a CANONICAL
         decimal amount (human units, e.g. ``1.5``) — not base units —
-        and the returned ``estimated_amount_out`` is decimal too."""
+        and the returned ``estimated_amount_out`` is decimal too.  *pool_key*
+        pins the quote to one pool instead of the router's best path."""
         params: dict[str, Any] = {"token_in": token_in, "token_out": token_out}
         if amount_in is not None:
             params["amount_in"] = str(amount_in)
+        if pool_key is not None:
+            params["pool_key"] = pool_key
         return _build(models.RouteResultDoc, self._get("/route", params)["data"])
+
+    def get_route_topology(self) -> models.RouteTopologyDoc:
+        """The routable token graph: every (token0, token1) edge with an
+        enabled pool and the router's ``max_hops``.  Lets a client enumerate
+        reachable pairs without probing ``/route`` per pair."""
+        return _build(models.RouteTopologyDoc, self._get("/route/topology")["data"])
+
+    def get_rebalance_state(self, pool_key: str, *, tick_lower: int, tick_upper: int,
+                            old_liquidity: int, mint_tick_lower: int,
+                            mint_tick_upper: int) -> models.RebalanceState:
+        """The indexer's snapshot for planning a rebalance: live price and
+        fee accumulators, the CURRENT range's boundary ticks, and insert hints
+        for the successor range computed as if the old position were already
+        closed.  Amounts are decimal strings; ``observed_block`` says how
+        fresh.  The SDK's own planner reads the chain instead — this is for
+        cross-checking or for callers without node access."""
+        params = {"tick_lower": tick_lower, "tick_upper": tick_upper,
+                  "old_liquidity": str(old_liquidity),
+                  "mint_tick_lower": mint_tick_lower, "mint_tick_upper": mint_tick_upper}
+        return _build(models.RebalanceState,
+                      self._get(f"/pools/{pool_key}/rebalance-state", params)["data"])
 
     def get_swap(self, swap_id: str) -> models.SwapDoc:
         """The indexer's record of one swap, by its id.
@@ -445,6 +654,13 @@ class AsyncApiClient:
         _check(resp)
         return resp.json()
 
+    async def _delete(self, path: str) -> Any:
+        resp = await self._client.delete(f"{self.base_url}{path}", headers=self._headers())
+        if self._expired_session(resp):
+            resp = await self._client.delete(f"{self.base_url}{path}", headers=self._headers())
+        _check(resp)
+        return resp.json()
+
     async def authenticate(self, address: str, sign: Any) -> str:
         """Async challenge/verify handshake; stores and returns the JWT."""
         challenge = (await self._post("/auth/challenge", {"address": address}))["data"]
@@ -529,7 +745,8 @@ class AsyncApiClient:
         return [_build(models.TokenDoc, t) for t in (await self._get("/tokens"))["data"]]
 
     async def get_route(self, *, token_in: str, token_out: str,
-                        amount_in: int | None = None) -> models.RouteResultDoc:
+                        amount_in: Any = None,
+                        pool_key: Optional[str] = None) -> models.RouteResultDoc:
         """Best route between two tokens — see :meth:`ApiClient.get_route`.
 
         As on the sync client, *amount_in* is stringified onto the query and the
@@ -538,6 +755,8 @@ class AsyncApiClient:
         params: dict[str, Any] = {"token_in": token_in, "token_out": token_out}
         if amount_in is not None:
             params["amount_in"] = str(amount_in)
+        if pool_key is not None:
+            params["pool_key"] = pool_key
         return _build(models.RouteResultDoc, (await self._get("/route", params))["data"])
 
     async def get_swap(self, swap_id: str) -> models.SwapDoc:
@@ -556,3 +775,119 @@ class AsyncApiClient:
         """Public balances for *user* — see :meth:`ApiClient.get_public_balances`."""
         return [_build(models.TokenBalanceDoc, b)
                 for b in (await self._get("/balances", {"user": user}))["data"]]
+
+    # ── 2026-09 API surface (async mirrors) ────────────────────────────────
+
+    async def list_api_tokens(self) -> list[models.ApiTokenRow]:
+        """Durable token metadata — see :meth:`ApiClient.list_api_tokens`."""
+        data = (await self._get("/api-tokens"))["data"]
+        return _build(models.ApiTokenListResponse, data).tokens
+
+    async def revoke_api_token(self, token_id: str) -> models.ApiTokenRevokeResponse:
+        """Revoke a durable token — see :meth:`ApiClient.revoke_api_token`."""
+        return _build(models.ApiTokenRevokeResponse,
+                      (await self._delete(f"/api-tokens/{token_id}"))["data"])
+
+    async def my_referral_codes(self) -> models.ReferralMyCodesResponse:
+        """Issued referral codes — see :meth:`ApiClient.my_referral_codes`."""
+        return _build(models.ReferralMyCodesResponse,
+                      (await self._get("/referral/my-codes"))["data"])
+
+    async def report_referral_activity(self, *, action: str, tx_id: str,
+                                       metadata: Any = None
+                                       ) -> models.ReferralActivityResponse:
+        """Attribute an action — see :meth:`ApiClient.report_referral_activity`."""
+        body: dict[str, Any] = {"action": action, "tx_id": tx_id}
+        if metadata is not None:
+            body["metadata"] = metadata
+        return _build(models.ReferralActivityResponse,
+                      (await self._post("/referral/activity", body))["data"])
+
+    async def report_referral_swap_claim(self, *, code: str, blinded_address: str
+                                         ) -> models.ReferralSwapClaimResponse:
+        """Link a swap to a code — see :meth:`ApiClient.report_referral_swap_claim`."""
+        return _build(models.ReferralSwapClaimResponse,
+                      (await self._post("/referral/swap-claims",
+                                        {"code": code, "blinded_address": blinded_address}))["data"])
+
+    async def report_referral_address_batch(self, *, code: str, blinded_addresses: list[str]
+                                            ) -> models.ReferralAddressBatchResponse:
+        """Batch swap attribution — see :meth:`ApiClient.report_referral_address_batch`."""
+        return _build(models.ReferralAddressBatchResponse,
+                      (await self._post("/referral/address-batches",
+                                        {"code": code, "blinded_addresses": blinded_addresses}))["data"])
+
+    async def get_pool(self, pool_key: str) -> models.PoolWithStatsDoc:
+        """One pool with stats — see :meth:`ApiClient.get_pool`."""
+        return _build(models.PoolWithStatsDoc, (await self._get(f"/pools/{pool_key}"))["data"])
+
+    async def get_pool_stats(self, pool_key: str) -> models.PoolStats24hDoc:
+        """Rolling pool analytics — see :meth:`ApiClient.get_pool_stats`."""
+        return _build(models.PoolStats24hDoc,
+                      (await self._get(f"/pools/{pool_key}/stats"))["data"])
+
+    async def get_pool_trades(self, pool_key: str, *, limit: Optional[int] = None,
+                              offset: Optional[int] = None,
+                              trade_type: Optional[str] = None) -> list[models.PoolTradeDoc]:
+        """Recent fills — see :meth:`ApiClient.get_pool_trades`."""
+        params = {k: v for k, v in (("limit", limit), ("offset", offset),
+                                    ("trade_type", trade_type)) if v is not None}
+        data = (await self._get(f"/pools/{pool_key}/trades", params or None))["data"]
+        return [_build(models.PoolTradeDoc, t) for t in data]
+
+    async def get_initialized_ticks(self, pool_key: str) -> list[int]:
+        """Initialized ticks — see :meth:`ApiClient.get_initialized_ticks`."""
+        data = (await self._get(f"/pools/{pool_key}/initialized-ticks"))["data"]
+        return [int(t) for t in data]
+
+    async def get_fee_tiers(self) -> list[models.FeeTierDoc]:
+        """Fee tiers — see :meth:`ApiClient.get_fee_tiers`."""
+        return [_build(models.FeeTierDoc, t) for t in (await self._get("/fee-tiers"))["data"]]
+
+    async def get_tick_spacings(self) -> list[models.TickSpacingDoc]:
+        """Tick spacings — see :meth:`ApiClient.get_tick_spacings`."""
+        return [_build(models.TickSpacingDoc, t)
+                for t in (await self._get("/tick-spacings"))["data"]]
+
+    async def get_protocol_state(self, *, minimum_revision: Optional[int] = None
+                                 ) -> models.ProtocolStateResponse:
+        """Protocol config + indexer freshness — see :meth:`ApiClient.get_protocol_state`."""
+        params = {"minimum_revision": minimum_revision} if minimum_revision is not None else None
+        return _build(models.ProtocolStateResponse, await self._get("/protocol/state", params))
+
+    async def get_swaps(self, *, pool: Optional[str] = None, limit: Optional[int] = None,
+                        offset: Optional[int] = None) -> list[models.SwapDoc]:
+        """The session's swaps — see :meth:`ApiClient.get_swaps`."""
+        params = {k: v for k, v in (("pool", pool), ("limit", limit),
+                                    ("offset", offset)) if v is not None}
+        return [_build(models.SwapDoc, s)
+                for s in (await self._get("/swaps", params or None))["data"]]
+
+    async def get_positions(self, *, limit: Optional[int] = None,
+                            offset: Optional[int] = None) -> list[models.PositionDoc]:
+        """The session's indexed positions — see :meth:`ApiClient.get_positions`."""
+        params = {k: v for k, v in (("limit", limit), ("offset", offset)) if v is not None}
+        return [_build(models.PositionDoc, p)
+                for p in (await self._get("/positions", params or None))["data"]]
+
+    async def get_position(self, token_id: str) -> models.PositionDoc:
+        """One indexed position — see :meth:`ApiClient.get_position`."""
+        return _build(models.PositionDoc, (await self._get(f"/positions/{token_id}"))["data"])
+
+    async def get_unclaimed(self) -> models.UnclaimedPayloadDoc:
+        """Collectable swaps and owed positions — see :meth:`ApiClient.get_unclaimed`."""
+        return _build(models.UnclaimedPayloadDoc, (await self._get("/unclaimed"))["data"])
+
+    async def get_route_topology(self) -> models.RouteTopologyDoc:
+        """Routable token graph — see :meth:`ApiClient.get_route_topology`."""
+        return _build(models.RouteTopologyDoc, (await self._get("/route/topology"))["data"])
+
+    async def get_rebalance_state(self, pool_key: str, *, tick_lower: int, tick_upper: int,
+                                  old_liquidity: int, mint_tick_lower: int,
+                                  mint_tick_upper: int) -> models.RebalanceState:
+        """Indexer rebalance snapshot — see :meth:`ApiClient.get_rebalance_state`."""
+        params = {"tick_lower": tick_lower, "tick_upper": tick_upper,
+                  "old_liquidity": str(old_liquidity),
+                  "mint_tick_lower": mint_tick_lower, "mint_tick_upper": mint_tick_upper}
+        return _build(models.RebalanceState,
+                      (await self._get(f"/pools/{pool_key}/rebalance-state", params))["data"])

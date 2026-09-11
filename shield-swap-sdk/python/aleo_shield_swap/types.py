@@ -11,7 +11,7 @@ from dataclasses import asdict, dataclass
 from decimal import Decimal
 from typing import Optional
 
-from ._generated import Slot
+from ._generated import HopExecution, Slot, SwapExecutionHeader, SwapExecutionKey
 from .tick_math import Q128, round_tick_to_spacing, u256_to_int
 
 
@@ -207,6 +207,70 @@ class OwnedPosition:
     #: The spendable record plaintext — pass as ``position_record=`` to write verbs.
     record: str
     state: Optional[OwnedPositionState]
+
+
+@dataclass(frozen=True)
+class HopFill:
+    """One pool leg of an executed swap, as the chain recorded it.
+
+    ``fee_paid`` is gross and includes ``protocol_fee``; ``lp_fee`` is the
+    difference — what the pool's liquidity providers earned from this leg.
+    ``sqrt_price_after`` is the Q128.128 price as an integer.
+    """
+
+    pool: str
+    zero_for_one: bool
+    amount_in: int
+    amount_out: int
+    fee_paid: int
+    protocol_fee: int
+    lp_fee: int
+    sqrt_price_after: int
+    liquidity_after: int
+    tick_after: int
+
+    @classmethod
+    def from_execution(cls, hop: HopExecution) -> "HopFill":
+        return cls(pool=hop.pool, zero_for_one=hop.zero_for_one,
+                   amount_in=hop.amount_in, amount_out=hop.amount_out,
+                   fee_paid=hop.fee_paid, protocol_fee=hop.protocol_fee,
+                   lp_fee=hop.fee_paid - hop.protocol_fee,
+                   sqrt_price_after=u256_to_int(hop.sqrt_price_after),
+                   liquidity_after=hop.liquidity_after, tick_after=hop.tick_after)
+
+
+@dataclass(frozen=True)
+class SwapExecution:
+    """The chain's fill receipt for one swap: when it executed and every hop.
+
+    Written at finalize into ``swap_execution_headers`` /
+    ``swap_execution_hops``; a single-pool swap has one hop, a multi-hop swap
+    up to three.  Unlike ``swap_outputs`` this is never consumed by a claim, so
+    it stays readable as history.
+    """
+
+    swap_id: str
+    executed_height: int
+    hops: list[HopFill]
+
+    @staticmethod
+    def hop_key(swap_id: str, hop_index: int) -> str:
+        """The ``swap_execution_hops`` mapping key for one leg (a struct literal)."""
+        return SwapExecutionKey(swap_id=swap_id, hop_index=hop_index).to_plaintext()
+
+    @classmethod
+    def from_plaintexts(cls, swap_id: str, header_text: str,
+                        hop_texts: list[Optional[str]]) -> "SwapExecution":
+        header = SwapExecutionHeader.from_plaintext(header_text)
+        hops: list[HopFill] = []
+        for i, text in enumerate(hop_texts):
+            if text is None:
+                raise ValueError(
+                    f"swap {swap_id}: header records {header.hop_count} hops but "
+                    f"hop {i} is missing from swap_execution_hops — the node is "
+                    "behind or the read raced a finalize; retry.")
+            hops.append(HopFill.from_execution(HopExecution.from_plaintext(text)))
+        return cls(swap_id=swap_id, executed_height=header.executed_height, hops=hops)
 
 
 @dataclass

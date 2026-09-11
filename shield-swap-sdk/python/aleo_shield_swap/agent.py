@@ -105,6 +105,31 @@ def _h_collect_all(dex: Any, args: dict[str, Any]) -> Any:
     return _serialize(dex.collect_all())
 
 
+def _h_get_swap_execution(dex: Any, args: dict[str, Any]) -> Any:
+    return _serialize(dex.get_swap_execution(args["swap_id"]))
+
+
+def _opt_int(args: dict[str, Any], key: str) -> Any:
+    value = args.get(key)
+    return int(value) if value is not None else None
+
+
+def _rebalance_kwargs(args: dict[str, Any]) -> dict[str, Any]:
+    return dict(pool_key=args["pool_key"], position_token_id=args["position_token_id"],
+                tick_lower=int(args["tick_lower"]), tick_upper=int(args["tick_upper"]),
+                liquidity_target=_opt_int(args, "liquidity_target"),
+                max_funding0=_opt_int(args, "max_funding0"),
+                max_funding1=_opt_int(args, "max_funding1"))
+
+
+def _h_plan_rebalance(dex: Any, args: dict[str, Any]) -> Any:
+    return _serialize(dex.plan_rebalance(**_rebalance_kwargs(args)))
+
+
+def _h_rebalance_position(dex: Any, args: dict[str, Any]) -> Any:
+    return _serialize(dex.rebalance_position(**_rebalance_kwargs(args)).delegate())
+
+
 _TOOLS: list[tuple[str, str, dict[str, Any], Callable[[Any, dict[str, Any]], Any]]] = [
     ("setup_account",
      "Register this machine's shield-swap profile end to end (auth, "
@@ -156,6 +181,37 @@ _TOOLS: list[tuple[str, str, dict[str, Any], Callable[[Any, dict[str, Any]], Any
      "Claim every finalized swap and collect owed LP fees, from the journal. "
      "Safe to run any time; reports what is still pending.",
      _schema({}, []), _h_collect_all),
+    ("get_swap_execution",
+     "The chain's fill receipt for a swap: executed height and, per pool hop, "
+     "amounts in/out, gross fee, protocol fee, LP fee, and post-trade price/"
+     "tick/liquidity. Survives the claim (unlike the swap output). Returns "
+     "null until the swap finalizes.",
+     _schema({"swap_id": _S}, ["swap_id"]), _h_get_swap_execution),
+    ("plan_rebalance",
+     "Quote moving a position to a new tick range in one transaction (testnet "
+     "only — the rebalance router is not on mainnet). Size with EXACTLY one "
+     "of liquidity_target (exact successor liquidity) or max_funding0 AND "
+     "max_funding1 (extra raw units the user will add; 0 and 0 = reuse only "
+     "what the old position returns). Reports recovered, required, funded, "
+     "and refund amounts per token; show them to the user before executing. "
+     "Amounts are raw base units as strings.",
+     _schema({"pool_key": _S, "position_token_id": _S, "tick_lower": _I,
+              "tick_upper": _I, "liquidity_target": _S, "max_funding0": _S,
+              "max_funding1": _S},
+             ["pool_key", "position_token_id", "tick_lower", "tick_upper"]),
+     _h_plan_rebalance),
+    ("rebalance_position",
+     "Execute the rebalance plan_rebalance described: burn the old position, "
+     "settle its principal and fees, add any funding, and mint the successor "
+     "range — atomically. Same sizing arguments as plan_rebalance (the plan is "
+     "rebuilt at submit time). Reverts if the pool price moved since planning; "
+     "on revert, re-plan and resubmit. Returns the new position id, the "
+     "transaction id, and the submitted plan.",
+     _schema({"pool_key": _S, "position_token_id": _S, "tick_lower": _I,
+              "tick_upper": _I, "liquidity_target": _S, "max_funding0": _S,
+              "max_funding1": _S},
+             ["pool_key", "position_token_id", "tick_lower", "tick_upper"]),
+     _h_rebalance_position),
 ]
 
 

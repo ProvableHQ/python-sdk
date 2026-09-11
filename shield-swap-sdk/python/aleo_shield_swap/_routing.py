@@ -13,6 +13,9 @@ from ._generated import PROGRAM_ID
 
 ROUTER_ID = "shield_swap_router.aleo"
 LP_ROUTER_ID = "shield_swap_lp_router.aleo"
+#: Close-and-remint in one transaction.  Deployed on testnet; not on mainnet
+#: as of 2026-09 — a mainnet call fails at program registration.
+REBALANCE_ROUTER_ID = "shield_swap_rebalance_router.aleo"
 
 
 class Route(NamedTuple):
@@ -37,13 +40,25 @@ def swap_route(input_wrapped: bool) -> Route:
             else Route(PROGRAM_ID, "swap"))
 
 
-def claim_route(output_wrapped: bool, refund_wrapped: bool) -> Route:
+def claim_route(output_wrapped: bool, refund_wrapped: bool,
+                no_refund: bool = False) -> Route:
     """Route a claim by the wrapped-ness of its output and refund legs.
 
     Either leg being wrapped forces the claim through the router, since only it
     can wrap on the way out; a claim with both legs plain goes to the core. The
     two flags come from the finalized ``SwapOutput``, not from the original swap.
+
+    *no_refund* (``amount_remaining == 0``) selects the no-refund entrypoints,
+    which take no ``amount_remaining`` input and mint no zero-value refund
+    record.  With nothing to refund only the output leg's shape decides the
+    proofs, but a wrapped refund token still keeps the claim on the router.
     """
+    if no_refund:
+        if output_wrapped:
+            return Route(ROUTER_ID, "claim_to_wrapped_no_refund")
+        if refund_wrapped:
+            return Route(ROUTER_ID, "claim_to_arc20_no_refund")
+        return Route(PROGRAM_ID, "claim_swap_output_no_refund")
     if output_wrapped and refund_wrapped:
         return Route(ROUTER_ID, "claim_to_wrapped_refund_wrapped")
     if output_wrapped:
@@ -85,3 +100,24 @@ def collect_route(w0: bool, w1: bool) -> Route:
     unwrapping on the way in.
     """
     return _lp_route(w0, w1, "collect_to", "collect")
+
+
+def rebalance_route(w0: bool, w1: bool, funds0: bool, funds1: bool) -> Route:
+    """Route a rebalance by each side's shape and whether it takes funding.
+
+    The router deploys one entrypoint per (shape, funding) combination —
+    ``rebalance_<side0>_<side1>_<mode>`` with sides ``plain``/``wrapped`` and
+    mode ``none``/``both``, or for a single funded side ``one`` when both
+    sides share a shape (the slots are symmetric) and ``fund0``/``fund1`` when
+    they differ (a wrapped funded side also carries a sender proof).  Every
+    rebalance goes through the router; the core's ``rebalance_position``
+    accepts only the router as caller.
+    """
+    shape = f"{'wrapped' if w0 else 'plain'}_{'wrapped' if w1 else 'plain'}"
+    if funds0 and funds1:
+        mode = "both"
+    elif funds0 or funds1:
+        mode = "one" if w0 == w1 else ("fund0" if funds0 else "fund1")
+    else:
+        mode = "none"
+    return Route(REBALANCE_ROUTER_ID, f"rebalance_{shape}_{mode}")

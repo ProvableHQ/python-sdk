@@ -50,7 +50,8 @@ print(f"wrote shield_swap.abi.json ({len(abi['structs'])} structs, "
 # The routers are pinned as DRIFT GUARDS only (test_drift.py + the input-count
 # parity test) — no Python is generated from them: their calls reuse the
 # core's structs and the client assembles inputs positionally.
-for router in ("shield_swap_router.aleo", "shield_swap_lp_router.aleo"):
+for router in ("shield_swap_router.aleo", "shield_swap_lp_router.aleo",
+               "shield_swap_rebalance_router.aleo"):
     seen = {}
     load_deps(router, seen)
     src = seen.pop(router)
