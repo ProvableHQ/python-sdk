@@ -190,7 +190,7 @@ async def test_async_swap_inputs_and_handle(astub):
     assert args[0] == RECORD_TEXT
     assert args[1] == BLINDING_FACTOR_0 and args[2] == BLINDED_ADDRESS_0
     assert args[7] == int_to_u256_plaintext(MIN_SQRT_RATIO_X128)
-    assert args[9] == "1100u32"
+    assert args[9] == "11000u32"                  # height 1000 + the shared 10_000-block default
 
     handle = await call.transact()
     assert handle.swap_id == "88field"
@@ -241,10 +241,24 @@ async def test_async_claim_wrapped_output_routes_through_router():
                         blinded_address="aleo1blinded", token_in_id="1field",
                         token_out_id="2field", pool_key="5field", amount_in=1,
                         transaction_id="at1req", program="shield_swap.aleo")
-    await AsyncShieldSwap(astub).claim_swap_output(handle)
+    dex = AsyncShieldSwap(astub)
+
+    async def plain_program(token_id):          # the registry, stubbed
+        return {"1field": "tok_in.aleo"}[token_id]
+
+    async def wrapper_program(token_id):
+        return {"2field": "wrapped_out.aleo"}[token_id]
+
+    dex._token_program = plain_program
+    dex._amm_token_program = wrapper_program
+    await dex.claim_swap_output(handle)
     fn, args = astub.last_call
     assert (astub.last_program, fn) == (ROUTER_ID, "claim_to_wrapped_refund_arc20")
     assert len(args) == 9
+    # Both legs' token programs are registered before authorization: the core
+    # dispatches into them dynamically (payout AND refund), so a fresh async
+    # process without them fails to authorize — the sync client already did this.
+    assert {"tok_in.aleo", "wrapped_out.aleo", ROUTER_ID} <= set(astub.registered_programs)
 
 
 async def test_async_swap_execution_and_pool_creator():
@@ -285,10 +299,25 @@ async def test_async_claim_no_refund_mirrors_sync_dispatch():
             "swap_outputs": {"77field": out_text},
             "from_wrapper_token_id": wrapped,
         })
-        await AsyncShieldSwap(astub).claim_swap_output(handle)
+        dex = AsyncShieldSwap(astub)
+
+        async def plain_program(token_id):       # the registry, stubbed
+            return f"arc20_{token_id}.aleo"
+
+        async def wrapper_program(token_id):
+            return f"wrapper_{token_id}.aleo"
+
+        dex._token_program = plain_program
+        dex._amm_token_program = wrapper_program
+        await dex.claim_swap_output(handle)
         fn, args = astub.last_call
         assert (astub.last_program, fn) == expected
         assert len(args) == count
+        # Every leg's token program is registered: wrapper for wrapped legs,
+        # the ARC-20 itself for plain ones (the core dispatches into both).
+        for token_id in ("1field", "2field"):
+            want = f"wrapper_{token_id}.aleo" if token_id in wrapped else f"arc20_{token_id}.aleo"
+            assert want in astub.registered_programs, (wrapped, astub.registered_programs)
         assert "0u128" not in args           # amount_remaining is not an input
 
 

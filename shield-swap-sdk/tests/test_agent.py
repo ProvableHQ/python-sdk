@@ -164,13 +164,16 @@ def test_dispatch_plan_and_rebalance_serialize():
     out = dispatch_tool(_Dex(), "plan_rebalance",
                         {"pool_key": "5field", "position_token_id": "42field",
                          "tick_lower": -60, "tick_upper": 60, "liquidity_target": "12"})
-    assert out["funded0"] == 2 and out["function_name"] == "rebalance_plain_plain_one"
+    # Amounts are raw u128 values reported as STRINGS (exact for JSON consumers
+    # limited to 2^53), as the tool description promises; ticks stay numeric.
+    assert out["funded0"] == "2" and out["liquidity_target"] == "12"
+    assert out["tick_lower"] == -60 and out["function_name"] == "rebalance_plain_plain_one"
     json.dumps(out)
     out = dispatch_tool(_Dex(), "rebalance_position",
                         {"pool_key": "5field", "position_token_id": "42field",
                          "tick_lower": -60, "tick_upper": 60,
                          "max_funding0": "0", "max_funding1": "0"})
-    assert out["position_token_id"] == "77field" and out["plan"]["liquidity_target"] == 12
+    assert out["position_token_id"] == "77field" and out["plan"]["liquidity_target"] == "12"
     json.dumps(out)
 
 

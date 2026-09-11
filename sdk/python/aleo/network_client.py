@@ -30,6 +30,7 @@ from ._client_common import (
     is_provable_host,
     jwt_expired,
     jwt_origin,
+    requires_credentials,
     service_root,
     make_default_headers,
     method_headers,
@@ -380,6 +381,11 @@ class AleoNetworkClient:
     ) -> dict[str, Any] | None:
         if jwt_data and not jwt_expired(jwt_data):
             return jwt_data
+        # Only the credentialed legacy host mints JWTs; on the open edge (or
+        # any other node) ambient credentials are ignored rather than sent
+        # to a /jwts route that does not exist there.
+        if not requires_credentials(self._origin):
+            return None
         resolved_key = api_key or self.api_key
         resolved_cid = consumer_id or self.consumer_id
         if resolved_key and resolved_cid:

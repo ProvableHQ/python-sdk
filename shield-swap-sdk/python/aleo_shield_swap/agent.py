@@ -125,12 +125,33 @@ def _rebalance_kwargs(args: dict[str, Any]) -> dict[str, Any]:
                 max_funding1=_opt_int(args, "max_funding1"))
 
 
+#: RebalancePlan fields that are raw u128 amounts — reported as strings so
+#: JSON consumers that cannot represent integers above 2^53 keep them exact
+#: (the tool descriptions promise "raw base units as strings").
+_PLAN_AMOUNT_FIELDS = ("old_liquidity", "fees_accrued0", "fees_accrued1",
+                       "recovered0", "recovered1", "required0", "required1",
+                       "funded0", "funded1", "refund0", "refund1", "liquidity_target")
+
+
+def _plan_json(plan: Any) -> dict[str, Any]:
+    out = _serialize(plan)
+    for key in _PLAN_AMOUNT_FIELDS:
+        if out.get(key) is not None:
+            out[key] = str(out[key])
+    return out
+
+
 def _h_plan_rebalance(dex: Any, args: dict[str, Any]) -> Any:
-    return _serialize(dex.plan_rebalance(**_rebalance_kwargs(args)))
+    return _plan_json(dex.plan_rebalance(**_rebalance_kwargs(args)))
 
 
 def _h_rebalance_position(dex: Any, args: dict[str, Any]) -> Any:
-    return _serialize(dex.rebalance_position(**_rebalance_kwargs(args)).delegate())
+    result = _serialize(dex.rebalance_position(**_rebalance_kwargs(args)).delegate())
+    if isinstance(result.get("plan"), dict):
+        for key in _PLAN_AMOUNT_FIELDS:
+            if result["plan"].get(key) is not None:
+                result["plan"][key] = str(result["plan"][key])
+    return result
 
 
 _TOOLS: list[tuple[str, str, dict[str, Any], Callable[[Any, dict[str, Any]], Any]]] = [

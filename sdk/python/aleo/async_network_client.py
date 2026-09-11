@@ -26,6 +26,7 @@ from ._client_common import (
     is_provable_host,
     jwt_expired,
     jwt_origin,
+    requires_credentials,
     service_root,
     make_default_headers,
     method_headers,
@@ -355,6 +356,8 @@ class AsyncAleoNetworkClient:
     ) -> dict[str, Any] | None:
         if jwt_data and not jwt_expired(jwt_data):
             return jwt_data
+        if not requires_credentials(self._origin):   # see AleoNetworkClient._ensure_jwt
+            return None
         resolved_key = api_key or self.api_key
         resolved_cid = consumer_id or self.consumer_id
         if resolved_key and resolved_cid:

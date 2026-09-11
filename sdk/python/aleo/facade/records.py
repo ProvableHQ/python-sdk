@@ -74,6 +74,7 @@ class RecordsModule:
         :class:`~aleo.facade.provider.HTTPProvider`.  Assign :attr:`scanner` to
         replace it.
         """
+        from .._client_common import requires_credentials
         from ..record_scanner import RecordScanner
         from .provider import scanner_base
 
@@ -87,11 +88,15 @@ class RecordsModule:
                 "Assign your own scanner (aleo.records.scanner = RecordScanner(...)) "
                 "or a custom aleo.record_provider to scan against this endpoint."
             )
+        # Credentials travel only to the host that gates the scanner behind
+        # them; on the open edge ambient/legacy credentials are dropped so the
+        # scanner never tries to mint a JWT there.
+        credentialed = requires_credentials(provider.url)
         return RecordScanner(
             base,
             network=provider.network,
-            api_key=provider.api_key,
-            consumer_id=getattr(provider, "consumer_id", None),
+            api_key=provider.api_key if credentialed else None,
+            consumer_id=getattr(provider, "consumer_id", None) if credentialed else None,
             transport=getattr(provider, "_transport", None),
         )
 

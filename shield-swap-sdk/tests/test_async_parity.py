@@ -39,3 +39,18 @@ def test_sync_only_list_has_no_stale_entries():
     asyn = {n for n in vars(AsyncShieldSwap) if not n.startswith("_")}
     stale = SYNC_ONLY & asyn
     assert not stale, f"async now has these — drop from SYNC_ONLY: {sorted(stale)}"
+
+
+def test_shared_write_verbs_agree_on_parameter_defaults():
+    """Name parity is not enough: the async swap once defaulted
+    deadline_offset_blocks to 100 (~5 min) while the sync one used 10,000
+    (~8 h), so a delegated proof could outlive its own deadline.  Every
+    parameter both clients share must carry the same default."""
+    import inspect
+    for name in ("swap", "claim_swap_output"):
+        sync_params = inspect.signature(getattr(ShieldSwap, name)).parameters
+        async_params = inspect.signature(getattr(AsyncShieldSwap, name)).parameters
+        for pname, p in sync_params.items():
+            if pname in async_params and p.default is not inspect.Parameter.empty:
+                assert async_params[pname].default == p.default, (
+                    f"{name}({pname}=): sync {p.default!r} vs async {async_params[pname].default!r}")

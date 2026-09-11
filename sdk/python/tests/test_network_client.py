@@ -915,3 +915,23 @@ def test_default_client_targets_the_edge() -> None:
     c = AleoNetworkClient(network="mainnet")
     assert c._host == "https://edge.provable.com/api/v2/mainnet"
     assert c.prover_uri == "https://edge.provable.com/api/prove/mainnet"
+
+
+def test_open_edge_ignores_ambient_credentials() -> None:
+    """A client on the open edge configured with legacy api_key/consumer_id
+    (e.g. from a shell that also targets api.provable.com) must not try to
+    mint a JWT at /api/jwts — the route does not exist there and the prover
+    and scanner need no credential."""
+    calls: list[str] = []
+
+    def transport(method: str, url: str, **kwargs: Any) -> Any:
+        calls.append(url)
+        raise AssertionError(f"unexpected HTTP call {method} {url}")
+
+    c = AleoNetworkClient("https://edge.provable.com/api", network="testnet",
+                          api_key="legacy-key", consumer_id="legacy-consumer", transport=transport)
+    assert c._ensure_jwt(None, None, None) is None
+    assert calls == []
+    # The legacy host still mints as before (covered by the JWT tests above).
+    legacy = AleoNetworkClient("https://api.provable.com", network="testnet")
+    assert legacy._ensure_jwt(None, None, None) is None            # no creds → nothing to mint

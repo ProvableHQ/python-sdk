@@ -526,3 +526,14 @@ def test_scanner_base_keeps_the_edge_api_prefix() -> None:
     a = Aleo(HTTPProvider(network="testnet"))                     # the default: edge, no creds
     assert a.records.scanner.url == "https://edge.provable.com/api/scanner/testnet"
     assert a.records.scanner._api_key is None                   # no credentials wired
+
+
+def test_scanner_drops_credentials_on_the_open_edge() -> None:
+    # Ambient legacy credentials must not reach the edge scanner (it would try
+    # /api/jwts, which does not exist); on the legacy host they are forwarded.
+    edge = Aleo(HTTPProvider("https://edge.provable.com/api", network="testnet",
+                             api_key="k", consumer_id="c"))
+    assert edge.records.scanner._api_key is None and edge.records.scanner.consumer_id is None
+    legacy = Aleo(HTTPProvider("https://api.provable.com", network="testnet",
+                               api_key="k", consumer_id="c"))
+    assert legacy.records.scanner._api_key is not None and legacy.records.scanner.consumer_id == "c"

@@ -165,8 +165,13 @@ Two conveniences trade secret material for service:
 
 ## Async
 
-`AsyncShieldSwap` / `AsyncApiClient` mirror the sync surface method-for-method on
-`aleo.AsyncAleo` (install the `[async]` extra):
+`AsyncShieldSwap` / `AsyncApiClient` mirror the sync **read, swap and claim**
+surface method-for-method on `aleo.AsyncAleo` (install the `[async]` extra).
+The liquidity verbs (`create_pool`, `mint`, `increase_liquidity`,
+`decrease_liquidity`, `collect`, `burn`, `rebalance_position`) and the
+journal-bound helpers (`from_profile`, `onboard`, `status`, `swap_many`,
+`collect_all`, `get_positions`) are sync-only for now — the exact list is
+pinned by `tests/test_async_parity.py`:
 
 ```python
 from aleo_shield_swap import AsyncShieldSwap

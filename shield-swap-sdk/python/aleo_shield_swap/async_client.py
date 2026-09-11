@@ -586,7 +586,7 @@ class AsyncShieldSwap:
     async def swap(self, *, pool_key: str, token_in_id: str, amount_in: int,
                    slippage_bps: int = 50, expected_out: Optional[int] = None,
                    sqrt_price_limit: Optional[int] = None,
-                   deadline_offset_blocks: int = 100,
+                   deadline_offset_blocks: int = 10_000,
                    nonce: Optional[int] = None,
                    token_in_program: Optional[str] = None,
                    token_record: Optional[str] = None,
@@ -717,11 +717,17 @@ class AsyncShieldSwap:
         no_refund = int(out.amount_remaining) == 0
         route = claim_route(w_out, w_in, no_refund=no_refund)
         token_programs = [route.program] if route.program != self.program else []
+        # The core calls each leg's token program dynamically
+        # (`transfer_public_to_private` on payout/refund), so both must be in
+        # the process before authorization — wrapper for wrapped legs, the
+        # ARC-20 itself for plain ones — exactly as the sync client does.
         for token_id, wrapped in ((out.token_in, w_in), (out.token_out, w_out)):
             if wrapped:
                 wrapper = await self._amm_token_program(str(token_id))
                 if wrapper:
                     token_programs.append(wrapper)
+            else:
+                token_programs.append(await self._token_program(str(token_id)))
         await self._ensure(token_programs, imports)
         inputs = [handle.blinding_factor, handle.blinded_address, handle.swap_id,
                   out.token_in, out.token_out, f"{out.amount_out}u128"]
