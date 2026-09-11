@@ -8,57 +8,6 @@ from typing import Any
 
 
 @dataclass
-class AccessCodeRow:
-    code: str
-    created_at: str
-    redeemed_at: str | None = None
-    redeemed_by: str | None = None
-
-
-@dataclass
-class AccessGenerateRequest:
-    count: int
-
-
-@dataclass
-class AccessGenerateResponse:
-    codes: list[str]
-
-
-@dataclass
-class AccessGenerateResponseDoc:
-    data: AccessGenerateResponse
-
-
-@dataclass
-class AccessListResponse:
-    available: int
-    codes: list[AccessCodeRow]
-    redeemed: int
-    total: int
-
-
-@dataclass
-class AccessListResponseDoc:
-    data: AccessListResponse
-
-
-@dataclass
-class AccessRedeemRequest:
-    code: str
-
-
-@dataclass
-class AccessStatusResponse:
-    has_access: bool
-
-
-@dataclass
-class AccessStatusResponseDoc:
-    data: AccessStatusResponse
-
-
-@dataclass
 class ActiveSessionPayload:
     current: bool
     expires_at: int
@@ -142,6 +91,20 @@ class ApiTokenRow:
 
 
 @dataclass
+class Asset:
+    decimals: int
+    id: str
+    name: str
+    symbol: str
+    coinGeckoId: str | None = None
+
+
+@dataclass
+class AssetResponse:
+    asset: Asset
+
+
+@dataclass
 class AuthTokenPayload:
     expires_at: int
     token: str
@@ -150,6 +113,12 @@ class AuthTokenPayload:
 @dataclass
 class AuthTokenResponseDoc:
     data: AuthTokenPayload
+
+
+@dataclass
+class BlockResponse:
+    blockNumber: int
+    blockTimestamp: int
 
 
 @dataclass
@@ -167,31 +136,6 @@ class ChallengeRequestDoc:
 @dataclass
 class ChallengeResponseDoc:
     data: ChallengePayload
-
-
-@dataclass
-class CreateTokenRequestDoc:
-    address: str
-    decimals: int
-    name: str
-    symbol: str
-    amm_token_program: str | None = None
-
-
-@dataclass
-class DeployTokenRequest:
-    decimals: int
-    name: str
-    recipient: str
-    symbol: str
-    supply: str | None = None
-
-
-@dataclass
-class DeployTokenResult:
-    program_id: str
-    recipient: str
-    status: str
 
 
 @dataclass
@@ -243,12 +187,18 @@ class InitializedTicksResponseDoc:
     data: list[int]
 
 
+@dataclass
+class LatestBlockResponse:
+    block: BlockResponse
+
+
 class LiveCompatibilityFailureCode(Enum):
     cache_unavailable = 'cache_unavailable'
     edition_mismatch = 'edition_mismatch'
     edition_unavailable = 'edition_unavailable'
     rate_limited = 'rate_limited'
     rpc_unavailable = 'rpc_unavailable'
+    program_missing = 'program_missing'
     source_mismatch = 'source_mismatch'
     source_unavailable = 'source_unavailable'
     verification_timeout = 'verification_timeout'
@@ -258,6 +208,13 @@ class LiveCompatibilityStatus(Enum):
     compatible = 'compatible'
     incompatible = 'incompatible'
     unavailable = 'unavailable'
+
+
+@dataclass
+class LiveProgramObservation:
+    source_sha256: str
+    edition: int | None = None
+    version: str | None = None
 
 
 @dataclass
@@ -286,19 +243,6 @@ class LogoutResponseDoc:
 
 
 @dataclass
-class MintTokenRequest:
-    amm_token_program: str
-    amount: str
-    recipient: str
-
-
-@dataclass
-class MintTokenResult:
-    status: str
-    tx_id: str | None = None
-
-
-@dataclass
 class OhlcvDoc:
     c: str
     granularity: GranularityDoc
@@ -323,10 +267,24 @@ class PaginationMeta:
 
 
 @dataclass
+class Pair:
+    asset0Id: str
+    asset1Id: str
+    dexKey: str
+    feeBps: float
+    id: str
+
+
+@dataclass
 class PairComplianceStatus:
     paused: bool
     token0: str
     token1: str
+
+
+@dataclass
+class PairResponse:
+    pair: Pair
 
 
 @dataclass
@@ -453,11 +411,6 @@ class PositionDoc:
 class PositionListResponseDoc:
     data: list[PositionDoc]
     pagination: PaginationMeta
-
-
-@dataclass
-class PositionResponseDoc:
-    data: PositionDoc
 
 
 @dataclass
@@ -651,25 +604,6 @@ class ReferralMyCodeResponseDoc:
 
 
 @dataclass
-class ReferralMyCodeRow:
-    code: str
-    redemption_count: int
-    redeemed_at: str | None = None
-    redeemed_by: str | None = None
-
-
-@dataclass
-class ReferralMyCodesResponse:
-    codes: list[ReferralMyCodeRow]
-    quota: int
-
-
-@dataclass
-class ReferralMyCodesResponseDoc:
-    data: ReferralMyCodesResponse
-
-
-@dataclass
 class ReferralRedeemRequest:
     code: str
 
@@ -733,6 +667,12 @@ class ReferralUpdateSettingsRequest:
 
 
 @dataclass
+class Reserves:
+    asset0: str
+    asset1: str
+
+
+@dataclass
 class RevokeSessionPayload:
     current: bool
     ok: bool
@@ -786,15 +726,6 @@ class RouteResultDoc:
 
 
 @dataclass
-class SchemaField:
-    description: str
-    name: str
-    type: str
-    visibility: str
-    fields: list[SchemaField] | None = None
-
-
-@dataclass
 class SessionPayload:
     address: str
     csrf_token: str
@@ -809,9 +740,9 @@ class SessionResponseDoc:
 
 
 @dataclass
-class SwapHopDoc:
-    pool: str
-    zero_for_one: bool
+class SwapMetadata:
+    fees0In: str | None = None
+    fees1In: str | None = None
 
 
 @dataclass
@@ -821,32 +752,11 @@ class TickLiquidityDoc:
 
 
 @dataclass
-class TickSpacingDoc:
-    id: str
-    tick_spacing: int
-
-
-@dataclass
-class TickSpacingListResponseDoc:
-    data: list[TickSpacingDoc]
-
-
-@dataclass
 class TickStatusDoc:
     exists: bool
     tick: int
     tick_mapping_key: str
     raw_value: str | None = None
-
-
-@dataclass
-class TokenBalanceDoc:
-    balance: str
-    decimals: int
-    name: str
-    symbol: str
-    token_address: str
-    token_id: str
 
 
 @dataclass
@@ -872,11 +782,6 @@ class TokenDoc:
 @dataclass
 class TokenListResponseDoc:
     data: list[TokenDoc]
-
-
-@dataclass
-class TokenResponseDoc:
-    data: TokenDoc
 
 
 @dataclass
@@ -931,27 +836,6 @@ class ApiTokenListResponseDoc:
 
 
 @dataclass
-class BalanceListResponseDoc:
-    data: list[TokenBalanceDoc]
-
-
-@dataclass
-class DeployTokenResponseDoc:
-    data: DeployTokenResult
-
-
-@dataclass
-class FunctionSchema:
-    description: str
-    function: str
-    id: str
-    inputs: list[SchemaField]
-    program: str
-    visibility: str
-    follow_up: list[str] | None = None
-
-
-@dataclass
 class GlobalConfigResponseDoc:
     data: GlobalConfigStatus
 
@@ -965,11 +849,6 @@ class LiquidityDistributionResponseDoc:
 class LiveCompatibilityFailure:
     code: LiveCompatibilityFailureCode
     program_id: str | None = None
-
-
-@dataclass
-class MintTokenResponseDoc:
-    data: MintTokenResult
 
 
 @dataclass
@@ -1090,6 +969,7 @@ class ProtocolControls:
 class ProtocolDeployment:
     abi_version: int
     amm_start_block: int
+    compatibility_fingerprint: str
     contract_ref: str
     contract_repository: str
     deployment_fingerprint: str
@@ -1140,53 +1020,26 @@ class RouteTopologyResponseDoc:
 
 
 @dataclass
-class SwapDoc:
-    amount_remaining: str
-    executed_at: str
-    hops: list[SwapHopDoc]
-    id: str
-    input_amount: str
-    input_token: str
-    is_private: bool
-    nonce: str
-    output_amount: str
-    output_token: str
-    pool: str
-    recipient: str
-    swap_id: str
-    transaction: str
-    user: str
-    claim_tx: str | None = None
-    claimed_at: str | None = None
-    input_token_info: TokenDoc | None = None
-    output_token_info: TokenDoc | None = None
-    trade: str | None = None
-
-
-@dataclass
-class SwapListResponseDoc:
-    data: list[SwapDoc]
-    pagination: PaginationMeta
-
-
-@dataclass
-class SwapResponseDoc:
-    data: SwapDoc
+class SwapEvent:
+    block: BlockResponse
+    eventIndex: int
+    eventType: str
+    maker: str
+    metadata: SwapMetadata
+    pairId: str
+    priceNative: str
+    reserves: Reserves
+    txnId: str
+    txnIndex: int
+    asset0In: str | None = None
+    asset0Out: str | None = None
+    asset1In: str | None = None
+    asset1Out: str | None = None
 
 
 @dataclass
 class TokenComplianceResponseDoc:
     data: TokenComplianceStatus
-
-
-@dataclass
-class TradingSchemaListResponse:
-    data: list[FunctionSchema]
-
-
-@dataclass
-class TradingSchemaResponse:
-    data: FunctionSchema
 
 
 @dataclass
@@ -1201,11 +1054,18 @@ class UnclaimedResponseDoc:
 
 
 @dataclass
+class EventsResponse:
+    events: list[SwapEvent]
+
+
+@dataclass
 class LiveCompatibility:
     artifacts_checked: int
     checked_at: str
     failures: list[LiveCompatibilityFailure]
+    observed_programs: dict[str, LiveProgramObservation]
     status: LiveCompatibilityStatus
+    observed_artifact_vector_hash: str | None = None
 
 
 @dataclass

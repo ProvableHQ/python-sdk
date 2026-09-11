@@ -26,9 +26,6 @@ class _StubApi:
         self._token = "jwt"
         return "jwt"
 
-    def access_status(self):
-        return type("S", (), {"has_access": self._token is not None})()
-
     def referral_status(self):
         return type("RS", (), {"has_access": self._token is not None,
                                "referred_by": self.referred_by,
@@ -222,3 +219,25 @@ def test_airdrop_stage_refuses_on_mainnet(tmp_path):
         assert "aleo1me" in str(exc)
     else:
         raise AssertionError("expected NotFundedError on mainnet")
+
+
+def test_credentials_stage_survives_the_api_token_cap(profile, dps_env):
+    """The DEX caps active durable tokens per account (5).  An account at the
+    cap must still onboard — the cookie session serves this process — with
+    the cap named in the stage detail, and no token stored."""
+    from aleo_shield_swap.errors import DexApiError
+
+    api = _StubApi()
+    api._token = "jwt"
+
+    def capped(name, expires_in_days=None):
+        raise DexApiError(400, '{"error":"active token limit reached (5); revoke one first"}')
+
+    api.create_api_token = capped
+    dex = _StubDex(api, {"waleo.aleo": 7}, funded_from_start=True)
+    report = run_onboard(dex, profile)
+    creds = next(o for o in report.outcomes if o.name == "credentials")
+    assert creds.action == "ran"
+    assert "token limit" in creds.detail and "session" in creds.detail
+    assert "dex_api_token" not in profile.credentials
+    assert report.funded is True

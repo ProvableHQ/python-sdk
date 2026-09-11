@@ -126,12 +126,29 @@ class Journal:
                 f.write(json.dumps(event) + "\n")
             return counters
 
+    def skip_counters_through(self, counter: int) -> None:
+        """Retire every counter up to and including *counter* without issuing it.
+
+        A fresh journal for an account that already swapped starts at 0, but
+        those counters are consumed on chain — a swap built on one is rejected
+        at finalize.  The client seeds the cursor past the used run with this;
+        it never moves the cursor backwards.
+        """
+        with self._locked():
+            if counter < self.counter_cursor():
+                return
+            event = {"type": "counters_skipped", "ts": time.time(), "through": counter}
+            with self.path.open("a") as f:      # already under the lock
+                f.write(json.dumps(event) + "\n")
+
     def counter_cursor(self) -> int:
         """Next unissued counter (max seen in any event + 1)."""
         top = -1
         for e in self.events():
             if e["type"] == "counters_reserved":
                 top = max(top, *e.get("counters") or [-1])
+            elif e["type"] == "counters_skipped":
+                top = max(top, e.get("through", -1))
             elif e["type"] in ("swap", "swap_failed"):
                 top = max(top, e.get("counter", -1))
         return top + 1

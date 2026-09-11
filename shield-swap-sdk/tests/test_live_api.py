@@ -47,7 +47,7 @@ def funded_api() -> ApiClient:
         pytest.skip("ALEO_E2E_PRIVATE_KEY not set")
     pk = aleo.testnet.PrivateKey.from_string(key)
     api = _authed_client(pk)
-    assert api.access_status().has_access      # authentication is the gate
+    assert api.referral_status().has_access    # authentication is the gate
     return api
 
 
@@ -58,7 +58,7 @@ def test_authenticate_needs_no_funds():
     # deployments returned a body JWT) — either way the credential is held
     # and the gated status probe answers.
     assert api.is_authenticated
-    assert api.access_status().has_access is True
+    assert api.referral_status().has_access is True
 
 
 def test_gated_endpoint_rejects_missing_token():
@@ -76,7 +76,6 @@ def test_authentication_alone_grants_access():
     # API token.
     pk = aleo.testnet.PrivateKey.random()
     api = _authed_client(pk)
-    assert api.access_status().has_access is True
     status = api.referral_status()
     assert status.has_access is True and status.referred_by is None
     assert api.my_referral_code()               # issued on first login
@@ -111,15 +110,13 @@ def test_funded_ohlcv(funded_api):
     assert isinstance(candles, list)  # may be empty on a quiet pool
 
 
-def test_funded_balances(funded_api):
-    key = os.environ["ALEO_E2E_PRIVATE_KEY"]
-    addr = str(aleo.testnet.PrivateKey.from_string(key).address)
-    balances = funded_api.get_public_balances(addr)
-    assert isinstance(balances, list)
+def test_funded_fee_tiers(funded_api):
+    tiers = funded_api.get_fee_tiers()
+    assert tiers and all(isinstance(t.fee_tier, int) for t in tiers)
 
 
-def test_access_status_typed(funded_api):
-    assert funded_api.access_status().has_access is True
+def test_referral_status_typed(funded_api):
+    assert funded_api.referral_status().has_access is True
 
 
 def test_airdrop_request_is_rate_limit_tolerant(funded_api, e2e_address):

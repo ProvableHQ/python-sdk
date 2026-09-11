@@ -30,8 +30,14 @@ def u256_wrapping_sub(a: int, b: int) -> int:
     return (a - b) % U256_MOD
 
 
-def _mul_div(a: int, b: int, denom: int, round_up: bool) -> int:
+def mul_div(a: int, b: int, denom: int, round_up: bool) -> int:
     """``a * b / denom``, floored or ceiled — mirrors ``view_mul_div``.
+
+    Args:
+        a: First factor.
+        b: Second factor.
+        denom: Divisor.
+        round_up: Round a non-zero remainder up rather than down.
 
     Raises:
         ZeroDivisionError: If *denom* is zero, as the contract's divide would
@@ -54,8 +60,8 @@ def amount0_delta(sqrt_a: int, sqrt_b: int, liquidity: int,
     """
     lower, upper = (sqrt_a, sqrt_b) if sqrt_a < sqrt_b else (sqrt_b, sqrt_a)
     diff = u256_wrapping_sub(upper, lower)
-    scaled = _mul_div(liquidity * Q128, diff, upper, round_up)
-    result = _mul_div(scaled, 1, lower, round_up)
+    scaled = mul_div(liquidity * Q128, diff, upper, round_up)
+    result = mul_div(scaled, 1, lower, round_up)
     if result > U128_MAX:
         raise ValueError(f"amount0 {result} exceeds u128")
     return result
@@ -113,15 +119,42 @@ def amounts_for_liquidity(sqrt_current: int, sqrt_a: int, sqrt_b: int,
     return 0, 0
 
 
-def _liquidity_for_amount0(lower: int, upper: int, amount0: int) -> int:
-    # Scaled down by 2^128 first, matching the forward direction's chained
-    # mul-divs rather than multiplying out to 2^256 and dividing back.
-    intermediate = _mul_div(lower, upper, Q128, False)
-    return _mul_div(amount0, intermediate, upper - lower, False)
+def liquidity_for_amount0(lower: int, upper: int, amount0: int) -> int:
+    """Liquidity that *amount0* of token0 backs between two sorted sqrt prices.
+
+    The inverse of :func:`amount0_delta` for a range the price sits below or
+    inside (pass the current price as *lower* when in range).  Scales down by
+    2^128 first, matching the forward direction's chained mul-divs rather than
+    multiplying out to 2^256 and dividing back — so the round trip floors
+    rather than reproducing the input exactly.
+
+    Args:
+        lower: The lower Q128.128 sqrt price (must be below *upper*).
+        upper: The upper Q128.128 sqrt price.
+        amount0: Raw base units of token0.
+
+    Returns:
+        The liquidity, floored.
+    """
+    intermediate = mul_div(lower, upper, Q128, False)
+    return mul_div(amount0, intermediate, upper - lower, False)
 
 
-def _liquidity_for_amount1(lower: int, upper: int, amount1: int) -> int:
-    return _mul_div(amount1, Q128, upper - lower, False)
+def liquidity_for_amount1(lower: int, upper: int, amount1: int) -> int:
+    """Liquidity that *amount1* of token1 backs between two sorted sqrt prices.
+
+    The inverse of :func:`amount1_delta` for a range the price sits above or
+    inside (pass the current price as *upper* when in range).
+
+    Args:
+        lower: The lower Q128.128 sqrt price (must be below *upper*).
+        upper: The upper Q128.128 sqrt price.
+        amount1: Raw base units of token1.
+
+    Returns:
+        The liquidity, floored.
+    """
+    return mul_div(amount1, Q128, upper - lower, False)
 
 
 def liquidity_for_amount(sqrt_current: int, sqrt_a: int, sqrt_b: int, *,
@@ -143,14 +176,14 @@ def liquidity_for_amount(sqrt_current: int, sqrt_a: int, sqrt_b: int, *,
     lower, upper = (sqrt_a, sqrt_b) if sqrt_a < sqrt_b else (sqrt_b, sqrt_a)
     if side == 0:
         if sqrt_current <= lower:
-            return _liquidity_for_amount0(lower, upper, amount)
+            return liquidity_for_amount0(lower, upper, amount)
         if sqrt_current < upper:
-            return _liquidity_for_amount0(sqrt_current, upper, amount)
+            return liquidity_for_amount0(sqrt_current, upper, amount)
         return 0
     if sqrt_current >= upper:
-        return _liquidity_for_amount1(lower, upper, amount)
+        return liquidity_for_amount1(lower, upper, amount)
     if sqrt_current > lower:
-        return _liquidity_for_amount1(lower, sqrt_current, amount)
+        return liquidity_for_amount1(lower, sqrt_current, amount)
     return 0
 
 
@@ -165,11 +198,11 @@ def liquidity_for_amounts(sqrt_current: int, sqrt_a: int, sqrt_b: int,
     """
     lower, upper = (sqrt_a, sqrt_b) if sqrt_a < sqrt_b else (sqrt_b, sqrt_a)
     if sqrt_current <= lower:
-        return _liquidity_for_amount0(lower, upper, amount0)
+        return liquidity_for_amount0(lower, upper, amount0)
     if sqrt_current < upper:
-        return min(_liquidity_for_amount0(sqrt_current, upper, amount0),
-                   _liquidity_for_amount1(lower, sqrt_current, amount1))
-    return _liquidity_for_amount1(lower, upper, amount1)
+        return min(liquidity_for_amount0(sqrt_current, upper, amount0),
+                   liquidity_for_amount1(lower, sqrt_current, amount1))
+    return liquidity_for_amount1(lower, upper, amount1)
 
 
 def fee_growth_inside(lower_outside: tuple[int, int], lower_tick: int,

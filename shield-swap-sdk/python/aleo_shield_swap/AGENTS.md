@@ -267,20 +267,17 @@ returning an Aleo signature literal (``sign1…``) — e.g.::
     api.authenticate(str(pk.address),
                      lambda msg: str(pk.sign(msg.encode())))
 
-### `api.access_status(self) -> 'models.AccessStatusResponse'`
-
-Whether this authenticated account may use the gated endpoints.
-
-Always ``has_access: true`` for an authenticated account — access is
-granted by authentication alone, no code required.  Raises
-:class:`NotAuthenticatedError` when the session is missing or
-expired, which is what makes this a useful liveness probe.
-
 ### `api.referral_status(self) -> 'models.ReferralStatusResponse'`
 
 This account's referral picture: ``referred_by`` (the referrer's
 address once a code was redeemed, else None), ``my_code`` (the code
 this account shares), and ``has_access``.  Network read.
+
+``has_access`` is always true for an authenticated account — access
+is granted by authentication alone, no code required — and the call
+raises :class:`NotAuthenticatedError` when the session is missing or
+expired, which makes this the session liveness probe (the dedicated
+``/access/status`` route was retired in 2026-09).
 
 ### `api.my_referral_code(self) -> 'Optional[str]'`
 
@@ -389,13 +386,21 @@ Use with journal-reserved counters for concurrent swaps;
 :func:`next_blinded_identity` (probe-based) remains the recovery path
 when no journal exists.
 
-### `next_blinded_identity(aleo: 'Any', account: 'Any', program: 'str' = 'shield_swap.aleo', *, start_counter: 'int' = 0, max_scan: 'int' = 64) -> 'BlindedIdentity'`
+### `next_blinded_identity(aleo: 'Any', account: 'Any', program: 'str' = 'shield_swap.aleo', *, start_counter: 'int' = 0, max_scan: 'int' = 64, gallop: 'bool' = True) -> 'BlindedIdentity'`
 
-First unused single-use identity for *account*.
+An unused single-use identity for *account*.
 
 Derives at ``start_counter, +1, …`` and probes the program's
-``used_blinded_addresses`` mapping until one is free.  ``max_scan`` fails
-fast when something is systematically wrong (e.g. wrong program).
+``used_blinded_addresses`` mapping until one is free.  When the whole
+linear window is used — an account that has swapped more than *max_scan*
+times without a journal — *gallop* extends the search in O(log n) probes:
+double the stride past the window until a free counter appears, then
+bisect back to the lowest free one in that span.  Any free counter is a
+valid identity (a gap left by a failed swap is fine), so the search only
+needs SOME unused address, not the exact end of the used run.
+
+With ``gallop=False`` the linear window is the whole search and
+exhausting it raises — the fail-fast for a systematically wrong program.
 
 ### Chain methods
 
@@ -571,6 +576,25 @@ Private balances can only be scanned for the bound account's view
 key — when *address* names someone else, ``private`` is 0 for every
 token (their records are not scannable) rather than silently mixing
 in the caller's own private holdings.
+
+### `get_public_balances(self, programs: 'list[str]', address: 'Optional[str]' = None) -> 'dict[str, int]'`
+
+Public balances per token program, read from each program's
+on-chain ``balances`` mapping (keyed by plain address — one mapping
+read per program, any address).  The public counterpart to
+:meth:`get_private_balances`.  Pass the registry's
+``amm_token_program`` values; an absent entry reads as ``0``.
+
+Args:
+    programs: Token programs to read; duplicates are read once.
+    address: Whose balances; defaults to the bound account's.
+
+Returns:
+    Raw base-unit balances keyed by program.
+
+Raises:
+    ValueError: No address available, or a value that is not an
+        unsigned-integer literal (the mapping is not ARC-20 shaped).
 
 ### `get_private_balances(self, programs: 'list[str]', account: 'Any' = None) -> 'dict[str, int]'`
 

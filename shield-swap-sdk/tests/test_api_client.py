@@ -32,6 +32,10 @@ class _Session:
         self.calls.append(("POST", url, json, headers))
         return self.responses.pop(0)
 
+    def put(self, url, json=None, timeout=None, headers=None):
+        self.calls.append(("PUT", url, json, headers))
+        return self.responses.pop(0)
+
     def delete(self, url, timeout=None, headers=None):
         self.calls.append(("DELETE", url, None, headers))
         return self.responses.pop(0)
@@ -59,14 +63,17 @@ def test_get_route_stringifies_amount():
                       "amount_in": str(10**18)}
 
 
-def test_get_public_balances_passes_user():
-    payload = {"data": [{"balance": "5", "decimals": 6, "name": "USDCx",
-                         "symbol": "wUSDCx", "token_address": "4field",
-                         "token_id": "4field", "extra_field": "ignored"}]}
-    s = _Session([_Resp(200, payload)])
-    bals = ApiClient(base_url="https://x", session=s).get_public_balances("aleo1me")
-    assert bals[0].balance == "5"
-    assert s.calls[0][2] == {"user": "aleo1me"}
+RETIRED_ROUTES = ("access_status", "my_referral_codes", "get_tick_spacings",
+                  "get_swaps", "get_swap", "get_position", "get_public_balances")
+
+
+@pytest.mark.parametrize("name", RETIRED_ROUTES)
+def test_retired_dex_routes_have_no_wrapper(name):
+    # The API retired these routes in 2026-09 (they 404 on both networks).
+    # Balances, swap detail, and position detail are chain reads on
+    # ShieldSwap; the access flag rides on referral_status().
+    assert not hasattr(ApiClient, name)
+    assert not hasattr(AsyncApiClient, name)
 
 
 def test_non_2xx_raises_dex_api_error():
@@ -89,7 +96,7 @@ def test_authenticate_stores_bearer_token():
     method, url, body, _ = s.calls[1]
     assert (method, url) == ("POST", "https://x/auth/verify")
     assert body == {"address": "aleo1me", "signature": "sign1xyz"}
-    client.get_public_balances("aleo1me")
+    client.get_fee_tiers()
     headers = s.calls[2][3]
     assert headers["authorization"] == "Bearer jwt-abc"
 
@@ -98,7 +105,7 @@ def test_401_maps_to_not_authenticated():
     from aleo_shield_swap.errors import NotAuthenticatedError
     s = _Session([_Resp(401, {"error": "missing token"})])
     with pytest.raises(NotAuthenticatedError):
-        ApiClient(base_url="https://x", session=s)._get("/access/status")
+        ApiClient(base_url="https://x", session=s)._get("/fee-tiers")
 
 
 def test_403_is_a_plain_dex_api_error():
@@ -117,10 +124,12 @@ def _lifecycle_client(*resps, token="t"):
     return ApiClient(base_url="https://x", session=s, token=token), s
 
 
-def test_access_status():
-    api, s = _lifecycle_client(_Resp(200, {"data": {"has_access": True}}))
-    assert api.access_status().has_access is True
-    assert s.calls[0][:2] == ("GET", "https://x/access/status")
+def test_referral_status_carries_the_access_flag():
+    # /access/status is gone; referral_status() is the gated liveness probe.
+    api, s = _lifecycle_client(_Resp(200, {"data": {"has_access": True, "code": None,
+                                                    "referred_by": None, "my_code": "MC"}}))
+    assert api.referral_status().has_access is True
+    assert s.calls[0][:2] == ("GET", "https://x/referral/status")
 
 
 def test_redeem_code_targets_referral_endpoint():
@@ -202,6 +211,10 @@ class _AsyncClient:
         self.calls.append(("POST", url, json, headers))
         return self.responses.pop(0)
 
+    async def put(self, url, json=None, headers=None):
+        self.calls.append(("PUT", url, json, headers))
+        return self.responses.pop(0)
+
     async def delete(self, url, headers=None):
         self.calls.append(("DELETE", url, None, headers))
         return self.responses.pop(0)
@@ -212,7 +225,6 @@ async def test_async_lifecycle_endpoints():
     from aleo_shield_swap.api import AsyncApiClient
     from aleo_shield_swap.errors import AirdropRateLimitedError
     c = _AsyncClient([
-        _AsyncResp(200, {"data": {"has_access": True}}),
         _AsyncResp(200, {"data": {"has_access": True, "code": None,
                                   "referred_by": None, "my_code": "MC"}}),
         _AsyncResp(200, {"data": {"code": "MC"}}),
@@ -224,12 +236,12 @@ async def test_async_lifecycle_endpoints():
         _AsyncResp(429, {"error": "already claimed"}),
     ])
     api = AsyncApiClient(base_url="https://x", client=c, token="t")
-    assert (await api.access_status()).has_access is True
-    assert (await api.referral_status()).my_code == "MC"
+    status = await api.referral_status()
+    assert status.has_access is True and status.my_code == "MC"
     assert (await api.my_referral_code()) == "MC"
     assert (await api.redeem_code("C")).status == "redeemed"
     assert api._token == "t"          # redeem no longer rotates the credential
-    assert [u for _, u, *_ in c.calls[1:3]] == [
+    assert [u for _, u, *_ in c.calls[0:2]] == [
         "https://x/referral/status", "https://x/referral/my-code"]
     assert (await api.request_airdrop("aleo1a")).job_id == "j1"
     job = await api.get_airdrop_job("j1")
@@ -352,35 +364,29 @@ def test_get_initialized_ticks():
     assert s.calls[0][1] == "https://x/pools/5field/initialized-ticks"
 
 
-def test_get_swaps_and_positions_are_session_scoped():
-    # /swaps and /positions list the authenticated account's own history —
-    # no user parameter exists; paging and a pool filter are the only knobs.
+def test_get_positions_is_session_scoped():
+    # /positions lists the authenticated account's own positions — no user
+    # parameter exists; paging is the only knob.
     api, s = _lifecycle_client(
-        _Resp(200, {"data": [{"swap_id": "77field", "pool": "5field", "status": "claimed"}]}),
         _Resp(200, {"data": [{"token_id": "42field", "pool": "5field", "liquidity": "500"}]}),
-        _Resp(200, {"data": {"token_id": "42field", "pool": "5field", "liquidity": "500",
-                             "tokens_owed0": "1", "tokens_owed1": "2"}}),
+        _Resp(200, {"data": [{"token_id": "43field", "pool": "5field", "liquidity": "1"}]}),
     )
-    swaps = api.get_swaps(pool="5field", limit=5)
-    assert swaps[0].swap_id == "77field"
-    assert s.calls[0][2] == {"pool": "5field", "limit": 5}
     positions = api.get_positions()
     assert positions[0].token_id == "42field"
-    assert s.calls[1][2] in (None, {})
-    assert api.get_position("42field").liquidity == "500"
-    assert s.calls[2][1] == "https://x/positions/42field"
+    assert s.calls[0][1] == "https://x/positions" and s.calls[0][2] in (None, {})
+    assert api.get_positions(limit=1, offset=1)[0].token_id == "43field"
+    assert s.calls[1][2] == {"limit": 1, "offset": 1}
 
 
-def test_get_fee_tiers_and_tick_spacings():
+def test_get_fee_tiers_carries_tick_spacing():
+    # /tick-spacings is gone; each fee tier names its own spacing.
     api, s = _lifecycle_client(
         _Resp(200, {"data": [{"id": "f1", "fee_tier": 3000, "tick_spacing": 60,
                               "created_at": "t", "transaction": "at1"}]}),
-        _Resp(200, {"data": [{"id": "s1", "tick_spacing": 60}]}),
     )
     tier = api.get_fee_tiers()[0]
     assert tier.fee_tier == 3000 and tier.tick_spacing == 60
-    assert api.get_tick_spacings()[0].tick_spacing == 60
-    assert [c[1] for c in s.calls] == ["https://x/fee-tiers", "https://x/tick-spacings"]
+    assert [c[1] for c in s.calls] == ["https://x/fee-tiers"]
 
 
 def test_get_route_accepts_a_pool_key_pin():
@@ -434,8 +440,6 @@ def test_referral_reporting_endpoints():
         _Resp(200, {"data": {"recorded": True}}),
         _Resp(200, {"data": {"recorded": True}}),
         _Resp(200, {"data": {"recorded": 2, "duplicate": 1, "conflict": 0}}),
-        _Resp(200, {"data": {"codes": [{"code": "ABC", "redemption_count": 3,
-                                        "redeemed_at": None, "redeemed_by": None}], "quota": 5}}),
     )
     assert api.report_referral_activity(action="create_pool", tx_id="at1x",
                                         metadata={"pool": "5field"}).recorded is True
@@ -446,9 +450,6 @@ def test_referral_reporting_endpoints():
     batch = api.report_referral_address_batch(code="ABC", blinded_addresses=["aleo1b", "aleo1c", "aleo1d"])
     assert (batch.recorded, batch.duplicate, batch.conflict) == (2, 1, 0)
     assert s.calls[2][2] == {"code": "ABC", "blinded_addresses": ["aleo1b", "aleo1c", "aleo1d"]}
-    mine = api.my_referral_codes()
-    assert mine.quota == 5 and mine.codes[0].redemption_count == 3
-    assert s.calls[3][1] == "https://x/referral/my-codes"
 
 
 def test_dex_api_error_carries_the_machine_code():
@@ -516,3 +517,176 @@ async def test_async_client_mirrors_the_new_endpoints():
     sync_api = {n for n in dir(ApiClient) if not n.startswith("_")}
     async_api = {n for n in dir(AsyncApiClient) if not n.startswith("_")}
     assert sync_api - async_api == set()
+
+
+# ── 2026-09: session management, compliance, pool depth, referral issuance ──
+
+SESSION = {"address": "aleo1me", "csrf_token": "csrf-2", "expires_at": 1_800_000_000,
+           "session_id": "sid-1", "session_version": 3}
+
+
+def _cookie_client(*resps):
+    s = _Session(list(resps))
+    api = ApiClient(base_url="https://x", session=s)
+    api._csrf = "csrf-1"                           # a live cookie session
+    return api, s
+
+
+def test_session_reads_and_refresh_adopts_the_rotated_csrf():
+    api, s = _cookie_client(
+        _Resp(200, {"data": SESSION}),
+        _Resp(200, {"data": SESSION}),
+        _Resp(200, {"data": [{"session_id": "sid-1", "started_at": 1, "last_refreshed_at": 2,
+                              "expires_at": 3, "user_agent": "py", "current": True},
+                             {"session_id": "sid-0", "started_at": 0, "last_refreshed_at": 0,
+                              "expires_at": 3, "user_agent": None, "current": False}]}),
+        _Resp(200, {"data": {"token": "ws-jwt", "expires_at": 9}}),
+    )
+    assert api.get_session().session_id == "sid-1"
+    assert s.calls[0][:2] == ("GET", "https://x/auth/session")
+    assert s.calls[0][3]["x-csrf-token"] == "csrf-1"
+    assert api.refresh_session().session_version == 3
+    assert s.calls[1][:3] == ("POST", "https://x/auth/refresh", {})
+    assert api._csrf == "csrf-2"                   # rotated token adopted
+    sessions = api.list_sessions()
+    assert [x.current for x in sessions] == [True, False]
+    assert api.get_ws_ticket().token == "ws-jwt"
+    assert s.calls[3][1] == "https://x/auth/ws-ticket"
+
+
+def test_logout_binds_to_the_session_and_keeps_a_bearer():
+    # The API refuses /auth/logout unless the request names the session it
+    # ends, so logout() reads the session first and sends the binding headers.
+    api, s = _cookie_client(
+        _Resp(200, {"data": SESSION}),
+        _Resp(200, {"data": {"ok": True, "ended": True, "session_id": "sid-1"}}),
+    )
+    api._token = "ss_reserve"
+    out = api.logout()
+    assert out.ended is True
+    assert s.calls[0][:2] == ("GET", "https://x/auth/session")
+    assert s.calls[1][:2] == ("POST", "https://x/auth/logout")
+    assert s.calls[1][3]["x-shield-session-id"] == "sid-1"
+    assert s.calls[1][3]["x-shield-wallet-address"] == "aleo1me"
+    assert s.calls[1][3]["x-csrf-token"] == "csrf-1"   # binding adds to, never replaces
+    assert api._csrf is None and api._token == "ss_reserve"
+    assert api.is_authenticated                    # the bearer is still there
+    # A caller holding the session already skips the extra read.
+    api2, s2 = _cookie_client(_Resp(200, {"data": {"ok": True, "ended": True, "session_id": "sid-1"}}))
+    from aleo_shield_swap import _api_models as models
+    api2.logout(models.SessionPayload(**SESSION))
+    assert [c[0] for c in s2.calls] == ["POST"]
+
+
+def test_revoke_session_drops_local_state_only_for_the_current_one():
+    api, s = _cookie_client(
+        _Resp(200, {"data": {"ok": True, "revoked": True, "current": False}}),
+        _Resp(200, {"data": {"ok": True, "revoked": True, "current": True}}),
+    )
+    assert api.revoke_session("sid-0").revoked is True
+    assert s.calls[0][1] == "https://x/auth/sessions/sid-0/revoke"
+    assert api._csrf == "csrf-1"                   # someone else's session
+    api.revoke_session("sid-1")
+    assert api._csrf is None
+
+
+def test_logout_all_reports_the_bumped_session_version():
+    api, s = _cookie_client(_Resp(200, {"data": {"ok": True, "ended": True,
+                                                 "address": "aleo1me", "session_version": 4}}))
+    assert api.logout_all().session_version == 4
+    assert s.calls[0][:2] == ("POST", "https://x/auth/logout-all") and api._csrf is None
+
+
+def test_compliance_reads_are_public():
+    s = _Session([
+        _Resp(200, {"data": {"global_paused": False, "pool_creation_is_open": True}}),
+        _Resp(200, {"data": {"token_id": "1field", "allowed": True, "paused": False}}),
+        _Resp(200, {"data": {"token0": "1field", "token1": "2field", "paused": True}}),
+    ])
+    api = ApiClient(base_url="https://x", session=s)
+    assert api.get_compliance().pool_creation_is_open is True
+    assert api.get_token_compliance("1field").allowed is True
+    assert api.get_pair_compliance("1field", "2field").paused is True
+    assert [c[1] for c in s.calls] == ["https://x/compliance", "https://x/compliance/tokens/1field",
+                                       "https://x/compliance/pairs/1field/2field"]
+    assert all("authorization" not in c[3] and "x-csrf-token" not in c[3] for c in s.calls)
+
+
+STATS = {"price": "1.5", "liquidity": "10", "reserve0": "1", "reserve1": "2"}
+
+
+def test_pool_stats_batch_and_liquidity_distribution():
+    s = _Session([
+        _Resp(200, {"data": {"5field": STATS, "6field": STATS}}),
+        _Resp(200, {"data": [{"tick": -60, "liquidity_net": "100"},
+                             {"tick": 60, "liquidity_net": "-100"}]}),
+    ])
+    api = ApiClient(base_url="https://x", session=s)
+    stats = api.get_pool_stats_batch(["5field", "6field"])
+    assert set(stats) == {"5field", "6field"} and stats["5field"].price == "1.5"
+    assert s.calls[0][1:3] == ("https://x/pools/stats", {"keys": "5field,6field"})
+    dist = api.get_liquidity_distribution("5field")
+    assert [(d.tick, d.liquidity_net) for d in dist] == [(-60, "100"), (60, "-100")]
+    assert s.calls[1][1] == "https://x/pools/5field/liquidity-distribution"
+    assert api.get_pool_stats_batch([]) == {} and len(s.calls) == 2   # no request
+
+
+def test_referral_issuance_surface():
+    api, s = _lifecycle_client(
+        _Resp(200, {"data": {"codes_per_user": 3, "codes_per_user_limit": 5, "max_users": None}}),
+        _Resp(200, {"data": {"codes_per_user": 4, "codes_per_user_limit": 5, "max_users": 10}}),
+        _Resp(200, {"data": {"total": 2, "redeemed": 1, "available": 1, "redemptions": 1,
+                             "codes": [{"code": "AAA", "created_at": "t", "issued_to": None,
+                                        "redeemed_at": "t2", "redeemed_by": "aleo1b",
+                                        "redemption_count": 1}]}}),
+        _Resp(200, {"data": {"codes": ["NEW1", "NEW2"]}}),
+    )
+    assert api.referral_settings().codes_per_user == 3
+    updated = api.update_referral_settings(codes_per_user=4, max_users=10)
+    assert updated.max_users == 10
+    assert s.calls[1][:3] == ("PUT", "https://x/referral/settings",
+                              {"codes_per_user": 4, "max_users": 10})
+    page = api.list_referral_codes(limit=1)
+    assert page.total == 2 and page.codes[0].redeemed_by == "aleo1b"
+    assert s.calls[2][1:3] == ("https://x/referral/codes", {"limit": 1})
+    assert api.generate_referral_codes(2) == ["NEW1", "NEW2"]
+    assert s.calls[3][:3] == ("POST", "https://x/referral/generate", {"count": 2})
+
+
+NEW_2026_09_METHODS = (
+    "get_session", "refresh_session", "list_sessions", "revoke_session", "logout",
+    "logout_all", "get_ws_ticket", "get_compliance", "get_token_compliance",
+    "get_pair_compliance", "get_pool_stats_batch", "get_liquidity_distribution",
+    "referral_settings", "update_referral_settings", "list_referral_codes",
+    "generate_referral_codes",
+)
+
+
+@pytest.mark.parametrize("name", NEW_2026_09_METHODS)
+def test_new_wrappers_exist_on_both_clients(name):
+    assert callable(getattr(ApiClient, name)) and callable(getattr(AsyncApiClient, name))
+
+
+@pytest.mark.asyncio
+async def test_async_session_compliance_and_referral_mirrors():
+    c = _AsyncClient([
+        _AsyncResp(200, {"data": SESSION}),
+        _AsyncResp(200, {"data": SESSION}),
+        _AsyncResp(200, {"data": {"ok": True, "ended": True, "session_id": "sid-1"}}),
+        _AsyncResp(200, {"data": {"global_paused": True, "pool_creation_is_open": False}}),
+        _AsyncResp(200, {"data": {"5field": STATS}}),
+        _AsyncResp(200, {"data": {"codes_per_user": 1, "codes_per_user_limit": 1, "max_users": None}}),
+        _AsyncResp(200, {"data": {"codes": ["X"]}}),
+    ])
+    api = AsyncApiClient(base_url="https://x", client=c)
+    api._csrf = "csrf-1"
+    assert (await api.refresh_session()).address == "aleo1me" and api._csrf == "csrf-2"
+    assert (await api.logout()).ok is True and api._csrf is None
+    assert c.calls[2][1] == "https://x/auth/logout"
+    assert c.calls[2][3]["x-shield-session-id"] == "sid-1"
+    assert (await api.get_compliance()).global_paused is True
+    assert (await api.get_pool_stats_batch(["5field"]))["5field"].liquidity == "10"
+    assert (await api.update_referral_settings(codes_per_user=1)).codes_per_user == 1
+    assert c.calls[5][:3] == ("PUT", "https://x/referral/settings", {"codes_per_user": 1})
+    assert await api.generate_referral_codes() == ["X"]
+    assert c.calls[6][2] == {"count": 1}

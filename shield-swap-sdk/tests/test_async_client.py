@@ -280,3 +280,14 @@ async def test_async_claim_no_refund_mirrors_sync_dispatch():
         assert (astub.last_program, fn) == expected
         assert len(args) == count
         assert "0u128" not in args           # amount_remaining is not an input
+
+
+async def test_async_public_balances_are_chain_reads():
+    aleo = AsyncStubAleo(mappings={"balances": {"aleo1x": "9u64"}})
+    dex = AsyncShieldSwap(aleo)
+    assert await dex.get_public_balances(["a.aleo", "a.aleo", "b.aleo"], address="aleo1x") == {
+        "a.aleo": 9, "b.aleo": 9}
+    assert await dex.get_public_balances(["a.aleo"]) == {"a.aleo": 0}   # bound account, absent
+    aleo.default_account = None
+    with pytest.raises(ValueError):
+        await dex.get_public_balances(["a.aleo"])

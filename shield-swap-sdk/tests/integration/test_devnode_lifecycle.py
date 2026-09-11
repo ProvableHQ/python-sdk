@@ -273,6 +273,18 @@ def test_swaps_both_directions_and_claims(ctx, dex, journey):
         with pytest.raises(SwapOutputNotFinalizedError):
             dex.get_swap_output(handle)          # the claim consumed the entry
 
+        # The fill receipt persists past the claim: the composite
+        # {swap_id, hop_index} struct key decodes against a real node.
+        receipt = dex.get_swap_execution(handle.swap_id)
+        assert receipt is not None and len(receipt.hops) == 1
+        hop = receipt.hops[0]
+        assert hop.pool == pool_case["pool_key"] and hop.amount_in == 10_000_000
+        assert hop.amount_out == output.amount_out
+        assert hop.lp_fee == hop.fee_paid - hop.protocol_fee
+        assert hop.zero_for_one is zero_for_one
+        # Pools created by the non-admin user record that user as creator.
+        assert dex.get_pool_creator(pool_case["pool_key"]) == str(ctx.user.address)
+
         slot_after = dex.get_slot(pool_case["pool_key"])
         sp_after = u256_to_int(slot_after.raw.sqrt_price)
         sp_before = u256_to_int(slot_before.raw.sqrt_price)
@@ -363,6 +375,15 @@ def test_rebalance_moves_ranges_atomically(ctx, dex, journey):
     cases = []
     p0 = journey.pools[0]
     s0 = p0["tick_spacing"]
+    # devnodeRebalance.e2e: a swap through the range accrues fees PAST the
+    # position's checkpoints — tokens_owed stays zero in the mapping (only a
+    # settle books it), which is exactly the state the planner must price.
+    record = ctx.privatize_token(ctx.user, ctx.token0_program, 4_000_000)
+    _submit(ctx, dex.swap(pool_key=p0["pool_key"], token_in_id=ctx.token0_field,
+                          amount_in=2_000_000, expected_out=0, slippage_bps=0,
+                          token_record=record, imports=ctx.imports, account=ctx.user),
+            ctx.user)
+    assert _position(ctx, p0)["tokens_owed0"] == 0
     cases.append((p0, dict(tick_lower=-9 * s0, tick_upper=11 * s0,
                            max_funding0=0, max_funding1=0), {}))
     p1 = journey.pools[1]
@@ -385,6 +406,10 @@ def test_rebalance_moves_ranges_atomically(ctx, dex, journey):
         else:
             assert plan.funded0 == 0 and plan.funded1 == 0
             assert plan.function_name == "rebalance_plain_plain_none"
+            # The live proof of the fee fix: the planner found fees no
+            # mapping carries; the contract asserts they were recovered.
+            assert plan.fees_accrued0 > 0
+            assert plan.recovered0 > 0
 
         call = dex.rebalance_position(
             pool_key=pool_case["pool_key"], position_token_id=old_id,
@@ -397,6 +422,13 @@ def test_rebalance_moves_ranges_atomically(ctx, dex, journey):
 
         # The close removed the old entry; the successor holds exactly the target.
         assert ctx.read_mapping("positions", old_id) is None
+        # Refunds land privately with the user as Token records of exactly the
+        # planned surplus (the position's withdrawal address is the user).
+        records = ctx.records_of(ctx.user, result.transaction_id)
+        for refund in (plan.refund0, plan.refund1):
+            if refund:
+                assert any(f"amount: {refund}u128" in r for r in records), \
+                    f"no refund record of {refund} in {records}"
         pool_case["position_token_id"] = result.position_token_id
         _refresh_nft(ctx, pool_case, result.transaction_id)
         assert re.search(rf"tick_lower:\s*{plan.tick_lower}i32", pool_case["nft_record"])

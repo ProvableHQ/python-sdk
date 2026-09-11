@@ -18,6 +18,7 @@ from ._core import (
     normalize_mapping_value,
     generate_swap_nonce,
     parse_token_record_info,
+    parse_unsigned_literal,
     pick_covering_record,
     program_imports,
     record_plaintext,
@@ -124,14 +125,23 @@ class AsyncShieldSwap:
         # allow_token relationships are immutable — cache probes for the
         # client's lifetime.
         self._wrapped_cache: dict[str, bool] = {}
+        self._program_handles: dict[str, Any] = {}
 
     def __repr__(self) -> str:
         return f"AsyncShieldSwap(program={self.program!r}, api={self.api.base_url!r})"
 
     # ── Mapping plumbing ─────────────────────────────────────────────────────
 
+    async def _program(self, program_id: str) -> Any:
+        """Bound program handle, fetched once — see ``ShieldSwap._program``."""
+        handle = self._program_handles.get(program_id)
+        if handle is None:
+            handle = await self._aleo.programs.get(program_id)
+            self._program_handles[program_id] = handle
+        return handle
+
     async def _mapping_value(self, mapping: str, key: str) -> Optional[str]:
-        prog = await self._aleo.programs.get(self.program)
+        prog = await self._program(self.program)
         raw = await prog.mapping(mapping).get(key)
         return normalize_mapping_value(raw)
 
@@ -244,7 +254,7 @@ class AsyncShieldSwap:
         network = self._aleo.network_name
         scalar = str(account.view_key.to_scalar())
         signer = str(account.address)
-        prog = await self._aleo.programs.get(self.program)
+        prog = await self._program(self.program)
         mapping = prog.mapping("used_blinded_addresses")
         for counter in range(64):
             bf = derive_blinding_factor(scalar, counter, self.program, network=network)
@@ -287,7 +297,7 @@ class AsyncShieldSwap:
                 continue
             seen.add(pid)
             if pid not in sources:
-                prog = await self._aleo.programs.get(pid)
+                prog = await self._program(pid)
                 sources[pid] = str(prog.source)
             stack.extend(program_imports(sources[pid]))
         register_program_sources(self._aleo, sources)
@@ -298,7 +308,7 @@ class AsyncShieldSwap:
         see the sync client)."""
         tid = str(token_id)
         if tid not in self._wrapped_cache:
-            prog = await self._aleo.programs.get(self.program)
+            prog = await self._program(self.program)
             raw = await prog.mapping("from_wrapper_token_id").get(tid)
             self._wrapped_cache[tid] = normalize_mapping_value(raw) is not None
         return self._wrapped_cache[tid]
@@ -464,6 +474,22 @@ class AsyncShieldSwap:
                 return owned
         return None
 
+    async def get_public_balances(self, programs: list[str],
+                                  address: Optional[str] = None) -> dict[str, int]:
+        """Public balances per program from each program's on-chain
+        ``balances`` mapping — see :meth:`ShieldSwap.get_public_balances`."""
+        if address is None:
+            acct = self._aleo.default_account
+            if acct is None:
+                raise ValueError("No address: pass address= or set aleo.default_account")
+            address = str(acct.address)
+        out: dict[str, int] = {}
+        for program in dict.fromkeys(programs):
+            prog = await self._program(program)
+            raw = normalize_mapping_value(await prog.mapping("balances").get(address))
+            out[program] = parse_unsigned_literal(raw, program, address)
+        return out
+
     async def get_private_balances(self, programs: list[str],
                                    account: Any = None) -> dict[str, int]:
         """Sum of unspent record amounts per wrapper program (spendable
@@ -498,28 +524,34 @@ class AsyncShieldSwap:
         if addr is None:
             raise ValueError("No address: pass address= or set aleo.default_account")
         tokens = await self.api.get_tokens()
-        # Spendable private records live in the record-funding program: the
-        # UNDERLYING program for wrapped assets, the ARC-20 itself for plain.
-        by_program: dict[str, Any] = {}
+        # Public balances live in the AMM token program the DEX dispatches
+        # through; spendable private records in the record-funding program —
+        # the UNDERLYING program for wrapped assets, the ARC-20 itself for plain.
+        public_by_program: dict[str, Any] = {
+            tok.amm_token_program: tok for tok in tokens if tok.amm_token_program}
+        private_by_program: dict[str, Any] = {}
         for tok in tokens:
             prog = tok.underlying_program or tok.amm_token_program
             if prog:
-                by_program[prog] = tok
-        private = await self.get_private_balances(list(by_program), account=acct)
+                private_by_program[prog] = tok
+        own_address = str(acct.address) if acct is not None else None
+        public = await self.get_public_balances(list(public_by_program), address=addr)
+        private = (await self.get_private_balances(list(private_by_program), account=acct)
+                   if addr == own_address else {p: 0 for p in private_by_program})
+
         out: dict[str, dict[str, Any]] = {}
-        for bal in await self.api.get_public_balances(addr):
-            entry = out.setdefault(bal.token_id, {
-                "symbol": bal.symbol, "decimals": bal.decimals,
-                "public": 0, "private": 0})
-            entry["public"] += int(bal.balance)
-        for program, amount in private.items():
-            tok = by_program[program]
-            if amount == 0 and tok.address not in out:
-                continue
-            entry = out.setdefault(tok.address, {
+
+        def entry_for(tok: Any) -> dict[str, Any]:
+            return out.setdefault(tok.address, {
                 "symbol": tok.symbol, "decimals": tok.decimals,
                 "public": 0, "private": 0})
-            entry["private"] += amount
+
+        for program, amount in public.items():
+            if amount:
+                entry_for(public_by_program[program])["public"] += amount
+        for program, amount in private.items():
+            if amount:
+                entry_for(private_by_program[program])["private"] += amount
         for entry in out.values():
             entry["total"] = entry["public"] + entry["private"]
         return out
@@ -604,7 +636,7 @@ class AsyncShieldSwap:
                     "expected_out or a slippage below 100%")
             inputs = [record, wrapper_proofs or default_merkle_proofs(),
                       *inputs[1:]]
-        prog = await self._aleo.programs.get(route.program)
+        prog = await self._program(route.program)
         bound = getattr(prog.functions, route.function)(*inputs)
 
         def build_result(tx_id: str, outputs: list[Any]) -> SwapHandle:
@@ -674,7 +706,7 @@ class AsyncShieldSwap:
             inputs.append(wp)             # output receiver proof
         if w_in and not no_refund:
             inputs.append(wp)             # refund receiver proof
-        prog = await self._aleo.programs.get(route.program)
+        prog = await self._program(route.program)
         bound = getattr(prog.functions, route.function)(*inputs)
         return AsyncDexCall(self._aleo, bound,
                             lambda tx_id, _o: ClaimResult(tx_id, out.amount_out,

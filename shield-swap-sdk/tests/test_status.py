@@ -41,7 +41,7 @@ def test_get_positions_merges_journal_and_scan(dex):
 
 def test_status_reorients_from_disk(dex, monkeypatch):
     dex.api.set_token("jwt")
-    monkeypatch.setattr(dex.api, "access_status",
+    monkeypatch.setattr(dex.api, "referral_status",
                         lambda: type("S", (), {"has_access": True})())
     monkeypatch.setattr(dex, "get_balances", lambda: {"tok": {"total": 5}})
     dex.journal.append(
@@ -60,7 +60,7 @@ def test_status_survives_unauthenticated_api(dex, monkeypatch):
     def boom():
         raise AssertionError("must not be called without a token")
 
-    monkeypatch.setattr(dex.api, "access_status", boom)
+    monkeypatch.setattr(dex.api, "referral_status", boom)
     monkeypatch.setattr(dex, "get_balances", lambda: {})
     st = dex.status()                      # no token set
     assert st.authenticated is False and st.has_access is None

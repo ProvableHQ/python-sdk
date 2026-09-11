@@ -234,9 +234,9 @@ def test_oracle_amount_vectors():
 
 
 def test_oracle_mul_div_vectors():
-    from aleo_shield_swap.position_math import _mul_div
+    from aleo_shield_swap.position_math import mul_div
     for v in _vectors()["mulDiv"]:
-        assert _mul_div(int(v["a"]), int(v["b"]), int(v["d"]), v["roundUp"]) == int(v["result"]), v
+        assert mul_div(int(v["a"]), int(v["b"]), int(v["d"]), v["roundUp"]) == int(v["result"]), v
 
 
 def test_oracle_sqrt_price_at_tick_vectors():

@@ -8,6 +8,7 @@ service.
 """
 from __future__ import annotations
 
+import time
 from typing import Any, Optional
 
 from aleo.codegen.runtime import parse_plaintext
@@ -25,6 +26,7 @@ from ._core import (
     get_deadline,
     normalize_mapping_value,
     parse_token_record_info,
+    parse_unsigned_literal,
     resolve_swap_params,
     select_token_record,
 )
@@ -35,6 +37,7 @@ from .derivations import (
     blinded_identity_at,
     derive_pool_key as _derive_pool_key,
     derive_tick_key as _derive_tick_key,
+    find_unused_counter,
     next_blinded_identity,
 )
 from .errors import (
@@ -116,6 +119,7 @@ class ShieldSwap:
         # allow_token relationships are immutable — cache probes for the
         # client's lifetime.
         self._wrapped_cache: dict[str, bool] = {}
+        self._program_handles: dict[str, Any] = {}
 
     def __repr__(self) -> str:
         return f"ShieldSwap(program={self.program!r}, api={self.api.base_url!r})"
@@ -227,8 +231,24 @@ class ShieldSwap:
 
     # ── Mapping plumbing ─────────────────────────────────────────────────────
 
+    def _program(self, program_id: str) -> Any:
+        """The facade's bound program handle, fetched ONCE per program.
+
+        ``aleo.programs.get`` downloads and re-parses the deployed source on
+        every call (1.4 MB for the core), and a client issues a mapping read
+        per position, slot, and boundary tick — an owned-position scan of a
+        few dozen positions was hundreds of full-source fetches.  A deployed
+        program's interface is immutable for its edition, so the handle is
+        cached for the client's lifetime.
+        """
+        handle = self._program_handles.get(program_id)
+        if handle is None:
+            handle = self._aleo.programs.get(program_id)
+            self._program_handles[program_id] = handle
+        return handle
+
     def _mapping_value(self, mapping: str, key: str) -> Optional[str]:
-        raw = self._aleo.programs.get(self.program).mapping(mapping).get(key)
+        raw = self._program(self.program).mapping(mapping).get(key)
         return normalize_mapping_value(raw)
 
     # ── Chain reads ──────────────────────────────────────────────────────────
@@ -361,7 +381,7 @@ class ShieldSwap:
         has_access: Optional[bool] = None
         if authenticated:
             try:
-                has_access = bool(self.api.access_status().has_access)
+                has_access = bool(self.api.referral_status().has_access)
             except ShieldSwapError:
                 has_access = None
         address = (self.profile.address if self.profile
@@ -370,13 +390,17 @@ class ShieldSwap:
             balances = self.get_balances()
         except Exception:
             # Private scan unavailable (e.g. credentials stage not run yet) —
-            # degrade to public-only rather than reporting nothing.
+            # degrade to public-only (chain mapping reads) rather than
+            # reporting nothing.
             try:
-                balances = {b.token_id: {"symbol": b.symbol,
-                                         "decimals": b.decimals,
-                                         "public": int(b.balance), "private": 0,
-                                         "total": int(b.balance)}
-                            for b in self.api.get_public_balances(address)}
+                tokens = {t.amm_token_program: t for t in self.api.get_tokens()
+                          if t.amm_token_program}
+                public = self.get_public_balances(list(tokens), address=address)
+                balances = {tokens[p].address: {"symbol": tokens[p].symbol,
+                                                "decimals": tokens[p].decimals,
+                                                "public": amt, "private": 0,
+                                                "total": amt}
+                            for p, amt in public.items() if amt}
             except Exception:
                 balances = {}
         pending = self.journal.pending_claims() if self.journal else []
@@ -579,6 +603,37 @@ class ShieldSwap:
 
     # ── Balances ─────────────────────────────────────────────────────────────
 
+    def get_public_balances(self, programs: list[str],
+                            address: Optional[str] = None) -> dict[str, int]:
+        """Public balances per token program, read from each program's
+        on-chain ``balances`` mapping (keyed by plain address — one mapping
+        read per program, any address).  The public counterpart to
+        :meth:`get_private_balances`.  Pass the registry's
+        ``amm_token_program`` values; an absent entry reads as ``0``.
+
+        Args:
+            programs: Token programs to read; duplicates are read once.
+            address: Whose balances; defaults to the bound account's.
+
+        Returns:
+            Raw base-unit balances keyed by program.
+
+        Raises:
+            ValueError: No address available, or a value that is not an
+                unsigned-integer literal (the mapping is not ARC-20 shaped).
+        """
+        if address is None:
+            acct = self._aleo.default_account
+            if acct is None:
+                raise ValueError("No address: pass address= or set aleo.default_account")
+            address = str(acct.address)
+        out: dict[str, int] = {}
+        for program in dict.fromkeys(programs):
+            raw = normalize_mapping_value(
+                self._program(program).mapping("balances").get(address))
+            out[program] = parse_unsigned_literal(raw, program, address)
+        return out
+
     def get_private_balances(self, programs: list[str],
                              account: Any = None) -> dict[str, int]:
         """Sum of unspent record amounts per wrapper program (spendable
@@ -612,33 +667,36 @@ class ShieldSwap:
             raise ValueError("No address: pass address= or set aleo.default_account")
 
         tokens = self.api.get_tokens()
-        # Spendable private records live in the record-funding program: the
-        # UNDERLYING program for wrapped assets, the ARC-20 itself for plain.
-        by_program: dict[str, Any] = {}
+        # Public balances live in the AMM token program the DEX dispatches
+        # through (``transfer_from_public``); spendable private records in the
+        # record-funding program — the UNDERLYING program for wrapped assets,
+        # the ARC-20 itself for plain.
+        public_by_program: dict[str, Any] = {
+            tok.amm_token_program: tok for tok in tokens if tok.amm_token_program}
+        private_by_program: dict[str, Any] = {}
         for tok in tokens:
             prog = tok.underlying_program or tok.amm_token_program
             if prog:
-                by_program[prog] = tok
+                private_by_program[prog] = tok
         own_address = str(acct.address) if acct is not None else None
-        private = (self.get_private_balances(list(by_program), account=acct)
-                   if addr == own_address else {p: 0 for p in by_program})
+        public = self.get_public_balances(list(public_by_program), address=addr)
+        private = (self.get_private_balances(list(private_by_program), account=acct)
+                   if addr == own_address else {p: 0 for p in private_by_program})
 
         out: dict[str, dict[str, Any]] = {}
-        for bal in self.api.get_public_balances(addr):
-            entry = out.setdefault(bal.token_id, {
-                "symbol": bal.symbol, "decimals": bal.decimals,
-                "public": 0, "private": 0,
-            })
-            entry["public"] += int(bal.balance)
-        for program, amount in private.items():
-            tok = by_program[program]
-            if amount == 0 and tok.address not in out:
-                continue
-            entry = out.setdefault(tok.address, {
+
+        def entry_for(tok: Any) -> dict[str, Any]:
+            return out.setdefault(tok.address, {
                 "symbol": tok.symbol, "decimals": tok.decimals,
                 "public": 0, "private": 0,
             })
-            entry["private"] += amount
+
+        for program, amount in public.items():
+            if amount:
+                entry_for(public_by_program[program])["public"] += amount
+        for program, amount in private.items():
+            if amount:
+                entry_for(private_by_program[program])["private"] += amount
         for entry in out.values():
             entry["total"] = entry["public"] + entry["private"]
         return out
@@ -756,9 +814,8 @@ class ShieldSwap:
         # serialized by the journal's file lock, so it cannot collide.
         counter: Optional[int] = None
         if identity is None and track and self.journal is not None:
-            reserved = int(self.journal.reserve_counters(1)[0])
-            counter = reserved
-            identity = blinded_identity_at(self._aleo, acct, self.program, reserved)
+            identity = self._reserve_identities(acct, 1)[0]
+            counter = identity.counter
         elif identity is None:
             identity = next_blinded_identity(self._aleo, acct, self.program)
 
@@ -808,7 +865,7 @@ class ShieldSwap:
                     "expected_out or a slippage below 100%")
             inputs = [record, wrapper_proofs or default_merkle_proofs(),
                       *inputs[1:]]
-        bound = getattr(self._aleo.programs.get(route.program).functions,
+        bound = getattr(self._program(route.program).functions,
                         route.function)(*inputs)
 
         def build_result(tx_id: str, outputs: list[Any]) -> SwapHandle:
@@ -917,7 +974,7 @@ class ShieldSwap:
             inputs.append(wp)
         if w_in and not no_refund:
             inputs.append(wp)
-        bound = getattr(self._aleo.programs.get(route.program).functions,
+        bound = getattr(self._program(route.program).functions,
                         route.function)(*inputs)
 
         def build_result(tx_id: str, outputs: list[Any]) -> ClaimResult:
@@ -930,6 +987,44 @@ class ShieldSwap:
 
         return DexCall(self._aleo, bound, build_result)
 
+    def _blinded_address_used(self, blinded_address: str) -> bool:
+        """Chain probe: has this blinded address already anchored a swap?"""
+        return self._mapping_value("used_blinded_addresses", blinded_address) is not None
+
+    def _reserve_identities(self, acct: Any, n: int) -> list[BlindedIdentity]:
+        """*n* journal-reserved blinded identities that are also UNUSED on chain.
+
+        The journal serializes reservation (no two concurrent swaps derive the
+        same counter), but it only knows what THIS journal issued.  A fresh
+        journal for an account with swap history would hand out counters the
+        chain already consumed — and the finalize rejects a reused blinded
+        address (seen live: two batch swaps on counters 0 and 1, both
+        rejected).  So the cursor is seeded past the used run on first use,
+        and every reserved identity is verified against
+        ``used_blinded_addresses`` before a proof is spent on it; a used one
+        is burned in the journal and the next counter taken.
+        """
+        if self.journal is None:
+            raise ValueError("counter reservation needs a journal — construct "
+                             "with ShieldSwap.from_profile().")
+        journal = self.journal
+        if journal.counter_cursor() == 0:
+            first_free = find_unused_counter(
+                lambda c: self._blinded_address_used(
+                    blinded_identity_at(self._aleo, acct, self.program, c).blinded_address))
+            if first_free > 0:
+                journal.skip_counters_through(first_free - 1)
+        out: list[BlindedIdentity] = []
+        while len(out) < n:
+            counter = int(journal.reserve_counters(1)[0])
+            ident = blinded_identity_at(self._aleo, acct, self.program, counter)
+            if self._blinded_address_used(ident.blinded_address):
+                journal.record_swap_failed(
+                    counter, "blinded address already used on chain — counter skipped")
+                continue
+            out.append(ident)
+        return out
+
     def _is_wrapped(self, token_id: str) -> bool:
         """True when the AMM registers *token_id* as a wrapper.
 
@@ -940,7 +1035,7 @@ class ShieldSwap:
         """
         tid = str(token_id)
         if tid not in self._wrapped_cache:
-            raw = self._aleo.programs.get(self.program) \
+            raw = self._program(self.program) \
                       .mapping("from_wrapper_token_id").get(tid)
             self._wrapped_cache[tid] = normalize_mapping_value(raw) is not None
         return self._wrapped_cache[tid]
@@ -989,13 +1084,19 @@ class ShieldSwap:
         return None
 
     def _quote_expected_out(self, *, token_in_id: str, token_out_id: str,
-                            amount_in: int) -> Optional[int]:
-        """Base-unit expected output for a trade, via the route quote.
+                            amount_in: int, pool_key: str) -> Optional[int]:
+        """Base-unit expected output for a trade in ONE pool, via the route quote.
 
         The route endpoint returns canonical decimal amounts, the contract
         takes base units — this converts in both directions using the
         token registry's decimals.  Returns None when the pool genuinely has no
         quotable route, or when either token is missing from the registry.
+
+        The quote is pinned to *pool_key*.  Unpinned, ``/route`` answers with
+        the router's best path for the pair — possibly two hops through a
+        deeper pool — and a slippage floor derived from that is one the pool
+        actually traded cannot pay: the swap proves, broadcasts, and is
+        rejected at finalize with the fee spent.
 
         Raises:
             NotAuthenticatedError: If no DEX session is established.
@@ -1014,7 +1115,8 @@ class ShieldSwap:
             canonical = Decimal(amount_in) / (10 ** dec_in)
             route = self.api.get_route(
                 token_in=token_in_id, token_out=token_out_id,
-                amount_in=f"{canonical:f}")   # fixed-point, never "1E-8"
+                amount_in=f"{canonical:f}",   # fixed-point, never "1E-8"
+                pool_key=pool_key)
         except NotAuthenticatedError:
             raise
         except ShieldSwapError:
@@ -1062,7 +1164,7 @@ class ShieldSwap:
         if expected_out is None:
             expected_out = self._quote_expected_out(
                 token_in_id=token_in_id, token_out_id=token_out_id,
-                amount_in=amount_in)
+                amount_in=amount_in, pool_key=pool_key)
         if expected_out is None and slippage_bps < 10_000:
             # Falling back to the spot estimate would set amount_out_min above
             # what the pool can actually pay (spot ignores the fee), so every
@@ -1075,21 +1177,37 @@ class ShieldSwap:
                 "pass expected_out, or set slippage_bps=10000 to accept any "
                 "output."
             )
-        counters = self.journal.reserve_counters(count)
+        identities = self._reserve_identities(acct, count)
         program = self._token_program(token_in_id)
         used_records: set[str] = set()
 
         def _fresh_record() -> Optional[str]:
-            """An unspent covering record not already used by this batch."""
-            records = self._aleo.record_provider.find(acct, program=program,
-                                                      unspent=True)
+            """An unspent covering record not already used by this batch.
+
+            The scanner is a remote service; one reset connection must not
+            abort a batch whose earlier swaps are already broadcast, so a
+            transient failure is retried a few times before it propagates.
+            """
+            last: Optional[Exception] = None
+            for attempt in range(3):
+                try:
+                    records = self._aleo.record_provider.find(
+                        acct, program=program, unspent=True)
+                    break
+                except Exception as exc:          # noqa: BLE001 - remote scanner
+                    last = exc
+                    time.sleep(3.0 * (attempt + 1))
+            else:
+                assert last is not None
+                raise last
             return pick_covering_record(records, min_amount=amount_in,
                                         token_id=token_in_id,
                                         exclude=used_records)
 
         handles: list[SwapHandle] = []
         failures: list[dict] = []
-        for counter in counters:
+        for ident in identities:
+            counter = ident.counter
             # Each in-flight swap must spend a DISTINCT record — the scanner
             # still shows a record unspent until its swap confirms, so reuse
             # would double-spend and the network would reject the copy.
@@ -1115,7 +1233,6 @@ class ShieldSwap:
                 failures.append({"counter": counter, "error": msg})
                 continue
             used_records.add(record)
-            ident = blinded_identity_at(self._aleo, acct, self.program, counter)
             try:
                 handle = self.swap(pool_key=pool_key, token_in_id=token_in_id,
                                    amount_in=amount_in, slippage_bps=slippage_bps,
@@ -1231,7 +1348,7 @@ class ShieldSwap:
             f"{spacing}u32",
             f"{initial_tick}i32",
         ]
-        bound = self._aleo.programs.get(self.program).functions.create_pool(*inputs)
+        bound = self._program(self.program).functions.create_pool(*inputs)
 
         def build_result(tx_id: str, outputs: list[Any]) -> TxResult:
             """Pull the new pool's key out of the transition's public outputs.
@@ -1451,7 +1568,7 @@ class ShieldSwap:
         proofs = default_merkle_proofs()
         inputs = [position, field_nonce, *funding, *receivers,
                   request, assets, proofs, proofs]
-        bound = getattr(self._aleo.programs.get(route.program).functions,
+        bound = getattr(self._program(route.program).functions,
                         route.function)(*inputs)
         final_plan = plan
         base_build = self._position_result(MintResult)
@@ -1565,7 +1682,7 @@ class ShieldSwap:
         rec1 = [record1, wp] if w1 else [record1]
         inputs = [field_nonce, *rec0, *rec1, to, payout, request,
                   pool.token0, pool.token1, proofs, proofs, proofs]
-        bound = getattr(self._aleo.programs.get(route.program).functions,
+        bound = getattr(self._program(route.program).functions,
                         route.function)(*inputs)
 
         base_build = self._position_result(MintResult)
@@ -1645,7 +1762,7 @@ class ShieldSwap:
             pool.token0, pool.token1,
             f"{lo_hint}i32", f"{hi_hint}i32",
         ]
-        bound = getattr(self._aleo.programs.get(route.program).functions,
+        bound = getattr(self._program(route.program).functions,
                         route.function)(*inputs)
         return DexCall(self._aleo, bound, self._position_result(TxResult))
 
@@ -1666,7 +1783,7 @@ class ShieldSwap:
         self._ensure([], imports)
         inputs = [position, f"{liquidity_to_remove}u128",
                   f"{amount0_min}u128", f"{amount1_min}u128"]
-        bound = self._aleo.programs.get(self.program).functions.decrease_liquidity(*inputs)
+        bound = self._program(self.program).functions.decrease_liquidity(*inputs)
         return DexCall(self._aleo, bound, self._position_result(TxResult))
 
     def collect(
@@ -1713,7 +1830,7 @@ class ShieldSwap:
             inputs.append(wp)
         if w1:
             inputs.append(wp)
-        bound = getattr(self._aleo.programs.get(route.program).functions,
+        bound = getattr(self._program(route.program).functions,
                         route.function)(*inputs)
         # collect's first output is the re-issued PositionNFT record, not a
         # public field — there is no positional id to read back.
@@ -1732,7 +1849,7 @@ class ShieldSwap:
         position = position_record or self._select_position_record(pool_key, acct)
         decoded = parse_plaintext(position)
         pid = str(decoded.get("token_id")) if isinstance(decoded, dict) else None
-        bound = self._aleo.programs.get(self.program).functions.burn(position)
+        bound = self._program(self.program).functions.burn(position)
 
         base_build = self._position_result(TxResult)
 

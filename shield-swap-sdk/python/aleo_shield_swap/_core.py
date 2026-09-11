@@ -133,6 +133,26 @@ def normalize_mapping_value(raw: Any) -> Optional[str]:
     return None if text in ("", "null") else text
 
 
+_UNSIGNED_LITERAL = re.compile(r"^(\d+)u(?:8|16|32|64|128)$")
+
+
+def parse_unsigned_literal(raw: Optional[str], program: str, key: str) -> int:
+    """An ARC-20 ``balances`` entry (``"5u128"``) as an int; ``None`` reads as 0.
+
+    Raises:
+        ValueError: If *raw* is not an unsigned-integer literal — the mapping
+            is not ARC-20 shaped, which is a caller error worth surfacing
+            rather than a zero balance.
+    """
+    if raw is None:
+        return 0
+    match = _UNSIGNED_LITERAL.match(raw.strip())
+    if not match:
+        raise ValueError(f"{program} balances[{key}] is not an unsigned "
+                         f"integer literal: {raw!r}")
+    return int(match.group(1))
+
+
 def pick_covering_record(records: Any, *, min_amount: int,
                          token_id: Optional[str],
                          exclude: Optional[set[str]] = None) -> Optional[str]:

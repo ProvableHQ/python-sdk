@@ -157,27 +157,86 @@ def next_blinded_identity(
     *,
     start_counter: int = 0,
     max_scan: int = 64,
+    gallop: bool = True,
 ) -> BlindedIdentity:
-    """First unused single-use identity for *account*.
+    """An unused single-use identity for *account*.
 
     Derives at ``start_counter, +1, …`` and probes the program's
-    ``used_blinded_addresses`` mapping until one is free.  ``max_scan`` fails
-    fast when something is systematically wrong (e.g. wrong program).
+    ``used_blinded_addresses`` mapping until one is free.  When the whole
+    linear window is used — an account that has swapped more than *max_scan*
+    times without a journal — *gallop* extends the search in O(log n) probes:
+    double the stride past the window until a free counter appears, then
+    bisect back to the lowest free one in that span.  Any free counter is a
+    valid identity (a gap left by a failed swap is fine), so the search only
+    needs SOME unused address, not the exact end of the used run.
+
+    With ``gallop=False`` the linear window is the whole search and
+    exhausting it raises — the fail-fast for a systematically wrong program.
     """
     network = aleo.network_name
     scalar = str(account.view_key.to_scalar())
     signer = str(account.address)
     mapping = aleo.programs.get(program).mapping("used_blinded_addresses")
+    cache: dict[int, BlindedIdentity] = {}
+
+    def identity(counter: int) -> BlindedIdentity:
+        if counter not in cache:
+            bf = derive_blinding_factor(scalar, counter, program, network=network)
+            cache[counter] = BlindedIdentity(
+                counter, bf, derive_blinded_address(bf, signer, program, network=network))
+        return cache[counter]
+
+    def is_used(counter: int) -> bool:
+        return mapping.get(identity(counter).blinded_address) not in (None, "", "null", "false")
+
+    try:
+        counter = find_unused_counter(is_used, start_counter=start_counter,
+                                      max_scan=max_scan, gallop=gallop)
+    except LookupError as exc:
+        raise ValueError(f"{exc} for {program} — wrong program or scan range?") from None
+    return identity(counter)
+
+
+def find_unused_counter(is_used: Any, *, start_counter: int = 0,
+                        max_scan: int = 64, gallop: bool = True) -> int:
+    """The lowest-effort unused counter given an ``is_used(counter)`` probe.
+
+    Linear over ``[start_counter, start_counter + max_scan)`` first; when that
+    whole window is used and *gallop* is on, doubles the stride past it until
+    a free counter appears, then bisects back to the lowest free counter in
+    that span — O(log n) probes for an account with a long swap history.  Any
+    free counter is acceptable (a gap left by a failed swap included), so the
+    result is SOME unused counter, not necessarily the end of the used run.
+
+    Raises:
+        LookupError: If the window is exhausted with *gallop* off, or the
+            gallop exceeds 2^24 counters (a systematically wrong probe).
+    """
     for counter in range(start_counter, start_counter + max_scan):
-        bf = derive_blinding_factor(scalar, counter, program, network=network)
-        ba = derive_blinded_address(bf, signer, program, network=network)
-        used = mapping.get(ba)
-        if used in (None, "", "null", "false"):
-            return BlindedIdentity(counter, bf, ba)
-    raise ValueError(
-        f"No unused blinded address in counters [{start_counter}, "
-        f"{start_counter + max_scan}) for {program} — wrong program or scan range?"
-    )
+        if not is_used(counter):
+            return counter
+    if not gallop:
+        raise LookupError(
+            f"No unused blinded address in counters [{start_counter}, "
+            f"{start_counter + max_scan})")
+    lo = start_counter + max_scan - 1              # known used
+    stride = max(max_scan, 1)
+    while True:
+        hi = lo + stride
+        if hi - start_counter > 1 << 24:
+            raise LookupError(
+                f"No unused blinded address in counters [{start_counter}, {hi})")
+        if not is_used(hi):
+            break
+        lo, stride = hi, stride * 2
+    # Bisect (lo used, hi free) down to the lowest free counter in the span.
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if is_used(mid):
+            lo = mid
+        else:
+            hi = mid
+    return hi
 
 
 def blinded_identity_at(

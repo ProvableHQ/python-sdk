@@ -116,6 +116,15 @@ def _coerce(hint: Any, value: Any) -> Any:
     return value
 
 
+def _session_binding(session: models.SessionPayload) -> dict[str, str]:
+    """Headers that bind a session-ending request to one session — the API
+    refuses ``/auth/logout`` without them whenever a refresh cookie rides."""
+    headers = {"x-shield-wallet-address": str(session.address)}
+    if session.session_id:
+        headers["x-shield-session-id"] = str(session.session_id)
+    return headers
+
+
 def _build(cls: type[T], d: Any) -> T:
     """Build a generated model from a response dict, dropping unknown keys.
 
@@ -216,12 +225,24 @@ class ApiClient:
         _check(resp)
         return resp.json()
 
-    def _post(self, path: str, body: dict[str, Any]) -> Any:
+    def _post(self, path: str, body: dict[str, Any],
+              headers: dict[str, str] | None = None) -> Any:
         resp = self._session.post(f"{self.base_url}{path}", json=body,
-                                  headers=self._headers(), timeout=_TIMEOUT)
+                                  headers={**self._headers(), **(headers or {})},
+                                  timeout=_TIMEOUT)
         if self._expired_session(resp):
             resp = self._session.post(f"{self.base_url}{path}", json=body,
-                                      headers=self._headers(), timeout=_TIMEOUT)
+                                      headers={**self._headers(), **(headers or {})},
+                                      timeout=_TIMEOUT)
+        _check(resp)
+        return resp.json()
+
+    def _put(self, path: str, body: dict[str, Any]) -> Any:
+        resp = self._session.put(f"{self.base_url}{path}", json=body,
+                                 headers=self._headers(), timeout=_TIMEOUT)
+        if self._expired_session(resp):
+            resp = self._session.put(f"{self.base_url}{path}", json=body,
+                                     headers=self._headers(), timeout=_TIMEOUT)
         _check(resp)
         return resp.json()
 
@@ -276,21 +297,82 @@ class ApiClient:
     # Registration/onboarding endpoints change over time — regen the spec
     # (codegen/regen-openapi.sh) before touching these.
 
-    def access_status(self) -> models.AccessStatusResponse:
-        """Whether this authenticated account may use the gated endpoints.
+    # ── Session management (cookie sessions from authenticate()) ───────────
 
-        Always ``has_access: true`` for an authenticated account — access is
-        granted by authentication alone, no code required.  Raises
-        :class:`NotAuthenticatedError` when the session is missing or
-        expired, which is what makes this a useful liveness probe.
-        """
-        return _build(models.AccessStatusResponse,
-                      self._get("/access/status")["data"])
+    def _drop_session(self) -> None:
+        """Forget the cookie session locally after a logout/revoke: the CSRF
+        token and the httpOnly cookies.  A bearer token in reserve stays."""
+        self._csrf = None
+        cookies = getattr(self._session, "cookies", None)
+        if cookies is not None:
+            cookies.clear()
+
+    def get_session(self) -> models.SessionPayload:
+        """The current cookie session: address, expiry, session id, and its
+        CSRF token.  401 (:class:`NotAuthenticatedError`) once it has expired."""
+        return _build(models.SessionPayload, self._get("/auth/session")["data"])
+
+    def refresh_session(self) -> models.SessionPayload:
+        """Extend the current cookie session and adopt its (possibly rotated)
+        CSRF token.  Sessions are short-lived; call this from long-running
+        processes, or mint an ``ss_`` token instead (:meth:`create_api_token`)."""
+        data = self._post("/auth/refresh", {})["data"]
+        session = _build(models.SessionPayload, data)
+        if session.csrf_token:
+            self._csrf = str(session.csrf_token)
+        return session
+
+    def list_sessions(self) -> list[models.ActiveSessionPayload]:
+        """Every live cookie session for this account (``current`` marks this
+        one), with start/refresh/expiry times and user agent."""
+        return [_build(models.ActiveSessionPayload, s)
+                for s in self._get("/auth/sessions")["data"]]
+
+    def revoke_session(self, session_id: str) -> models.RevokeSessionPayload:
+        """End one session by id (from :meth:`list_sessions`).  Revoking the
+        current one also drops it locally."""
+        out = _build(models.RevokeSessionPayload,
+                     self._post(f"/auth/sessions/{session_id}/revoke", {})["data"])
+        if out.current:
+            self._drop_session()
+        return out
+
+    def logout(self, session: Optional[models.SessionPayload] = None
+               ) -> models.LogoutResponse:
+        """End the current cookie session and forget it locally.  A bearer
+        token loaded via ``token=`` is untouched and keeps working.
+
+        The server requires the request to be *bound* to the session it ends
+        (``X-Shield-Session-Id`` / ``X-Shield-Wallet-Address``), so this
+        reads :meth:`get_session` first unless *session* is passed."""
+        session = session or self.get_session()
+        out = _build(models.LogoutResponse,
+                     self._post("/auth/logout", {}, _session_binding(session))["data"])
+        self._drop_session()
+        return out
+
+    def logout_all(self) -> models.LogoutAllResponse:
+        """End every cookie session for this account (bumps the account's
+        ``session_version``) and forget the local one."""
+        out = _build(models.LogoutAllResponse, self._post("/auth/logout-all", {})["data"])
+        self._drop_session()
+        return out
+
+    def get_ws_ticket(self) -> models.AuthTokenPayload:
+        """A short-lived JWT for the API's websocket feed (the browser client's
+        live updates).  Needs a session."""
+        return _build(models.AuthTokenPayload, self._get("/auth/ws-ticket")["data"])
 
     def referral_status(self) -> models.ReferralStatusResponse:
         """This account's referral picture: ``referred_by`` (the referrer's
         address once a code was redeemed, else None), ``my_code`` (the code
-        this account shares), and ``has_access``.  Network read."""
+        this account shares), and ``has_access``.  Network read.
+
+        ``has_access`` is always true for an authenticated account — access
+        is granted by authentication alone, no code required — and the call
+        raises :class:`NotAuthenticatedError` when the session is missing or
+        expired, which makes this the session liveness probe (the dedicated
+        ``/access/status`` route was retired in 2026-09)."""
         return _build(models.ReferralStatusResponse,
                       self._get("/referral/status")["data"])
 
@@ -371,11 +453,38 @@ class ApiClient:
 
     # ── Referral reporting ─────────────────────────────────────────────────
 
-    def my_referral_codes(self) -> models.ReferralMyCodesResponse:
-        """Every referral code this account has been issued, with redemption
-        counts, plus the issuance ``quota``.  Network read."""
-        return _build(models.ReferralMyCodesResponse,
-                      self._get("/referral/my-codes")["data"])
+    def referral_settings(self) -> models.ReferralSettingsResponse:
+        """This account's code issuance settings: ``codes_per_user`` (how many
+        codes it may issue) under the deployment's ``codes_per_user_limit``,
+        and an optional ``max_users`` cap on redemptions.  Needs a session."""
+        return _build(models.ReferralSettingsResponse,
+                      self._get("/referral/settings")["data"])
+
+    def update_referral_settings(self, *, codes_per_user: int,
+                                 max_users: Optional[int] = None
+                                 ) -> models.ReferralSettingsResponse:
+        """Change the issuance settings (bounded by ``codes_per_user_limit``);
+        returns the settings as stored.  403 when the account may not."""
+        body: dict[str, Any] = {"codes_per_user": codes_per_user}
+        if max_users is not None:
+            body["max_users"] = max_users
+        return _build(models.ReferralSettingsResponse,
+                      self._put("/referral/settings", body)["data"])
+
+    def list_referral_codes(self, *, limit: Optional[int] = None,
+                            offset: Optional[int] = None) -> models.ReferralListResponse:
+        """The codes this account has issued, with redemption details, plus
+        the ``total``/``redeemed``/``available``/``redemptions`` tallies.
+        Page with *limit*/*offset*.  Needs a session."""
+        params = {k: v for k, v in (("limit", limit), ("offset", offset)) if v is not None}
+        return _build(models.ReferralListResponse,
+                      self._get("/referral/codes", params or None)["data"])
+
+    def generate_referral_codes(self, count: int = 1) -> list[str]:
+        """Issue *count* new referral codes for this account to hand out.
+        400 once the account's ``codes_per_user`` allowance is used up."""
+        return list(_build(models.ReferralGenerateResponse,
+                           self._post("/referral/generate", {"count": count})["data"]).codes)
 
     def report_referral_activity(self, *, action: str, tx_id: str,
                                  metadata: Any = None
@@ -446,6 +555,41 @@ class ApiClient:
         return _build(models.PoolStats24hDoc,
                       self._get(f"/pools/{pool_key}/stats")["data"])
 
+    def get_pool_stats_batch(self, pool_keys: list[str]
+                             ) -> dict[str, models.PoolStats24hDoc]:
+        """:meth:`get_pool_stats` for many pools in one request, keyed by pool
+        key.  Pools the indexer has no stats for are simply absent.  Public."""
+        if not pool_keys:
+            return {}
+        data = self._get("/pools/stats", {"keys": ",".join(pool_keys)})["data"]
+        return {k: _build(models.PoolStats24hDoc, v) for k, v in data.items()}
+
+    def get_liquidity_distribution(self, pool_key: str) -> list[models.TickLiquidityDoc]:
+        """The pool's depth: ``liquidity_net`` at every initialized tick, in
+        tick order (the chart behind a liquidity-distribution view).  Public;
+        404 (:class:`DexApiError`) for an unknown pool."""
+        return [_build(models.TickLiquidityDoc, t)
+                for t in self._get(f"/pools/{pool_key}/liquidity-distribution")["data"]]
+
+    # ── Compliance (public; check before spending on a write) ──────────────
+
+    def get_compliance(self) -> models.GlobalConfigStatus:
+        """Deployment-wide switches: ``global_paused`` (every write halts)
+        and ``pool_creation_is_open`` (whether :meth:`ShieldSwap.create_pool`
+        is permitted for non-operators)."""
+        return _build(models.GlobalConfigStatus, self._get("/compliance")["data"])
+
+    def get_token_compliance(self, token_id: str) -> models.TokenComplianceStatus:
+        """Whether a token is ``allowed`` on the DEX and whether trading in it
+        is currently ``paused``."""
+        return _build(models.TokenComplianceStatus,
+                      self._get(f"/compliance/tokens/{token_id}")["data"])
+
+    def get_pair_compliance(self, token0: str, token1: str) -> models.PairComplianceStatus:
+        """Whether trading between two tokens is currently ``paused``."""
+        return _build(models.PairComplianceStatus,
+                      self._get(f"/compliance/pairs/{token0}/{token1}")["data"])
+
     def get_pool_trades(self, pool_key: str, *, limit: Optional[int] = None,
                         offset: Optional[int] = None,
                         trade_type: Optional[str] = None) -> list[models.PoolTradeDoc]:
@@ -468,10 +612,6 @@ class ApiClient:
         tick spacing each is bound to, or None when unbound.  Auth-gated."""
         return [_build(models.FeeTierDoc, t) for t in self._get("/fee-tiers")["data"]]
 
-    def get_tick_spacings(self) -> list[models.TickSpacingDoc]:
-        """Registered tick spacings.  Auth-gated."""
-        return [_build(models.TickSpacingDoc, t) for t in self._get("/tick-spacings")["data"]]
-
     def get_protocol_state(self, *, minimum_revision: Optional[int] = None
                            ) -> models.ProtocolStateResponse:
         """The indexer's view of protocol configuration and its own freshness.
@@ -485,15 +625,9 @@ class ApiClient:
         return _build(models.ProtocolStateResponse, self._get("/protocol/state", params))
 
     # ── Account views ──────────────────────────────────────────────────────
-
-    def get_swaps(self, *, pool: Optional[str] = None, limit: Optional[int] = None,
-                  offset: Optional[int] = None) -> list[models.SwapDoc]:
-        """The authenticated account's swaps (the session decides whose — there
-        is no user parameter), newest first, each with its full hop route and
-        claim status.  Filter by *pool*; page with *limit*/*offset*."""
-        params = {k: v for k, v in (("pool", pool), ("limit", limit),
-                                    ("offset", offset)) if v is not None}
-        return [_build(models.SwapDoc, s) for s in self._get("/swaps", params or None)["data"]]
+    # Swap history/detail and per-token position detail are chain reads now
+    # (``ShieldSwap.get_swap_output`` / ``get_swap_execution`` /
+    # ``get_position``) — the API retired those routes in 2026-09.
 
     def get_positions(self, *, limit: Optional[int] = None,
                       offset: Optional[int] = None) -> list[models.PositionDoc]:
@@ -503,11 +637,6 @@ class ApiClient:
         params = {k: v for k, v in (("limit", limit), ("offset", offset)) if v is not None}
         return [_build(models.PositionDoc, p)
                 for p in self._get("/positions", params or None)["data"]]
-
-    def get_position(self, token_id: str) -> models.PositionDoc:
-        """One indexed position by token id — 404 (:class:`DexApiError`) if the
-        indexer has not seen it or it was burned."""
-        return _build(models.PositionDoc, self._get(f"/positions/{token_id}")["data"])
 
     def get_unclaimed(self) -> models.UnclaimedPayloadDoc:
         """Everything the authenticated account can still collect, as the
@@ -553,16 +682,6 @@ class ApiClient:
         return _build(models.RebalanceState,
                       self._get(f"/pools/{pool_key}/rebalance-state", params)["data"])
 
-    def get_swap(self, swap_id: str) -> models.SwapDoc:
-        """The indexer's record of one swap, by its id.
-
-        Note: The API may lag slightly behind chain state, so a recently
-        broadcast swap may not be visible immediately and can be retried if a
-        caller has confirmed a swap on chain — raises :class:`DexApiError` (404)
-        until it is.
-        """
-        return _build(models.SwapDoc, self._get(f"/swaps/{swap_id}")["data"])
-
     def get_ohlcv(self, pool_key: str, *, granularity: str,
                   from_ts: int, to_ts: int) -> list[models.OhlcvDoc]:
         """Candles for one pool over a time window.
@@ -577,17 +696,9 @@ class ApiClient:
                          {"granularity": granularity, "from": from_ts, "to": to_ts})["data"]
         return [_build(models.OhlcvDoc, o) for o in data]
 
-    # ── Balances ───────────────────────────────────────────────────────────
-
-    def get_public_balances(self, user: str) -> list[models.TokenBalanceDoc]:
-        """Public token balances for an address, as the API sees them.
-
-        Public only — tokens held privately in records are invisible here, so this
-        understates a shielded account. Use ``ShieldSwap.get_private_balances``
-        to get private balances.
-        """
-        return [_build(models.TokenBalanceDoc, b)
-                for b in self._get("/balances", {"user": user})["data"]]
+    # Balances are chain reads: ``ShieldSwap.get_public_balances`` (each token
+    # program's ``balances`` mapping) and ``get_private_balances`` (records).
+    # The API's ``/balances`` route was retired in 2026-09.
 
 
 class AsyncApiClient:
@@ -645,12 +756,21 @@ class AsyncApiClient:
         _check(resp)
         return resp.json()
 
-    async def _post(self, path: str, body: dict[str, Any]) -> Any:
+    async def _post(self, path: str, body: dict[str, Any],
+                    headers: dict[str, str] | None = None) -> Any:
         resp = await self._client.post(f"{self.base_url}{path}", json=body,
-                                       headers=self._headers())
+                                       headers={**self._headers(), **(headers or {})})
         if self._expired_session(resp):
             resp = await self._client.post(f"{self.base_url}{path}", json=body,
-                                           headers=self._headers())
+                                           headers={**self._headers(), **(headers or {})})
+        _check(resp)
+        return resp.json()
+
+    async def _put(self, path: str, body: dict[str, Any]) -> Any:
+        resp = await self._client.put(f"{self.base_url}{path}", json=body, headers=self._headers())
+        if self._expired_session(resp):
+            resp = await self._client.put(f"{self.base_url}{path}", json=body,
+                                          headers=self._headers())
         _check(resp)
         return resp.json()
 
@@ -682,10 +802,56 @@ class AsyncApiClient:
 
     # ── Lifecycle (async mirror of ApiClient) ──────────────────────────────
 
-    async def access_status(self) -> models.AccessStatusResponse:
-        """Access flag for the session — see :meth:`ApiClient.access_status`."""
-        return _build(models.AccessStatusResponse,
-                      (await self._get("/access/status"))["data"])
+    # ── Session management (async mirrors) ─────────────────────────────────
+
+    def _drop_session(self) -> None:
+        self._csrf = None
+        cookies = getattr(self._client, "cookies", None)
+        if cookies is not None:
+            cookies.clear()
+
+    async def get_session(self) -> models.SessionPayload:
+        """Current cookie session — see :meth:`ApiClient.get_session`."""
+        return _build(models.SessionPayload, (await self._get("/auth/session"))["data"])
+
+    async def refresh_session(self) -> models.SessionPayload:
+        """Extend the session — see :meth:`ApiClient.refresh_session`."""
+        session = _build(models.SessionPayload, (await self._post("/auth/refresh", {}))["data"])
+        if session.csrf_token:
+            self._csrf = str(session.csrf_token)
+        return session
+
+    async def list_sessions(self) -> list[models.ActiveSessionPayload]:
+        """Live sessions — see :meth:`ApiClient.list_sessions`."""
+        return [_build(models.ActiveSessionPayload, s)
+                for s in (await self._get("/auth/sessions"))["data"]]
+
+    async def revoke_session(self, session_id: str) -> models.RevokeSessionPayload:
+        """End one session — see :meth:`ApiClient.revoke_session`."""
+        out = _build(models.RevokeSessionPayload,
+                     (await self._post(f"/auth/sessions/{session_id}/revoke", {}))["data"])
+        if out.current:
+            self._drop_session()
+        return out
+
+    async def logout(self, session: Optional[models.SessionPayload] = None
+                     ) -> models.LogoutResponse:
+        """End the current session — see :meth:`ApiClient.logout`."""
+        session = session or await self.get_session()
+        data = (await self._post("/auth/logout", {}, _session_binding(session)))["data"]
+        out = _build(models.LogoutResponse, data)
+        self._drop_session()
+        return out
+
+    async def logout_all(self) -> models.LogoutAllResponse:
+        """End every session — see :meth:`ApiClient.logout_all`."""
+        out = _build(models.LogoutAllResponse, (await self._post("/auth/logout-all", {}))["data"])
+        self._drop_session()
+        return out
+
+    async def get_ws_ticket(self) -> models.AuthTokenPayload:
+        """Websocket ticket — see :meth:`ApiClient.get_ws_ticket`."""
+        return _build(models.AuthTokenPayload, (await self._get("/auth/ws-ticket"))["data"])
 
     async def referral_status(self) -> models.ReferralStatusResponse:
         """Referral picture — see :meth:`ApiClient.referral_status`."""
@@ -759,10 +925,6 @@ class AsyncApiClient:
             params["pool_key"] = pool_key
         return _build(models.RouteResultDoc, (await self._get("/route", params))["data"])
 
-    async def get_swap(self, swap_id: str) -> models.SwapDoc:
-        """One swap by id — see :meth:`ApiClient.get_swap`."""
-        return _build(models.SwapDoc, (await self._get(f"/swaps/{swap_id}"))["data"])
-
     async def get_ohlcv(self, pool_key: str, *, granularity: str,
                         from_ts: int, to_ts: int) -> list[models.OhlcvDoc]:
         """Candles for one pool — see :meth:`ApiClient.get_ohlcv`."""
@@ -770,11 +932,6 @@ class AsyncApiClient:
                                 {"granularity": granularity, "from": from_ts,
                                  "to": to_ts}))["data"]
         return [_build(models.OhlcvDoc, o) for o in data]
-
-    async def get_public_balances(self, user: str) -> list[models.TokenBalanceDoc]:
-        """Public balances for *user* — see :meth:`ApiClient.get_public_balances`."""
-        return [_build(models.TokenBalanceDoc, b)
-                for b in (await self._get("/balances", {"user": user}))["data"]]
 
     # ── 2026-09 API surface (async mirrors) ────────────────────────────────
 
@@ -788,10 +945,32 @@ class AsyncApiClient:
         return _build(models.ApiTokenRevokeResponse,
                       (await self._delete(f"/api-tokens/{token_id}"))["data"])
 
-    async def my_referral_codes(self) -> models.ReferralMyCodesResponse:
-        """Issued referral codes — see :meth:`ApiClient.my_referral_codes`."""
-        return _build(models.ReferralMyCodesResponse,
-                      (await self._get("/referral/my-codes"))["data"])
+    async def referral_settings(self) -> models.ReferralSettingsResponse:
+        """Issuance settings — see :meth:`ApiClient.referral_settings`."""
+        return _build(models.ReferralSettingsResponse,
+                      (await self._get("/referral/settings"))["data"])
+
+    async def update_referral_settings(self, *, codes_per_user: int,
+                                       max_users: Optional[int] = None
+                                       ) -> models.ReferralSettingsResponse:
+        """Change issuance settings — see :meth:`ApiClient.update_referral_settings`."""
+        body: dict[str, Any] = {"codes_per_user": codes_per_user}
+        if max_users is not None:
+            body["max_users"] = max_users
+        return _build(models.ReferralSettingsResponse,
+                      (await self._put("/referral/settings", body))["data"])
+
+    async def list_referral_codes(self, *, limit: Optional[int] = None,
+                                  offset: Optional[int] = None) -> models.ReferralListResponse:
+        """Issued codes — see :meth:`ApiClient.list_referral_codes`."""
+        params = {k: v for k, v in (("limit", limit), ("offset", offset)) if v is not None}
+        return _build(models.ReferralListResponse,
+                      (await self._get("/referral/codes", params or None))["data"])
+
+    async def generate_referral_codes(self, count: int = 1) -> list[str]:
+        """Issue new codes — see :meth:`ApiClient.generate_referral_codes`."""
+        data = (await self._post("/referral/generate", {"count": count}))["data"]
+        return list(_build(models.ReferralGenerateResponse, data).codes)
 
     async def report_referral_activity(self, *, action: str, tx_id: str,
                                        metadata: Any = None
@@ -826,6 +1005,33 @@ class AsyncApiClient:
         return _build(models.PoolStats24hDoc,
                       (await self._get(f"/pools/{pool_key}/stats"))["data"])
 
+    async def get_pool_stats_batch(self, pool_keys: list[str]
+                                   ) -> dict[str, models.PoolStats24hDoc]:
+        """Stats for many pools — see :meth:`ApiClient.get_pool_stats_batch`."""
+        if not pool_keys:
+            return {}
+        data = (await self._get("/pools/stats", {"keys": ",".join(pool_keys)}))["data"]
+        return {k: _build(models.PoolStats24hDoc, v) for k, v in data.items()}
+
+    async def get_liquidity_distribution(self, pool_key: str) -> list[models.TickLiquidityDoc]:
+        """Pool depth per tick — see :meth:`ApiClient.get_liquidity_distribution`."""
+        data = (await self._get(f"/pools/{pool_key}/liquidity-distribution"))["data"]
+        return [_build(models.TickLiquidityDoc, t) for t in data]
+
+    async def get_compliance(self) -> models.GlobalConfigStatus:
+        """Deployment switches — see :meth:`ApiClient.get_compliance`."""
+        return _build(models.GlobalConfigStatus, (await self._get("/compliance"))["data"])
+
+    async def get_token_compliance(self, token_id: str) -> models.TokenComplianceStatus:
+        """Token allow/pause state — see :meth:`ApiClient.get_token_compliance`."""
+        return _build(models.TokenComplianceStatus,
+                      (await self._get(f"/compliance/tokens/{token_id}"))["data"])
+
+    async def get_pair_compliance(self, token0: str, token1: str) -> models.PairComplianceStatus:
+        """Pair pause state — see :meth:`ApiClient.get_pair_compliance`."""
+        return _build(models.PairComplianceStatus,
+                      (await self._get(f"/compliance/pairs/{token0}/{token1}"))["data"])
+
     async def get_pool_trades(self, pool_key: str, *, limit: Optional[int] = None,
                               offset: Optional[int] = None,
                               trade_type: Optional[str] = None) -> list[models.PoolTradeDoc]:
@@ -844,24 +1050,11 @@ class AsyncApiClient:
         """Fee tiers — see :meth:`ApiClient.get_fee_tiers`."""
         return [_build(models.FeeTierDoc, t) for t in (await self._get("/fee-tiers"))["data"]]
 
-    async def get_tick_spacings(self) -> list[models.TickSpacingDoc]:
-        """Tick spacings — see :meth:`ApiClient.get_tick_spacings`."""
-        return [_build(models.TickSpacingDoc, t)
-                for t in (await self._get("/tick-spacings"))["data"]]
-
     async def get_protocol_state(self, *, minimum_revision: Optional[int] = None
                                  ) -> models.ProtocolStateResponse:
         """Protocol config + indexer freshness — see :meth:`ApiClient.get_protocol_state`."""
         params = {"minimum_revision": minimum_revision} if minimum_revision is not None else None
         return _build(models.ProtocolStateResponse, await self._get("/protocol/state", params))
-
-    async def get_swaps(self, *, pool: Optional[str] = None, limit: Optional[int] = None,
-                        offset: Optional[int] = None) -> list[models.SwapDoc]:
-        """The session's swaps — see :meth:`ApiClient.get_swaps`."""
-        params = {k: v for k, v in (("pool", pool), ("limit", limit),
-                                    ("offset", offset)) if v is not None}
-        return [_build(models.SwapDoc, s)
-                for s in (await self._get("/swaps", params or None))["data"]]
 
     async def get_positions(self, *, limit: Optional[int] = None,
                             offset: Optional[int] = None) -> list[models.PositionDoc]:
@@ -869,10 +1062,6 @@ class AsyncApiClient:
         params = {k: v for k, v in (("limit", limit), ("offset", offset)) if v is not None}
         return [_build(models.PositionDoc, p)
                 for p in (await self._get("/positions", params or None))["data"]]
-
-    async def get_position(self, token_id: str) -> models.PositionDoc:
-        """One indexed position — see :meth:`ApiClient.get_position`."""
-        return _build(models.PositionDoc, (await self._get(f"/positions/{token_id}"))["data"])
 
     async def get_unclaimed(self) -> models.UnclaimedPayloadDoc:
         """Collectable swaps and owed positions — see :meth:`ApiClient.get_unclaimed`."""

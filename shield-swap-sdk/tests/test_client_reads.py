@@ -135,3 +135,84 @@ def test_get_private_balances(stub_aleo):
     dex = ShieldSwap(stub_aleo)
     out = dex.get_private_balances(["tok.aleo"])
     assert out == {"tok.aleo": 2_000_000_000}
+
+
+def test_program_handle_is_fetched_once_per_client():
+    """Every mapping read used to call ``aleo.programs.get(...)``, which
+    downloads and re-parses the 1.4 MB program source — a 47-position owned
+    scan on testnet issued ~190 such fetches and stalled for hours.  The
+    handle is immutable for a deployment; fetch it once per program."""
+    from .conftest import POOL_TEXT
+    stub = StubAleo(mappings={
+        "pools": {"5field": POOL_TEXT},
+        "pool_creators": {"5field": "aleo1c"},
+    })
+    dex = ShieldSwap(stub)
+    dex.get_pool("5field"); dex.get_pool("5field")
+    dex.get_pool_creator("5field"); dex.is_pool_initialized("5field")
+    assert stub.fetched_programs.count("shield_swap.aleo") == 1
+
+
+# ── Public balances are chain reads (the API's /balances route is retired) ──
+
+class _Tok:
+    def __init__(self, address, symbol, amm, underlying=None, decimals=6):
+        self.address, self.symbol, self.decimals = address, symbol, decimals
+        self.amm_token_program, self.underlying_program = amm, underlying
+
+
+class _RegistryApi:
+    def __init__(self, tokens):
+        self._tokens = tokens
+
+    def get_tokens(self):
+        return self._tokens
+
+
+def test_get_public_balances_reads_each_programs_balances_mapping():
+    aleo = StubAleo(mappings={"balances": {"aleo1x": "5u128"}})
+    dex = ShieldSwap(aleo)
+    out = dex.get_public_balances(["a.aleo", "b.aleo", "a.aleo"], address="aleo1x")
+    assert out == {"a.aleo": 5, "b.aleo": 5}
+    assert aleo.fetched_programs == ["a.aleo", "b.aleo"]   # deduped, handle cached
+
+
+def test_get_public_balances_absent_entry_is_zero_and_defaults_to_the_account():
+    aleo = StubAleo(mappings={"balances": {}})
+    assert ShieldSwap(aleo).get_public_balances(["a.aleo"]) == {"a.aleo": 0}
+    aleo.default_account = None
+    with pytest.raises(ValueError):
+        ShieldSwap(aleo).get_public_balances(["a.aleo"])
+
+
+def test_get_public_balances_rejects_a_non_arc20_value():
+    aleo = StubAleo(mappings={"balances": {"aleo1x": "{ a: 1u8 }"}})
+    with pytest.raises(ValueError, match="unsigned integer literal"):
+        ShieldSwap(aleo).get_public_balances(["odd.aleo"], address="aleo1x")
+
+
+def test_get_balances_joins_chain_public_with_record_private():
+    # Public side: the AMM token program's mapping; private side: records in
+    # the underlying program.  Unheld tokens are omitted.
+    aleo = StubAleo(mappings={"balances": {"aleo1x": "7u128"}}, records=[])
+    dex = ShieldSwap(aleo)
+    dex.api = _RegistryApi([
+        _Tok("1field", "USDCx", "wrapped_usdcx.aleo", "usdcx.aleo"),
+        _Tok("2field", "ETH", "eth.aleo"),
+    ])
+    seen = {}
+    dex.get_private_balances = lambda programs, account=None: (
+        seen.setdefault("programs", list(programs)) and
+        {"usdcx.aleo": 3, "eth.aleo": 0})
+    out = dex.get_balances(address="aleo1x", account=aleo.default_account)
+    # aleo1x is not the bound account, so private is skipped (0) for every token.
+    assert out == {"1field": {"symbol": "USDCx", "decimals": 6, "public": 7,
+                              "private": 0, "total": 7},
+                   "2field": {"symbol": "ETH", "decimals": 6, "public": 7,
+                              "private": 0, "total": 7}}
+    assert "programs" not in seen
+    aleo.default_account.address = "aleo1x"
+    out = dex.get_balances()
+    assert sorted(seen["programs"]) == ["eth.aleo", "usdcx.aleo"]
+    assert out["1field"] == {"symbol": "USDCx", "decimals": 6, "public": 7,
+                             "private": 3, "total": 10}

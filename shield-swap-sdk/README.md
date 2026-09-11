@@ -92,8 +92,9 @@ from the chain or the service.
 | `get_swap_execution(swap_id)` | The fill receipt — executed height and per-hop amounts, gross/protocol/LP fee, post-trade price. Survives the claim; `None` until finalized. |
 | `get_pool_creator(pool_key)` | Who created the pool (`None` for pools that predate creator tracking). |
 | `is_pool_initialized(pool_key)` | Whether the pool exists on chain. |
+| `get_public_balances(programs)` | Each token program's on-chain `balances` mapping entry for an address (raw base units; absent reads as 0). |
 | `get_private_balances(programs)` | Summed unspent record amounts per token program (needs a registered record provider). |
-| `get_balances()` | Public + private balances in one shape. |
+| `get_balances()` | Public + private balances in one shape, joined through the API's token registry. |
 | `derive_pool_key(token0, token1, fee)` / `derive_tick_key(pool_key, tick)` | Mapping keys derived locally — no network. |
 
 **Writes** (each returns a `DexCall`):
@@ -129,8 +130,14 @@ wrapper change record) — single-sided ranges make this deterministic;
 in-range wrapped amounts depend on the live price.
 
 **DEX API** (`dex.api`, standalone as `ApiClient`): `get_pools`,
-`get_tokens`, `get_route`, `get_swap`, `get_ohlcv`, `get_public_balances`.
-Route quoting, OHLCV, and balances are auth-gated — call
+`get_tokens`, `get_route`, `get_ohlcv`, `get_positions`, `get_unclaimed`,
+`get_pool_stats_batch`, `get_liquidity_distribution`, the compliance reads
+(`get_compliance`, `get_token_compliance`, `get_pair_compliance` — check
+before spending on a write), cookie-session management (`get_session`,
+`refresh_session`, `list_sessions`, `revoke_session`, `logout`,
+`logout_all`, `get_ws_ticket`), and referral issuance (`referral_settings`,
+`list_referral_codes`, `generate_referral_codes`).
+Route quoting, OHLCV, and the account views are auth-gated — call
 `api.authenticate(address, sign)` once (challenge/verify by signature, no
 funds required; the session rides as httpOnly cookies + a CSRF header and
 is short-lived — mint a durable `ss_…` token via `create_api_token` for

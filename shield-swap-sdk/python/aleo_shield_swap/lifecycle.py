@@ -16,6 +16,7 @@ from .errors import (
     AirdropPendingError,
     AirdropRateLimitedError,
     CredentialsMissingError,
+    DexApiError,
     NotFundedError,
     NotAuthenticatedError,
 )
@@ -78,7 +79,7 @@ def _auth_done(ctx: _Ctx) -> bool:
     if not authed:
         return False
     try:                                  # a stored-but-expired credential is not auth
-        ctx.dex.api.access_status()
+        ctx.dex.api.referral_status()     # the gated liveness probe (401 → expired)
         return True
     except NotAuthenticatedError:
         return False
@@ -169,10 +170,21 @@ def _creds_run(ctx: _Ctx) -> str:
             details.append("Provable consumer + API key provisioned")
         ctx.profile.save_credentials(dps_api_key=key, dps_consumer_id=cid)
     if not ctx.profile.credentials.get("dex_api_token"):
-        tok = ctx.dex.api.create_api_token(
-            f"shield-swap-profile-{ctx.profile.address[:16]}")
-        ctx.profile.save_credentials(dex_api_token=tok.token)
-        details.append("durable DEX API token minted")
+        try:
+            tok = ctx.dex.api.create_api_token(
+                f"shield-swap-profile-{ctx.profile.address[:16]}")
+        except DexApiError as exc:
+            # The DEX caps active durable tokens per account.  The session
+            # established by the authenticate stage serves this process, so
+            # onboarding proceeds; the next run will try to persist one again.
+            if exc.status == 400 and "token limit" in exc.body:
+                details.append("DEX API token limit reached — using the session "
+                               "for this run; revoke an old token to persist one")
+            else:
+                raise
+        else:
+            ctx.profile.save_credentials(dex_api_token=tok.token)
+            details.append("durable DEX API token minted")
     refresh = getattr(ctx.dex, "_refresh_credentials", None)
     if refresh is not None:
         refresh()                         # live facade picks up the new key

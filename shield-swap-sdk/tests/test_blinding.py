@@ -117,10 +117,46 @@ def test_next_blinded_identity_skips_used():
 
 
 def test_next_blinded_identity_max_scan():
-    # Counters 0 and 1 are both used and max_scan=2 stops the scan there.
+    # Counters 0 and 1 are both used and max_scan=2 stops the scan there —
+    # when galloping past the window is disabled.
     used = {VECTORS[0][2], VECTORS[1][2]}
     with pytest.raises(ValueError, match="No unused blinded address"):
-        next_blinded_identity(_StubAleo(used=used), _StubAccount(), max_scan=2)
+        next_blinded_identity(_StubAleo(used=used), _StubAccount(), max_scan=2,
+                              gallop=False)
+
+
+def _used_through(n):
+    """Blinded addresses of counters 0..n-1 for the vector account."""
+    out = set()
+    for c in range(n):
+        bf = derive_blinding_factor(VIEW_KEY_SCALAR, c)
+        out.add(derive_blinded_address(bf, SIGNER))
+    return out
+
+
+def test_next_blinded_identity_gallops_past_a_long_used_run():
+    """An account that has swapped more times than the linear window (the
+    e2e account is past 64) must still find a free counter — and in O(log n)
+    probes, not one per used counter.  Live failure 2026-09-03:
+    'No unused blinded address in counters [0, 64)'."""
+    used = _used_through(300)
+    stub = _StubAleo(used=used)
+    probes = []
+    inner = stub.programs.get("x").mapping("used_blinded_addresses").get
+    stub.programs.get("x").mapping("used_blinded_addresses").get = \
+        lambda key: probes.append(key) or inner(key)
+    ident = next_blinded_identity(stub, _StubAccount(), max_scan=8)
+    assert ident.counter == 300
+    assert ident.blinded_address not in used
+    assert len(probes) < 8 + 2 * 12          # window + gallop + bisection, not 300
+
+
+def test_next_blinded_identity_gallop_takes_a_gap_not_just_the_end():
+    # Any unused counter is valid: a gap left by a failed swap is fine to reuse.
+    used = _used_through(100) - {derive_blinded_address(
+        derive_blinding_factor(VIEW_KEY_SCALAR, 40), SIGNER)}
+    ident = next_blinded_identity(_StubAleo(used=used), _StubAccount(), max_scan=8)
+    assert ident.blinded_address not in used
 
 
 def test_blinded_identity_at_exact_counter_no_probe():

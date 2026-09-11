@@ -42,6 +42,8 @@ def dex(tmp_path, monkeypatch):
                         lambda self, **kw: 990_000)
     monkeypatch.setattr(ShieldSwap, "_token_program",
                         lambda self, token_id: "tok.aleo")
+    # Nothing used on chain unless a test says otherwise.
+    monkeypatch.setattr(ShieldSwap, "_blinded_address_used", lambda self, ba: False)
     return d
 
 
@@ -125,17 +127,24 @@ def test_quote_expected_out_converts_units_both_ways(tmp_path, monkeypatch):
         type("T", (), {"address": "tout", "decimals": 6})()])
     seen = {}
 
-    def fake_route(*, token_in, token_out, amount_in):
+    def fake_route(*, token_in, token_out, amount_in, pool_key=None):
         seen["amount_in"] = str(amount_in)
+        seen["pool_key"] = pool_key
         return type("R", (), {"estimated_amount_out": "1089.461274"})()
 
     monkeypatch.setattr(dex.api, "get_route", fake_route)
     out = dex._quote_expected_out(token_in_id="tin", token_out_id="tout",
-                                  amount_in=10**19)
+                                  amount_in=10**19, pool_key="5field")
     assert seen["amount_in"] == "10"           # base -> canonical decimal
+    # The quote is PINNED to the pool being traded: /route otherwise answers
+    # with the router's best path (possibly multi-hop through a deeper pool),
+    # and a floor derived from that is one the traded pool cannot pay — the
+    # swap proves, broadcasts, and is rejected at finalize (seen live on
+    # testnet, 2026-09-03: a 2-hop quote 165x the direct pool's output).
+    assert seen["pool_key"] == "5field"
     assert out == 1089461274                   # canonical -> base units
     assert dex._quote_expected_out(token_in_id="unknown", token_out_id="tout",
-                                   amount_in=1) is None
+                                   amount_in=1, pool_key="5field") is None
 
 
 def test_swap_many_partitions_distinct_records(dex, monkeypatch):
@@ -209,7 +218,7 @@ def test_quote_propagates_auth_failure():
     fresh._token_decimals = lambda _tid: 6   # registry known, route not askable
     with pytest.raises(NotAuthenticatedError):
         fresh._quote_expected_out(token_in_id="t0", token_out_id="t1",
-                                  amount_in=10**6)
+                                  amount_in=10**6, pool_key="5field")
 
 
 def test_swap_many_accepts_a_caller_supplied_quote(dex, monkeypatch):
@@ -226,3 +235,52 @@ def test_swap_many_accepts_a_caller_supplied_quote(dex, monkeypatch):
                   count=1, expected_out=990_000)
     assert called["n"] == 0, "should not have quoted"
     assert dex.journal.counter_cursor() == 1
+
+
+def test_swap_many_skips_counters_already_used_on_chain(dex, monkeypatch):
+    """A fresh journal for an account with history reserved counters 0 and 1
+    — both long used on chain — and both swaps were rejected at finalize
+    (live, 2026-09-03).  Reservation must seed the cursor past the used run
+    and verify each identity against the chain before spending a proof."""
+    used = {f"ba{c}" for c in range(5)} | {"ba7"}     # 0..4 used, gap at 5,6, 7 used
+    monkeypatch.setattr(ShieldSwap, "_blinded_address_used",
+                        lambda self, ba: ba in used)
+    fake, calls = _fake_swap_factory()
+    monkeypatch.setattr(ShieldSwap, "swap", fake)
+    report = dex.swap_many(pool_key="1field", token_in_id="t0", amount_in=5, count=3)
+    assert calls == [5, 6, 8]                         # skipped 0..4 and 7
+    assert [h.swap_id for h in report.handles] == ["s5", "s6", "s8"]
+    assert report.failures == []
+    assert dex.journal.counter_cursor() == 9
+    # The skipped-used counter 7 is burned in the journal, never reissued.
+    assert 7 in {e.get("counter") for e in dex.journal.events() if e["type"] == "swap_failed"}
+
+
+def test_reserve_identities_is_shared_by_single_swaps(dex, monkeypatch):
+    used = {"ba0", "ba1"}
+    monkeypatch.setattr(ShieldSwap, "_blinded_address_used",
+                        lambda self, ba: ba in used)
+    idents = dex._reserve_identities(object(), 2)
+    assert [i.counter for i in idents] == [2, 3]
+    assert dex.journal.counter_cursor() == 4
+
+
+def test_swap_many_tolerates_a_transient_scanner_error(dex, monkeypatch):
+    """One reset connection to the record scanner mid-batch must not abort a
+    batch whose earlier swaps are already broadcast (live, 2026-09-03:
+    'Connection aborted' from the scanner between swap 1 and swap 2)."""
+    calls = {"n": 0}
+    real_find = dex._aleo.record_provider.find
+
+    def flaky_find(account, program=None, unspent=True):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise ConnectionError("Connection aborted.")
+        return real_find(account, program=program, unspent=unspent)
+
+    monkeypatch.setattr(dex._aleo.record_provider, "find", flaky_find)
+    monkeypatch.setattr("aleo_shield_swap.client.time.sleep", lambda s: None)
+    fake, calls_made = _fake_swap_factory()
+    monkeypatch.setattr(ShieldSwap, "swap", fake)
+    report = dex.swap_many(pool_key="1field", token_in_id="t0", amount_in=5, count=3)
+    assert calls_made == [0, 1, 2] and report.failures == []
