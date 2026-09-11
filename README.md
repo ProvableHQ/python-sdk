@@ -55,7 +55,7 @@ python -m aleo_shield_swap.mcp      # stdio server with the lifecycle tools
 from aleo import Aleo
 
 # Connect (construction is offline — no I/O until you make a call)
-aleo = Aleo(Aleo.HTTPProvider("https://api.provable.com/v2"))
+aleo = Aleo(Aleo.HTTPProvider("https://edge.provable.com/api"))
 print(aleo.network_name)   # "mainnet"
 print(aleo.network_id)     # 0
 
@@ -79,7 +79,7 @@ The facade follows a clean top-to-bottom narrative: **connect → account → re
 ```python
 from aleo import Aleo
 
-aleo = Aleo(Aleo.HTTPProvider("https://api.provable.com/v2"))
+aleo = Aleo(Aleo.HTTPProvider("https://edge.provable.com/api"))
 
 # Optional: check reachability  # requires a live node
 if aleo.is_connected():
@@ -215,7 +215,7 @@ import asyncio
 from aleo import AsyncAleo
 
 async def main():
-    aleo = AsyncAleo(AsyncAleo.HTTPProvider("https://api.provable.com/v2"))
+    aleo = AsyncAleo(AsyncAleo.HTTPProvider("https://edge.provable.com/api"))
     print(aleo.network_name)   # sync — no I/O
 
     # Account ops are sync (purely local), even on AsyncAleo

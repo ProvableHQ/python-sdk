@@ -28,7 +28,7 @@ Markers / gating
   the default offline jobs don't provide.)
 
 * Env-gated + offline-safe: ``ALEO_E2E_ENDPOINT`` (default the public Provable
-  API origin ``https://api.provable.com``; the SDK adds ``/v2`` for reads),
+  API service root ``https://edge.provable.com/api``; the SDK adds ``/v2`` for reads),
   ``network="testnet"``.  READ-ONLY — needs NO credentials and NO
   funded key.  At import time we probe the endpoint once; if it is unreachable
   (offline CI) the whole module skips cleanly via
@@ -59,7 +59,7 @@ from aleo import (
 pytestmark = pytest.mark.live
 
 _ENDPOINT = os.environ.get(
-    "ALEO_E2E_ENDPOINT", "https://api.provable.com"
+    "ALEO_E2E_ENDPOINT", "https://edge.provable.com/api"
 )
 _NETWORK = "testnet"
 

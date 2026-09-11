@@ -12,7 +12,7 @@ import os
 from pathlib import Path
 from typing import Any, Optional
 
-DEFAULT_ENDPOINT = "https://api.provable.com"
+DEFAULT_ENDPOINT = "https://edge.provable.com/api"
 _PROFILE = "profile.json"
 _CREDENTIALS = "credentials.json"
 

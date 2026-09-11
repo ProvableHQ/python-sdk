@@ -61,15 +61,22 @@ addopts if you invoke pytest from the repo root.
 
 ## Delegated services (DPS + record scanner)
 
-**Auth, proving, and scanning are all Provable *services* on `api.provable.com`,
-hosted at the API ORIGIN — NOT under the read node's `/v2/{network}` base.** The
-read/RPC endpoints live at `https://api.provable.com/v2/{network}/…`; the
-services hang off the bare origin (`https://api.provable.com`) at their own path
-prefixes. Each is confirmed working against live testnet (see
-`tests/e2e/test_testnet_e2e.py`):
+**Proving and scanning are Provable *services* hung off the hosted API's
+SERVICE ROOT — NOT under the read node's `/v2/{network}` base.** Two hosts:
 
-- **JWT auth** — origin, no prefix: `POST {origin}/jwts/{consumerId}`. Derive the
-  origin with `jwt_origin(base_url)` (`scheme://host`, path stripped).
+- **`https://edge.provable.com/api` (the default, `DEFAULT_HOST`)** — open: no
+  API key, consumer id, or JWT for reads, `/prove`, or `/scanner`. Note the
+  `/api` path prefix: reads are `{root}/v2/{network}/…`, services `{root}/prove`,
+  `{root}/scanner`. Derive the root with `service_root(url)` (keeps the prefix;
+  strips a legacy `/v2[/{network}]` suffix) — NOT `jwt_origin`, which drops it.
+- **`https://api.provable.com` (`LEGACY_HOST`)** — credentialed: the same
+  layout at the bare origin, with the prover and scanner behind
+  `api_key` + `consumer_id` JWTs. `requires_credentials(url)` is True only here;
+  everything below about JWTs applies only to this host.
+
+Each is confirmed working against live testnet (see `tests/e2e/`):
+
+- **JWT auth (legacy host only)** — `POST {root}/jwts/{consumerId}`.
 - **Delegated proving** — `{origin}/prove/{network}` prefix:
   - `GET {origin}/prove/{network}/pubkey` — ephemeral X25519 key + key id + a
     `Set-Cookie` **affinity** session. The ephemeral private key lives only on
@@ -81,8 +88,8 @@ prefixes. Each is confirmed working against live testnet (see
   - `POST {origin}/prove/{network}/prove/authorization` (or `/prove/request`) —
     sealed-box `{key_id, ciphertext}`; JWT + the affinity cookie; SDK retries
     500/503.
-- **Record scanner** — `{origin}/scanner/{network}` prefix (env
-  `RECORD_SCANNER_URL=https://api.provable.com/scanner`).
+- **Record scanner** — `{root}/scanner/{network}` prefix (env
+  `RECORD_SCANNER_URL=https://edge.provable.com/api/scanner`).
 
 Documented endpoints (docs describe paths *relative to the service base*; the
 base is the origin + service prefix above):

@@ -7,10 +7,9 @@ it is safe to construct without a live network.
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import urlparse
 
 from ..network_client import AleoNetworkClient
-from .._client_common import DEFAULT_HOST, DEFAULT_NETWORK, is_provable_host
+from .._client_common import DEFAULT_HOST, DEFAULT_NETWORK, is_provable_host, service_root
 
 # AsyncAleoNetworkClient imported lazily to avoid pulling httpx at import time.
 
@@ -33,8 +32,7 @@ def scanner_base(provider: "HTTPProvider") -> str | None:
     """
     if not is_provable_host(provider.url):
         return None
-    parsed = urlparse(provider.url)
-    return f"{parsed.scheme}://{parsed.netloc}/scanner"
+    return f"{service_root(provider.url)}/scanner"
 
 
 class HTTPProvider:
@@ -43,21 +41,24 @@ class HTTPProvider:
     Parameters
     ----------
     url:
-        API origin, e.g. ``"https://api.provable.com"`` (the default).  For the
-        hosted Provable API the SDK adds the service prefixes itself — reads at
-        ``/v2``, delegated proving at ``/prove``, hosted scanner at ``/scanner``,
-        JWT auth at ``/jwts`` — so you never spell them out.  Any other host
-        (devnode, a local or custom node) is used as a literal read base, with no
-        hosted prover/scanner wired up.  A legacy ``".../v2"`` value still works.
+        Hosted API service root, e.g. ``"https://edge.provable.com/api"`` (the
+        default — open, no credentials needed) or the credentialed legacy
+        ``"https://api.provable.com"``.  For the hosted Provable API the SDK
+        adds the service prefixes itself — reads at ``/v2``, delegated proving
+        at ``/prove``, hosted scanner at ``/scanner``, JWT auth at ``/jwts`` —
+        so you never spell them out.  Any other host (devnode, a local or
+        custom node) is used as a literal read base, with no hosted
+        prover/scanner wired up.  A legacy ``".../v2"`` value still works.
     network:
         Network name — ``"mainnet"`` (default) or ``"testnet"``.
     api_key:
-        Provable API key passed through to the underlying
-        :class:`~aleo.network_client.AleoNetworkClient`.  Shared by the
-        delegated prover and the hosted record scanner.
+        Provable API key, needed only on the legacy ``api.provable.com`` host
+        (see :func:`~aleo._client_common.requires_credentials`); passed through
+        to the underlying :class:`~aleo.network_client.AleoNetworkClient` and
+        shared by the delegated prover and the hosted record scanner.
     consumer_id:
-        Provable consumer id, paired with *api_key* to mint/refresh JWTs for
-        the delegated prover and the hosted record scanner.
+        Provable consumer id, paired with *api_key* to mint/refresh JWTs on the
+        legacy host.  Leave both unset on the edge.
     prover_uri:
         Optional override for the DPS prover base (without network suffix).
         Defaults to ``{origin}/prove`` derived from *url*.

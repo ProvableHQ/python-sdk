@@ -77,11 +77,16 @@ class _StubDex:
         return {p: self._balances.get(p, 0) for p in programs}
 
 
+LEGACY_ENDPOINT = "https://api.provable.com"      # the credentialed host
+
+
 @pytest.fixture
 def profile(tmp_path):
     # Real keygen: the authenticate stage parses the key with the native
-    # PrivateKey type, so a fake string won't do.
-    return Profile.load_or_create(tmp_path / "home")
+    # PrivateKey type, so a fake string won't do.  Pinned to the legacy
+    # credentialed endpoint so the Provable-credential paths stay under test;
+    # the open edge default is covered by its own test below.
+    return Profile.load_or_create(tmp_path / "home", endpoint=LEGACY_ENDPOINT)
 
 
 @pytest.fixture
@@ -389,3 +394,28 @@ def test_consumer_provisioning_posts_to_the_api_origin(monkeypatch):
     assert provision_provable_credentials("https://api.provable.com/v2/testnet/", "u") == ("k", "c")
     assert provision_provable_credentials("https://api.provable.com", "u") == ("k", "c")
     assert seen == ["https://api.provable.com/consumers"] * 2
+
+
+def test_open_edge_endpoint_needs_no_provable_credentials(tmp_path, monkeypatch):
+    """The default endpoint (edge.provable.com/api) gates nothing behind
+    api_key/consumer JWTs, so the credentials stage neither reads env
+    credentials nor provisions a consumer — it only mints the durable DEX
+    token — and it counts as done without dps_* entries."""
+    from aleo_shield_swap.lifecycle import provision_provable_credentials  # noqa: F401
+    monkeypatch.delenv("ALEO_E2E_API_KEY", raising=False)
+    monkeypatch.delenv("ALEO_E2E_CONSUMER_ID", raising=False)
+    monkeypatch.setattr("aleo_shield_swap.lifecycle.provision_provable_credentials",
+                        lambda endpoint, username: (_ for _ in ()).throw(
+                            AssertionError("must not provision on the open edge")))
+    edge_profile = Profile.load_or_create(tmp_path / "edge-home")     # default endpoint
+    assert edge_profile.endpoint == "https://edge.provable.com/api"
+    api = _StubApi()
+    api._token = "jwt"
+    dex = _StubDex(api, {"waleo.aleo": 7}, funded_from_start=True)
+    report = run_onboard(dex, edge_profile)
+    creds = next(o for o in report.outcomes if o.name == "credentials")
+    assert creds.action == "ran" and "open edge" in creds.detail and "minted" in creds.detail
+    assert "dps_api_key" not in edge_profile.credentials
+    assert edge_profile.credentials["dex_api_token"].startswith("ss_minted_")
+    again = run_onboard(dex, edge_profile)
+    assert next(o for o in again.outcomes if o.name == "credentials").action == "skipped"

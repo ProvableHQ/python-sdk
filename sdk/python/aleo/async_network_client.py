@@ -26,6 +26,7 @@ from ._client_common import (
     is_provable_host,
     jwt_expired,
     jwt_origin,
+    service_root,
     make_default_headers,
     method_headers,
     strip_quotes,
@@ -131,16 +132,16 @@ class AsyncAleoNetworkClient:
         and ``/consumers`` always live at the bare origin — handled in
         :meth:`_refresh_jwt`, not here.) Mirrors ``AleoNetworkClient._resolve_urls``.
         """
-        origin = jwt_origin(host)
         network = self._network
         if is_provable_host(host):
+            root = service_root(host)       # keeps the edge's /api prefix
             return (
-                f"{origin}/v2/{network}",
-                origin,
-                f"{origin}/prove/{network}",
-                f"{origin}/scanner/{network}",
+                f"{root}/v2/{network}",
+                root,
+                f"{root}/prove/{network}",
+                f"{root}/scanner/{network}",
             )
-        return (f"{host.rstrip('/')}/{network}", origin, None, None)
+        return (f"{host.rstrip('/')}/{network}", jwt_origin(host), None, None)
 
     # ── Network module selection ──────────────────────────────────────────
 

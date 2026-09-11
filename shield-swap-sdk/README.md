@@ -10,7 +10,7 @@ else.
 from aleo import Aleo
 from aleo_shield_swap import ShieldSwap
 
-aleo = Aleo(Aleo.HTTPProvider("https://api.provable.com"))
+aleo = Aleo(Aleo.HTTPProvider("https://edge.provable.com/api"))
 aleo.default_account = account
 dex = ShieldSwap(aleo)
 
