@@ -1121,7 +1121,7 @@
      "ty": {
       "Primitive": "Address"
      },
-     "mode": "Public"
+     "mode": "Private"
     },
     {
      "name": "withdrawal",
@@ -1188,7 +1188,7 @@
      "ty": {
       "Primitive": "Address"
      },
-     "mode": "Public"
+     "mode": "Private"
     },
     {
      "name": "swap_id",
@@ -1256,7 +1256,7 @@
      "ty": {
       "Primitive": "Address"
      },
-     "mode": "Public"
+     "mode": "Private"
     },
     {
      "name": "swap_id",
@@ -1310,7 +1310,7 @@
      "ty": {
       "Primitive": "Address"
      },
-     "mode": "Public"
+     "mode": "Private"
     },
     {
      "name": "token_id",

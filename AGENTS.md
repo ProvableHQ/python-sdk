@@ -1,6 +1,6 @@
 # Aleo Python SDK — Agent Guide
 
-Python SDK for Aleo: PyO3 bindings over **snarkvm v4.8.1** plus pure-Python
+Python SDK for Aleo: PyO3 bindings over **snarkvm v4.9.1** plus pure-Python
 client / record-scanner / delegated-proving layers and a Web3.py-style facade.
 Two shipped packages:
 

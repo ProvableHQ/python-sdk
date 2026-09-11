@@ -7,7 +7,7 @@ The SDK ships two layers:
 - A **Web3.py-style facade** (`aleo.Aleo` / `aleo.AsyncAleo`) — a high-level, batteries-included client for connecting to a node, managing accounts, reading state, and building/proving/broadcasting transactions.
 - **Low-level primitives** (`aleo.mainnet`, `aleo.testnet`) — direct Python bindings to Aleo's zero-knowledge cryptographic types, for when you need full control.
 
-Built with snarkvm 4.8.1 (MainnetV0). For build instructions, see [sdk/Readme.md](./sdk/Readme.md).
+Built with snarkvm 4.9.1 (MainnetV0). For build instructions, see [sdk/Readme.md](./sdk/Readme.md).
 
 ## Agent skills (trade on Shield Swap by chatting)
 

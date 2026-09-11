@@ -58,15 +58,18 @@ SIMPLE_EXPECTED = {
         {
             "path": ["Token"],
             "fields": [
+                # Modes follow the declaration (`owner as address.private`,
+                # `amount as u64.public`).  leo-abi before 2026-09 emitted them
+                # swapped; the pin on leo master c82f149e fixed it.
                 {
                     "name": "owner",
                     "ty": {"Primitive": "Address"},
-                    "mode": "Public",
+                    "mode": "Private",
                 },
                 {
                     "name": "amount",
                     "ty": {"Primitive": {"UInt": "U64"}},
-                    "mode": "Private",
+                    "mode": "Public",
                 },
             ],
         }
