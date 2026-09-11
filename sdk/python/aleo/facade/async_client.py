@@ -35,7 +35,7 @@ from contextlib import asynccontextmanager
 from decimal import Decimal
 from typing import Any, AsyncGenerator
 
-from .._client_common import AleoNetworkError
+from .._client_common import AleoNetworkError, is_provable_host
 from .._facade_common import (
     CreditsAmount,
     credits_to_microcredits,
@@ -961,12 +961,15 @@ class AsyncBoundCall(PreparedCall):
         process = self._client.process
         execution_id = execution.execution_id
         if base_fee is None:
-            # The version in force at the inclusion height — see
-            # BoundCall._current_height in call.py.
-            try:
-                height: int | None = int(await self._client.network.get_latest_height())
-            except Exception:  # noqa: BLE001 - estimate still possible without it
-                height = None
+            # The version in force at the inclusion height — hosted API only;
+            # see BoundCall._current_height in call.py for why a devnode's
+            # height must NOT be mapped through the SDK's activation table.
+            height: int | None = None
+            if is_provable_host(self._client._provider.url):
+                try:
+                    height = int(await self._client.network.get_latest_height())
+                except Exception:  # noqa: BLE001 - estimate still possible without it
+                    height = None
             total, _ = process.execution_cost(execution, height)
             base_fee = int(total)
         else:

@@ -318,3 +318,25 @@ def test_decode_transition_by_id_404_raises_transaction_not_found() -> None:
     )
     with pytest.raises(TransactionNotFound):
         a.decode_transition("at1fake")
+
+
+def test_current_height_is_only_consulted_on_the_hosted_api() -> None:
+    """A devnode or custom node runs its own activation schedule, so its
+    height must not be mapped through the SDK's network table (a devnode at
+    height 40 would be priced under V1 and drain its account — seen in the
+    devnode lifecycle tier).  Hosted API → chain head; anything else → None,
+    which the bindings resolve to the newest scheduled version."""
+    from types import SimpleNamespace as NS
+    from aleo.facade.call import BoundCall
+
+    def fake(url: str, height: Any = 4242) -> Any:
+        def latest() -> int:
+            if isinstance(height, Exception):
+                raise height
+            return height
+        return NS(_client=NS(_provider=NS(url=url), network=NS(get_latest_height=latest)))
+
+    assert BoundCall._current_height(fake("https://edge.provable.com/api")) == 4242
+    assert BoundCall._current_height(fake("https://api.provable.com/v2")) == 4242
+    assert BoundCall._current_height(fake("http://127.0.0.1:3030")) is None            # devnode
+    assert BoundCall._current_height(fake("https://edge.provable.com/api", RuntimeError("down"))) is None

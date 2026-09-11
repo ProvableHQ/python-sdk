@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .._client_common import is_provable_host
 from .errors import ExecutionError
 from .programs import PreparedCall
 
@@ -248,13 +249,25 @@ class BoundCall(PreparedCall):
     # ── Fee sourcing ────────────────────────────────────────────────────────
 
     def _current_height(self) -> int | None:
-        """The chain head, for consensus-version-dependent estimates.
+        """The chain head, for consensus-version-dependent estimates — on the
+        hosted API only.
 
         A transaction is judged by the rules in force at its inclusion
-        height, so fee estimates use the version active *now*, not the newest
-        one the network has scheduled.  ``None`` when the node cannot answer:
-        the bindings then fall back to the newest scheduled version.
+        height, so on the hosted Provable API fee estimates use the version
+        active *now* (resolved through the bindings' per-network activation
+        table), not the newest one the network has scheduled.
+
+        Off the hosted API the answer is ``None`` on purpose: a devnode or
+        custom node runs its own activation schedule (test heights, an env
+        override), so mapping ITS height through the SDK's mainnet/testnet
+        table lands on an ancient version whose fee formula does not match —
+        a devnode at height 40 would be priced under V1 and drain its account.
+        The bindings then use the newest scheduled version, which is what such
+        a node runs once past its test heights.  Also ``None`` when the node
+        cannot answer.
         """
+        if not is_provable_host(self._client._provider.url):
+            return None
         try:
             return int(self._client.network.get_latest_height())
         except Exception:  # noqa: BLE001 - estimate still possible without it
