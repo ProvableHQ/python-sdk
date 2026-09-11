@@ -267,12 +267,8 @@ def test_credentials_stage_reclaims_this_profiles_stale_token(profile, dps_env):
     api._token = "jwt"
     name = f"shield-swap-profile-{profile.address[:16]}"
 
-    def row(i, name_, created):
-        return type("Row", (), {"id": i, "name": name_, "created_at": created,
-                                "revoked_at": None})()
-
-    api.tokens = [row("newer", name, "2026-09-01"), row("older", name, "2026-08-01"),
-                  row("agent", "ss-agent-x", "2026-01-01")]
+    api.tokens = [_row("newer", name, "2026-09-01"), _row("older", name, "2026-08-01"),
+                  _row("agent", "ss-agent-x", "2026-01-01")]
     api.revoked = []
     attempts = {"n": 0}
 
@@ -286,6 +282,92 @@ def test_credentials_stage_reclaims_this_profiles_stale_token(profile, dps_env):
     dex = _StubDex(api, {"waleo.aleo": 7}, funded_from_start=True)
     report = run_onboard(dex, profile)
     creds = next(o for o in report.outcomes if o.name == "credentials")
-    assert api.revoked == ["older"]                  # oldest same-name token only
+    assert api.revoked == ["older"]                  # the longest-idle same-name token only
     assert profile.credentials["dex_api_token"] == "ss_fresh"
+    assert "dex_api_token_cap_hit" not in profile.credentials
     assert "revoked" in creds.detail and "minted" in creds.detail
+
+
+def _row(i, name_, created, last_used=None):
+    return type("Row", (), {"id": i, "name": name_, "created_at": created,
+                            "last_used_at": last_used, "revoked_at": None})()
+
+
+def _capped_once(api):
+    """create_api_token that hits the cap on the first call only."""
+    from aleo_shield_swap.errors import DexApiError
+    attempts = {"n": 0}
+
+    def create(name_, expires_in_days=None):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise DexApiError(400, '{"error":"active token limit reached (5); revoke one first"}')
+        return type("T", (), {"token": "ss_fresh"})()
+
+    api.create_api_token = create
+    return attempts
+
+
+def test_credentials_stage_never_revokes_a_token_in_recent_use(profile, dps_env):
+    """The token name derives from the address, so another machine onboarded
+    with the same key holds a same-name token — and a revoke hits every
+    holder at once.  A same-name token used recently is that machine's live
+    credential, not a stale leftover: leave it, fall back to the session."""
+    import time as _time
+    from datetime import datetime, timezone
+
+    api = _StubApi()
+    api._token = "jwt"
+    name = f"shield-swap-profile-{profile.address[:16]}"
+    just_now = datetime.fromtimestamp(_time.time() - 60, tz=timezone.utc).isoformat()
+    api.tokens = [_row("live", name, "2026-08-01", last_used=just_now),
+                  _row("agent", "ss-agent-x", "2026-01-01")]
+    api.revoked = []
+    _capped_once(api)
+    dex = _StubDex(api, {"waleo.aleo": 7}, funded_from_start=True)
+    report = run_onboard(dex, profile)
+    creds = next(o for o in report.outcomes if o.name == "credentials")
+    assert api.revoked == []                          # the live token survives
+    assert "dex_api_token" not in profile.credentials
+    assert "token limit" in creds.detail and "session" in creds.detail
+    assert report.funded is True
+
+
+def test_cap_held_onboarding_is_a_noop_until_the_retry_window_passes(profile, dps_env):
+    """AGENTS.md: the first run registers, later runs are no-ops.  At the
+    token cap nothing durable is stored, so the stage records the cap hit
+    and treats it as settled for CAP_RETRY_SECONDS instead of re-running
+    (400 + token list + scanner re-registration) on every onboard()."""
+    from aleo_shield_swap.errors import DexApiError
+    from aleo_shield_swap.lifecycle import CAP_RETRY_SECONDS
+
+    api = _StubApi()
+    api._token = "jwt"
+    calls = {"n": 0}
+
+    def always_capped(name_, expires_in_days=None):
+        calls["n"] += 1
+        raise DexApiError(400, '{"error":"active token limit reached (5); revoke one first"}')
+
+    api.create_api_token = always_capped
+    api.tokens, api.revoked = [], []
+    dex = _StubDex(api, {"waleo.aleo": 7}, funded_from_start=True)
+
+    first = run_onboard(dex, profile)
+    assert next(o for o in first.outcomes if o.name == "credentials").action == "ran"
+    assert "dex_api_token_cap_hit" in profile.credentials and calls["n"] == 1
+
+    second = run_onboard(dex, profile)                # settled: no-op
+    assert next(o for o in second.outcomes if o.name == "credentials").action == "skipped"
+    assert calls["n"] == 1
+
+    # Once the window passes the stage tries again — and a mint that now
+    # succeeds clears the marker.
+    import time as _time
+    profile.save_credentials(dex_api_token_cap_hit=str(_time.time() - CAP_RETRY_SECONDS - 1))
+    _capped_once(api)
+    api.tokens = [_row("older", f"shield-swap-profile-{profile.address[:16]}", "2026-08-01")]
+    third = run_onboard(dex, profile)
+    assert next(o for o in third.outcomes if o.name == "credentials").action == "ran"
+    assert profile.credentials["dex_api_token"] == "ss_fresh"
+    assert "dex_api_token_cap_hit" not in profile.credentials

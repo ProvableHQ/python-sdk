@@ -247,6 +247,19 @@ class BoundCall(PreparedCall):
 
     # ── Fee sourcing ────────────────────────────────────────────────────────
 
+    def _current_height(self) -> int | None:
+        """The chain head, for consensus-version-dependent estimates.
+
+        A transaction is judged by the rules in force at its inclusion
+        height, so fee estimates use the version active *now*, not the newest
+        one the network has scheduled.  ``None`` when the node cannot answer:
+        the bindings then fall back to the newest scheduled version.
+        """
+        try:
+            return int(self._client.network.get_latest_height())
+        except Exception:  # noqa: BLE001 - estimate still possible without it
+            return None
+
     def _authorize_fee(
         self,
         account: Any,
@@ -273,7 +286,7 @@ class BoundCall(PreparedCall):
         process = self._client.process
         execution_id = execution.execution_id
         if base_fee is None:
-            total, _ = process.execution_cost(execution)
+            total, _ = process.execution_cost(execution, self._current_height())
             base_fee = int(total)
         else:
             base_fee = int(base_fee)

@@ -719,3 +719,18 @@ def test_logout_on_an_expired_session_forgets_it_and_reraises():
     with pytest.raises(NotAuthenticatedError):
         api.logout()
     assert api._csrf is None and not api.is_authenticated
+
+
+def test_pool_stats_batch_dedups_and_chunks_to_the_route_cap():
+    from aleo_shield_swap.api import POOL_STATS_BATCH_MAX
+    keys = [f"{i}field" for i in range(150)] + ["3field", "7field"]      # 150 unique + dupes
+    s = _Session([
+        _Resp(200, {"data": {f"{i}field": STATS for i in range(100)}}),
+        _Resp(200, {"data": {f"{i}field": STATS for i in range(100, 150)}}),
+    ])
+    out = ApiClient(base_url="https://x", session=s).get_pool_stats_batch(keys)
+    assert len(out) == 150 and out["149field"].price == "1.5"
+    sent = [c[2]["keys"].split(",") for c in s.calls]
+    assert [len(chunk) for chunk in sent] == [POOL_STATS_BATCH_MAX, 50]
+    assert sent[0][3] == "3field" and "3field" not in sent[1]            # deduped, order kept
+    assert ApiClient(base_url="https://x", session=_Session([])).get_pool_stats_batch([]) == {}

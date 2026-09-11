@@ -471,8 +471,11 @@ def test_authorize_fee_private_uses_provider_record() -> None:
         execution_id = "exec-id"
 
     class _ProcessShim:
-        def execution_cost(self, _execution: Any) -> Any:
+        def execution_cost(self, _execution: Any, block_height: Any = None) -> Any:
+            self.cost_heights.append(block_height)
             return (1000, (900, 100))
+
+        cost_heights: list = []
 
         def authorize_fee_private(
             self, _pk: Any, record: Any, base_fee: int, priority: int, exec_id: Any

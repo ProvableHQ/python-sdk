@@ -28,15 +28,19 @@ use snarkvm::console::network::{ConsensusVersion, Network};
 use snarkvm::synthesizer::process::{deployment_cost, execution_cost, InclusionVersion};
 
 /// The consensus version in force at `block_height` on this build's network,
-/// from snarkvm's per-network activation table.  With no height, the newest
-/// version the network has scheduled — the rules a transaction built now will
-/// be judged by once every scheduled activation has passed, and (since cost
-/// formulas only change at some versions: deployment at V18, execution at
-/// V10) the right one for fee estimates on both live networks today.
+/// from snarkvm's per-network activation table.
 ///
-/// Never hardcode a version here: the cost formula changed at V18 and a
-/// stale literal underestimates deployment fees, so the transaction is
-/// rejected for an insufficient fee.
+/// A transaction is judged by the rules at its *inclusion* height, so callers
+/// should pass the chain head (the facade does: `network.get_latest_height()`)
+/// — that is snarkvm's own convention (`query.current_block_height()`).  With
+/// no height, the newest version the network has *scheduled* is used.  That
+/// is a fallback for when no node is reachable, not a default to rely on: the
+/// moment a future snarkvm schedules a version at a height not yet reached,
+/// it would apply unenforced rules to a transaction broadcast now.
+///
+/// Never hardcode a version here either: the deployment-cost formula changed
+/// at V18 and a stale literal underestimates the fee, so the transaction is
+/// rejected as underpaid.
 fn consensus_version_at(block_height: Option<u32>) -> anyhow::Result<ConsensusVersion> {
     CurrentNetwork::CONSENSUS_VERSION(block_height.unwrap_or(u32::MAX))
 }

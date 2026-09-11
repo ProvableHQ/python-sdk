@@ -813,11 +813,12 @@ class ShieldSwap:
         )
         deadline = get_deadline(self._aleo, deadline_offset_blocks)
         swap_nonce = nonce if nonce is not None else generate_swap_nonce()
-        # Reserve from the journal rather than probing the chain: the probe
-        # asks "is this blinded address used?" and the answer is only true
-        # until another swap consumes it, so two concurrent swaps derive the
-        # same counter and the second reverts at finalize. Reservation is
-        # serialized by the journal's file lock, so it cannot collide.
+        # With a journal, reserve through it: reservation is serialized by the
+        # journal's file lock, so two concurrent swaps cannot derive the same
+        # counter — a bare chain probe would let both pick the same free
+        # address and the second revert at finalize.  _reserve_identities
+        # still verifies each reserved counter against the chain, because the
+        # journal only knows what it issued (see its docstring).
         counter: Optional[int] = None
         if identity is None and track and self.journal is not None:
             identity = self._reserve_identities(acct, 1)[0]
@@ -1018,19 +1019,32 @@ class ShieldSwap:
             raise ValueError("counter reservation needs a journal — construct "
                              "with ShieldSwap.from_profile().")
         journal = self.journal
+        identities: dict[int, BlindedIdentity] = {}     # derive each counter once
+
+        def identity(counter: int) -> BlindedIdentity:
+            if counter not in identities:
+                identities[counter] = blinded_identity_at(self._aleo, acct, self.program, counter)
+            return identities[counter]
 
         def is_used(counter: int) -> bool:
-            return self._blinded_address_used(
-                blinded_identity_at(self._aleo, acct, self.program, counter).blinded_address)
+            return self._blinded_address_used(identity(counter).blinded_address)
 
         out: list[BlindedIdentity] = []
+        known_free: set[int] = set()        # proved free by a gallop — no re-probe
         while len(out) < n:
-            counter = int(journal.reserve_counters(1)[0])
-            if is_used(counter):
+            # One lock + one journal event per batch, not per counter.
+            pending = [int(c) for c in journal.reserve_counters(n - len(out))]
+            while pending and len(out) < n:
+                counter = pending.pop(0)
+                if counter in known_free or not is_used(counter):
+                    out.append(identity(counter))
+                    continue
                 first_free = find_unused_counter(is_used, start_counter=counter + 1)
                 journal.skip_counters_through(first_free - 1)
-                continue
-            out.append(blinded_identity_at(self._aleo, acct, self.program, counter))
+                known_free.add(first_free)
+                # Counters this batch reserved inside the used run are retired
+                # with it; any past the run are still good.
+                pending = [c for c in pending if c >= first_free]
         return out
 
     def _is_wrapped(self, token_id: str) -> bool:

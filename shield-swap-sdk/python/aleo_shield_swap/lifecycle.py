@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
 from .errors import (
@@ -142,10 +143,25 @@ def provision_provable_credentials(endpoint: str, username: str) -> tuple[str, s
         f"POST /consumers -> {resp.status_code}: {resp.text[:120]}")
 
 
+#: How long a cap-held onboarding treats "no durable token" as settled before
+#: it tries to mint one again.  Keeps onboard() a no-op between runs (the
+#: contract) without giving up on persisting a token for good.
+CAP_RETRY_SECONDS = 24 * 3600
+#: A same-name token is only reclaimed when idle this long — a token used
+#: more recently is another live machine's, not a stale leftover.
+TOKEN_IDLE_SECONDS = 24 * 3600
+
+
 def _creds_done(ctx: _Ctx) -> bool:
     c = ctx.profile.credentials
-    return bool(c.get("dps_api_key") and c.get("dps_consumer_id")
-                and c.get("dex_api_token"))
+    if not (c.get("dps_api_key") and c.get("dps_consumer_id")):
+        return False
+    if c.get("dex_api_token"):
+        return True
+    # At the token cap the stage settles for the session and records when:
+    # done until the retry window passes, so re-running onboard() is a no-op.
+    cap_hit = c.get("dex_api_token_cap_hit")
+    return bool(cap_hit) and time.time() - float(cap_hit) < CAP_RETRY_SECONDS
 
 
 def _is_token_cap(exc: DexApiError) -> bool:
@@ -157,15 +173,36 @@ def _is_token_cap(exc: DexApiError) -> bool:
     return exc.status == 400 and "token limit" in exc.body
 
 
+def _idle_since(row: Any, now: float) -> float:
+    """Seconds since *row* was last used (or created, if never used).
+    Unparseable timestamps count as just used — the conservative reading."""
+    stamp = row.last_used_at or row.created_at
+    try:
+        used = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+        if used.tzinfo is None:
+            used = used.replace(tzinfo=timezone.utc)
+        return now - used.timestamp()
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _reclaim_profile_token(api: Any, name: str) -> Any:
-    """Revoke the oldest active token this profile minted under *name* and
-    mint again.  None when there is none to reclaim or the cap still holds
-    (other tokens, not ours to touch, fill it)."""
+    """Revoke ONE stale token this profile minted under *name* and mint again.
+
+    The name derives from the address, so another machine onboarded with the
+    same key mints the same name — and a revoke takes effect for every holder
+    at once.  Only a token idle for :data:`TOKEN_IDLE_SECONDS` (never used, or
+    last used long ago) is treated as this profile's lost leftover; a token in
+    recent use is left alone.  Returns None when nothing is safely reclaimable
+    or the cap still holds afterwards (other tokens, not ours, fill it).
+    """
+    now = time.time()
     stale = [row for row in api.list_api_tokens()
-             if row.name == name and not row.revoked_at]
+             if row.name == name and not row.revoked_at
+             and _idle_since(row, now) >= TOKEN_IDLE_SECONDS]
     if not stale:
         return None
-    api.revoke_api_token(min(stale, key=lambda row: row.created_at).id)
+    api.revoke_api_token(max(stale, key=lambda row: _idle_since(row, now)).id)
     try:
         return api.create_api_token(name)
     except DexApiError as exc:
@@ -209,12 +246,15 @@ def _creds_run(ctx: _Ctx) -> str:
             # authenticate stage serves this process; the next run tries again.
             tok = _reclaim_profile_token(ctx.dex.api, name)
             if tok is None:
+                ctx.profile.save_credentials(dex_api_token_cap_hit=str(time.time()))
                 details.append("DEX API token limit reached — using the session "
-                               "for this run; revoke an old token to persist one")
+                               "for this run; revoke an old token to persist one "
+                               f"(retried after {CAP_RETRY_SECONDS // 3600}h)")
             else:
-                details.append("revoked this profile's oldest stale DEX API token")
+                details.append("revoked this profile's idle stale DEX API token")
         if tok is not None:
             ctx.profile.save_credentials(dex_api_token=tok.token)
+            ctx.profile.forget_credentials("dex_api_token_cap_hit")
             details.append("durable DEX API token minted")
     refresh = getattr(ctx.dex, "_refresh_credentials", None)
     if refresh is not None:

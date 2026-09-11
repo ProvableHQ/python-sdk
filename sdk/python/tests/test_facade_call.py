@@ -225,14 +225,22 @@ def test_delegate_pay_own_fee_attaches_fee_authorization() -> None:
         def execute(self, _auth: Any) -> Any:
             return (None, _FakeTrace())
 
-        def execution_cost(self, _execution: Any) -> Any:
+        def execution_cost(self, _execution: Any, block_height: Any = None) -> Any:
+            self.cost_heights.append(block_height)
             return (1000, (900, 100))
+
+        cost_heights: list = []
 
         def authorize_fee_public(self, *args: Any) -> Any:
             return real_process.authorize_fee_public(*args)
 
     # Swap the lazily-cached process for the shim (property returns _process).
-    a._process = _ProcessShim()  # type: ignore[attr-defined]
+    shim = _ProcessShim()
+    a._process = shim  # type: ignore[attr-defined]
+    # The fee estimate must be priced under the consensus version in force
+    # at the chain head (a tx is judged at its inclusion height), so the
+    # facade passes the latest height through to execution_cost.
+    a.network.get_latest_height = lambda: 4242  # type: ignore[method-assign]
 
     bc.delegate(acct, pay_own_fee=True)
     request = mock.call_args.args[0]
@@ -240,6 +248,7 @@ def test_delegate_pay_own_fee_attaches_fee_authorization() -> None:
     fee_auth = request.fee_authorization()
     assert fee_auth is not None
     assert fee_auth.is_fee_public() is True
+    assert shim.cost_heights == [4242]
 
 
 # ---------------------------------------------------------------------------

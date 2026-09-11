@@ -325,3 +325,18 @@ def test_swap_many_tolerates_a_transient_scanner_error(dex, monkeypatch):
     monkeypatch.setattr(ShieldSwap, "swap", fake)
     report = dex.swap_many(pool_key="1field", token_in_id="t0", amount_in=5, count=3)
     assert calls_made == [0, 1, 2] and report.failures == []
+
+
+def test_reserve_identities_reserves_the_batch_in_one_journal_event(dex, monkeypatch):
+    """One lock + one counters_reserved event per batch, not per counter,
+    and each identity derived exactly once."""
+    derived = []
+    monkeypatch.setattr(
+        "aleo_shield_swap.client.blinded_identity_at",
+        lambda aleo, acct, prog, c: derived.append(c) or type(
+            "I", (), {"counter": c, "blinding_factor": f"bf{c}", "blinded_address": f"ba{c}"})())
+    idents = dex._reserve_identities(object(), 5)
+    assert [i.counter for i in idents] == [0, 1, 2, 3, 4]
+    reserved = [e for e in dex.journal.events() if e["type"] == "counters_reserved"]
+    assert len(reserved) == 1 and reserved[0]["counters"] == [0, 1, 2, 3, 4]
+    assert sorted(derived) == [0, 1, 2, 3, 4]                # no double derivation

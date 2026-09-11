@@ -373,10 +373,11 @@ for the indexer to reach one.  Returned unwrapped (no ``data``).
 ### Counters & blinding
 
 Blinded identities derive deterministically from (view key, counter,
-program).  Counters must NEVER be reused: reserve them via
-`dex.journal.reserve_counters(n)` (what `swap_many` does), or probe
-on-chain when no journal exists.  Persist `SwapHandle`s — the
-blinding factor is the claim secret.
+program).  Counters must NEVER be reused (the finalize rejects a reused
+blinded address after the proof is paid for).  Let `swap`/`swap_many`
+pick them: with a journal they reserve under its lock AND verify each
+counter on chain; without one they probe the chain.  Persist
+`SwapHandle`s — the blinding factor is the claim secret.
 
 ### `blinded_identity_at(aleo: 'Any', account: 'Any', program: 'str', counter: 'int') -> 'BlindedIdentity'`
 

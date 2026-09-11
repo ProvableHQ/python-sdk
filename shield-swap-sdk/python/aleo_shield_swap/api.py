@@ -87,6 +87,14 @@ def api_url_for(network: str) -> str:
 DEFAULT_API_URL = api_url_for("testnet")
 _TIMEOUT = 30.0
 
+#: ``GET /pools/stats?keys=`` accepts at most this many unique keys (the spec
+#: 400s above it); :meth:`ApiClient.get_pool_stats_batch` chunks to fit.
+POOL_STATS_BATCH_MAX = 100
+
+
+def _chunks(items: list[Any], size: int) -> list[list[Any]]:
+    return [items[i:i + size] for i in range(0, len(items), size)]
+
 T = TypeVar("T")
 
 
@@ -574,12 +582,15 @@ class ApiClient:
 
     def get_pool_stats_batch(self, pool_keys: list[str]
                              ) -> dict[str, models.PoolStats24hDoc]:
-        """:meth:`get_pool_stats` for many pools in one request, keyed by pool
-        key.  Pools the indexer has no stats for are simply absent.  Public."""
-        if not pool_keys:
-            return {}
-        data = self._get("/pools/stats", {"keys": ",".join(pool_keys)})["data"]
-        return {k: _build(models.PoolStats24hDoc, v) for k, v in data.items()}
+        """:meth:`get_pool_stats` for many pools, keyed by pool key.  The route
+        takes at most :data:`POOL_STATS_BATCH_MAX` unique keys per request, so
+        duplicates are dropped and longer lists go out in chunks.  Pools the
+        indexer has no stats for are simply absent.  Public."""
+        out: dict[str, models.PoolStats24hDoc] = {}
+        for chunk in _chunks(list(dict.fromkeys(pool_keys)), POOL_STATS_BATCH_MAX):
+            data = self._get("/pools/stats", {"keys": ",".join(chunk)})["data"]
+            out.update({k: _build(models.PoolStats24hDoc, v) for k, v in data.items()})
+        return out
 
     def get_liquidity_distribution(self, pool_key: str) -> list[models.TickLiquidityDoc]:
         """The pool's depth: ``liquidity_net`` at every initialized tick, in
@@ -644,7 +655,7 @@ class ApiClient:
     # ── Account views ──────────────────────────────────────────────────────
     # Swap history/detail and per-token position detail are chain reads now
     # (``ShieldSwap.get_swap_output`` / ``get_swap_execution`` /
-    # ``get_position``) — the API retired those routes in 2026-09.
+    # ``get_owned_position``) — the API retired those routes in 2026-09.
 
     def get_positions(self, *, limit: Optional[int] = None,
                       offset: Optional[int] = None) -> list[models.PositionDoc]:
@@ -1029,10 +1040,11 @@ class AsyncApiClient:
     async def get_pool_stats_batch(self, pool_keys: list[str]
                                    ) -> dict[str, models.PoolStats24hDoc]:
         """Stats for many pools — see :meth:`ApiClient.get_pool_stats_batch`."""
-        if not pool_keys:
-            return {}
-        data = (await self._get("/pools/stats", {"keys": ",".join(pool_keys)}))["data"]
-        return {k: _build(models.PoolStats24hDoc, v) for k, v in data.items()}
+        out: dict[str, models.PoolStats24hDoc] = {}
+        for chunk in _chunks(list(dict.fromkeys(pool_keys)), POOL_STATS_BATCH_MAX):
+            data = (await self._get("/pools/stats", {"keys": ",".join(chunk)}))["data"]
+            out.update({k: _build(models.PoolStats24hDoc, v) for k, v in data.items()})
+        return out
 
     async def get_liquidity_distribution(self, pool_key: str) -> list[models.TickLiquidityDoc]:
         """Pool depth per tick — see :meth:`ApiClient.get_liquidity_distribution`."""

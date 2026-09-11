@@ -961,7 +961,13 @@ class AsyncBoundCall(PreparedCall):
         process = self._client.process
         execution_id = execution.execution_id
         if base_fee is None:
-            total, _ = process.execution_cost(execution)
+            # The version in force at the inclusion height — see
+            # BoundCall._current_height in call.py.
+            try:
+                height: int | None = int(await self._client.network.get_latest_height())
+            except Exception:  # noqa: BLE001 - estimate still possible without it
+                height = None
+            total, _ = process.execution_cost(execution, height)
             base_fee = int(total)
         else:
             base_fee = int(base_fee)

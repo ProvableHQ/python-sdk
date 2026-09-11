@@ -91,18 +91,33 @@ def test_full_lifecycle_from_fresh_profile(tmp_path, monkeypatch):
     # Right after claims, the scanner can still serve just-spent records; a
     # mint built on one is silently dropped.  Model the careful client:
     # verify the drop, let the scanner refresh, re-select records, retry.
+    # "Confirmed" is not "landed": such a mint confirms as REJECTED with no
+    # exception raised, so the positions mapping is the only truth.  An
+    # attempt counts once its position is readable on chain; a dropped one
+    # is retired from the journal so it leaves no phantom position behind.
     minted = None
     for attempt in range(3):
         try:
-            minted = dex.mint(pool_key=pool.key, tick_lower=lo, tick_upper=hi,
-                              amount0_desired=amt0,
-                              amount1_desired=amt1).delegate()
-            break
+            candidate = dex.mint(pool_key=pool.key, tick_lower=lo, tick_upper=hi,
+                                 amount0_desired=amt0,
+                                 amount1_desired=amt1).delegate()
         except Exception:
-            if attempt == 2:
-                raise
-            time.sleep(60)               # scanner catches up; records re-scan
-    assert minted and minted.position_token_id, "mint returned no position id"
+            candidate = None
+        if candidate is not None and candidate.position_token_id:
+            landed_by = time.monotonic() + 120
+            while time.monotonic() < landed_by:
+                if dex._position_state(candidate.position_token_id) is not None:
+                    minted = candidate
+                    break
+                time.sleep(10)
+            if minted is not None:
+                break
+            dex.journal.record_position_burned(candidate.position_token_id,
+                                               candidate.transaction_id)
+        if attempt == 2:
+            pytest.fail("mint never landed on chain in 3 attempts (stale records?)")
+        time.sleep(60)               # scanner catches up; records re-scan
+    assert minted.position_token_id, "mint returned no position id"
     assert any(v.position_token_id == minted.position_token_id
                for v in dex.get_positions())
 

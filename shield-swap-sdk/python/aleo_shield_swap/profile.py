@@ -183,6 +183,11 @@ class Profile:
         merged = {**self.credentials, **{k: v for k, v in kv.items() if v}}
         _write_private(self.home / _CREDENTIALS, merged)
 
+    def forget_credentials(self, *keys: str) -> None:
+        """Drop *keys* from ``credentials.json``; absent keys are ignored."""
+        merged = {k: v for k, v in self.credentials.items() if k not in keys}
+        _write_private(self.home / _CREDENTIALS, merged)
+
     @property
     def journal_path(self) -> Path:
         """Where this profile's :class:`~aleo_shield_swap.journal.Journal` lives.
