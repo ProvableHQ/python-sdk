@@ -11,6 +11,7 @@ token info is surfaced through :class:`PoolEntry`.
 from __future__ import annotations
 
 import dataclasses
+import enum
 import functools
 import os
 import types
@@ -97,22 +98,34 @@ def _hints(cls: type) -> dict[str, Any]:
 
 
 def _coerce(hint: Any, value: Any) -> Any:
-    """Build nested generated models where the annotation names one."""
+    """Build nested generated models (and enums) where the annotation names
+    one: through ``Optional``/unions, ``list[...]``, and ``dict[str, ...]``
+    values, recursively."""
+    if value is None:
+        return None
     origin = typing.get_origin(hint)
     if origin in (typing.Union, types.UnionType):
         for arg in typing.get_args(hint):
-            if arg is not type(None) and dataclasses.is_dataclass(arg) \
-                    and isinstance(value, dict):
-                return _build(arg, value)  # type: ignore[arg-type]
+            if arg is type(None):
+                continue
+            coerced = _coerce(arg, value)
+            if coerced is not value:
+                return coerced
         return value
     if origin is list and isinstance(value, list):
         args = typing.get_args(hint)
-        if args and dataclasses.is_dataclass(args[0]):
-            return [_build(args[0], v) if isinstance(v, dict) else v  # type: ignore[arg-type]
-                    for v in value]
-        return value
+        return [_coerce(args[0], v) for v in value] if args else value
+    if origin is dict and isinstance(value, dict):
+        args = typing.get_args(hint)
+        return ({k: _coerce(args[1], v) for k, v in value.items()}
+                if len(args) == 2 else value)
     if dataclasses.is_dataclass(hint) and isinstance(value, dict):
         return _build(hint, value)  # type: ignore[arg-type]
+    if isinstance(hint, type) and issubclass(hint, enum.Enum) and not isinstance(value, hint):
+        try:
+            return hint(value)
+        except ValueError:
+            return value               # a value the spec does not know yet
     return value
 
 
@@ -345,9 +358,13 @@ class ApiClient:
         The server requires the request to be *bound* to the session it ends
         (``X-Shield-Session-Id`` / ``X-Shield-Wallet-Address``), so this
         reads :meth:`get_session` first unless *session* is passed."""
-        session = session or self.get_session()
-        out = _build(models.LogoutResponse,
-                     self._post("/auth/logout", {}, _session_binding(session))["data"])
+        try:
+            session = session or self.get_session()
+            out = _build(models.LogoutResponse,
+                         self._post("/auth/logout", {}, _session_binding(session))["data"])
+        except NotAuthenticatedError:
+            self._drop_session()       # already expired server-side: forget it anyway
+            raise
         self._drop_session()
         return out
 
@@ -837,8 +854,12 @@ class AsyncApiClient:
     async def logout(self, session: Optional[models.SessionPayload] = None
                      ) -> models.LogoutResponse:
         """End the current session — see :meth:`ApiClient.logout`."""
-        session = session or await self.get_session()
-        data = (await self._post("/auth/logout", {}, _session_binding(session)))["data"]
+        try:
+            session = session or await self.get_session()
+            data = (await self._post("/auth/logout", {}, _session_binding(session)))["data"]
+        except NotAuthenticatedError:
+            self._drop_session()
+            raise
         out = _build(models.LogoutResponse, data)
         self._drop_session()
         return out

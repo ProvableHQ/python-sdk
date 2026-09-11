@@ -133,6 +133,28 @@ def normalize_mapping_value(raw: Any) -> Optional[str]:
     return None if text in ("", "null") else text
 
 
+def mapping_flag_set(raw: Any) -> bool:
+    """A presence/boolean mapping read (``used_blinded_addresses``,
+    ``initialized_pools``) as one truth: set when an entry exists and is not
+    the literal ``false``.  Every probe of such a mapping — sync, async, and
+    the journal-free derivation path — must share this, or the three disagree
+    on whether a counter is free."""
+    text = normalize_mapping_value(raw)
+    return text is not None and text != "false"
+
+
+def read_mapping_value(aleo: Any, program: str, mapping: str, key: str) -> Optional[str]:
+    """One mapping entry via the node's mapping endpoint — no program handle.
+
+    ``aleo.programs.get(program)`` downloads and parses the deployed source
+    (1.4 MB for the core) just to hand back a ``Mapping`` whose ``get`` only
+    needs ``(program, mapping, key)``; probes that run per swap or per token
+    go straight to the network client instead.
+    """
+    return normalize_mapping_value(
+        aleo.network.get_program_mapping_value(program, mapping, key))
+
+
 _UNSIGNED_LITERAL = re.compile(r"^(\d+)u(?:8|16|32|64|128)$")
 
 

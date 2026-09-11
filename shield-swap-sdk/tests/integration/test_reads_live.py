@@ -310,3 +310,30 @@ def test_next_blinded_identity_collides_where_reserved_counters_do_not(live_dex_
     a = blinded_identity_at(dex._aleo, acct, dex.program, c0)
     b = blinded_identity_at(dex._aleo, acct, dex.program, c1)
     assert a.blinded_address != b.blinded_address
+
+
+# ── Blinded identities vs live chain ─────────────────────────────────────────
+
+@pytest.mark.usefixtures("account_dex")
+def test_next_blinded_identity_is_unused_on_chain_and_reproducible(account_dex):
+    """The e2e account has swapped many times: the next identity must skip
+    every counter already burned on chain (galloping past the 64-wide
+    window), and the pure derivations must rebuild the same identity."""
+    from aleo_shield_swap.derivations import (
+        blinded_identity_at,
+        derive_blinded_address,
+        next_blinded_identity,
+    )
+    aleo_ = account_dex._aleo
+    acct = aleo_.default_account
+    identity = next_blinded_identity(aleo_, acct, account_dex.program)
+    assert identity.counter > 0                        # history exists
+    assert not account_dex._blinded_address_used(identity.blinded_address)
+    again = blinded_identity_at(aleo_, acct, account_dex.program, identity.counter)
+    assert again.blinded_address == identity.blinded_address
+    assert again.blinding_factor == identity.blinding_factor
+    assert derive_blinded_address(identity.blinding_factor, str(acct.address),
+                                  account_dex.program) == identity.blinded_address
+    # The counter just before it really is spent (or the run starts at 0).
+    before = blinded_identity_at(aleo_, acct, account_dex.program, identity.counter - 1)
+    assert account_dex._blinded_address_used(before.blinded_address) or identity.counter == 1

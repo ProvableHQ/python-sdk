@@ -148,6 +148,32 @@ def _creds_done(ctx: _Ctx) -> bool:
                 and c.get("dex_api_token"))
 
 
+def _is_token_cap(exc: DexApiError) -> bool:
+    """The API-token cap, as the server reports it.  amm-api emits a plain
+    ``{"error": msg}`` with no machine code for this 400 — the literal is
+    ``"active token limit reached (5); revoke one first"`` — so the match is
+    on the stable phrase.  Other 400s on this route (bad name, bad expiry)
+    do not contain it."""
+    return exc.status == 400 and "token limit" in exc.body
+
+
+def _reclaim_profile_token(api: Any, name: str) -> Any:
+    """Revoke the oldest active token this profile minted under *name* and
+    mint again.  None when there is none to reclaim or the cap still holds
+    (other tokens, not ours to touch, fill it)."""
+    stale = [row for row in api.list_api_tokens()
+             if row.name == name and not row.revoked_at]
+    if not stale:
+        return None
+    api.revoke_api_token(min(stale, key=lambda row: row.created_at).id)
+    try:
+        return api.create_api_token(name)
+    except DexApiError as exc:
+        if _is_token_cap(exc):
+            return None
+        raise
+
+
 def _creds_run(ctx: _Ctx) -> str:
     """Register BOTH credential systems, unless already stored.
 
@@ -170,19 +196,24 @@ def _creds_run(ctx: _Ctx) -> str:
             details.append("Provable consumer + API key provisioned")
         ctx.profile.save_credentials(dps_api_key=key, dps_consumer_id=cid)
     if not ctx.profile.credentials.get("dex_api_token"):
+        name = f"shield-swap-profile-{ctx.profile.address[:16]}"
         try:
-            tok = ctx.dex.api.create_api_token(
-                f"shield-swap-profile-{ctx.profile.address[:16]}")
+            tok = ctx.dex.api.create_api_token(name)
         except DexApiError as exc:
-            # The DEX caps active durable tokens per account.  The session
-            # established by the authenticate stage serves this process, so
-            # onboarding proceeds; the next run will try to persist one again.
-            if exc.status == 400 and "token limit" in exc.body:
+            if not _is_token_cap(exc):
+                raise
+            # The DEX caps active durable tokens per account (5).  This
+            # profile's own earlier tokens (same deterministic name, secret
+            # lost with the credentials) are what usually fill it — revoke
+            # the oldest and retry once.  Failing that, the session from the
+            # authenticate stage serves this process; the next run tries again.
+            tok = _reclaim_profile_token(ctx.dex.api, name)
+            if tok is None:
                 details.append("DEX API token limit reached — using the session "
                                "for this run; revoke an old token to persist one")
             else:
-                raise
-        else:
+                details.append("revoked this profile's oldest stale DEX API token")
+        if tok is not None:
             ctx.profile.save_credentials(dex_api_token=tok.token)
             details.append("durable DEX API token minted")
     refresh = getattr(ctx.dex, "_refresh_credentials", None)

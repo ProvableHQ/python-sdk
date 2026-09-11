@@ -690,3 +690,32 @@ async def test_async_session_compliance_and_referral_mirrors():
     assert c.calls[5][:3] == ("PUT", "https://x/referral/settings", {"codes_per_user": 1})
     assert await api.generate_referral_codes() == ["X"]
     assert c.calls[6][2] == {"count": 1}
+
+
+def test_build_coerces_dict_values_and_enums():
+    # LiveCompatibility.observed_programs is dict[str, LiveProgramObservation]
+    # and .status is an Enum — both must come back typed, recursively.
+    from aleo_shield_swap import _api_models as models
+    payload = {"revision": 7, "live_compatibility": {
+        "status": "compatible", "checked_at": "t", "artifacts_checked": 1, "failures": [],
+        "observed_programs": {"shield_swap.aleo": {"source_sha256": "ab", "edition": 3,
+                                                   "version": "1.0"}}}}
+    s = _Session([_Resp(200, payload)])
+    state = ApiClient(base_url="https://x", session=s).get_protocol_state()
+    lc = state.live_compatibility
+    assert lc.status is models.LiveCompatibilityStatus.compatible
+    obs = lc.observed_programs["shield_swap.aleo"]
+    assert isinstance(obs, models.LiveProgramObservation) and obs.edition == 3
+    assert state.capabilities is None                # a dropped field still reads as None
+    # An enum value the spec does not know yet stays a plain string, not an error.
+    payload["live_compatibility"]["status"] = "degraded"
+    state = ApiClient(base_url="https://x", session=_Session([_Resp(200, payload)])).get_protocol_state()
+    assert state.live_compatibility.status == "degraded"
+
+
+def test_logout_on_an_expired_session_forgets_it_and_reraises():
+    from aleo_shield_swap.errors import NotAuthenticatedError
+    api, s = _cookie_client(_Resp(401, {"error": "session expired"}))
+    with pytest.raises(NotAuthenticatedError):
+        api.logout()
+    assert api._csrf is None and not api.is_authenticated

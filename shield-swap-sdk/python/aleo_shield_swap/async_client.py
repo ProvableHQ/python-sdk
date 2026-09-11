@@ -7,7 +7,10 @@ shared from ``_core``/``derivations`` — only the I/O differs.
 """
 from __future__ import annotations
 
+import logging
 from typing import Any, Callable, Generic, Optional, TypeVar
+
+from aleo import AleoNetworkError, ProgramNotFound
 
 from . import _generated as g
 from ._calls import extract_tx_id, root_outputs
@@ -15,6 +18,7 @@ from ._core import (
     decode_position_record,
     default_merkle_proofs,
     find_position_plaintext,
+    mapping_flag_set,
     normalize_mapping_value,
     generate_swap_nonce,
     parse_token_record_info,
@@ -37,10 +41,10 @@ from .api import AsyncApiClient, api_url_for
 from .tick_math import get_sqrt_price_at_tick_x128, int_to_u256_plaintext
 from .derivations import (
     BlindedIdentity,
-    derive_blinded_address,
-    derive_blinding_factor,
+    BlindedIdentityCache,
     derive_pool_key as _derive_pool_key,
     derive_tick_key as _derive_tick_key,
+    find_unused_counter_async,
 )
 from .errors import (
     InsufficientRecordsError,
@@ -56,6 +60,8 @@ from .types import (
     SwapExecution,
     SwapHandle,
 )
+
+_log = logging.getLogger(__name__)
 
 R = TypeVar("R")
 
@@ -250,18 +256,24 @@ class AsyncShieldSwap:
 
     # ── Async record/identity/imports helpers ───────────────────────────────
 
-    async def _next_blinded_identity(self, account: Any) -> BlindedIdentity:
-        network = self._aleo.network_name
-        scalar = str(account.view_key.to_scalar())
-        signer = str(account.address)
-        prog = await self._program(self.program)
-        mapping = prog.mapping("used_blinded_addresses")
-        for counter in range(64):
-            bf = derive_blinding_factor(scalar, counter, self.program, network=network)
-            ba = derive_blinded_address(bf, signer, self.program, network=network)
-            if (await mapping.get(ba)) in (None, "", "null", "false"):
-                return BlindedIdentity(counter, bf, ba)
-        raise ValueError(f"No unused blinded address in 64 counters for {self.program}")
+    async def _next_blinded_identity(self, account: Any, *,
+                                     start_counter: int = 0) -> BlindedIdentity:
+        """The sync client's probe, awaited: the same galloping search over
+        ``used_blinded_addresses`` (an account with a long swap history is
+        O(log n) probes, not a fixed 64-counter window that then gives up),
+        straight to the node's mapping endpoint — no program download."""
+        identities = BlindedIdentityCache(self._aleo.network_name, account, self.program)
+
+        async def is_used(counter: int) -> bool:
+            raw = await self._aleo.network.get_program_mapping_value(
+                self.program, "used_blinded_addresses", identities.at(counter).blinded_address)
+            return mapping_flag_set(raw)
+
+        try:
+            counter = await find_unused_counter_async(is_used, start_counter=start_counter)
+        except LookupError as exc:
+            raise ValueError(f"{exc} for {self.program} — wrong program or scan range?") from None
+        return identities.at(counter)
 
     async def _select_token_record(self, *, program: str, min_amount: int,
                                    token_id: Optional[str], account: Any) -> str:
@@ -485,9 +497,16 @@ class AsyncShieldSwap:
             address = str(acct.address)
         out: dict[str, int] = {}
         for program in dict.fromkeys(programs):
-            prog = await self._program(program)
-            raw = normalize_mapping_value(await prog.mapping("balances").get(address))
-            out[program] = parse_unsigned_literal(raw, program, address)
+            try:
+                raw = normalize_mapping_value(
+                    await self._aleo.network.get_program_mapping_value(program, "balances", address))
+                out[program] = parse_unsigned_literal(raw, program, address)
+            except (ProgramNotFound, ValueError) as exc:
+                _log.warning("get_public_balances: skipping %s — %s", program, exc)
+            except AleoNetworkError as exc:
+                if exc.status != 404:
+                    raise
+                _log.warning("get_public_balances: %s is not deployed here — skipped", program)
         return out
 
     async def get_private_balances(self, programs: list[str],
@@ -509,9 +528,12 @@ class AsyncShieldSwap:
         return out
 
     async def get_balances(self, address: Optional[str] = None,
-                           account: Any = None) -> dict[str, dict[str, Any]]:
+                           account: Any = None, *,
+                           include_private: bool = True) -> dict[str, dict[str, Any]]:
         """Public + private + total per token id, joined via the API's
-        token registry.  Defaults to the bound account's address; returns
+        token registry (``include_private=False`` skips the record scan —
+        see :meth:`ShieldSwap.get_balances`).  Defaults to the bound
+        account's address; returns
         only tokens actually held.
 
         Private balances can only be scanned for the bound account's view
@@ -535,9 +557,11 @@ class AsyncShieldSwap:
             if prog:
                 private_by_program[prog] = tok
         own_address = str(acct.address) if acct is not None else None
-        public = await self.get_public_balances(list(public_by_program), address=addr)
+        # Record scan first — see ShieldSwap.get_balances.
         private = (await self.get_private_balances(list(private_by_program), account=acct)
-                   if addr == own_address else {p: 0 for p in private_by_program})
+                   if include_private and addr == own_address
+                   else {p: 0 for p in private_by_program})
+        public = await self.get_public_balances(list(public_by_program), address=addr)
 
         out: dict[str, dict[str, Any]] = {}
 
@@ -565,6 +589,7 @@ class AsyncShieldSwap:
                    nonce: Optional[int] = None,
                    token_in_program: Optional[str] = None,
                    token_record: Optional[str] = None,
+                   identity: Optional[BlindedIdentity] = None,
                    wrapper_proofs: Optional[str] = None,
                    imports: Optional[dict[str, str]] = None,
                    account: Any = None) -> AsyncDexCall[SwapHandle]:
@@ -601,7 +626,8 @@ class AsyncShieldSwap:
             sqrt_price_limit=sqrt_price_limit)
         deadline = int(await self._aleo.network.get_latest_height()) + deadline_offset_blocks
         swap_nonce = nonce if nonce is not None else generate_swap_nonce()
-        identity = await self._next_blinded_identity(acct)
+        if identity is None:
+            identity = await self._next_blinded_identity(acct)
 
         record = token_record
         if record is None:

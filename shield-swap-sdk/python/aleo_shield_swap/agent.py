@@ -36,8 +36,11 @@ def _serialize(value: Any) -> Any:
 
 
 def _h_get_pools(dex: Any, args: dict[str, Any]) -> Any:
+    # The API's pool document carries the fee as ``fee_percent`` — a legacy
+    # name for the fee in basis points ("2" means 0.02%).  There is no ``fee``
+    # attribute on it; that lives on the chain-side PoolState.
     return [{"key": p.key, "token0": p.token0, "token1": p.token1,
-             "fee": p.fee,
+             "fee_bps": int(p.fee_percent),
              "token0_symbol": p.token0_info.symbol if p.token0_info else None,
              "token1_symbol": p.token1_info.symbol if p.token1_info else None}
             for p in dex.api.get_pools()]

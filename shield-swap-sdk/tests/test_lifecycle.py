@@ -50,6 +50,20 @@ class _StubApi:
     def create_api_token(self, name, expires_in_days=None):
         return type("T", (), {"token": f"ss_minted_{name[:12]}"})()
 
+    # Durable-token bookkeeping the credentials stage reclaims from.
+    tokens: list = []
+    revoked: list = []
+
+    def list_api_tokens(self):
+        return list(self.tokens)
+
+    def revoke_api_token(self, token_id):
+        self.revoked.append(token_id)
+        for row in self.tokens:
+            if row.id == token_id:
+                row.revoked_at = "now"
+        return type("R", (), {"id": token_id, "revoked": True})()
+
 
 class _StubDex:
     def __init__(self, api, balances, funded_from_start=False):
@@ -241,3 +255,37 @@ def test_credentials_stage_survives_the_api_token_cap(profile, dps_env):
     assert "token limit" in creds.detail and "session" in creds.detail
     assert "dex_api_token" not in profile.credentials
     assert report.funded is True
+
+
+def test_credentials_stage_reclaims_this_profiles_stale_token(profile, dps_env):
+    """At the cap, the stale tokens are usually this profile's own earlier
+    mints (same deterministic name, secret lost with the credentials):
+    revoke the oldest of those — never anyone else's — and mint again."""
+    from aleo_shield_swap.errors import DexApiError
+
+    api = _StubApi()
+    api._token = "jwt"
+    name = f"shield-swap-profile-{profile.address[:16]}"
+
+    def row(i, name_, created):
+        return type("Row", (), {"id": i, "name": name_, "created_at": created,
+                                "revoked_at": None})()
+
+    api.tokens = [row("newer", name, "2026-09-01"), row("older", name, "2026-08-01"),
+                  row("agent", "ss-agent-x", "2026-01-01")]
+    api.revoked = []
+    attempts = {"n": 0}
+
+    def create(name_, expires_in_days=None):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise DexApiError(400, '{"error":"active token limit reached (5); revoke one first"}')
+        return type("T", (), {"token": "ss_fresh"})()
+
+    api.create_api_token = create
+    dex = _StubDex(api, {"waleo.aleo": 7}, funded_from_start=True)
+    report = run_onboard(dex, profile)
+    creds = next(o for o in report.outcomes if o.name == "credentials")
+    assert api.revoked == ["older"]                  # oldest same-name token only
+    assert profile.credentials["dex_api_token"] == "ss_fresh"
+    assert "revoked" in creds.detail and "minted" in creds.detail

@@ -185,6 +185,16 @@ class _Network:
         return _Tx(self._recorder.delegated_fn,
                    self._recorder.delegated_program or PROGRAM_ID)
 
+    def get_program_mapping_value(self, program_id, mapping_name, key):
+        """The node's mapping endpoint: no program handle involved.  The
+        stub keys mappings by name only; a program listed in
+        ``missing_programs`` answers the node's 404."""
+        self._recorder.mapping_reads.append((program_id, mapping_name, key))
+        if program_id in self._recorder.missing_programs:
+            from aleo import AleoNetworkError
+            raise AleoNetworkError(f"GET /program/{program_id}/... returned 404", status=404)
+        return self._recorder._mappings.get(mapping_name, {}).get(key)
+
 
 class _Provider:
     def __init__(self, records):
@@ -208,7 +218,10 @@ class StubAleo:
         self.waited = []
         self.fetched_programs = []
         self.registered_programs = []
-        self.programs = _Programs(self, mappings or {})
+        self.mapping_reads = []
+        self.missing_programs = set()
+        self._mappings = mappings or {}
+        self.programs = _Programs(self, self._mappings)
         self.record_provider = _Provider(records if records is not None
                                          else [{"record_plaintext": RECORD_TEXT}])
         self.network = _Network(self)

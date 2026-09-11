@@ -174,7 +174,23 @@ def test_get_public_balances_reads_each_programs_balances_mapping():
     dex = ShieldSwap(aleo)
     out = dex.get_public_balances(["a.aleo", "b.aleo", "a.aleo"], address="aleo1x")
     assert out == {"a.aleo": 5, "b.aleo": 5}
-    assert aleo.fetched_programs == ["a.aleo", "b.aleo"]   # deduped, handle cached
+    # Deduped, and read through the node's mapping endpoint — no program
+    # source download per token.
+    assert aleo.mapping_reads == [("a.aleo", "balances", "aleo1x"),
+                                  ("b.aleo", "balances", "aleo1x")]
+    assert aleo.fetched_programs == []
+
+
+def test_get_public_balances_isolates_one_bad_program(caplog):
+    # A registry token whose program is not on this network (404) must not
+    # take every other token's balance down with it — it is skipped, logged.
+    aleo = StubAleo(mappings={"balances": {"aleo1x": "5u128"}})
+    aleo.missing_programs.add("gone.aleo")
+    dex = ShieldSwap(aleo)
+    with caplog.at_level("WARNING"):
+        out = dex.get_public_balances(["a.aleo", "gone.aleo", "b.aleo"], address="aleo1x")
+    assert out == {"a.aleo": 5, "b.aleo": 5}
+    assert "gone.aleo" in caplog.text and "not deployed" in caplog.text
 
 
 def test_get_public_balances_absent_entry_is_zero_and_defaults_to_the_account():
@@ -185,10 +201,12 @@ def test_get_public_balances_absent_entry_is_zero_and_defaults_to_the_account():
         ShieldSwap(aleo).get_public_balances(["a.aleo"])
 
 
-def test_get_public_balances_rejects_a_non_arc20_value():
+def test_get_public_balances_skips_a_non_arc20_value(caplog):
     aleo = StubAleo(mappings={"balances": {"aleo1x": "{ a: 1u8 }"}})
-    with pytest.raises(ValueError, match="unsigned integer literal"):
-        ShieldSwap(aleo).get_public_balances(["odd.aleo"], address="aleo1x")
+    with caplog.at_level("WARNING"):
+        out = ShieldSwap(aleo).get_public_balances(["odd.aleo"], address="aleo1x")
+    assert out == {}                                  # skipped, not raised
+    assert "odd.aleo" in caplog.text and "unsigned integer literal" in caplog.text
 
 
 def test_get_balances_joins_chain_public_with_record_private():

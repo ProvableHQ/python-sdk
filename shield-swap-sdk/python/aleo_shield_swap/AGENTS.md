@@ -566,7 +566,7 @@ Raises:
     ValueError: If the header names a hop the node did not return —
         a node lagging its own finalize; retry.
 
-### `get_balances(self, address: 'Optional[str]' = None, account: 'Any' = None) -> 'dict[str, dict[str, Any]]'`
+### `get_balances(self, address: 'Optional[str]' = None, account: 'Any' = None, *, include_private: 'bool' = True) -> 'dict[str, dict[str, Any]]'`
 
 Public + private + total per token id, joined via the API's
 token registry.  Defaults to the bound account's address; returns
@@ -575,26 +575,19 @@ only tokens actually held.
 Private balances can only be scanned for the bound account's view
 key — when *address* names someone else, ``private`` is 0 for every
 token (their records are not scannable) rather than silently mixing
-in the caller's own private holdings.
+in the caller's own private holdings.  ``include_private=False``
+skips the record scan (public only — before scanner credentials).
 
 ### `get_public_balances(self, programs: 'list[str]', address: 'Optional[str]' = None) -> 'dict[str, int]'`
 
-Public balances per token program, read from each program's
-on-chain ``balances`` mapping (keyed by plain address — one mapping
-read per program, any address).  The public counterpart to
-:meth:`get_private_balances`.  Pass the registry's
-``amm_token_program`` values; an absent entry reads as ``0``.
-
-Args:
-    programs: Token programs to read; duplicates are read once.
-    address: Whose balances; defaults to the bound account's.
-
-Returns:
-    Raw base-unit balances keyed by program.
-
-Raises:
-    ValueError: No address available, or a value that is not an
-        unsigned-integer literal (the mapping is not ARC-20 shaped).
+Public balances per token program from each program's on-chain
+``balances`` mapping (plain-address key; one read per program, any
+address) — the public counterpart to :meth:`get_private_balances`.
+Pass the registry's ``amm_token_program`` values.  Raw base units
+keyed by program; an absent entry reads as ``0``.  A program this
+network lacks, or a non-ARC-20 value, is skipped with a warning
+rather than failing every other token.  *address* defaults to the
+bound account's (ValueError when there is none).
 
 ### `get_private_balances(self, programs: 'list[str]', account: 'Any' = None) -> 'dict[str, int]'`
 

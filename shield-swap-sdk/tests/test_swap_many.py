@@ -252,8 +252,49 @@ def test_swap_many_skips_counters_already_used_on_chain(dex, monkeypatch):
     assert [h.swap_id for h in report.handles] == ["s5", "s6", "s8"]
     assert report.failures == []
     assert dex.journal.counter_cursor() == 9
-    # The skipped-used counter 7 is burned in the journal, never reissued.
-    assert 7 in {e.get("counter") for e in dex.journal.events() if e["type"] == "swap_failed"}
+    # The used run 0..4 is retired in one counters_skipped event; nothing is
+    # logged as a swap failure, because nothing failed.
+    events = dex.journal.events()
+    assert [e["type"] for e in events if e["type"] == "swap_failed"] == []
+    assert any(e["type"] == "counters_skipped" and e["through"] == 4 for e in events)
+
+
+def test_reserve_identities_gallops_when_the_journal_is_behind(dex, monkeypatch):
+    """A journal at cursor 5 for an account that has since swapped 300 times
+    elsewhere (another machine, the async client, track=False) must find the
+    free run in O(log n) probes and retire the used run in one event — not
+    burn ~300 counters one reserve-probe-append at a time."""
+    probes = []
+
+    def used(self, ba):
+        probes.append(ba)
+        return int(ba[2:]) <= 300
+
+    monkeypatch.setattr(ShieldSwap, "_blinded_address_used", used)
+    dex.journal.reserve_counters(5)                  # journal believes 0..4 are issued
+    idents = dex._reserve_identities(object(), 2)
+    assert [i.counter for i in idents] == [301, 302]
+    assert len(probes) < 90                          # 64-window + gallop + bisect, not ~300
+    events = dex.journal.events()
+    assert [e for e in events if e["type"] == "swap_failed"] == []
+    assert any(e["type"] == "counters_skipped" and e["through"] == 300 for e in events)
+    assert dex.journal.counter_cursor() == 303
+
+
+def test_swap_many_scanner_retry_does_not_sleep_after_the_last_attempt(dex, monkeypatch):
+    sleeps = []
+    monkeypatch.setattr("aleo_shield_swap.client.time.sleep", lambda s: sleeps.append(s))
+
+    class _Down:
+        def find(self, *a, **k):
+            raise ConnectionError("scanner down")
+
+    dex._aleo.record_provider = _Down()
+    fake, _ = _fake_swap_factory()
+    monkeypatch.setattr(ShieldSwap, "swap", fake)
+    with pytest.raises(ConnectionError):
+        dex.swap_many(pool_key="1field", token_in_id="t0", amount_in=5, count=1)
+    assert sleeps == [3.0, 6.0]                      # back-off between tries, none after the last
 
 
 def test_reserve_identities_is_shared_by_single_swaps(dex, monkeypatch):

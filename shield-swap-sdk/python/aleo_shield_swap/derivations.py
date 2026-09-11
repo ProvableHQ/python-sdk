@@ -173,33 +173,48 @@ def next_blinded_identity(
     With ``gallop=False`` the linear window is the whole search and
     exhausting it raises — the fail-fast for a systematically wrong program.
     """
-    network = aleo.network_name
-    scalar = str(account.view_key.to_scalar())
-    signer = str(account.address)
-    mapping = aleo.programs.get(program).mapping("used_blinded_addresses")
-    cache: dict[int, BlindedIdentity] = {}
+    from ._core import mapping_flag_set, read_mapping_value
 
-    def identity(counter: int) -> BlindedIdentity:
-        if counter not in cache:
-            bf = derive_blinding_factor(scalar, counter, program, network=network)
-            cache[counter] = BlindedIdentity(
-                counter, bf, derive_blinded_address(bf, signer, program, network=network))
-        return cache[counter]
+    identities = BlindedIdentityCache(aleo.network_name, account, program)
 
     def is_used(counter: int) -> bool:
-        return mapping.get(identity(counter).blinded_address) not in (None, "", "null", "false")
+        # Straight to the node's mapping endpoint: no program download per
+        # probe (this is the path every journal-less swap takes).
+        return mapping_flag_set(read_mapping_value(
+            aleo, program, "used_blinded_addresses", identities.at(counter).blinded_address))
 
     try:
         counter = find_unused_counter(is_used, start_counter=start_counter,
                                       max_scan=max_scan, gallop=gallop)
     except LookupError as exc:
         raise ValueError(f"{exc} for {program} — wrong program or scan range?") from None
-    return identity(counter)
+    return identities.at(counter)
 
 
-def find_unused_counter(is_used: Any, *, start_counter: int = 0,
-                        max_scan: int = 64, gallop: bool = True) -> int:
-    """The lowest-effort unused counter given an ``is_used(counter)`` probe.
+class BlindedIdentityCache:
+    """Derive-once identities for one (account, program) during a search."""
+
+    def __init__(self, network: str, account: Any, program: str) -> None:
+        self._network = network
+        self._scalar = str(account.view_key.to_scalar())
+        self._signer = str(account.address)
+        self._program = program
+        self._cache: dict[int, BlindedIdentity] = {}
+
+    def at(self, counter: int) -> BlindedIdentity:
+        if counter not in self._cache:
+            bf = derive_blinding_factor(self._scalar, counter, self._program,
+                                        network=self._network)
+            self._cache[counter] = BlindedIdentity(
+                counter, bf,
+                derive_blinded_address(bf, self._signer, self._program, network=self._network))
+        return self._cache[counter]
+
+
+def _unused_counter_search(start_counter: int, max_scan: int, gallop: bool):
+    """The search as a generator: yields the counter to probe, receives
+    whether it is used, and returns the chosen counter.  One algorithm drives
+    both :func:`find_unused_counter` and :func:`find_unused_counter_async`.
 
     Linear over ``[start_counter, start_counter + max_scan)`` first; when that
     whole window is used and *gallop* is on, doubles the stride past it until
@@ -207,13 +222,9 @@ def find_unused_counter(is_used: Any, *, start_counter: int = 0,
     that span — O(log n) probes for an account with a long swap history.  Any
     free counter is acceptable (a gap left by a failed swap included), so the
     result is SOME unused counter, not necessarily the end of the used run.
-
-    Raises:
-        LookupError: If the window is exhausted with *gallop* off, or the
-            gallop exceeds 2^24 counters (a systematically wrong probe).
     """
     for counter in range(start_counter, start_counter + max_scan):
-        if not is_used(counter):
+        if not (yield counter):
             return counter
     if not gallop:
         raise LookupError(
@@ -226,17 +237,49 @@ def find_unused_counter(is_used: Any, *, start_counter: int = 0,
         if hi - start_counter > 1 << 24:
             raise LookupError(
                 f"No unused blinded address in counters [{start_counter}, {hi})")
-        if not is_used(hi):
+        if not (yield hi):
             break
         lo, stride = hi, stride * 2
     # Bisect (lo used, hi free) down to the lowest free counter in the span.
     while hi - lo > 1:
         mid = (lo + hi) // 2
-        if is_used(mid):
+        if (yield mid):
             lo = mid
         else:
             hi = mid
     return hi
+
+
+def find_unused_counter(is_used: Any, *, start_counter: int = 0,
+                        max_scan: int = 64, gallop: bool = True) -> int:
+    """The lowest-effort unused counter given an ``is_used(counter)`` probe.
+
+    See :func:`_unused_counter_search` for the strategy.
+
+    Raises:
+        LookupError: If the window is exhausted with *gallop* off, or the
+            gallop exceeds 2^24 counters (a systematically wrong probe).
+    """
+    search = _unused_counter_search(start_counter, max_scan, gallop)
+    try:
+        counter = next(search)
+        while True:
+            counter = search.send(bool(is_used(counter)))
+    except StopIteration as done:
+        return done.value
+
+
+async def find_unused_counter_async(is_used: Any, *, start_counter: int = 0,
+                                    max_scan: int = 64, gallop: bool = True) -> int:
+    """:func:`find_unused_counter` for an ``async def is_used(counter)`` probe —
+    the same search, so the sync and async clients cannot drift apart."""
+    search = _unused_counter_search(start_counter, max_scan, gallop)
+    try:
+        counter = next(search)
+        while True:
+            counter = search.send(bool(await is_used(counter)))
+    except StopIteration as done:
+        return done.value
 
 
 def blinded_identity_at(

@@ -122,6 +122,13 @@ class _AsyncNetwork:
         return _Tx(self._recorder.delegated_fn,
                    self._recorder.delegated_program or PROGRAM_ID)
 
+    async def get_program_mapping_value(self, program_id, mapping_name, key):
+        self._recorder.mapping_reads.append((program_id, mapping_name, key))
+        if program_id in self._recorder.missing_programs:
+            from aleo import AleoNetworkError
+            raise AleoNetworkError("404", status=404)
+        return self._recorder._mappings.get(mapping_name, {}).get(key)
+
 
 class _AsyncProvider:
     def __init__(self, records):
@@ -142,7 +149,10 @@ class AsyncStubAleo:
         self.submitted = []
         self.waited = []
         self.registered_programs = []
-        self.programs = _AsyncPrograms(self, mappings or {})
+        self.mapping_reads = []
+        self.missing_programs = set()
+        self._mappings = mappings or {}
+        self.programs = _AsyncPrograms(self, self._mappings)
         self.record_provider = _AsyncProvider(
             records if records is not None else [{"record_plaintext": RECORD_TEXT}])
         self.network = _AsyncNetwork(self)
@@ -291,3 +301,40 @@ async def test_async_public_balances_are_chain_reads():
     aleo.default_account = None
     with pytest.raises(ValueError):
         await dex.get_public_balances(["a.aleo"])
+
+
+async def test_async_identity_probe_gallops_past_a_long_used_run():
+    """The async client shares the sync client's galloping search: an account
+    with 70 swaps on chain gets counter 70 in a short gallop, not a
+    ValueError after a fixed 64-counter window — and never downloads the
+    program to do it."""
+    from aleo_shield_swap.derivations import BlindedIdentityCache
+    acct = StubAccount()
+    dex_program = AsyncShieldSwap(AsyncStubAleo()).program
+    cache = BlindedIdentityCache("testnet", acct, dex_program)
+    used = {cache.at(c).blinded_address: "true" for c in range(70)}
+    aleo = AsyncStubAleo(mappings={"used_blinded_addresses": used})
+    ident = await AsyncShieldSwap(aleo)._next_blinded_identity(acct)
+    assert ident.counter == 70 and ident.blinded_address == cache.at(70).blinded_address
+    probes = [r for r in aleo.mapping_reads if r[1] == "used_blinded_addresses"]
+    assert 64 < len(probes) < 80
+    assert all(r[0] == dex_program for r in probes)
+
+
+async def test_async_swap_takes_an_explicit_identity(astub):
+    from aleo_shield_swap.derivations import BlindedIdentity
+    dex = AsyncShieldSwap(astub)
+    ident = BlindedIdentity(9, "bf9", BLINDED_ADDRESS_0)
+    await dex.swap(pool_key="5field", token_in_id="1field", amount_in=10**9, nonce=1,
+                   expected_out=1_000_000, token_in_program="tok.aleo", identity=ident)
+    _, args = astub.last_call
+    assert args[1] == "bf9"                          # the caller's identity, verbatim
+    assert not [r for r in astub.mapping_reads if r[1] == "used_blinded_addresses"]
+
+
+async def test_async_public_balances_isolate_one_bad_program(caplog):
+    aleo = AsyncStubAleo(mappings={"balances": {"aleo1x": "9u64"}})
+    aleo.missing_programs.add("gone.aleo")
+    with caplog.at_level("WARNING"):
+        out = await AsyncShieldSwap(aleo).get_public_balances(["a.aleo", "gone.aleo"], address="aleo1x")
+    assert out == {"a.aleo": 9} and "gone.aleo" in caplog.text

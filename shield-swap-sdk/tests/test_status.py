@@ -64,3 +64,20 @@ def test_status_survives_unauthenticated_api(dex, monkeypatch):
     monkeypatch.setattr(dex, "get_balances", lambda: {})
     st = dex.status()                      # no token set
     assert st.authenticated is False and st.has_access is None
+
+
+def test_status_falls_back_to_public_only_when_the_scan_fails(dex, monkeypatch):
+    # No scanner credentials yet: the private scan raises inside get_balances,
+    # status() retries public-only — one shape, built in one place.
+    calls = []
+
+    def fake(include_private=True):
+        calls.append(include_private)
+        if include_private:
+            raise RuntimeError("scanner not registered")
+        return {"tok": {"symbol": "T", "decimals": 6, "public": 5, "private": 0, "total": 5}}
+
+    monkeypatch.setattr(dex, "get_balances", fake)
+    st = dex.status()
+    assert calls == [True, False]
+    assert st.balances["tok"]["total"] == 5 and st.balances["tok"]["private"] == 0

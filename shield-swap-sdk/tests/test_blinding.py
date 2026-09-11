@@ -80,17 +80,23 @@ class _StubAleo:
 
     def __init__(self, used):
         mapping = _Mapping(used)
-
-        class _Prog:
-            def mapping(self, name):
-                assert name == "used_blinded_addresses"
-                return mapping
+        self.probes = 0
+        stub = self
 
         class _Programs:
             def get(self, pid):
-                return _Prog()
+                # The probe must never download the program: it costs a
+                # 1.4 MB fetch+parse per swap on the journal-free path.
+                raise AssertionError("next_blinded_identity fetched the program source")
+
+        class _Network:
+            def get_program_mapping_value(self, program_id, mapping_name, key):
+                assert mapping_name == "used_blinded_addresses"
+                stub.probes += 1
+                return mapping.get(key)
 
         self.programs = _Programs()
+        self.network = _Network()
 
 
 class _StubAccount:
@@ -141,14 +147,10 @@ def test_next_blinded_identity_gallops_past_a_long_used_run():
     'No unused blinded address in counters [0, 64)'."""
     used = _used_through(300)
     stub = _StubAleo(used=used)
-    probes = []
-    inner = stub.programs.get("x").mapping("used_blinded_addresses").get
-    stub.programs.get("x").mapping("used_blinded_addresses").get = \
-        lambda key: probes.append(key) or inner(key)
     ident = next_blinded_identity(stub, _StubAccount(), max_scan=8)
     assert ident.counter == 300
     assert ident.blinded_address not in used
-    assert len(probes) < 8 + 2 * 12          # window + gallop + bisection, not 300
+    assert stub.probes < 8 + 2 * 12          # window + gallop + bisection, not 300
 
 
 def test_next_blinded_identity_gallop_takes_a_gap_not_just_the_end():

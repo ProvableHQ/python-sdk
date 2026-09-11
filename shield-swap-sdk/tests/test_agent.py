@@ -188,3 +188,18 @@ def test_dispatch_get_swap_execution():
     json.dumps(out)
     assert dispatch_tool(type("D", (), {"get_swap_execution": lambda self, s: None})(),
                          "get_swap_execution", {"swap_id": "1field"}) is None
+
+
+def test_get_pools_tool_reads_the_api_pool_document():
+    """The API pool document carries the fee as ``fee_percent`` (basis
+    points) and has no ``fee`` attribute — the tool must not reach for one
+    (it did, and broke against the live API until the live suite caught it)."""
+    from types import SimpleNamespace as NS
+    from aleo_shield_swap.agent import dispatch_tool
+    entry = NS(key="5field", token0="1field", token1="2field", fee_percent="30",
+               token0_info=NS(symbol="ETH"), token1_info=None)
+    dex = NS(api=NS(get_pools=lambda: [entry]))
+    out = dispatch_tool(dex, "get_pools", {})
+    assert out == [{"key": "5field", "token0": "1field", "token1": "2field",
+                    "fee_bps": 30, "token0_symbol": "ETH", "token1_symbol": None}]
+    json.dumps(out)

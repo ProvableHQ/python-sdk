@@ -293,3 +293,43 @@ def test_referral_issuance_surface(authed):
         raise
     assert len(codes) == 1 and len(codes[0]) == 10
     assert any(r.code == codes[0] for r in authed.list_referral_codes(limit=5).codes)
+
+
+# ── referral reporting (best-effort analytics posts) and set_token ──────────
+
+def test_set_token_adopts_a_bearer_that_the_server_then_judges(api):
+    client = ApiClient(api_url_for("testnet"))
+    assert not client.is_authenticated
+    client.set_token("ss_not_a_real_token")
+    assert client.is_authenticated                 # held locally …
+    with pytest.raises(NotAuthenticatedError):     # … rejected server-side
+        client.get_fee_tiers()
+
+
+@account_tier
+def test_referral_reporting_posts_record_attribution(authed):
+    """activity → recorded; swap-claim → recorded; the batch form reports the
+    repeat as a duplicate.  Attribution rows only — nothing on chain."""
+    # Swap-claim attribution names the code THIS account redeemed (its
+    # referrer's), not the code it hands out — the server rejects the latter
+    # with "code does not match the redeemed code".
+    code = authed.referral_status().code
+    if not code:
+        pytest.skip("the e2e account has not redeemed a referral code")
+    trades = authed.get_pool_trades(authed.get_pools()[0].key, limit=1)
+    tx_id = trades[0].transactionHash if trades else "at1" + "q" * 58
+    try:
+        activity = authed.report_referral_activity(action="create_pool", tx_id=tx_id,
+                                                   metadata={"source": "py-itest"})
+    except DexApiError as exc:
+        if exc.status in (400, 403):
+            pytest.skip(f"activity reporting not accepted for this account: {exc.body[:80]}")
+        raise
+    assert isinstance(activity.recorded, bool)
+    blinded = str(aleo.testnet.PrivateKey.random().address)
+    claim = authed.report_referral_swap_claim(code=code, blinded_address=blinded)
+    assert isinstance(claim.recorded, bool)
+    other = str(aleo.testnet.PrivateKey.random().address)
+    batch = authed.report_referral_address_batch(code=code, blinded_addresses=[blinded, other])
+    assert batch.recorded + batch.duplicate + batch.conflict == 2
+    assert batch.duplicate >= 1                    # the address already claimed above
