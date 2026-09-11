@@ -371,3 +371,21 @@ def test_cap_held_onboarding_is_a_noop_until_the_retry_window_passes(profile, dp
     assert next(o for o in third.outcomes if o.name == "credentials").action == "ran"
     assert profile.credentials["dex_api_token"] == "ss_fresh"
     assert "dex_api_token_cap_hit" not in profile.credentials
+
+
+def test_consumer_provisioning_posts_to_the_api_origin(monkeypatch):
+    """The profile endpoint may be a node base with a path; consumer
+    registration lives at the origin, so the path must be dropped."""
+    from aleo_shield_swap.lifecycle import provision_provable_credentials
+    seen = []
+
+    class _Resp:
+        status_code = 200
+
+        def json(self):
+            return {"key": "k", "consumer": {"id": "c"}}
+
+    monkeypatch.setattr("requests.post", lambda url, **kw: seen.append(url) or _Resp())
+    assert provision_provable_credentials("https://api.provable.com/v2/testnet/", "u") == ("k", "c")
+    assert provision_provable_credentials("https://api.provable.com", "u") == ("k", "c")
+    assert seen == ["https://api.provable.com/consumers"] * 2

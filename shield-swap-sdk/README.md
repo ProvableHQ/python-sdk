@@ -27,9 +27,9 @@ Wrapped assets (ALEO/USAD/USDCx) **route automatically** through the swap/LP
 routers — fund them with *underlying* records (`credits.aleo` / stablecoin);
 you never handle wrapper records. `mint` stores an immutable `withdrawal`
 address on the position NFT (defaults to the recipient) and `collect` always
-pays it — decide the payout wallet at mint time. The off-chain API default is
-the staging host `https://amm-api-staging.dev.provable.com` (override with
-`SHIELD_SWAP_API_URL`).
+pays it — decide the payout wallet at mint time. The off-chain API is
+selected per network — `https://api.testnet.swap.shield.fi` for testnet,
+`https://api.swap.shield.fi` for mainnet (override with `SHIELD_SWAP_API_URL`).
 
 ## Install
 

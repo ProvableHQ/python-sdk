@@ -229,8 +229,14 @@ def decode_position_record(plaintext: str) -> Optional[dict[str, Any]]:
     return decoded if all(f in decoded for f in POSITION_RECORD_FIELDS) else None
 
 
-def find_position_plaintext(records: Any, pool_key: str) -> Optional[str]:
-    """First unspent PositionNFT plaintext whose ``pool`` matches, or None.
+def find_position_plaintext(records: Any, pool_key: str,
+                            position_token_id: Optional[str] = None) -> Optional[str]:
+    """The unspent PositionNFT plaintext for *pool_key*, or None.
+
+    With *position_token_id* the record must carry that token id — an account
+    holding several positions in one pool must not have a write verb pair a
+    plan for one position with another position's NFT (a guaranteed revert
+    after the proof is paid for).  Without it, the first position in the pool.
 
     Uses :func:`decode_position_record`, so a record of another type that
     happens to carry a matching ``pool`` field is not returned as a position.
@@ -240,8 +246,11 @@ def find_position_plaintext(records: Any, pool_key: str) -> Optional[str]:
         if not plaintext:
             continue
         decoded = decode_position_record(plaintext)
-        if decoded is not None and decoded.get("pool") == pool_key:
-            return plaintext
+        if decoded is None or decoded.get("pool") != pool_key:
+            continue
+        if position_token_id is not None and str(decoded.get("token_id")) != str(position_token_id):
+            continue
+        return plaintext
     return None
 
 

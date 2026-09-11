@@ -130,9 +130,14 @@ def provision_provable_credentials(endpoint: str, username: str) -> tuple[str, s
     import secrets
 
     import requests
+    from aleo._client_common import jwt_origin
 
+    # *endpoint* may be the API origin or a node base such as
+    # ``https://api.provable.com/v2/testnet``; consumer registration lives at
+    # the origin, so any path is dropped (``/v2/testnet/consumers`` is 404).
+    origin = jwt_origin(endpoint)
     for name in (username, f"{username}-{secrets.token_hex(4)}"):
-        resp = requests.post(f"{endpoint.rstrip('/')}/consumers",
+        resp = requests.post(f"{origin}/consumers",
                              json={"username": name}, timeout=30.0)
         if 200 <= resp.status_code < 300:
             data = resp.json()

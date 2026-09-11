@@ -289,10 +289,11 @@ class AsyncShieldSwap:
                 f"(token_id={token_id or 'any'}) — privatize funds or pass token_record=.")
         return chosen
 
-    async def _select_position_record(self, pool_key: str, account: Any) -> str:
+    async def _select_position_record(self, pool_key: str, account: Any,
+                                      position_token_id: Optional[str] = None) -> str:
         records = await self._aleo.record_provider.find(
             account, program=self.program, unspent=True)
-        plaintext = find_position_plaintext(records, pool_key)
+        plaintext = find_position_plaintext(records, pool_key, position_token_id)
         if plaintext is None:
             raise InsufficientRecordsError(
                 f"No unspent PositionNFT record for pool {pool_key}.")

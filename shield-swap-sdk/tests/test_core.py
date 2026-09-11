@@ -191,3 +191,23 @@ def test_find_position_plaintext_rejects_a_lookalike_record():
                 "tick_lower: -60i32.private, tick_upper: 60i32.private }")
     recs = [{"record_plaintext": lookalike}, {"record_plaintext": position}]
     assert find_position_plaintext(recs, "5field") == position
+
+
+def test_find_position_plaintext_selects_by_token_id_within_a_pool():
+    """Two positions in one pool: a write verb given a token id must get THAT
+    NFT, not the first one for the pool — pairing a rebalance plan with the
+    wrong record is a guaranteed revert after the proof is paid for."""
+    from aleo_shield_swap._core import find_position_plaintext
+
+    def pos(token_id):
+        return ("{ owner: aleo1x.private, withdrawal: aleo1y.private, "
+                f"token_id: {token_id}.private, token0_id: 2field.private, "
+                "token1_id: 3field.private, pool: 5field.private, "
+                "tick_lower: -60i32.private, tick_upper: 60i32.private }")
+
+    first, second = pos("1field"), pos("9field")
+    recs = [{"record_plaintext": first}, {"record_plaintext": second}]
+    assert find_position_plaintext(recs, "5field") == first                      # legacy: first in pool
+    assert find_position_plaintext(recs, "5field", "9field") == second
+    assert find_position_plaintext(recs, "5field", "7field") is None             # not held → None, never a substitute
+    assert find_position_plaintext(recs, "6field", "9field") is None             # pool must match too

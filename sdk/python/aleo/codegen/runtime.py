@@ -166,3 +166,18 @@ def fmt_array(v: object, encode_one: Callable[[Any], str], length: int) -> str:
     if len(items) != length:
         raise ValueError(f"Expected a list of length {length}, got length {len(items)}")
     return "[" + ", ".join(encode_one(x) for x in items) + "]"
+
+
+def dec_array(v: object, decode_one: Callable[[Any], Any], length: int) -> list[Any]:
+    """Decode a fixed-length Aleo array, enforcing the ABI's declared length.
+
+    The mirror of :func:`fmt_array`: a ``[field; 16]`` decoded from plaintext
+    must hold exactly 16 elements, or the value is not the declared type and
+    the generated dataclass would carry a shape the program rejects.
+    """
+    if not isinstance(v, list):
+        raise ValueError(f"Expected an array of length {length}, got {type(v).__name__}")
+    items = cast("list[Any]", v)
+    if len(items) != length:
+        raise ValueError(f"Expected an array of length {length}, got length {len(items)}")
+    return [decode_one(x) for x in items]

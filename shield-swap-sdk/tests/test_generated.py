@@ -72,3 +72,13 @@ def test_mint_request_encodes():
     text = g.MintPositionRequest(**req_kwargs).to_plaintext()
     assert text.startswith("{ ") and text.endswith(" }")
     assert g.MintPositionRequest.from_plaintext(text) == g.MintPositionRequest(**req_kwargs)
+
+
+def test_merkle_proof_rejects_the_wrong_number_of_siblings():
+    # `[field; 16]` both ways: a 15-sibling proof is not a MerkleProof.
+    import pytest
+    short = "{ siblings: [" + ", ".join(["0field"] * 15) + "], leaf_index: 1u32 }"
+    with pytest.raises(ValueError, match="length 16"):
+        g.MerkleProof.from_plaintext(short)
+    with pytest.raises(ValueError, match="length 16"):
+        g.MerkleProof(siblings=["0field"] * 15, leaf_index=1).to_plaintext()

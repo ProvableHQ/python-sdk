@@ -1487,7 +1487,8 @@ class ShieldSwap:
             pool_key, position_token_id = plan.pool_key, plan.position_token_id
         assert pool_key is not None
         pool = self.get_pool(pool_key)
-        position = position_record or self._select_position_record(pool_key, acct)
+        position = position_record or self._select_position_record(
+            pool_key, acct, position_token_id=position_token_id)
         decoded = parse_plaintext(position)
         if position_token_id is None:
             position_token_id = str(decoded["token_id"])
@@ -1604,12 +1605,13 @@ class ShieldSwap:
 
         return DexCall(self._aleo, bound, build_result)
 
-    def _select_position_record(self, pool_key: str, account: Any) -> str:
+    def _select_position_record(self, pool_key: str, account: Any,
+                                position_token_id: Optional[str] = None) -> str:
         """Unspent PositionNFT plaintext for *pool_key* from the shield_swap
         program's own records."""
         records = self._aleo.record_provider.find(
             account, program=self.program, unspent=True)
-        plaintext = find_position_plaintext(records, pool_key)
+        plaintext = find_position_plaintext(records, pool_key, position_token_id)
         if plaintext is None:
             raise InsufficientRecordsError(
                 f"No unspent PositionNFT record for pool {pool_key} — mint "

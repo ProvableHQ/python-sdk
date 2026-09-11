@@ -78,13 +78,15 @@ def resolve_ty(ty: Any) -> PyType:
     if isinstance(ty, dict) and "Array" in ty:
         elem = resolve_ty(ty["Array"]["element"])
         length = int(ty["Array"]["length"])
-        needs_decode = elem.decode_expr("_x") != "_x"
+        # Both directions enforce the declared length: encoding via fmt_array,
+        # decoding via dec_array — a `[field; 16]` with 15 siblings is not the
+        # declared type, whichever way it travels.
         return PyType(
             f"list[{elem.annotation}]",
             lambda e, el=elem, n=length:
                 f"fmt_array({e}, lambda _x: {el.encode_expr('_x')}, {n})",
-            (lambda e, el=elem: f"[{el.decode_expr('_x')} for _x in {e}]")
-            if needs_decode else (lambda e: e),
+            lambda e, el=elem, n=length:
+                f"dec_array({e}, lambda _x: {el.decode_expr('_x')}, {n})",
         )
     raise ValueError(f"Unsupported ABI type: {ty!r}")
 
@@ -136,7 +138,7 @@ _IMPORTS = (
     "from dataclasses import dataclass\n"
     "from typing import Any, Callable, Optional\n"
     "from aleo.codegen.runtime import (parse_plaintext, fmt_int, fmt_bool,"
-    " fmt_fieldlike, fmt_address, fmt_array)\n\n"
+    " fmt_fieldlike, fmt_address, fmt_array, dec_array)\n\n"
 )
 
 

@@ -172,3 +172,23 @@ def test_array_of_structs_decodes_elementwise():
     o = ns["Outer"].from_plaintext("{ pair: [{ x: 1u8 }, { x: 2u8 }] }")
     assert o.pair == [ns["Inner"](x=1), ns["Inner"](x=2)]
     assert o.to_plaintext() == "{ pair: [{ x: 1u8 }, { x: 2u8 }] }"
+
+
+def test_array_decode_enforces_the_declared_length():
+    """Decoding must reject a `[field; 3]` carrying two elements, just as
+    encoding does — otherwise MerkleProof-style dataclasses accept any number
+    of siblings and the program rejects the value later."""
+    import pytest
+    abi = {
+        "program": "arr_test.aleo",
+        "structs": [{"path": ["MerkleProof"], "fields": [
+            {"name": "siblings", "ty": {"Array": {"element": {"Primitive": "Field"}, "length": 3}}},
+        ]}],
+        "records": [], "mappings": [], "functions": [],
+    }
+    ns: dict = {}
+    exec(compile(emit_module(abi), "<gen>", "exec"), ns)
+    with pytest.raises(ValueError, match="length 3"):
+        ns["MerkleProof"].from_plaintext("{ siblings: [0field, 1field] }")
+    with pytest.raises(ValueError, match="length 3"):
+        ns["MerkleProof"](siblings=["0field"] * 4).to_plaintext()
