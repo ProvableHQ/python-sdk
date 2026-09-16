@@ -158,10 +158,20 @@ class Progress:
 
 def to_progress(plan: Plan, receipt: Receipt) -> Progress:
     """brief §2.5: SOURCE_SUBMISSION_PENDING→resume, DESTINATION_ACTION_REQUIRED→complete, COMPLETED→done,
-    FAILED|EXPIRED→failed, everything else→wait."""
+    FAILED|EXPIRED→failed, everything else→wait. For FAILED|EXPIRED, derive error from protocol_state."""
     if "routeId" not in receipt.protocol_state:
         raise ValueError("Receipt.protocol_state must carry routeId")
-    return Progress(_NEXT_BY_STATUS.get(Status(receipt.status), "wait"), plan, receipt)
+    status = Status(receipt.status)
+    next_val = _NEXT_BY_STATUS.get(status, "wait")
+
+    # Derive error for terminal failure states
+    error = None
+    if status in {Status.FAILED, Status.EXPIRED}:
+        error = (receipt.protocol_state.get("destinationError") or
+                 receipt.protocol_state.get("sourceError") or
+                 f"Bridge transfer ended in {status.value}")
+
+    return Progress(next_val, plan, receipt, error=error)
 
 
 @dataclass(frozen=True)

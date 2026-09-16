@@ -15,8 +15,12 @@ from .errors import (  # noqa: E402
     RegistryVersionMismatchError, RouteNotFoundError, RouteUnavailableError, UnsupportedRouteError,
 )
 from .registry import DEFAULT_REGISTRY, Asset, Chain, Locator, Privacy, Registry, Route, validate_registry  # noqa: E402
-from .types import (Attestation, BridgeStatus, BurnReceipt, ChainStatus, DepositReceipt, DispatchReceipt, Fee, GasQuote,  # noqa: E402
-                    MintReceipt, Plan, PreparedTx, PrivacyReceipt, Progress, Quote, Receipt, Status, Step, to_progress)
+from .types import (  # noqa: E402
+    CALLER_BOUNDARIES, TERMINAL, AleoHyperlaneQuote, AleoXReserveQuote, Attestation, BridgeStatus, BurnReceipt,
+    ChainStatus, DepositReceipt, DispatchReceipt, EvmHyperlaneQuote, EvmXReserveQuote, Fee, GasQuote,
+    MintReceipt, Plan, PreparedTx, PrivacyReceipt, Progress, Quote, Receipt, SolanaHyperlaneQuote, Status, Step,
+    to_progress,
+)
 
 __all__ = [
     "__version__", "AmbiguousRouteError", "AttestationError", "BridgeError", "ChainMismatchError",
@@ -25,6 +29,8 @@ __all__ = [
     "PollingTimeoutError", "RegistryVersionMismatchError", "RouteNotFoundError", "RouteUnavailableError",
     "UnsupportedRouteError",
     "Asset", "Chain", "DEFAULT_REGISTRY", "Locator", "Privacy", "Registry", "Route", "validate_registry",
-    "Attestation", "BridgeStatus", "BurnReceipt", "ChainStatus", "DepositReceipt", "DispatchReceipt", "Fee", "GasQuote",
-    "MintReceipt", "Plan", "PreparedTx", "PrivacyReceipt", "Progress", "Quote", "Receipt", "Status", "Step", "to_progress",
+    "CALLER_BOUNDARIES", "TERMINAL", "AleoHyperlaneQuote", "AleoXReserveQuote", "Attestation", "BridgeStatus",
+    "BurnReceipt", "ChainStatus", "DepositReceipt", "DispatchReceipt", "EvmHyperlaneQuote", "EvmXReserveQuote",
+    "Fee", "GasQuote", "MintReceipt", "Plan", "PreparedTx", "PrivacyReceipt", "Progress", "Quote", "Receipt",
+    "SolanaHyperlaneQuote", "Status", "Step", "to_progress",
 ]

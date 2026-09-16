@@ -3,6 +3,8 @@ import json
 
 import pytest
 
+import aleo_bridge
+from aleo_bridge import types
 from aleo_bridge.types import (CALLER_BOUNDARIES, TERMINAL, AleoHyperlaneQuote, Attestation, BridgeStatus,
                                ChainStatus, DispatchReceipt, Fee, GasQuote, Plan, PreparedTx, PrivacyReceipt,
                                Progress, Receipt, Status, Step, to_progress)
@@ -39,7 +41,32 @@ def test_to_progress_table(status, expected):
     plan = _plan()
     progress = to_progress(plan, receipt)
     assert progress.next == expected
-    assert progress.plan is plan and progress.receipt is receipt and progress.error is None
+    assert progress.plan is plan and progress.receipt is receipt
+    # Error is only set for FAILED and EXPIRED statuses
+    if status in {Status.FAILED, Status.EXPIRED}:
+        assert progress.error is not None
+    else:
+        assert progress.error is None
+
+
+def test_to_progress_error_derivation():
+    """Test error field is derived from protocol_state for FAILED/EXPIRED statuses."""
+    plan = _plan()
+
+    # FAILED with destinationError (takes priority over sourceError)
+    receipt_de = Receipt(id="at1x", protocol="hyperlane", status=Status.FAILED,
+                         protocol_state={"routeId": "r", "destinationError": "dest err", "sourceError": "src err"})
+    assert to_progress(plan, receipt_de).error == "dest err"
+
+    # FAILED with only sourceError
+    receipt_se = Receipt(id="at1x", protocol="hyperlane", status=Status.FAILED,
+                         protocol_state={"routeId": "r", "sourceError": "src err only"})
+    assert to_progress(plan, receipt_se).error == "src err only"
+
+    # EXPIRED with neither error field (generates default message)
+    receipt_expired = Receipt(id="at1x", protocol="hyperlane", status=Status.EXPIRED, protocol_state={"routeId": "r"})
+    progress = to_progress(plan, receipt_expired)
+    assert progress.error == "Bridge transfer ended in EXPIRED"
 
 
 def test_to_progress_accepts_status_strings_and_requires_route_id():
@@ -82,3 +109,9 @@ def test_result_dataclasses():
     status = BridgeStatus(environment="mainnet", registry_version="v", chains=[ChainStatus("aleo", None, False, {})], pending=[])
     assert status.chains[0].can_sign is False
     assert isinstance(Progress("wait", _plan(), receipt), Progress)
+
+
+def test_all_types_exported_from_package():
+    """Ensure all names in types.__all__ are re-exported from aleo_bridge.__all__."""
+    assert set(types.__all__) <= set(aleo_bridge.__all__), \
+        f"Missing exports: {set(types.__all__) - set(aleo_bridge.__all__)}"
