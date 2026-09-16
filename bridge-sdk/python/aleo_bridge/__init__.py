@@ -14,6 +14,7 @@ from .errors import (  # noqa: E402
     InvalidRecipientError, MissingExtraError, NotResumableError, PollingTimeoutError,
     RegistryVersionMismatchError, RouteNotFoundError, RouteUnavailableError, UnsupportedRouteError,
 )
+from .registry import DEFAULT_REGISTRY, Asset, Chain, Locator, Privacy, Registry, Route, validate_registry  # noqa: E402
 
 __all__ = [
     "__version__", "AmbiguousRouteError", "AttestationError", "BridgeError", "ChainMismatchError",
@@ -21,4 +22,5 @@ __all__ = [
     "InvalidAmountError", "InvalidRecipientError", "MissingExtraError", "NotResumableError",
     "PollingTimeoutError", "RegistryVersionMismatchError", "RouteNotFoundError", "RouteUnavailableError",
     "UnsupportedRouteError",
+    "Asset", "Chain", "DEFAULT_REGISTRY", "Locator", "Privacy", "Registry", "Route", "validate_registry",
 ]
