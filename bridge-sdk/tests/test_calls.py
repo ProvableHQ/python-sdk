@@ -29,7 +29,8 @@ def test_helpers():
     assert payload_transitions({"transaction": {"execution": {"transitions": [{"program": "p", "function": "f", "outputs": []}]}}}) == \
         [{"program": "p", "function": "f", "outputs": []}]
     assert is_duplicate_submission(RuntimeError("Transaction 'at1x' already exists in the ledger"))
-    assert is_duplicate_submission(RuntimeError("duplicate transaction"))
+    assert not is_duplicate_submission(RuntimeError("duplicate transaction"))   # real double-spend, must propagate
+    assert not is_duplicate_submission(RuntimeError("duplicate serial number"))
     assert not is_duplicate_submission(RuntimeError("insufficient fee"))
 
 
@@ -91,6 +92,17 @@ def test_submit_prepared_treats_duplicate_as_success(fake_aleo):
     fake_aleo.duplicate_on_submit = True
     tx_id, outputs = call.submit_prepared(prepared)
     assert tx_id == "at1delegated" and outputs == ["77field"]
+
+
+def test_submit_prepared_confirmation_timeout_propagates_after_broadcast(fake_aleo):
+    from aleo.facade.errors import TransactionConfirmationTimeout
+
+    call = _call(fake_aleo)
+    prepared = call.delegate_prepared()
+    fake_aleo.wait_raises = True
+    with pytest.raises(TransactionConfirmationTimeout):
+        call.submit_prepared(prepared)
+    assert fake_aleo.submitted == [prepared.serialized]     # broadcast already happened
 
 
 def test_delegate_prepared_requires_transaction_payload(fake_aleo):

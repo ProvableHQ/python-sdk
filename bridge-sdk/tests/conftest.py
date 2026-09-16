@@ -144,6 +144,9 @@ class FakeNetwork:
 
     def wait_for_transaction(self, tx_id: str, *, timeout: float = 45.0, poll_interval: float = 2.0) -> dict:
         self._aleo.waited.append((tx_id, timeout))
+        if self._aleo.wait_raises:
+            from aleo.facade.errors import TransactionConfirmationTimeout
+            raise TransactionConfirmationTimeout(tx_id, timeout)
         return {"status": "accepted"}
 
     def get_transaction_object(self, tx_id: str) -> FakeTx:
@@ -183,6 +186,7 @@ class FakeAleo:
         self.record_queries: list = []
         self.duplicate_on_submit = False
         self.delegate_returns_id_only = False
+        self.wait_raises = False
         self.programs = FakePrograms(self)
         self.records = FakeRecords(self)
         self.record_provider = self.records

@@ -15,7 +15,7 @@ from .errors import ConfigurationError
 from .types import PreparedTx
 
 R = TypeVar("R")
-_DUPLICATE_MARKERS = ("already exists", "duplicate")
+_DUPLICATE_MARKER = "already exists"
 
 
 def _network_module(aleo: Any) -> Any:
@@ -74,8 +74,12 @@ def root_outputs(decoded: list[dict[str, Any]], program: str, function: str) -> 
 
 
 def is_duplicate_submission(exc: BaseException) -> bool:
-    text = str(exc).lower()
-    return any(marker in text for marker in _DUPLICATE_MARKERS)
+    """True only for a node's "already exists" rejection (an idempotent rebroadcast).
+
+    Deliberately narrow: a message like "duplicate serial number" or "duplicate output id" is a
+    REAL double-spend failure and must propagate, not be swallowed as success.
+    """
+    return _DUPLICATE_MARKER in str(exc).lower()
 
 
 class AleoCall(Generic[R]):
@@ -144,6 +148,15 @@ class AleoCall(Generic[R]):
         ``broadcast=True``: the prover broadcasts; outputs come from the returned transaction, or after
         waiting and fetching when the payload is id-only. ``broadcast=False``: ``delegate_prepared`` then
         ``submit_prepared`` so the exact bytes exist locally before the network sees them.
+
+        When the payload is id-only, ``wait`` is effectively forced ``True`` regardless of what was
+        passed: the transaction body must be fetched after confirmation to harvest outputs, so a wait
+        happens either way in that branch.
+
+        If ``wait`` (or the forced wait above) times out, ``aleo.facade.errors.TransactionConfirmationTimeout``
+        propagates AFTER the transaction has already been broadcast by the DPS — the transaction id is
+        recoverable from the exception's ``tx_id`` attribute (or from re-deriving it) for later polling;
+        the transfer itself was not rolled back.
         """
         if not broadcast:
             return self.submit_prepared(self.delegate_prepared(account, **fee), wait=wait, wait_timeout=wait_timeout)
@@ -172,7 +185,16 @@ class AleoCall(Generic[R]):
         return PreparedTx(transaction_id=str(tx["id"]), serialized=json.dumps(tx))
 
     def submit_prepared(self, prepared: PreparedTx, *, wait: bool = True, wait_timeout: float = 180.0) -> R:
-        """Broadcast a prepared transaction; a duplicate-transaction rejection is success (idempotent rebroadcast)."""
+        """Broadcast a prepared transaction; a duplicate-transaction rejection is success (idempotent rebroadcast).
+
+        If ``wait`` is true and confirmation does not land within ``wait_timeout``,
+        ``aleo.facade.errors.TransactionConfirmationTimeout`` propagates AFTER the transaction has already
+        been broadcast (the ``submit_transaction`` call above already returned/succeeded) — this is not a
+        submission failure. The transaction id is recoverable from ``prepared.transaction_id`` or from the
+        exception's own ``tx_id`` attribute, for later polling or a checkpoint. Keeping this raise (rather
+        than swallowing it) is consistent with the rest of the facade; the lifecycle layer calls
+        ``submit_prepared(wait=False)`` and does its own status polling instead of relying on this wait.
+        """
         try:
             self._aleo.network.submit_transaction(prepared.serialized)
         except Exception as exc:  # noqa: BLE001 — the node's error type varies by transport
