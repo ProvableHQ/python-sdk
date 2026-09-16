@@ -9,7 +9,8 @@ def test_import_without_optional_extras(monkeypatch):
         monkeypatch.setitem(sys.modules, mod, None)  # any import of these now raises ImportError
     for name in list(sys.modules):
         if name.startswith("aleo_bridge"):
-            del sys.modules[name]
+            monkeypatch.delitem(sys.modules, name)  # reverted at teardown — a fresh reimport below must not
+                                                     # leak new module/class objects into tests that run after this one
     pkg = importlib.import_module("aleo_bridge")
     assert pkg.__version__ == "0.1.0"
     assert issubclass(pkg.RouteNotFoundError, pkg.BridgeError)
