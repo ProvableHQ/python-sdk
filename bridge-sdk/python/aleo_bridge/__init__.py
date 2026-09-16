@@ -1,0 +1,24 @@
+"""aleo_bridge — move assets between Aleo, Ethereum and Solana (Hyperlane warp routes, Circle xReserve).
+
+Web3.py idioms: bind an ``aleo.Aleo`` facade to :class:`Bridge`; reads return values, Aleo writes
+return an :class:`AleoCall` with ``simulate()`` / ``prove()`` / ``transact()`` / ``delegate()``.
+Exports grow in Tasks 4–11 of plan 1; keep this list sorted.
+"""
+from __future__ import annotations
+
+__version__ = "0.1.0"
+
+from .errors import (  # noqa: E402
+    AmbiguousRouteError, AttestationError, BridgeError, ChainMismatchError, CheckpointInvalidError,
+    ConfigurationError, DeliveryUnknownError, InsufficientBalanceError, InvalidAmountError,
+    InvalidRecipientError, MissingExtraError, NotResumableError, PollingTimeoutError,
+    RegistryVersionMismatchError, RouteNotFoundError, RouteUnavailableError, UnsupportedRouteError,
+)
+
+__all__ = [
+    "__version__", "AmbiguousRouteError", "AttestationError", "BridgeError", "ChainMismatchError",
+    "CheckpointInvalidError", "ConfigurationError", "DeliveryUnknownError", "InsufficientBalanceError",
+    "InvalidAmountError", "InvalidRecipientError", "MissingExtraError", "NotResumableError",
+    "PollingTimeoutError", "RegistryVersionMismatchError", "RouteNotFoundError", "RouteUnavailableError",
+    "UnsupportedRouteError",
+]
