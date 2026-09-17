@@ -104,11 +104,12 @@ default if it rate-limits. The funded round trip runs from `scripts/rehearse.py`
 `BRIDGE_PRIVATE_KEY` (required by `from_env`), `ALEO_ENDPOINT` (default `https://edge.provable.com/api`),
 `ALEO_NETWORK` (`mainnet`|`testnet`), `ALEO_API_KEY`/`ALEO_CONSUMER_ID` (legacy hosts),
 `EVM_PRIVATE_KEY`+`ETHEREUM_RPC_URL` (aliases `BRIDGE_EVM_PRIVATE_KEY`+`BRIDGE_LIVE_ETHEREUM_RPC_URL`, used by the
-user's live shell/veil config; the primary variable wins when both are set), `SOLANA_PRIVATE_KEY`(+`SOLANA_RPC_URL`),
-`BRIDGE_CHECKPOINT_DIR`.
-Note that `BRIDGE_LIVE_ETHEREUM_RPC_URL` is not live-test-only: ordinary `Ethereum.from_env()` /
-`Bridge.from_env()` read it as an alias for `ETHEREUM_RPC_URL`, so leaving it exported points everyday
-calls at that endpoint too.
+user's live shell/veil config; the primary variable wins when both are set),
+`SOLANA_PRIVATE_KEY`(+`SOLANA_RPC_URL`) (aliases `BRIDGE_SOLANA_PRIVATE_KEY`+`BRIDGE_LIVE_SOLANA_RPC_URL`,
+same precedence), `BRIDGE_CHECKPOINT_DIR`.
+Note that `BRIDGE_LIVE_ETHEREUM_RPC_URL` and `BRIDGE_LIVE_SOLANA_RPC_URL` are not live-test-only: ordinary
+`Ethereum.from_env()` / `Solana.from_env()` / `Bridge.from_env()` read them as aliases for
+`ETHEREUM_RPC_URL` / `SOLANA_RPC_URL`, so leaving one exported points everyday calls at that endpoint too.
 Profiles live at `$ALEO_BRIDGE_HOME` or `~/.aleo-bridge` and hold only the Aleo key (mode 600).
 
 ## Tests

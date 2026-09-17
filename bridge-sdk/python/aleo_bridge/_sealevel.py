@@ -24,7 +24,6 @@ PROGRAM_INSTRUCTION_DISCRIMINATOR = bytes([1] * 8)
 TRANSFER_REMOTE_VARIANT_TAG = 1
 INSTRUCTION_DATA_BYTES = 77          # 8 + 1 + 4 + 32 + 32
 U256_BYTES = 32
-ALEO_MAINNET_HYPERLANE_DOMAIN = 1634493807
 
 
 def build_transfer_remote_instruction_data(destination_domain: int, recipient32: bytes, amount: int) -> bytes:

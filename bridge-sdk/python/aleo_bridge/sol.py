@@ -658,7 +658,7 @@ class SolModule:
 
     # --- quote ------------------------------------------------------------------------------
 
-    def _make_plan(self, route: Route, *, recipient: str, amount_atomic: int, sender: str, decimals: int) -> Plan:
+    def _make_plan(self, route: Route, *, recipient: str, amount_atomic: int, sender: str) -> Plan:
         return build_plan(self.registry, route, amount_atomic=amount_atomic, recipient=recipient, sender=sender)
 
     def _compile_message(self, metadata: sl.SolanaRouteMetadata, *, sender: str, unique_message: str,
@@ -714,7 +714,7 @@ class SolModule:
         if sender is None:
             raise ConfigurationError("Solana sender is required to quote the transaction fee: configure a signer or pass sender=<base58 address>")
         if plan is None:
-            plan = self._make_plan(route, recipient=recipient, amount_atomic=amount_atomic, sender=sender, decimals=decimals)
+            plan = self._make_plan(route, recipient=recipient, amount_atomic=amount_atomic, sender=sender)
 
         igp_data = self._account_data(metadata.igp_account)
         if igp_data is None:
