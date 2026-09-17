@@ -12,12 +12,13 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from . import encoding
-from ._evm_abi import ERC20_ABI, EVM_CHAIN_BY_ENVIRONMENT, WARP_ROUTE_ABI, ZERO_ADDRESS
+from ._calls import EvmCall, EvmOutcome, EvmStep
+from ._evm_abi import ERC20_ABI, EVM_CHAIN_BY_ENVIRONMENT, MAILBOX_ABI, WARP_ROUTE_ABI, ZERO_ADDRESS
 from .errors import (AmbiguousRouteError, BridgeError, ChainMismatchError, ConfigurationError, InvalidAmountError,
                      InvalidRecipientError, MissingExtraError, RegistryVersionMismatchError, RouteNotFoundError,
                      RouteUnavailableError)
 from .registry import Asset, Chain, Registry, Route
-from .types import EvmHyperlaneQuote, Fee, Plan, Step
+from .types import DispatchReceipt, EvmHyperlaneQuote, Fee, Plan, Receipt, Status, Step
 from .units import format_decimal_amount, parse_decimal_amount, resolve_amount
 
 
@@ -368,6 +369,85 @@ class EthModule:
                                  amount_out=format_decimal_amount(atomic, destination.decimals),
                                  recipient_bytes32=recipient32, native_value_atomic=q.native_value_atomic,
                                  native_fee_atomic=q.native_fee_atomic, approval_required=approval_required)
+
+    # -- Hyperlane execute --------------------------------------------------------------------
+
+    def _message_id_from_receipt(self, route: Route, receipt: Any) -> str | None:
+        """Hyperlane Mailbox ``DispatchId(bytes32 indexed messageId)`` from a confirmed receipt; ``None`` if absent."""
+        from web3.logs import DISCARD
+
+        mailbox = self._contract(str(route.metadata["mailboxAddress"]), MAILBOX_ABI)
+        events = mailbox.events.DispatchId().process_receipt(receipt, errors=DISCARD)
+        if not events:
+            return None
+        return _web3().Web3.to_hex(events[-1]["args"]["messageId"])
+
+    @staticmethod
+    def _hyperlane_protocol_state(route: Route, *, recipient_bytes32: bytes, destination_domain: int,
+                                  native_value_atomic: int, amount_atomic: int, approval_tx_ids: list[str],
+                                  sender: str | None, message_id: str | None = None) -> dict[str, Any]:
+        state: dict[str, Any] = {
+            "routeId": route.id, "approvalTxIds": list(approval_tx_ids), "sourceSender": sender,
+            "recipientBytes32": "0x" + recipient_bytes32.hex(), "destinationDomain": destination_domain,
+            "nativeValueAtomic": str(native_value_atomic), "amountAtomic": str(amount_atomic),
+        }
+        if message_id is not None:
+            state["messageId"] = message_id
+        return state
+
+    def _hyperlane_result(self, route: Route, q: "_HyperlaneQuote", outcome: EvmOutcome) -> DispatchReceipt:
+        approvals = list(outcome.approval_tx_ids)
+        if outcome.status == "CONFIRMED":
+            message_id = self._message_id_from_receipt(route, outcome.receipt)
+            status, rid = Status.DELIVERY_PENDING, message_id or outcome.source_tx_id
+        else:
+            message_id, status = None, Status(outcome.status)
+            rid = outcome.source_tx_id or approvals[-1]
+        state = self._hyperlane_protocol_state(
+            route, recipient_bytes32=q.recipient_bytes32, destination_domain=q.destination_domain,
+            native_value_atomic=q.native_value_atomic, amount_atomic=q.amount_atomic,
+            approval_tx_ids=approvals, sender=outcome.sender, message_id=message_id)
+        receipt = Receipt(id=rid, protocol="hyperlane", status=status, source_tx_id=outcome.source_tx_id, protocol_state=state)
+        return DispatchReceipt(transaction_id=outcome.source_tx_id or approvals[-1], route_id=route.id,
+                               message_id=message_id, amount_atomic=q.amount_atomic, receipt=receipt)
+
+    def transfer_remote(self, asset: Any, recipient: str, *, amount: Any = None,
+                        amount_atomic: int | None = None) -> EvmCall[DispatchReceipt]:
+        """Send ETH, WBTC or USDT to Aleo through its Hyperlane Warp Route.
+
+        Re-quotes ``quoteTransferRemote`` at send time. Collateral routes approve exactly the
+        quoted token amount only when the allowance is short (USDT: a non-zero allowance is
+        reset to 0 first). Native ETH sends amount + fee as ``msg.value``; collateral routes
+        send the fee only. Each hash is checkpointed before polling; a timeout returns a
+        pending ``DispatchReceipt``. The message id comes from the Mailbox ``DispatchId`` log.
+        """
+        route = self._hyperlane_route(self._asset(asset))
+        sender = self.conn.require_address()
+        atomic = self._amount_atomic(route, amount, amount_atomic)
+        recipient32 = self._recipient_bytes32(route, recipient)
+        plan = _plan_for(self.registry, route, amount_atomic=atomic, recipient=recipient, sender=sender)
+        latest: dict[str, _HyperlaneQuote] = {}
+
+        def steps(owner: str) -> list[EvmStep]:
+            q = self._quote_hyperlane(route, recipient32, atomic, owner)      # last responsible moment
+            latest["q"] = q
+            out: list[EvmStep] = []
+            if q.router_type == "collateral" and (q.allowance_atomic or 0) < q.token_amount_atomic:
+                token = self._erc20(q.token)
+                if (q.allowance_atomic or 0) > 0 and q.requires_approval_reset:
+                    out.append(EvmStep("approve", q.token, token.encode_abi("approve", args=[q.router, 0])))
+                out.append(EvmStep("approve", q.token, token.encode_abi("approve", args=[q.router, q.token_amount_atomic])))
+            warp = self._contract(q.router, WARP_ROUTE_ABI)
+            out.append(EvmStep("main", q.router,
+                               warp.encode_abi("transferRemote", args=[q.destination_domain, recipient32, atomic]),
+                               q.native_value_atomic))
+            return out
+
+        def finish(outcome: EvmOutcome) -> DispatchReceipt:
+            return self._hyperlane_result(route, latest["q"], outcome)
+
+        return EvmCall(self.conn, plan=plan, registry=self.registry, steps=steps, finish=finish,
+                       store=self.bridge.checkpoints)
 
 
 __all__ = ["Ethereum", "EthModule"]
