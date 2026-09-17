@@ -30,6 +30,7 @@ from .freezelist import EMPTY_MERKLE_PROOF_PAIR, FreezeList  # noqa: E402
 from .hyperlane import HyperlaneModule  # noqa: E402
 from .privacy import PrivacyModule  # noqa: E402
 from .profile import DEFAULT_ENDPOINT, Profile  # noqa: E402
+from .sol import Solana  # noqa: E402
 from .xreserve import XReserveModule  # noqa: E402
 
 __all__ = [
@@ -47,4 +48,5 @@ __all__ = [
     "HyperlaneModule", "PrivacyModule", "Profile", "XReserveModule",
     "Checkpoint", "CheckpointStore", "FileCheckpointStore", "create_checkpoint",
     "EthModule", "Ethereum", "EvmCall",
+    "Solana",
 ]

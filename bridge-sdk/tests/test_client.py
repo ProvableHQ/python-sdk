@@ -151,9 +151,17 @@ def test_from_env_side_chain_variables(monkeypatch, tmp_path):
     assert bridge.ethereum.address == EthAccount.from_key("0x" + "11" * 32).address
     monkeypatch.delenv("EVM_PRIVATE_KEY")
     monkeypatch.delenv("ETHEREUM_RPC_URL")
-    monkeypatch.setenv("SOLANA_PRIVATE_KEY", "5" * 88)
-    with pytest.raises(MissingExtraError, match="solana"):       # plan 3 makes this construct a Solana connection
-        Bridge.from_env()
+    pytest.importorskip("solders")
+    from solders.keypair import Keypair
+
+    from aleo_bridge._base58 import b58encode
+    from aleo_bridge.sol import Solana
+
+    solana_key = Keypair()
+    monkeypatch.setenv("SOLANA_PRIVATE_KEY", b58encode(bytes(solana_key)))
+    bridge = Bridge.from_env()                                   # plan 3/4 (Task 4): real Solana connection now constructed
+    assert isinstance(bridge.solana, Solana)
+    assert bridge.solana.can_sign and bridge.solana.address == str(solana_key.pubkey())
     monkeypatch.delenv("SOLANA_PRIVATE_KEY")
     monkeypatch.setenv("BRIDGE_CHECKPOINT_DIR", str(tmp_path / "cp"))
     bridge = Bridge.from_env()                                   # plan 4: FileCheckpointStore now wired

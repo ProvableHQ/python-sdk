@@ -1,0 +1,436 @@
+"""Solana transport, connection and the ``bridge.sol`` module (SOL → Aleo over Hyperlane).
+
+solders is imported lazily through :func:`_libs`; an install without the ``solana`` extra
+raises :class:`MissingExtraError` at the point of use, never at import. Layouts live in
+:mod:`aleo_bridge._sealevel` (pure); this module adds a synchronous JSON-RPC transport
+(solana-py ≥ 0.36 is async-only), signing, broadcast and status polling.
+"""
+from __future__ import annotations
+
+import asyncio
+import base64
+import inspect
+import json
+import os
+import threading
+import time
+from dataclasses import dataclass, replace
+from typing import Any, Callable, Mapping, Protocol, Sequence, runtime_checkable
+
+import requests
+
+from . import _sealevel as sl
+from .encoding import aleo_address_to_bytes32
+from .errors import (
+    BridgeError,
+    CheckpointInvalidError,
+    ConfigurationError,
+    InsufficientBalanceError,
+    InvalidAmountError,
+    MissingExtraError,
+    RegistryVersionMismatchError,
+    UnsupportedRouteError,
+)
+from .registry import Route
+from .types import DispatchReceipt, Fee, Plan, Receipt, SolanaHyperlaneQuote, Status, Step
+from .units import format_decimal_amount, resolve_amount
+
+DEFAULT_SOLANA_RPC_URL = "https://api.mainnet-beta.solana.com"
+CONFIRMED = "confirmed"
+COMMITMENTS = ("processed", "confirmed", "finalized")
+SOLANA_CHAIN_ID = "solana"
+SOLANA_SOL_ASSET_ID = "solana/sol"
+ALEO_SOL_ASSET_ID = "aleo/sol"
+
+
+@dataclass(frozen=True)
+class _SolanaLibs:
+    Keypair: Any
+    Pubkey: Any
+    Signature: Any
+    Hash: Any
+    Instruction: Any
+    AccountMeta: Any
+    MessageV0: Any
+    to_bytes_versioned: Any
+    VersionedTransaction: Any
+    set_compute_unit_limit: Any
+
+
+_LIBS: _SolanaLibs | None = None
+
+
+def _libs() -> _SolanaLibs:
+    """Import solders once; translate a missing extra into MissingExtraError."""
+    global _LIBS
+    if _LIBS is None:
+        try:
+            from solders.compute_budget import set_compute_unit_limit
+            from solders.hash import Hash
+            from solders.instruction import AccountMeta, Instruction
+            from solders.keypair import Keypair
+            from solders.message import MessageV0, to_bytes_versioned
+            from solders.pubkey import Pubkey
+            from solders.signature import Signature
+            from solders.transaction import VersionedTransaction
+        except ImportError as exc:
+            raise MissingExtraError("solana", "Solana connections and SOL transfers") from exc
+        _LIBS = _SolanaLibs(Keypair, Pubkey, Signature, Hash, Instruction, AccountMeta, MessageV0,
+                            to_bytes_versioned, VersionedTransaction, set_compute_unit_limit)
+    return _LIBS
+
+
+# --- synchronous JSON-RPC transport (veil src/solana/rpc.ts) ------------------------------------
+
+@dataclass(frozen=True)
+class SendOptions:
+    """Broadcast options; attribute-compatible with solana-py's ``TxOpts``."""
+    skip_preflight: bool = False
+    preflight_commitment: str = CONFIRMED
+    skip_confirmation: bool = True
+
+
+@dataclass(frozen=True)
+class RpcResult:
+    value: Any
+
+
+@dataclass(frozen=True)
+class LatestBlockhash:
+    blockhash: Any                 # solders Hash
+    last_valid_block_height: int
+
+
+@dataclass(frozen=True)
+class AccountInfo:
+    data: bytes
+    lamports: int
+    owner: str
+
+
+@dataclass(frozen=True)
+class SignatureStatus:
+    err: Any
+    confirmation_status: str | None
+
+
+@dataclass(frozen=True)
+class TransactionMeta:
+    log_messages: list[str] | None
+
+
+@dataclass(frozen=True)
+class TransactionWithMeta:
+    meta: TransactionMeta | None
+
+
+@dataclass(frozen=True)
+class ConfirmedTransaction:
+    transaction: TransactionWithMeta
+    slot: int
+
+
+class SolanaRpcClient:
+    """Minimal synchronous Solana JSON-RPC client exposing the solana-py method surface SolModule uses.
+
+    Every method issues one POST, validates the envelope (HTTP status, JSON, JSON-RPC ``error``,
+    ``result`` presence) and the result shape, and returns an object with ``.value`` shaped like
+    solana-py's response types. No method signs or retries.
+    """
+
+    def __init__(self, url: str, *, commitment: str = CONFIRMED, session: Any = None, timeout: float = 30.0) -> None:
+        if commitment not in COMMITMENTS:
+            raise ConfigurationError(f"Solana commitment must be one of {COMMITMENTS}, got {commitment!r}")
+        self.url = url
+        self.commitment = commitment
+        self.timeout = timeout
+        self._session = session or requests.Session()
+
+    def _commitment(self, commitment: str | None) -> dict[str, str]:
+        return {"commitment": str(commitment or self.commitment)}
+
+    def _call(self, method: str, params: list[Any]) -> Any:
+        try:
+            response = self._session.post(self.url, json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params},
+                                          timeout=self.timeout, headers={"content-type": "application/json", "cache-control": "no-cache"})
+        except requests.RequestException as exc:
+            raise BridgeError(f"Solana RPC {method} request failed: {exc}") from exc
+        if not 200 <= response.status_code < 300:
+            raise BridgeError(f"Solana RPC {method} request failed with HTTP status {response.status_code}")
+        try:
+            body = response.json()
+        except ValueError as exc:
+            raise BridgeError(f"Solana RPC {method} returned invalid JSON") from exc
+        if not isinstance(body, dict):
+            raise BridgeError(f"Solana RPC {method} returned an invalid JSON-RPC response")
+        error = body.get("error")
+        if error:
+            details = f"; {json.dumps(error['data'])}" if isinstance(error, dict) and "data" in error else ""
+            message = error.get("message", "unknown error") if isinstance(error, dict) else str(error)
+            raise BridgeError(f"Solana RPC {method} returned a JSON-RPC error: {message}{details}")
+        if "result" not in body:
+            raise BridgeError(f"Solana RPC {method} returned an invalid result envelope")
+        return body["result"]
+
+    @staticmethod
+    def _integer(method: str, value: Any) -> int:
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise BridgeError(f"Solana RPC {method} returned an invalid result")
+        return value
+
+    @staticmethod
+    def _contextual(method: str, result: Any) -> Any:
+        if not isinstance(result, dict) or "value" not in result:
+            raise BridgeError(f"Solana RPC {method} returned an invalid contextual result")
+        return result["value"]
+
+    def get_latest_blockhash(self, commitment: str | None = None) -> RpcResult:
+        value = self._contextual("getLatestBlockhash", self._call("getLatestBlockhash", [self._commitment(commitment)]))
+        if not isinstance(value, dict) or not isinstance(value.get("blockhash"), str) or not value["blockhash"]:
+            raise BridgeError("Solana RPC getLatestBlockhash returned an invalid result")
+        return RpcResult(LatestBlockhash(_libs().Hash.from_string(value["blockhash"]),
+                                         self._integer("getLatestBlockhash", value.get("lastValidBlockHeight"))))
+
+    def get_block_height(self, commitment: str | None = None) -> RpcResult:
+        return RpcResult(self._integer("getBlockHeight", self._call("getBlockHeight", [self._commitment(commitment)])))
+
+    def is_blockhash_valid(self, blockhash: Any, commitment: str | None = None) -> RpcResult:
+        value = self._contextual("isBlockhashValid", self._call("isBlockhashValid", [str(blockhash), self._commitment(commitment)]))
+        if not isinstance(value, bool):
+            raise BridgeError("Solana RPC isBlockhashValid returned an invalid result")
+        return RpcResult(value)
+
+    def get_balance(self, pubkey: Any, commitment: str | None = None) -> RpcResult:
+        value = self._contextual("getBalance", self._call("getBalance", [str(pubkey), self._commitment(commitment)]))
+        return RpcResult(self._integer("getBalance", value))
+
+    def get_account_info(self, pubkey: Any, commitment: str | None = None, encoding: str = "base64") -> RpcResult:
+        if encoding != "base64":
+            raise BridgeError("SolanaRpcClient.get_account_info supports base64 encoding only")
+        value = self._contextual("getAccountInfo", self._call("getAccountInfo", [str(pubkey), {"encoding": "base64", **self._commitment(commitment)}]))
+        if value is None:
+            return RpcResult(None)
+        data = value.get("data") if isinstance(value, dict) else None
+        if not isinstance(data, list) or len(data) != 2 or not isinstance(data[0], str) or data[1] != "base64":
+            raise BridgeError("Solana RPC getAccountInfo returned invalid base64 account data")
+        try:
+            raw = base64.b64decode(data[0], validate=True)
+        except ValueError as exc:
+            raise BridgeError("Solana RPC getAccountInfo returned invalid base64 account data") from exc
+        return RpcResult(AccountInfo(raw, int(value.get("lamports", 0)), str(value.get("owner", ""))))
+
+    def get_fee_for_message(self, message: Any, commitment: str | None = None) -> RpcResult:
+        raw = bytes(message) if isinstance(message, (bytes, bytearray)) else _libs().to_bytes_versioned(message)
+        value = self._contextual("getFeeForMessage", self._call("getFeeForMessage", [base64.b64encode(raw).decode(), self._commitment(commitment)]))
+        return RpcResult(None if value is None else self._integer("getFeeForMessage", value))
+
+    def get_minimum_balance_for_rent_exemption(self, usize: int, commitment: str | None = None) -> RpcResult:
+        if isinstance(usize, bool) or not isinstance(usize, int) or usize < 0:
+            raise BridgeError("Solana rent data length must be a non-negative integer")
+        return RpcResult(self._integer("getMinimumBalanceForRentExemption",
+                                       self._call("getMinimumBalanceForRentExemption", [usize, self._commitment(commitment)])))
+
+    def send_raw_transaction(self, txn: bytes, opts: Any = None) -> RpcResult:
+        opts = opts or SendOptions()
+        config = {"encoding": "base64", "skipPreflight": bool(opts.skip_preflight), "preflightCommitment": str(opts.preflight_commitment)}
+        result = self._call("sendTransaction", [base64.b64encode(bytes(txn)).decode(), config])
+        if not isinstance(result, str) or not result:
+            raise BridgeError("Solana RPC sendTransaction returned an invalid signature")
+        return RpcResult(_libs().Signature.from_string(result))
+
+    def get_signature_statuses(self, signatures: Sequence[Any], search_transaction_history: bool = False) -> RpcResult:
+        value = self._contextual("getSignatureStatuses", self._call(
+            "getSignatureStatuses", [[str(s) for s in signatures], {"searchTransactionHistory": bool(search_transaction_history)}]))
+        if not isinstance(value, list) or len(value) != len(signatures):
+            raise BridgeError("Solana RPC getSignatureStatuses returned an invalid result")
+        statuses: list[SignatureStatus | None] = []
+        for status in value:
+            if status is None:
+                statuses.append(None)
+                continue
+            if not isinstance(status, dict) or "err" not in status:
+                raise BridgeError("Solana RPC getSignatureStatuses returned an invalid status")
+            confirmation = status.get("confirmationStatus")
+            if confirmation is not None and confirmation not in COMMITMENTS:
+                raise BridgeError(f"Solana RPC getSignatureStatuses returned unsupported confirmation status: {confirmation}")
+            statuses.append(SignatureStatus(status["err"], confirmation))
+        return RpcResult(statuses)
+
+    def get_transaction(self, tx_sig: Any, encoding: str = "json", commitment: str | None = None,
+                        max_supported_transaction_version: int | None = None) -> RpcResult:
+        config: dict[str, Any] = {"encoding": encoding, **self._commitment(commitment)}
+        if max_supported_transaction_version is not None:
+            config["maxSupportedTransactionVersion"] = max_supported_transaction_version
+        result = self._call("getTransaction", [str(tx_sig), config])
+        if result is None:
+            return RpcResult(None)
+        if not isinstance(result, dict) or "meta" not in result:
+            raise BridgeError("Solana RPC getTransaction returned an invalid result")
+        meta = result["meta"]
+        if meta is None:
+            return RpcResult(ConfirmedTransaction(TransactionWithMeta(None), int(result.get("slot", 0))))
+        if not isinstance(meta, dict) or "logMessages" not in meta:
+            raise BridgeError("Solana RPC getTransaction returned invalid metadata")
+        logs = meta["logMessages"]
+        if logs is not None and (not isinstance(logs, list) or not all(isinstance(line, str) for line in logs)):
+            raise BridgeError("Solana RPC getTransaction returned invalid logs")
+        return RpcResult(ConfirmedTransaction(TransactionWithMeta(TransactionMeta(logs)), int(result.get("slot", 0))))
+
+
+class _AsyncClientAdapter:
+    """Drives a solana-py ``AsyncClient`` (0.36+ is async-only) synchronously on a private event-loop
+    thread, and supplies ``is_blockhash_valid`` (missing from solana-py) and ``send_raw_transaction``
+    with our ``SendOptions`` translated to ``TxOpts``. Other methods are forwarded unchanged."""
+
+    def __init__(self, client: Any) -> None:
+        self._client = client
+        self._loop = asyncio.new_event_loop()
+        self._thread = threading.Thread(target=self._loop.run_forever, name="aleo-bridge-solana-rpc", daemon=True)
+        self._thread.start()
+
+    def _run(self, coroutine: Any) -> Any:
+        return asyncio.run_coroutine_threadsafe(coroutine, self._loop).result()
+
+    def __getattr__(self, name: str) -> Any:
+        attribute = getattr(self._client, name)
+        if inspect.iscoroutinefunction(attribute):
+            return lambda *args, **kwargs: self._run(attribute(*args, **kwargs))
+        return attribute
+
+    def is_blockhash_valid(self, blockhash: Any, commitment: str | None = None) -> Any:
+        from solders.commitment_config import CommitmentLevel
+        from solders.rpc.config import RpcContextConfig
+        from solders.rpc.requests import IsBlockhashValid
+        from solders.rpc.responses import IsBlockhashValidResp
+
+        level = {"processed": CommitmentLevel.Processed, "confirmed": CommitmentLevel.Confirmed,
+                 "finalized": CommitmentLevel.Finalized}[commitment or CONFIRMED]
+        request = IsBlockhashValid(blockhash, RpcContextConfig(commitment=level))
+        return self._run(self._client._provider.make_request(request, IsBlockhashValidResp))
+
+    def send_raw_transaction(self, txn: bytes, opts: Any = None) -> Any:
+        try:
+            from solana.rpc.models import TxOpts
+        except ImportError:  # solana-py < 0.36 kept TxOpts in solana.rpc.types
+            try:
+                from solana.rpc.types import TxOpts
+            except ImportError as exc:
+                raise MissingExtraError("solana", "solana-py AsyncClient transport") from exc
+        opts = opts or SendOptions()
+        tx_opts = TxOpts(skip_confirmation=True, skip_preflight=bool(opts.skip_preflight), preflight_commitment=str(opts.preflight_commitment))
+        return self._run(self._client.send_raw_transaction(bytes(txn), tx_opts))
+
+
+@runtime_checkable
+class SolanaSigner(Protocol):
+    """solana-py's signer shape: a solders ``Keypair`` or any wallet exposing these two methods."""
+
+    def pubkey(self) -> Any: ...
+
+    def sign_message(self, message: bytes) -> Any: ...
+
+
+def keypair_from_private_key(private_key: str | bytes) -> Any:
+    """Parse a Solana secret: base58 (Phantom export), a JSON array of 64 ints (solana-cli ``id.json``),
+    64 raw bytes (seed ‖ pubkey) or a 32-byte seed."""
+    libs = _libs()
+    if isinstance(private_key, (bytes, bytearray, memoryview)):
+        raw = bytes(private_key)
+    else:
+        text = private_key.strip()
+        if text.startswith("["):
+            try:
+                values = json.loads(text)
+            except ValueError as exc:
+                raise ConfigurationError("Solana private key JSON array is malformed; expected the 64 integers of a solana-cli id.json") from exc
+            if not isinstance(values, list) or not all(isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 255 for v in values):
+                raise ConfigurationError("Solana private key JSON array must hold integers 0–255")
+            raw = bytes(values)
+        else:
+            try:
+                return libs.Keypair.from_base58_string(text)
+            except Exception as exc:  # solders raises its own parse error types
+                raise ConfigurationError("Solana private key is not a valid base58 64-byte secret") from exc
+    if len(raw) == 64:
+        return libs.Keypair.from_bytes(raw)
+    if len(raw) == 32:
+        return libs.Keypair.from_seed(raw)
+    raise ConfigurationError(f"Solana private key must be 64 bytes (seed || pubkey) or a 32-byte seed, got {len(raw)}")
+
+
+class Solana:
+    """Solana transport plus an optional signer (spec §3.2).
+
+    ``Solana(rpc_url)`` builds ``SolanaRpcClient(rpc_url, commitment="confirmed")``;
+    ``Solana(client=…)`` reuses a caller-configured client: anything with the solana-py read/send
+    method surface (its own commitment, timeout, headers), or a solana-py ``AsyncClient``, which is
+    driven synchronously through :class:`_AsyncClientAdapter`. Exactly one of ``rpc_url``/``client``
+    may be given; at most one of ``signer``/``private_key``. A connection without a signer is
+    read-only (quotes and status reads work, ``send`` does not).
+    """
+
+    def __init__(self, rpc_url: str | None = None, *, client: Any = None, signer: Any = None,
+                 private_key: str | bytes | None = None) -> None:
+        if rpc_url is not None and client is not None:
+            raise ConfigurationError("Solana(): pass rpc_url or client, not both")
+        if signer is not None and private_key is not None:
+            raise ConfigurationError("Solana(): pass signer or private_key, not both")
+        if client is None:
+            _libs()                                   # SolanaRpcClient returns solders Hash/Signature values
+            rpc_url = rpc_url or DEFAULT_SOLANA_RPC_URL
+            client = SolanaRpcClient(rpc_url, commitment=CONFIRMED)
+        elif inspect.iscoroutinefunction(getattr(client, "get_balance", None)):
+            client = _AsyncClientAdapter(client)      # solana-py ≥ 0.36 AsyncClient
+        self._rpc_url = rpc_url
+        self._client = client
+        if private_key is not None:
+            signer = keypair_from_private_key(private_key)
+        if signer is not None and not (callable(getattr(signer, "pubkey", None)) and callable(getattr(signer, "sign_message", None))):
+            raise ConfigurationError("Solana signer must expose pubkey() and sign_message(bytes) — a solders Keypair or a solana-py Signer")
+        self._signer = signer
+
+    @classmethod
+    def from_env(cls, env: Mapping[str, str] | None = None) -> "Solana | None":
+        """Private key from ``SOLANA_PRIVATE_KEY`` else ``BRIDGE_SOLANA_PRIVATE_KEY`` (the user's shell
+        exports the latter); RPC from ``SOLANA_RPC_URL`` else ``BRIDGE_LIVE_SOLANA_RPC_URL`` else the
+        default. A key (either name) → signing connection; URL alone → read-only; neither → ``None``."""
+        env = os.environ if env is None else env
+        key = env.get("SOLANA_PRIVATE_KEY") or env.get("BRIDGE_SOLANA_PRIVATE_KEY")
+        url = env.get("SOLANA_RPC_URL") or env.get("BRIDGE_LIVE_SOLANA_RPC_URL") or None
+        if key:
+            return cls(url, private_key=key)
+        if url:
+            return cls(url)
+        return None
+
+    @property
+    def client(self) -> Any:
+        return self._client
+
+    @property
+    def signer(self) -> Any:
+        return self._signer
+
+    @property
+    def rpc_url(self) -> str | None:
+        return self._rpc_url
+
+    @property
+    def can_sign(self) -> bool:
+        return self._signer is not None
+
+    @property
+    def pubkey(self) -> Any:
+        if self._signer is None:
+            raise ConfigurationError("Solana connection is read-only: pass signer= or private_key= to Solana() to sign")
+        return self._signer.pubkey()
+
+    @property
+    def address(self) -> str | None:
+        return None if self._signer is None else str(self._signer.pubkey())
+
+    def sign_message(self, message: bytes) -> Any:
+        """Fee-payer signature over compiled message bytes (``to_bytes_versioned`` for v0 messages)."""
+        if self._signer is None:
+            raise ConfigurationError("Solana connection is read-only: pass signer= or private_key= to Solana() to sign")
+        return self._signer.sign_message(bytes(message))
