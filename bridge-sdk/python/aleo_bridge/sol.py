@@ -241,6 +241,13 @@ class SolanaRpcClient:
             raise BridgeError("Solana RPC sendTransaction returned an invalid signature")
         return RpcResult(_libs().Signature.from_string(result))
 
+    def close(self) -> None:
+        """Release the HTTP session (and its connection pool). Idempotent; ``requests`` allows reuse
+        afterwards, so a closed client that is used again simply opens fresh connections."""
+        closer = getattr(self._session, "close", None)
+        if callable(closer):
+            closer()
+
     def get_signature_statuses(self, signatures: Sequence[Any], search_transaction_history: bool = False) -> RpcResult:
         value = self._contextual("getSignatureStatuses", self._call(
             "getSignatureStatuses", [[str(s) for s in signatures], {"searchTransactionHistory": bool(search_transaction_history)}]))
@@ -296,12 +303,25 @@ class _AsyncClientAdapter:
         return asyncio.run_coroutine_threadsafe(coroutine, self._loop).result()
 
     def close(self, timeout: float = 5.0) -> None:
-        """Stop the private event-loop thread and close the loop. Idempotent — a second call is a no-op."""
+        """Close the wrapped client, then stop the private loop thread. Idempotent.
+
+        The wrapped client's own ``close()`` runs FIRST and on our loop: solana-py's ``AsyncClient``
+        owns an aiohttp session that can only be closed from the loop it was created on, so stopping
+        the thread first would leak the connection pool. The loop itself is closed only once the
+        thread has actually exited — closing a running loop raises.
+        """
         if self._closed:
             return
         self._closed = True
+        closer = getattr(self._client, "close", None)
+        if callable(closer):
+            result = closer()
+            if inspect.isawaitable(result):
+                self._run(result)
         self._loop.call_soon_threadsafe(self._loop.stop)
         self._thread.join(timeout=timeout)
+        if self._thread.is_alive():
+            return                                    # still running: leave the loop alone rather than raise
         if not self._loop.is_closed():
             self._loop.close()
 
@@ -450,8 +470,11 @@ class Solana:
         return self._signer.sign_message(bytes(message))
 
     def close(self) -> None:
-        """Release the wrapped client's resources (idempotent). A no-op unless the client exposes its own
-        ``close()`` — e.g. the private event-loop thread behind an adapted async solana-py client."""
+        """Release the wrapped client's resources (idempotent).
+
+        The default transport closes its HTTP session; an adapted async solana-py client closes the
+        client itself and then its private event-loop thread. A client with no ``close()`` is a no-op.
+        ``__exit__`` swallows whatever this raises; call it directly to see the error."""
         closer = getattr(self._client, "close", None)
         if callable(closer):
             closer()
@@ -460,7 +483,10 @@ class Solana:
         return self
 
     def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
-        self.close()
+        try:
+            self.close()
+        except Exception:                             # noqa: BLE001 — releasing a transport must never
+            pass                                      # replace (or invent) the caller's own exception
 
 
 def _confirmation_name(status: Any) -> str | None:

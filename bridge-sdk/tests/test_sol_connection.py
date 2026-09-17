@@ -209,6 +209,63 @@ def test_solana_context_manager_closes_the_wrapped_adapter():
     assert adapter._thread.is_alive() is False
 
 
+def test_adapter_close_awaits_the_wrapped_clients_own_close_on_its_loop():
+    """solana-py's AsyncClient owns an aiohttp session that can only be closed from its loop;
+    stopping the thread first would leak it (and warn)."""
+    pytest.importorskip("solders")
+
+    class FakeAsyncClient:
+        def __init__(self):
+            self.closed_on = None
+
+        async def get_balance(self, pubkey, commitment=None):
+            return sol.RpcResult(7)
+
+        async def close(self):
+            import threading as _threading
+            self.closed_on = _threading.current_thread().name
+
+    fake = FakeAsyncClient()
+    adapter = sol._AsyncClientAdapter(fake)
+    loop_thread = adapter._thread.name
+    adapter.close()
+    assert fake.closed_on == loop_thread                 # awaited on the private loop, before it stopped
+    assert adapter._thread.is_alive() is False
+    adapter.close()                                      # idempotent: closes the client exactly once
+
+
+def test_solana_exit_never_raises_even_when_the_client_close_fails():
+    pytest.importorskip("solders")
+
+    class ExplodingClient:
+        def get_latest_blockhash(self, commitment=None):   # pragma: no cover - never called
+            return None
+
+        def close(self):
+            raise OSError("socket already gone")
+
+    with sol.Solana(client=ExplodingClient()) as conn:
+        assert conn.client is not None
+    with pytest.raises(OSError):                           # an explicit close() still reports it
+        sol.Solana(client=ExplodingClient()).close()
+
+
+def test_rpc_client_close_closes_its_session():
+    pytest.importorskip("solders")
+
+    class FakeSession:
+        def __init__(self):
+            self.closed = 0
+
+        def close(self):
+            self.closed += 1
+
+    session = FakeSession()
+    conn = sol.Solana(client=sol.SolanaRpcClient("https://rpc.example", session=session))
+    conn.close()
+    assert session.closed == 1                             # the default transport releases its pool
+
+
 def test_close_is_a_noop_for_a_connection_without_a_closeable_client():
     conn = sol.Solana(client=_Reader())
     conn.close()  # no close() on the client — must not raise
