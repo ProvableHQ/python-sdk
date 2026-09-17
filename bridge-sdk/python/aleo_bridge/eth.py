@@ -14,9 +14,9 @@ from typing import Any, Mapping
 from . import encoding
 from ._calls import EvmCall, EvmOutcome, EvmStep
 from ._evm_abi import ERC20_ABI, EVM_CHAIN_BY_ENVIRONMENT, MAILBOX_ABI, WARP_ROUTE_ABI, XRESERVE_ABI, ZERO_ADDRESS
-from .errors import (AmbiguousRouteError, BridgeError, ChainMismatchError, ConfigurationError, InsufficientBalanceError,
-                     InvalidAmountError, InvalidRecipientError, MissingExtraError, RegistryVersionMismatchError,
-                     RouteNotFoundError, RouteUnavailableError)
+from .errors import (AmbiguousRouteError, BridgeError, ChainMismatchError, CheckpointInvalidError, ConfigurationError,
+                     InsufficientBalanceError, InvalidAmountError, InvalidRecipientError, MissingExtraError,
+                     RegistryVersionMismatchError, RouteNotFoundError, RouteUnavailableError, UnsupportedRouteError)
 from .registry import Asset, Chain, Registry, Route
 from .types import (DepositReceipt, DispatchReceipt, EvmHyperlaneQuote, EvmXReserveQuote, Fee, Plan, Receipt, Status,
                     Step)
@@ -29,6 +29,9 @@ def _web3():
     except ImportError as exc:  # pragma: no cover - exercised by test_import_without_web3
         raise MissingExtraError("evm", "Ethereum connections") from exc
     return web3
+
+
+_HASH_RE = re.compile(r"^0x[0-9a-fA-F]{64}$")
 
 
 def _eth_account():
@@ -806,6 +809,162 @@ class EthModule:
             return self._xreserve_result(route, latest["q"], outcome, mint_mode=mint_mode, intended_recipient=recipient)
 
         return EvmCall(self.conn, plan=plan, registry=self.registry, steps=steps, finish=finish, store=self.bridge.checkpoints)
+
+    # -- status ---------------------------------------------------------------------------------
+
+    @staticmethod
+    def _require_hash(value: Any, what: str) -> str:
+        if not isinstance(value, str) or not _HASH_RE.match(value):
+            raise CheckpointInvalidError(f"Receipt is missing a valid {what}")
+        return value
+
+    @staticmethod
+    def _failed(receipt: Receipt, key: str, message: str) -> Receipt:
+        return receipt.replace(status=Status.FAILED, next_action=None,
+                               protocol_state={**receipt.protocol_state, key: message})
+
+    def _validate_hyperlane_state(self, route: Route, plan: Plan, receipt: Receipt) -> bytes:
+        """Bind every value that affects the dispatch before trusting checkpointed transaction ids."""
+        state = receipt.protocol_state
+        recipient32 = encoding.aleo_address_to_bytes32(plan.recipient)
+        if (receipt.protocol != "hyperlane"
+                or state.get("destinationDomain") != int(route.metadata["destinationDomain"])
+                or state.get("amountAtomic") != str(plan.amount_atomic)
+                or not isinstance(state.get("recipientBytes32"), str)
+                or state["recipientBytes32"].lower() != "0x" + recipient32.hex()):
+            raise CheckpointInvalidError("Hyperlane checkpoint does not match the prepared transfer")
+        ids = state.get("approvalTxIds", [])
+        if not isinstance(ids, list) or any(not isinstance(i, str) or not _HASH_RE.match(i) for i in ids):
+            raise CheckpointInvalidError("Hyperlane checkpoint contains invalid approval transaction ids")
+        return recipient32
+
+    def _hyperlane_source_status(self, route: Route, plan: Plan, receipt: Receipt) -> Receipt:
+        self._validate_hyperlane_state(route, plan, receipt)
+        self.assert_chain(route)
+        source_tx_id = self._require_hash(receipt.source_tx_id, "source transaction id")
+        observed = self.conn.get_receipt(source_tx_id)
+        if observed is None:
+            return receipt
+        if int(observed["status"]) == 0:
+            return self._failed(receipt, "sourceError", f"EVM transaction reverted: {source_tx_id}")
+        message_id = self._message_id_from_receipt(route, observed)
+        state = dict(receipt.protocol_state)
+        if message_id is not None:
+            state["messageId"] = message_id
+        return receipt.replace(id=message_id or source_tx_id, status=Status.DELIVERY_PENDING, protocol_state=state)
+
+    def _xreserve_quote_from_state(self, route: Route, plan: Plan, receipt: Receipt) -> _XReserveQuote:
+        """veil ``resumeQuote``: rebuild the deposit arguments from saved state and bind them to the plan."""
+        Web3 = _web3().Web3
+        s = receipt.protocol_state
+        if receipt.protocol != "xreserve":
+            raise CheckpointInvalidError("Checkpoint does not match the prepared xReserve route")
+        if s.get("mintMode") != plan.mint_mode or s.get("intendedRecipient") != plan.recipient:
+            raise CheckpointInvalidError("Checkpoint does not match the prepared xReserve recipient")
+        try:
+            ok = (Web3.is_address(s["xReserveContract"]) and Web3.is_address(s["tokenAddress"])
+                  and isinstance(s["sourceChainId"], int) and isinstance(s["remoteDomain"], int)
+                  and _HASH_RE.match(s["remoteRecipientBytes32"]) is not None
+                  and isinstance(s["hookData"], str) and len(s["hookData"]) == 132 and s["hookData"].startswith("0x")
+                  and str(s["amountAtomic"]).isdigit() and str(s["maxFeeAtomic"]).isdigit())
+        except (KeyError, TypeError):
+            ok = False
+        if not ok:
+            raise CheckpointInvalidError("Checkpoint contains invalid xReserve submission state")
+        ids = s.get("approvalTxIds", [])
+        if not isinstance(ids, list) or any(not isinstance(i, str) or not _HASH_RE.match(i) for i in ids):
+            raise CheckpointInvalidError("Checkpoint contains invalid xReserve approval transaction ids")
+        meta = self._xreserve_metadata(route)   # reuse the registry validator rather than trusting raw metadata again
+        return _XReserveQuote(
+            xreserve_contract=Web3.to_checksum_address(s["xReserveContract"]), token=Web3.to_checksum_address(s["tokenAddress"]),
+            source_chain_id=int(s["sourceChainId"]), source_domain=meta.source_domain, remote_domain=int(s["remoteDomain"]),
+            remote_token_bytes32=meta.remote_token_bytes32,
+            remote_recipient_bytes32=bytes.fromhex(s["remoteRecipientBytes32"][2:]), amount_atomic=int(s["amountAtomic"]),
+            max_fee_atomic=int(s["maxFeeAtomic"]), hook_data=bytes.fromhex(s["hookData"][2:]), balance_atomic=0, allowance_atomic=0,
+            bridge_program=meta.bridge_program, wrapper_program=meta.wrapper_program)
+
+    def _observed_owner(self, plan: Plan, receipt: Receipt | None) -> str:
+        """Prefer the sender committed to the receipt or plan so read-only recovery never needs a signer."""
+        Web3 = _web3().Web3
+        saved = receipt.protocol_state.get("sourceSender") if receipt is not None else None
+        for candidate in (saved, plan.sender, self.conn.address):
+            if isinstance(candidate, str) and Web3.is_address(candidate):
+                return Web3.to_checksum_address(candidate)
+        raise ConfigurationError("Read-only EVM access requires the prepared sender address (plan.sender or protocol_state.sourceSender)")
+
+    def _xreserve_source_status(self, route: Route, plan: Plan, receipt: Receipt) -> Receipt:
+        q = self._xreserve_quote_from_state(route, plan, receipt)
+        owner = self._observed_owner(plan, receipt)
+        source_tx_id = self._require_hash(receipt.source_tx_id, "xReserve source transaction id")
+        observed = self.conn.get_receipt(source_tx_id)
+        if observed is None:
+            return receipt
+        if int(observed["status"]) == 0:
+            return self._failed(receipt, "sourceError", f"EVM transaction reverted: {source_tx_id}")
+        return self._confirmed_deposit_receipt(route, q, owner=owner, approval_tx_ids=list(receipt.protocol_state["approvalTxIds"]),
+                                               source_tx_id=source_tx_id, receipt=observed, mint_mode=plan.mint_mode,
+                                               intended_recipient=plan.recipient)
+
+    def source_status(self, plan: Plan, receipt: Receipt) -> Receipt:
+        """One read-only refresh of an Ethereum source leg (brief §2.4 branches 1 and 3, plus xReserve SOURCE_CONFIRMING).
+
+        ``SOURCE_APPROVAL_PENDING``: approval receipt → ``SOURCE_SUBMISSION_PENDING`` (or ``FAILED`` on revert).
+        ``SOURCE_CONFIRMING``: Hyperlane → ``DELIVERY_PENDING`` with the ``DispatchId`` message id;
+        xReserve → ``ATTESTATION_PENDING`` after re-verifying the ``DepositedToRemote`` event.
+        An unmined transaction returns the receipt unchanged. Never signs.
+
+        Deviation from veil (deliberate): veil raises for a reverted Hyperlane/xReserve *source*
+        transaction but returns ``FAILED`` for a reverted approval. Here every reverted source
+        transaction observed at this stage becomes ``FAILED`` with ``protocol_state["sourceError"]`` —
+        one uniform rule that plan 4's ``get_status``/``wait`` can rely on without a protocol switch.
+        ``send()`` still raises on revert.
+        """
+        route = self._route_for_plan(plan)
+        if receipt.protocol != plan.protocol or receipt.protocol_state.get("routeId") != plan.route_id:
+            raise CheckpointInvalidError("Receipt does not match the prepared route")
+        if receipt.status == Status.SOURCE_APPROVAL_PENDING:
+            approval_id = self._require_hash(receipt.id, "EVM approval transaction id")
+            observed = self.conn.get_receipt(approval_id)
+            if observed is None:
+                return receipt
+            if int(observed["status"]) == 0:
+                return self._failed(receipt, "sourceError", f"EVM approval transaction reverted: {approval_id}")
+            return receipt.replace(status=Status.SOURCE_SUBMISSION_PENDING)
+        if receipt.status == Status.SOURCE_CONFIRMING:
+            if route.protocol == "hyperlane":
+                return self._hyperlane_source_status(route, plan, receipt)
+            return self._xreserve_source_status(route, plan, receipt)
+        raise BridgeError("source_status refreshes SOURCE_APPROVAL_PENDING and SOURCE_CONFIRMING receipts only; "
+                          "use bridge.get_status for later stages")
+
+    def _mailbox_address(self) -> str:
+        for route in self.registry.routes(protocol="hyperlane", include_unavailable=True, environment=self.bridge.environment):
+            chains = {self.registry.asset(route.source_asset_id).chain_id, self.registry.asset(route.destination_asset_id).chain_id}
+            mailbox = route.metadata.get("mailboxAddress")
+            if self.chain.id in chains and isinstance(mailbox, str):
+                return mailbox
+        raise UnsupportedRouteError(f"No Hyperlane Mailbox is configured for {self.chain.id} in registry {self.registry.version}")
+
+    def is_delivered(self, message_id: str | bytes) -> bool:
+        """``Mailbox.delivered(bytes32)`` on this chain — the canonical Aleo → Ethereum delivery signal."""
+        raw = bytes.fromhex(message_id[2:]) if isinstance(message_id, str) and message_id.startswith("0x") else message_id
+        if not isinstance(raw, (bytes, bytearray)) or len(raw) != 32:
+            raise BridgeError("Hyperlane delivery requires a 32-byte message id")
+        return bool(self._contract(self._mailbox_address(), MAILBOX_ABI).functions.delivered(bytes(raw)).call())
+
+    def balance(self, asset: Any, *, address: str | None = None) -> int:
+        """Atomic balance of ``asset`` (native via ``eth_getBalance``, ERC-20 via ``balanceOf``) for ``address`` or the connection's account."""
+        target = self._asset(asset)
+        owner = self._owner(address)
+        if owner is None:
+            raise ConfigurationError("balance() needs an address: pass address= or configure a signer")
+        if target.locator is None:
+            raise UnsupportedRouteError(f"{target.id} has no on-chain locator")
+        if target.locator.kind == "native":
+            return int(self.conn.w3.eth.get_balance(owner))
+        if target.locator.kind == "evm-contract":
+            return int(self._erc20(target.locator.value).functions.balanceOf(owner).call())
+        raise UnsupportedRouteError(f"{target.id} is not an EVM asset")
 
 
 __all__ = ["Ethereum", "EthModule"]

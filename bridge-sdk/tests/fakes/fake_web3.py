@@ -133,6 +133,15 @@ class FakeRpcProvider(BaseProvider):
     def _ok(self, result: Any) -> dict:
         return {"jsonrpc": "2.0", "id": 1, "result": result}
 
+    def add_receipt(self, tx_hash: str, *, status: int = 1, logs: list[dict] | None = None, block_number: int = 0x65,
+                    sender: str = ZERO_ADDRESS, to: str = ZERO_ADDRESS) -> None:
+        """Serve a receipt for a hash the fake never accepted itself (recovery / status tests)."""
+        self.receipts[tx_hash] = {
+            "transactionHash": tx_hash, "status": _hex(status), "blockNumber": _hex(block_number), "blockHash": BLOCK_HASH,
+            "transactionIndex": "0x0", "from": to_checksum_address(sender), "to": to_checksum_address(to),
+            "cumulativeGasUsed": "0x1", "gasUsed": "0x1", "effectiveGasPrice": "0x1", "type": "0x2",
+            "contractAddress": None, "logsBloom": "0x" + "00" * 256, "logs": logs or []}
+
     def make_request(self, method: str, params: Any) -> dict:
         self.methods.append(method)
         if method == "eth_chainId":
