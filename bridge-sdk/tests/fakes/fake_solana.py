@@ -131,6 +131,6 @@ class FakeSolanaClient:
         return _Resp(SimpleNamespace(transaction=SimpleNamespace(meta=meta)))
 
 
-def stub_bridge(environment: str = "mainnet") -> SimpleNamespace:
-    """What SolModule needs from a Bridge without constructing one: registry + environment."""
-    return SimpleNamespace(registry=DEFAULT_REGISTRY, environment=environment)
+def stub_bridge(environment: str = "mainnet", checkpoints: Any = None) -> SimpleNamespace:
+    """What SolModule needs from a Bridge without constructing one: registry, environment, checkpoint store."""
+    return SimpleNamespace(registry=DEFAULT_REGISTRY, environment=environment, checkpoints=checkpoints)

@@ -20,6 +20,7 @@ from typing import Any, Callable, Mapping, Protocol, Sequence, runtime_checkable
 import requests
 
 from . import _sealevel as sl
+from ._calls import SolCall
 from ._plan import build_plan
 from .encoding import aleo_address_to_bytes32
 from .errors import (
@@ -447,6 +448,63 @@ def _confirmation_name(status: Any) -> str | None:
     return str(name).rsplit(".", 1)[-1].lower()
 
 
+@dataclass
+class SolBuild:
+    """Everything ``send`` needs after ``build``: the quote, the compiled message, the partially signed
+    transaction, the unique-message address that seeds the PDAs, and the blockhash lifetime."""
+    quote: SolanaHyperlaneQuote
+    message: Any
+    transaction: Any
+    unique_message_address: str
+    blockhash: str
+    last_valid_block_height: int
+    sender: str
+    destination_domain: int
+
+
+def _signature_status(client: Any, signature: Any) -> str | None:
+    """'failed' | 'processed' | 'confirmed' | 'finalized' | None (unknown); raises on RPC errors."""
+    value = client.get_signature_statuses([signature], search_transaction_history=True).value
+    status = value[0] if value else None
+    if status is None:
+        return None
+    if getattr(status, "err", None) is not None:
+        return "failed"
+    name = _confirmation_name(status)
+    if name not in (None, "processed", "confirmed", "finalized"):
+        raise BridgeError(f"Solana RPC getSignatureStatuses returned unsupported confirmation status: {name}")
+    return name
+
+
+def _poll_for_confirmation(client: Any, signature: str, blockhash: str, timeout_seconds: float,
+                           poll_seconds: float) -> str | None:
+    """Poll until confirmed/finalized ('confirmed'|'finalized'), the blockhash expires ('expired'), or the
+    deadline passes (None). A status read that raises is swallowed — the transaction is already broadcast,
+    so a transient RPC error must not be reported as a transfer failure. An on-chain ``err`` raises."""
+    libs = _libs()
+    sig = libs.Signature.from_string(signature)
+    hash_ = libs.Hash.from_string(blockhash)
+    interval = max(float(poll_seconds), 0.1)
+    deadline = time.monotonic() + max(float(timeout_seconds), 0.0)
+    while True:
+        try:
+            status = _signature_status(client, sig)
+        except Exception:                           # noqa: BLE001 — transport/decoding errors are transient here
+            status = None
+        if status == "failed":
+            raise BridgeError(f"Solana Hyperlane transfer failed on-chain: {signature}")
+        if status in ("confirmed", "finalized"):
+            return status
+        try:
+            if not client.is_blockhash_valid(hash_, commitment=CONFIRMED).value:
+                return "expired"
+        except Exception:                           # noqa: BLE001
+            pass                                    # advisory while the signature may still land
+        if time.monotonic() >= deadline:
+            return None
+        time.sleep(interval)
+
+
 class SolModule:
     """``bridge.sol`` — Solana-origin SOL → Aleo over the Hyperlane warp route (spec §6).
 
@@ -585,3 +643,146 @@ class SolModule:
             igp_lamports=igp, network_fee_lamports=fee, rent_lamports=rent, total_lamports=total,
             unique_message_address=str(unique.pubkey()),
         )
+
+    # --- write ------------------------------------------------------------------------------
+
+    def transfer_remote(self, recipient: str, *, amount: str | None = None, amount_atomic: int | None = None,
+                        plan: Plan | None = None) -> SolCall[DispatchReceipt]:
+        """Send native SOL to an Aleo address over the Hyperlane warp route (spec §6).
+
+        Returns a :class:`SolCall`: ``build()`` previews the partially signed transaction,
+        ``send()`` moves funds (amount + IGP payment + network fee + rent leave the wallet).
+        ``plan`` (from ``Bridge.execute``) must have been prepared for the connected wallet; its
+        registry version and route id are re-checked against the live registry when the call runs.
+        """
+        route = self.outbound_route()
+        sl.solana_route_metadata(route)                                  # refuse inactive/malformed routes early
+        decimals = self.registry.asset(route.source_asset_id).decimals
+        if plan is not None:
+            recipient, amount_atomic, amount = plan.recipient, plan.amount_atomic, None
+        amount_atomic = resolve_amount(amount=amount, amount_atomic=amount_atomic, decimals=decimals)
+        if amount_atomic <= 0:
+            raise InvalidAmountError("amount must be positive")
+        aleo_address_to_bytes32(recipient)
+
+        def build_result(receipt: Receipt) -> DispatchReceipt:
+            return DispatchReceipt(transaction_id=receipt.source_tx_id or receipt.id, route_id=route.id,
+                                   message_id=receipt.protocol_state.get("messageId"),
+                                   amount_atomic=amount_atomic, receipt=receipt)
+
+        return SolCall(self, route=route, recipient=recipient, amount_atomic=amount_atomic, plan=plan,
+                       build_result=build_result, store=getattr(self._bridge, "checkpoints", None))
+
+    def _build_transaction(self, *, route: Route, recipient: str, amount_atomic: int, plan: Plan | None) -> SolBuild:
+        libs = _libs()
+        sender = self.conn.address
+        if sender is None:
+            raise ConfigurationError("Solana connection is read-only: pass signer= or private_key= to Solana() to build transactions")
+        if plan is not None and plan.sender and plan.sender != sender:
+            raise ConfigurationError(f"Prepared sender {plan.sender} does not match connected account {sender}")
+        quote = self.quote_transfer_remote(recipient, amount_atomic=amount_atomic, sender=sender, plan=plan)
+        metadata = sl.solana_route_metadata(route)
+        unique = libs.Keypair()                       # fresh per build: seeds the dispatched-message and gas-payment PDAs
+        message, blockhash, last_valid_block_height = self._compile_message(
+            metadata, sender=sender, unique_message=str(unique.pubkey()),
+            recipient32=aleo_address_to_bytes32(quote.plan.recipient), amount_atomic=quote.plan.amount_atomic)
+        keys = list(message.account_keys)
+        if keys[0] != libs.Pubkey.from_string(sender):
+            raise BridgeError("compiled Solana message does not list the sender as fee payer")
+        signatures = [libs.Signature.default()] * message.header.num_required_signatures
+        signatures[keys.index(unique.pubkey())] = unique.sign_message(libs.to_bytes_versioned(message))
+        transaction = libs.VersionedTransaction.populate(message, signatures)
+        return SolBuild(quote=replace(quote, unique_message_address=str(unique.pubkey())), message=message,
+                        transaction=transaction, unique_message_address=str(unique.pubkey()), blockhash=blockhash,
+                        last_valid_block_height=last_valid_block_height, sender=sender,
+                        destination_domain=metadata.destination_domain)
+
+    def _source_receipt(self, built: SolBuild, signature: str) -> Receipt:
+        return Receipt(
+            id=signature, protocol="hyperlane", status=Status.SOURCE_CONFIRMING, source_tx_id=signature,
+            protocol_state={
+                "routeId": built.quote.plan.route_id,
+                "signature": signature,
+                "uniqueMessageAddress": built.unique_message_address,
+                "destinationDomain": built.destination_domain,
+                "quotedLamports": str(built.quote.total_lamports),
+                "blockhash": built.blockhash,
+                "lastValidBlockHeight": str(built.last_valid_block_height),
+            },
+        )
+
+    def _transaction_logs(self, signature: str) -> list[str] | None:
+        libs = _libs()
+        value = self.client.get_transaction(libs.Signature.from_string(signature), encoding="json",
+                                            commitment=CONFIRMED, max_supported_transaction_version=0).value
+        if value is None:
+            return None
+        meta = value.transaction.meta
+        return None if meta is None else meta.log_messages
+
+    def _delivery_pending(self, receipt: Receipt, signature: str) -> Receipt:
+        message_id = sl.extract_hyperlane_message_id(self._transaction_logs(signature))
+        state = dict(receipt.protocol_state)
+        if message_id:
+            state["messageId"] = message_id
+        else:
+            state["messageIdUnavailable"] = True
+        return receipt.replace(id=message_id or signature, status=Status.DELIVERY_PENDING, protocol_state=state)
+
+    def _checkpoint(self, plan: Plan, receipt: Receipt, on_checkpoint: "Callable[[Checkpoint], None] | None",
+                    store: "CheckpointStore | None", signature: str) -> None:
+        """Emit the checkpoint for a just-broadcast *signature* to the caller first, then the store.
+
+        Mirrors ``EvmCall._checkpoint``: the caller's callback runs before the store because the
+        transaction is already on the wire; a store failure is then fatal and names the signature,
+        because losing it silently would strand funds.
+        """
+        from .checkpoint import create_checkpoint
+
+        checkpoint = create_checkpoint(plan, receipt, self.registry)
+        if on_checkpoint is not None:
+            on_checkpoint(checkpoint)                     # the caller's own callback: errors are theirs
+        if store is not None:
+            try:
+                store.save(checkpoint)
+            except Exception as exc:  # noqa: BLE001 — any store backend failure
+                raise BridgeError(
+                    f"Solana transaction {signature} WAS broadcast but its checkpoint {checkpoint.id} could not be "
+                    f"saved ({exc}); record the signature before retrying — resending would double-spend") from exc
+
+    def _submit(self, built: SolBuild, *, wait: bool, timeout_seconds: float, poll_seconds: float,
+                on_checkpoint: "Callable[[Checkpoint], None] | None" = None,
+                store: "CheckpointStore | None" = None) -> Receipt:
+        libs = _libs()
+        quote = built.quote
+        balance = self._balance_of(built.sender)
+        if balance < quote.total_lamports:
+            raise InsufficientBalanceError(
+                f"Insufficient Solana balance for this Hyperlane transfer: balance {balance} lamports, "
+                f"required {quote.total_lamports} lamports (amount {quote.plan.amount_atomic} "
+                f"+ gas {quote.igp_lamports + quote.network_fee_lamports} + rent {quote.rent_lamports})")
+        signatures = list(built.transaction.signatures)
+        payer_index = list(built.message.account_keys).index(libs.Pubkey.from_string(built.sender))
+        signatures[payer_index] = self.conn.sign_message(libs.to_bytes_versioned(built.message))
+        signed = libs.VersionedTransaction.populate(built.message, signatures)
+        opts = SendOptions(skip_preflight=False, preflight_commitment=CONFIRMED)
+        signature = str(self.client.send_raw_transaction(bytes(signed), opts=opts).value)
+        receipt = self._source_receipt(built, signature)
+        self._checkpoint(quote.plan, receipt, on_checkpoint, store, signature)
+        if not wait:
+            return receipt
+        try:
+            outcome = _poll_for_confirmation(self.client, signature, built.blockhash, timeout_seconds, poll_seconds)
+            if outcome is None:
+                return receipt
+            if outcome == "expired":
+                return receipt.replace(status=Status.EXPIRED, protocol_state={
+                    **receipt.protocol_state, "blockhashExpired": True,
+                    "sourceError": f"Solana transaction expired before confirmation: {signature}"})
+            return self._delivery_pending(receipt, signature)
+        except BridgeError as exc:
+            if signature in str(exc):
+                raise
+            raise BridgeError(f"Solana Hyperlane transfer {signature} failed after broadcast: {exc}") from exc
+        except Exception as exc:  # noqa: BLE001 — any post-broadcast failure names the signature
+            raise BridgeError(f"Solana Hyperlane transfer {signature} failed after broadcast: {exc}") from exc

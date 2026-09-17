@@ -333,5 +333,45 @@ class EvmCall(Generic[R]):
         raise BridgeError("EvmCall has no main step")
 
 
-__all__ = ["AleoCall", "EvmCall", "EvmOutcome", "EvmStep", "extract_tx_id", "is_duplicate_submission",
+class SolCall(Generic[R]):
+    """A prepared Solana-origin call (spec §7).
+
+    ``build()`` re-quotes, compiles the v0 transaction and signs it with the ephemeral
+    unique-message keypair only — a preview that spends nothing. ``send()`` rebuilds with a
+    fresh quote, unique key and blockhash, checks the wallet balance, adds the fee-payer
+    signature through the connection's signer, broadcasts, hands the ``Checkpoint`` built from the
+    SOURCE_CONFIRMING receipt to ``on_checkpoint`` and then to the bound store — both before the
+    first confirmation poll — and returns the typed result. A polling timeout is not a failure:
+    the pending receipt comes back with the signature and blockhash lifetime.
+    """
+
+    def __init__(self, module: Any, *, route: Any, recipient: str, amount_atomic: int, plan: Any,
+                 build_result: Callable[[Any], R], store: "CheckpointStore | None" = None) -> None:
+        self._module = module
+        self.route = route
+        self.recipient = recipient
+        self.amount_atomic = amount_atomic
+        self.plan = plan
+        self._build_result = build_result
+        self._store = store
+        self.quote: Any = None
+        self._built: Any = None
+
+    def build(self) -> Any:
+        """Partially signed ``VersionedTransaction`` (unique-message signer only); sets ``self.quote``."""
+        self._built = self._module._build_transaction(route=self.route, recipient=self.recipient,
+                                                      amount_atomic=self.amount_atomic, plan=self.plan)
+        self.quote = self._built.quote
+        return self._built.transaction
+
+    def send(self, *, wait: bool = True, timeout_seconds: float = 120.0, poll_seconds: float = 1.0,
+             on_checkpoint: Callable[[Any], None] | None = None) -> R:
+        self.build()
+        receipt = self._module._submit(self._built, wait=wait, timeout_seconds=timeout_seconds,
+                                       poll_seconds=poll_seconds, on_checkpoint=on_checkpoint,
+                                       store=self._store)
+        return self._build_result(receipt)
+
+
+__all__ = ["AleoCall", "EvmCall", "EvmOutcome", "EvmStep", "SolCall", "extract_tx_id", "is_duplicate_submission",
            "output_values", "payload_transitions", "root_outputs"]

@@ -368,3 +368,21 @@ def account_metas(metadata: SolanaRouteMetadata, sender: str, unique_message: st
         rw(metadata.native_collateral_pda),               # 15
     ])
     return metas
+
+
+# --- Program logs ------------------------------------------------------------------------------
+
+# SEALEVEL_NOTES §5: only the Mailbox dispatch line carries the full id; the IGP and warp-completion
+# lines print H256 with Display (truncated "0xffe0…7805") and must never be parsed.
+DISPATCHED_MESSAGE_LOG_PATTERN = re.compile(r"Dispatched message to \d+, ID (0x[0-9a-fA-F]{64})")
+
+
+def extract_hyperlane_message_id(logs: "list[str] | None") -> str | None:
+    """The 32-byte Hyperlane message id from confirmed program logs, or None when absent."""
+    if not logs:
+        return None
+    for line in logs:
+        match = DISPATCHED_MESSAGE_LOG_PATTERN.search(line)
+        if match:
+            return match.group(1)
+    return None
