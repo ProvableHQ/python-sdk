@@ -127,7 +127,7 @@ def test_from_env_builds_aleo_only(monkeypatch, fake_aleo):
         Bridge.from_env(w3=marker)
 
 
-def test_from_env_side_chain_variables(monkeypatch):
+def test_from_env_side_chain_variables(monkeypatch, tmp_path):
     monkeypatch.setattr("aleo_bridge.client.build_aleo", lambda *a, **k: FakeAleo(mappings=default_mappings()))
     monkeypatch.setenv("BRIDGE_PRIVATE_KEY", "APrivateKey1zkpTest")
     for var in ("EVM_PRIVATE_KEY", "ETHEREUM_RPC_URL", "SOLANA_PRIVATE_KEY", "SOLANA_RPC_URL", "BRIDGE_CHECKPOINT_DIR"):
@@ -144,9 +144,11 @@ def test_from_env_side_chain_variables(monkeypatch):
     with pytest.raises(MissingExtraError, match="solana"):       # plan 3 makes this construct a Solana connection
         Bridge.from_env()
     monkeypatch.delenv("SOLANA_PRIVATE_KEY")
-    monkeypatch.setenv("BRIDGE_CHECKPOINT_DIR", "/tmp/cp")
-    with pytest.raises(ConfigurationError, match="plan 4"):      # plan 4 wires FileCheckpointStore
-        Bridge.from_env()
+    monkeypatch.setenv("BRIDGE_CHECKPOINT_DIR", str(tmp_path / "cp"))
+    bridge = Bridge.from_env()                                   # plan 4: FileCheckpointStore now wired
+    from aleo_bridge.checkpoint import FileCheckpointStore
+    assert isinstance(bridge.checkpoints, FileCheckpointStore)
+    assert bridge.checkpoints.directory == tmp_path / "cp" and bridge.checkpoints.directory.is_dir()
 
 
 def test_build_aleo_is_local_only():
@@ -172,7 +174,9 @@ def test_from_profile_uses_profile_and_wires_no_side_chains(tmp_path, monkeypatc
     assert bridge.profile is not None and bridge.profile.home == tmp_path / "home"
     assert captured == {"endpoint": "https://api.provable.com/v2", "network": "testnet", "private_key": bridge.profile.private_key}
     assert bridge.environment == "testnet" and bridge.ethereum is None and bridge.solana is None
-    assert bridge.checkpoints is None          # plan 4 binds FileCheckpointStore(profile.checkpoint_dir)
+    from aleo_bridge.checkpoint import FileCheckpointStore
+    assert isinstance(bridge.checkpoints, FileCheckpointStore)   # plan 4 binds FileCheckpointStore(profile.checkpoint_dir)
+    assert bridge.checkpoints.directory == bridge.profile.checkpoint_dir
     assert bridge.profile.checkpoint_dir.is_dir()
     marker = object()
     assert Bridge.from_profile(ethereum=marker).ethereum is marker

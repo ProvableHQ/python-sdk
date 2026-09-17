@@ -22,6 +22,7 @@ from .types import (  # noqa: E402
     to_progress,
 )
 from ._calls import AleoCall  # noqa: E402
+from .checkpoint import Checkpoint, CheckpointStore, FileCheckpointStore, create_checkpoint  # noqa: E402
 from .circle import CircleClient  # noqa: E402
 from .client import Bridge  # noqa: E402
 from .freezelist import EMPTY_MERKLE_PROOF_PAIR, FreezeList  # noqa: E402
@@ -43,4 +44,5 @@ __all__ = [
     "SolanaHyperlaneQuote", "Status", "Step", "to_progress",
     "AleoCall", "Bridge", "CircleClient", "DEFAULT_ENDPOINT", "EMPTY_MERKLE_PROOF_PAIR", "FreezeList",
     "HyperlaneModule", "PrivacyModule", "Profile", "XReserveModule",
+    "Checkpoint", "CheckpointStore", "FileCheckpointStore", "create_checkpoint",
 ]
