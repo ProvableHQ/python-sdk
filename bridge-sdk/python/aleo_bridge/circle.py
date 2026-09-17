@@ -7,7 +7,7 @@ import requests
 
 from . import encoding as enc
 from ._keccak import keccak256
-from .errors import AttestationError, ConfigurationError
+from .errors import AttestationError, ConfigurationError, InvalidRecipientError
 from .types import Attestation
 
 
@@ -24,7 +24,7 @@ class CircleClient:
     def get_attestation(self, message_hash_hex: str) -> Attestation | None:
         try:
             digest = enc.hex_to_bytes(message_hash_hex, 32)
-        except ValueError as exc:
+        except (ValueError, InvalidRecipientError) as exc:
             raise AttestationError(f"Circle attestation lookup needs a 32-byte message hash, got {message_hash_hex!r}") from exc
         try:
             response = self._session.get(f"{self.base_url}/{enc.to_hex(digest)}", timeout=self.timeout)
@@ -45,7 +45,7 @@ class CircleClient:
             payload = enc.hex_to_bytes(value["payload"], enc.XRESERVE_PAYLOAD_BYTES)
             signature = enc.hex_to_bytes(value["attestation"], enc.HOOK_DATA_BYTES)
             echoed = enc.hex_to_bytes(value["messageHash"], 32)
-        except (KeyError, TypeError, ValueError) as exc:
+        except (KeyError, TypeError, ValueError, InvalidRecipientError) as exc:
             raise AttestationError("Circle attester returned an invalid response (payload/attestation/messageHash)") from exc
         if echoed != digest:
             raise AttestationError("Circle attester echoed a different message hash than requested")

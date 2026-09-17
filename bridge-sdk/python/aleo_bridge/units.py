@@ -6,7 +6,7 @@ from decimal import Decimal
 
 from .errors import InvalidAmountError
 
-_DECIMAL_RE = re.compile(r"^(\d+)(?:\.(\d+))?$")
+_DECIMAL_RE = re.compile(r"^([0-9]+)(?:\.([0-9]+))?$")
 
 
 def _check_decimals(decimals: int) -> None:

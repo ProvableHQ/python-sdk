@@ -1,7 +1,7 @@
 import pytest
 
 from aleo_bridge import encoding as enc
-from aleo_bridge.errors import AttestationError, ConfigurationError, InvalidRecipientError
+from aleo_bridge.errors import AttestationError, ConfigurationError, InvalidAmountError, InvalidRecipientError
 
 RECIPIENT = "aleo1kypwp5m7qtk9mwazgcpg0tq8aal23mnrvwfvug65qgcg9xvsrqgspyjm6n"
 RECIPIENT_BYTES32 = "b102e0d37e02ec5dbba2460287ac07ef7ea8ee636392ce235402308299901811"
@@ -73,7 +73,7 @@ def test_solana_limbs():
 
 def test_limbs_and_literals():
     assert enc.bytes32_to_u128_limbs(bytes(31) + b"\x01") == (0, 1 << 120)
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidRecipientError):
         enc.bytes32_to_u128_limbs(bytes(31))
     assert enc.u128_pair_literal((0, 1329227995784915872903807060280344576)) == \
         "[0u128, 1329227995784915872903807060280344576u128]"
@@ -81,7 +81,7 @@ def test_limbs_and_literals():
     assert enc.u8_array_literal(bytes(31) + b"\x01") == "[" + ",".join(["0u8"] * 31 + ["1u8"]) + "]"
     assert enc.hex_to_bytes("0x00ff", 2) == b"\x00\xff"
     assert enc.hex_to_bytes(b"\x00\xff") == b"\x00\xff"
-    with pytest.raises(ValueError, match="32 bytes"):
+    with pytest.raises(InvalidRecipientError, match="32 bytes"):
         enc.hex_to_bytes("0x00ff", 32)
     assert enc.to_hex(b"\x00\xff") == "0x00ff"
 
@@ -90,7 +90,7 @@ def test_hyperlane_delivery_key_vector():
     # brief §3.7 vector
     key = enc.hyperlane_delivery_key(enc.hex_to_bytes(MESSAGE_ID, 32))
     assert key == "{ id: [262854447642257427123071959211115528903u128, 102980212169860384794748804418278302317u128] }"
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidRecipientError):
         enc.hyperlane_delivery_key(b"\x00")
 
 
@@ -137,14 +137,21 @@ def test_deposit_nonce_matches_abi_encoding_via_web3():
 def test_deposit_payload_rejects_bad_widths():
     good = dict(amount=1, remote_domain=1, remote_token=bytes(32), remote_recipient=bytes(32),
                 local_token=EVM1, depositor=EVM1, max_fee=0, nonce=bytes(32), hook_data=bytes(65))
-    with pytest.raises(ValueError, match="remote_token must contain 32 bytes"):
+    with pytest.raises(InvalidRecipientError, match="remote_token must contain 32 bytes"):
         enc.xreserve_deposit_payload(**{**good, "remote_token": bytes(31)})
-    with pytest.raises(ValueError, match="hook_data must contain 65 bytes"):
+    with pytest.raises(InvalidRecipientError, match="hook_data must contain 65 bytes"):
         enc.xreserve_deposit_payload(**{**good, "hook_data": bytes(64)})
-    with pytest.raises(ValueError, match="does not fit"):
+    with pytest.raises(InvalidAmountError, match="does not fit"):
         enc.xreserve_deposit_payload(**{**good, "remote_domain": 1 << 32})
     with pytest.raises(InvalidRecipientError):
         enc.xreserve_deposit_payload(**{**good, "depositor": "0x1234"})
+
+
+def test_deposit_nonce_bounds_source_domain_to_uint32():
+    tx_hash = bytes.fromhex("12" * 32)
+    assert enc.xreserve_deposit_nonce((1 << 32) - 1, tx_hash, 0)          # max uint32 is fine
+    with pytest.raises(InvalidAmountError, match="does not fit"):
+        enc.xreserve_deposit_nonce(1 << 32, tx_hash, 0)
 
 
 def test_nonce_from_payload_rejects_bad_layout():

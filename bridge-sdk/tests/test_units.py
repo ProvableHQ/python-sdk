@@ -21,6 +21,12 @@ def test_parse_decimal_amount_rejects(amount):
         parse_decimal_amount(amount, 6)
 
 
+def test_parse_decimal_amount_rejects_unicode_digits():
+    # Python's \d matches any Unicode decimal digit, not just ASCII 0-9; the regex must be [0-9] only.
+    with pytest.raises(InvalidAmountError):
+        parse_decimal_amount("٥٦", 6)   # ARABIC-INDIC DIGIT FIVE/SIX — category Nd, not ASCII
+
+
 def test_parse_decimal_amount_rejects_bad_types_and_decimals():
     with pytest.raises(InvalidAmountError):
         parse_decimal_amount(1.5, 6)  # type: ignore[arg-type]

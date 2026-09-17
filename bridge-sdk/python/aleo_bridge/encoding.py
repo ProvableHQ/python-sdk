@@ -12,7 +12,7 @@ from typing import Any
 
 from ._base58 import b58decode
 from ._keccak import keccak256
-from .errors import AttestationError, ConfigurationError, InvalidRecipientError
+from .errors import AttestationError, ConfigurationError, InvalidAmountError, InvalidRecipientError
 
 BECH32_ALPHABET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
 BECH32M_CONST = 0x2BC830A3
@@ -37,11 +37,11 @@ def hex_to_bytes(value: "str | bytes | bytearray | memoryview", expected_len: "i
         try:
             data = bytes.fromhex(text)
         except ValueError as exc:
-            raise ValueError(f"Not hexadecimal: {value!r}") from exc
+            raise InvalidRecipientError(f"Not hexadecimal: {value!r}") from exc
     else:
         data = bytes(value)
     if expected_len is not None and len(data) != expected_len:
-        raise ValueError(f"Expected {expected_len} bytes, got {len(data)}")
+        raise InvalidRecipientError(f"Expected {expected_len} bytes, got {len(data)}")
     return data
 
 
@@ -163,7 +163,7 @@ def bytes32_to_u128_limbs(data: bytes) -> tuple[int, int]:
     """Two little-endian u128 limbs over ``bytes[0:16]`` and ``bytes[16:32]``."""
     raw = bytes(data)
     if len(raw) != 32:
-        raise ValueError(f"Hyperlane recipient limbs need exactly 32 bytes, got {len(raw)}")
+        raise InvalidRecipientError(f"Hyperlane recipient limbs need exactly 32 bytes, got {len(raw)}")
     return int.from_bytes(raw[:16], "little"), int.from_bytes(raw[16:], "little")
 
 
@@ -176,11 +176,11 @@ def evm_address_to_hyperlane_recipient(address: str) -> tuple[int, int]:
 def solana_address_to_hyperlane_recipient(address: str) -> tuple[int, int]:
     try:
         raw = b58decode(address)
-        if len(raw) != 32:
-            raise ValueError("invalid public key width")
-        return bytes32_to_u128_limbs(raw)
     except ValueError as exc:
         raise InvalidRecipientError(f"Invalid Solana Hyperlane recipient: {address}") from exc
+    if len(raw) != 32:
+        raise InvalidRecipientError(f"Invalid Solana Hyperlane recipient: {address}")
+    return bytes32_to_u128_limbs(raw)
 
 
 def u128_pair_literal(limbs: tuple[int, int]) -> str:
@@ -204,12 +204,13 @@ def hyperlane_delivery_key(message_id: bytes) -> str:
 
 def _uint_be(value: int, width: int) -> bytes:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0 or value >= 1 << (8 * width):
-        raise ValueError(f"Unsigned value does not fit in {width} bytes: {value!r}")
+        raise InvalidAmountError(f"Unsigned value does not fit in {width} bytes: {value!r}")
     return value.to_bytes(width, "big")
 
 
 def xreserve_deposit_nonce(source_domain: int, tx_hash: "bytes | str", log_index: int) -> bytes:
     """Circle's deposit nonce: ``keccak(abi.encode(uint32 domain) ‖ txHash ‖ abi.encode(uint256 logIndex))``."""
+    _uint_be(source_domain, 4)  # bound to uint32, consistent with the payload's remote_domain check below
     return keccak256(_uint_be(source_domain, 32) + hex_to_bytes(tx_hash, 32) + _uint_be(log_index, 32))
 
 
@@ -224,7 +225,7 @@ def xreserve_deposit_payload(*, amount: int, remote_domain: int, remote_token: b
     for name, value, width in (("remote_token", remote_token, 32), ("remote_recipient", remote_recipient, 32),
                                ("nonce", nonce, 32), ("hook_data", hook_data, HOOK_DATA_BYTES)):
         if len(bytes(value)) != width:
-            raise ValueError(f"{name} must contain {width} bytes")
+            raise InvalidRecipientError(f"{name} must contain {width} bytes")
     out = bytearray(XRESERVE_PAYLOAD_BYTES)
     out[0:8] = _PAYLOAD_HEADER
     out[8:40] = _uint_be(amount, 32)

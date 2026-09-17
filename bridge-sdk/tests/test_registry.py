@@ -66,6 +66,8 @@ def test_assets_and_lookups():
     assert REG.asset("solana/sol").address_regex == "^[1-9A-HJ-NP-Za-km-z]{32,44}$"
     assert REG.asset("ethereum/usdc").matches_address("0x0000000000000000000000000000000000000001")
     assert not REG.asset("aleo/usdcx").matches_address("0xabc")
+    # re.fullmatch, not re.search: a trailing newline must not sneak past the "$" anchor
+    assert not REG.asset("ethereum/usdc").matches_address("0x0000000000000000000000000000000000000001\n")
     assert [a.id for a in REG.assets(chain="aleo")] == ["aleo/aleo", "aleo/usdcx", "aleo/eth", "aleo/wbtc", "aleo/usdt", "aleo/sol", "aleo/usad"]
     assert [a.id for a in REG.assets(symbol="aleo")] == ["aleo/aleo", "ethereum/aleo", "solana/aleo", "base/aleo", "hyperevm/aleo"]
     assert [a.id for a in REG.assets(environment="testnet")] == ["aleo-testnet/usdcx", "sepolia/usdc"]

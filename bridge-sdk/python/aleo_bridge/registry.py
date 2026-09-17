@@ -63,7 +63,7 @@ class Asset:
 
     def matches_address(self, value: str) -> bool:
         """Whether *value* matches this asset's chain address format (False when no regex is declared)."""
-        return bool(self.address_regex) and isinstance(value, str) and re.search(self.address_regex, value) is not None
+        return bool(self.address_regex) and isinstance(value, str) and re.fullmatch(self.address_regex, value) is not None
 
 
 @dataclass(frozen=True)

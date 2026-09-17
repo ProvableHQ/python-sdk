@@ -43,6 +43,8 @@ def parse_uint_literal(value: str) -> int:
 
 def balance_program(asset: Asset) -> str | None:
     """Program whose ``balances`` mapping holds *asset*'s public balance (None for ALEO credits / no locator)."""
+    # Verified on chain 2026-09-17: the warp/xreserve programs mint/burn via arc20_<sym>.aleo's
+    # mint_public/burn_public, so this IS the ledger transfer_remote (and xreserve burns) spend.
     if asset.locator is None or asset.locator.kind != "aleo-program" or asset.locator.value == "credits.aleo":
         return None
     return asset.privacy.program if asset.privacy is not None else asset.locator.value
@@ -93,18 +95,12 @@ def checkpoints_from_env() -> Any:
     directory = os.environ.get("BRIDGE_CHECKPOINT_DIR")
     if not directory:
         return None
-    try:
-        from .checkpoint import FileCheckpointStore  # plan 4
-    except ImportError as exc:
-        raise ConfigurationError("BRIDGE_CHECKPOINT_DIR needs the checkpoint store that arrives with plan 4; unset it for now") from exc
+    from .checkpoint import FileCheckpointStore
     return FileCheckpointStore(directory)
 
 
 def _checkpoints_for_profile(profile: Profile) -> Any:
-    try:
-        from .checkpoint import FileCheckpointStore  # plan 4
-    except ImportError:
-        return None
+    from .checkpoint import FileCheckpointStore
     return FileCheckpointStore(profile.checkpoint_dir)
 
 
