@@ -245,3 +245,17 @@ class FakeRpcProvider(BaseProvider):
 def fake_web3(**config: Any) -> Web3:
     """A real ``Web3`` over ``FakeRpcProvider``; reach the state through ``w3.provider``."""
     return Web3(FakeRpcProvider(**config))
+
+
+def make_bridge(*, ethereum: Any = None, **aleo_kwargs: Any) -> Any:
+    """A ``Bridge`` over a fresh mainnet ``FakeAleo``, wired with *ethereum* so ``bridge.eth`` works.
+
+    Kept here (rather than in ``tests/conftest.py``) so ``eth.py`` tests can import one fixture
+    factory alongside ``fake_web3`` without pulling in pytest fixtures.
+    """
+    from aleo_bridge import Bridge
+
+    from tests.conftest import FakeAleo, default_mappings
+
+    aleo_kwargs.setdefault("mappings", default_mappings())
+    return Bridge(FakeAleo(**aleo_kwargs), ethereum=ethereum)
