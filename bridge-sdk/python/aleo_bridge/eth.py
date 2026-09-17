@@ -317,9 +317,23 @@ class EthModule:
         self.registry: Registry = bridge.registry
         self.network: str = bridge.network            # "mainnet" | "testnet" → aleo.<network> for encoders
         self.chain: Chain = self.registry.chain(EVM_CHAIN_BY_ENVIRONMENT[bridge.environment])
-        if int(log_scan_chunk_blocks) < 1:
+        self.log_scan_chunk_blocks = log_scan_chunk_blocks        # recovery eth_getLogs span; lower it for strict RPCs
+
+    @property
+    def log_scan_chunk_blocks(self) -> int:
+        """Blocks per ``eth_getLogs`` request during recovery scans; lower it for strict RPCs.
+
+        Validated on every assignment, not just in the constructor: ``_scan_logs`` advances its
+        cursor by this many blocks per pass, so a zero or negative chunk would loop forever
+        against a live chain rather than fail.
+        """
+        return self._log_scan_chunk_blocks
+
+    @log_scan_chunk_blocks.setter
+    def log_scan_chunk_blocks(self, value: Any) -> None:
+        if int(value) < 1:
             raise ConfigurationError("log_scan_chunk_blocks must be at least 1")
-        self.log_scan_chunk_blocks = int(log_scan_chunk_blocks)   # recovery eth_getLogs span; lower it for strict RPCs
+        self._log_scan_chunk_blocks = int(value)
 
     # -- resolution ---------------------------------------------------------------------------
 
@@ -558,6 +572,8 @@ class EthModule:
         amount, and is validated against the live registry. It is mutually exclusive with
         ``asset=``/``route=``/``sender=``.
         """
+        if plan is None and recipient is None:
+            raise InvalidRecipientError("recipient is required when no plan is given")
         if plan is not None:
             if asset is not None or route is not None or sender is not None:
                 raise ValueError("Pass plan= or asset=/route=/sender=, not both")
@@ -715,6 +731,8 @@ class EthModule:
         and mint mode, and is validated against the live registry. It is mutually exclusive with
         ``route=``/``sender=``.
         """
+        if plan is None and recipient is None:
+            raise InvalidRecipientError("recipient is required when no plan is given")
         if plan is not None:
             if route is not None or sender is not None:
                 raise ValueError("Pass plan= or route=/sender=, not both")
@@ -795,6 +813,8 @@ class EthModule:
         re-resolved by id against the live registry, the sender must be the connected account, and
         the plan must equal what this call would have prepared itself. Mutually exclusive with ``asset=``.
         """
+        if plan is None and recipient is None:
+            raise InvalidRecipientError("recipient is required when no plan is given")
         if plan is not None:
             if asset is not None:
                 raise ValueError("Pass plan= or asset=, not both")
@@ -930,6 +950,8 @@ class EthModule:
         the plan must equal what this call would have prepared itself. ``secret_nonce`` is never
         part of a plan, so a private deposit must still pass the same one it was quoted with.
         """
+        if plan is None and recipient is None:
+            raise InvalidRecipientError("recipient is required when no plan is given")
         if plan is not None:
             route, sender, recipient, atomic, mint_mode = self._from_plan(
                 plan, "xreserve", recipient=recipient, amount=amount, amount_atomic=amount_atomic,

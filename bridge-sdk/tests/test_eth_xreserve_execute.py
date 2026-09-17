@@ -8,7 +8,8 @@ from eth_utils import keccak
 from web3 import Web3
 
 from aleo_bridge import encoding
-from aleo_bridge.errors import (BridgeError, ConfigurationError, RegistryVersionMismatchError, RouteUnavailableError)
+from aleo_bridge.errors import (BridgeError, ConfigurationError, InvalidRecipientError,
+                                RegistryVersionMismatchError, RouteUnavailableError)
 from aleo_bridge.eth import Ethereum
 from aleo_bridge.types import DepositReceipt, Status
 from tests.fakes.fake_web3 import deposited_log, fake_web3, make_bridge
@@ -215,3 +216,11 @@ def test_reverted_deposit_raises():
     w3.provider.reverted_nth.add(1)
     with pytest.raises(BridgeError, match="reverted"):
         eth.deposit_usdc(ALEO, amount="2").send(poll_seconds=0.001)
+
+
+def test_deposit_without_a_plan_or_a_recipient_names_the_missing_recipient():
+    """Same guard as the quote path: a missing recipient is an InvalidRecipientError, not a TypeError."""
+    eth, w3 = setup()
+    with pytest.raises(InvalidRecipientError, match="recipient is required when no plan is given"):
+        eth.deposit_usdc(amount="2")
+    assert w3.provider.methods == [] and w3.provider.sent == []

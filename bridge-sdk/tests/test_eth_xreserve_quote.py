@@ -5,7 +5,7 @@ from eth_account import Account
 
 from aleo_bridge.encoding import aleo_address_to_bytes32, aleo_program_address, xreserve_hook_data
 from aleo_bridge.errors import (BridgeError, ChainMismatchError, ConfigurationError, InsufficientBalanceError,
-                                InvalidAmountError)
+                                InvalidAmountError, InvalidRecipientError)
 from aleo_bridge.eth import Ethereum
 from aleo_bridge.registry import DEFAULT_REGISTRY
 from aleo_bridge.types import EvmXReserveQuote
@@ -142,3 +142,11 @@ def test_non_digit_minimum_amount_atomic_is_refused_before_any_contract_read():
     with pytest.raises(ConfigurationError, match="minimumAmountAtomic"):
         eth.quote_deposit_usdc(ALEO, amount="2", route=route)
     assert "eth_call" not in w3.provider.methods
+
+
+def test_quote_without_a_plan_or_a_recipient_names_the_missing_recipient():
+    """``recipient`` is only optional when ``plan=`` supplies it (the hook commits to it)."""
+    eth, w3 = sepolia()
+    with pytest.raises(InvalidRecipientError, match="recipient is required when no plan is given"):
+        eth.quote_deposit_usdc(amount="2")
+    assert w3.provider.methods == []                    # refused before any contract read

@@ -144,3 +144,12 @@ def test_amount_and_recipient_validation():
         eth.quote_transfer_remote("eth", "aleo1notanaddress", amount_atomic=1)
     with pytest.raises(InvalidRecipientError):
         eth.quote_transfer_remote("eth", "0x0000000000000000000000000000000000000001", amount_atomic=1)
+
+
+def test_quote_without_a_plan_or_a_recipient_names_the_missing_recipient():
+    """``recipient`` is only optional when ``plan=`` supplies it; otherwise it must be named,
+    not surface as the opaque TypeError ``_recipient_bytes32(None)`` used to raise."""
+    eth, w3 = eth_module(quotes={ETH_ROUTER: [(ZERO_ADDRESS, 1_000)]})
+    with pytest.raises(InvalidRecipientError, match="recipient is required when no plan is given"):
+        eth.quote_transfer_remote("eth", amount_atomic=100)
+    assert w3.provider.methods == []                    # refused before any contract read

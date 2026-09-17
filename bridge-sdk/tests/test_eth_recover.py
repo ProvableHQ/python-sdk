@@ -6,8 +6,9 @@ from web3 import Web3
 
 from aleo_bridge import encoding
 from aleo_bridge.checkpoint import create_checkpoint
-from aleo_bridge.errors import BridgeError, CheckpointInvalidError, RegistryVersionMismatchError
-from aleo_bridge.eth import Ethereum, _plan_for
+from aleo_bridge.errors import (BridgeError, CheckpointInvalidError, ConfigurationError,
+                                RegistryVersionMismatchError)
+from aleo_bridge.eth import LOG_SCAN_CHUNK_BLOCKS, EthModule, Ethereum, _plan_for
 from aleo_bridge.registry import DEFAULT_REGISTRY
 from aleo_bridge.types import Receipt, Status
 from tests.fakes.fake_web3 import deposited_log, dispatch_id_log, fake_web3, make_bridge, sent_transfer_remote_log
@@ -299,3 +300,19 @@ def test_xreserve_private_recovery_uses_checkpointed_hook_and_wrapper_recipient(
     bad = dataclasses.replace(cp, source={**cp.source, "hookData": "0x02"})
     with pytest.raises(CheckpointInvalidError, match="hook data"):
         eth.recover_source(plan, bad)
+
+
+def test_log_scan_chunk_blocks_cannot_be_lowered_below_one():
+    """``_scan_logs`` advances by ``chunk`` blocks a pass, so a 0 (or negative) chunk would spin
+    forever on a live range: the attribute validates on assignment, exactly like the constructor
+    (``ConfigurationError``, the error the constructor has always raised for this — the plan's
+    ``ValueError`` wording is kept as the same single check rather than two different errors)."""
+    eth, _ = mainnet_read_only()
+    for bad in (0, -5):
+        with pytest.raises(ConfigurationError, match="at least 1"):
+            eth.log_scan_chunk_blocks = bad
+    assert eth.log_scan_chunk_blocks == LOG_SCAN_CHUNK_BLOCKS       # the refused assignments changed nothing
+    eth.log_scan_chunk_blocks = 10
+    assert eth.log_scan_chunk_blocks == 10
+    with pytest.raises(ConfigurationError, match="at least 1"):
+        EthModule(make_bridge(ethereum=Ethereum(w3=fake_web3())), Ethereum(w3=fake_web3()), log_scan_chunk_blocks=0)

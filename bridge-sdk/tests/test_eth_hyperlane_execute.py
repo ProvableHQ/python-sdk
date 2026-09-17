@@ -5,7 +5,8 @@ from eth_account import Account
 from eth_utils import keccak
 from web3 import Web3
 
-from aleo_bridge.errors import (BridgeError, ConfigurationError, RegistryVersionMismatchError, RouteUnavailableError)
+from aleo_bridge.errors import (BridgeError, ConfigurationError, InvalidRecipientError,
+                                RegistryVersionMismatchError, RouteUnavailableError)
 from aleo_bridge.eth import Ethereum
 from aleo_bridge.types import DispatchReceipt, Status
 from tests.fakes.fake_web3 import ZERO_ADDRESS, dispatch_id_log, event_log, fake_web3, make_bridge
@@ -221,3 +222,11 @@ def test_read_only_connection_cannot_transfer():
     eth = make_bridge(ethereum=Ethereum(w3=w3)).eth
     with pytest.raises(ConfigurationError, match="read-only"):
         eth.transfer_remote("eth", ALEO, amount_atomic=100)
+
+
+def test_transfer_remote_without_a_plan_or_a_recipient_names_the_missing_recipient():
+    """Same guard as the quote path: a missing recipient is an InvalidRecipientError, not a TypeError."""
+    eth, w3 = setup(ETH_ROUTER, quotes={ETH_ROUTER: [(ZERO_ADDRESS, 1_000)]})
+    with pytest.raises(InvalidRecipientError, match="recipient is required when no plan is given"):
+        eth.transfer_remote("eth", amount_atomic=100)
+    assert w3.provider.methods == [] and w3.provider.sent == []
