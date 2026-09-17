@@ -641,11 +641,16 @@ class EthModule:
         """Hyperlane Mailbox ``DispatchId(bytes32 indexed messageId)`` from a confirmed receipt; ``None`` if absent."""
         from web3.logs import DISCARD
 
-        mailbox = self._contract(self._hyperlane_metadata(route).mailbox, MAILBOX_ABI)
-        events = mailbox.events.DispatchId().process_receipt(receipt, errors=DISCARD)
+        Web3 = _web3().Web3
+        address = self._hyperlane_metadata(route).mailbox
+        mailbox = self._contract(address, MAILBOX_ABI)
+        # process_receipt decodes by topic alone: another contract's DispatchId(bytes32) would
+        # otherwise be read as this transfer's message id, so filter on the emitting address first.
+        events = [ev for ev in mailbox.events.DispatchId().process_receipt(receipt, errors=DISCARD)
+                  if Web3.to_checksum_address(ev["address"]) == address]
         if not events:
             return None
-        return _web3().Web3.to_hex(events[0]["args"]["messageId"])   # veil messageIdFromReceipt: first match wins
+        return Web3.to_hex(events[0]["args"]["messageId"])           # veil messageIdFromReceipt: first match wins
 
     @staticmethod
     def _hyperlane_protocol_state(route: Route, *, recipient_bytes32: bytes, destination_domain: int,
@@ -903,6 +908,7 @@ class EthModule:
 
     def _xreserve_source_status(self, route: Route, plan: Plan, receipt: Receipt) -> Receipt:
         q = self._xreserve_quote_from_state(route, plan, receipt)
+        self.assert_chain(route)
         owner = self._observed_owner(plan, receipt)
         source_tx_id = self._require_hash(receipt.source_tx_id, "xReserve source transaction id")
         observed = self.conn.get_receipt(source_tx_id)

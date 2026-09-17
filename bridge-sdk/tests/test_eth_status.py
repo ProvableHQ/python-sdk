@@ -3,7 +3,8 @@ from eth_account import Account
 from web3 import Web3
 
 from aleo_bridge import encoding
-from aleo_bridge.errors import BridgeError, CheckpointInvalidError, ConfigurationError, UnsupportedRouteError
+from aleo_bridge.errors import (BridgeError, ChainMismatchError, CheckpointInvalidError, ConfigurationError,
+                                UnsupportedRouteError)
 from aleo_bridge.eth import Ethereum, _plan_for
 from aleo_bridge.registry import DEFAULT_REGISTRY
 from aleo_bridge.types import Receipt, Status
@@ -130,6 +131,18 @@ def test_xreserve_state_validation():
     read_only = make_bridge(environment="testnet", ethereum=Ethereum(w3=fake_web3(chain_id=11155111))).eth
     with pytest.raises(ConfigurationError, match="prepared sender"):
         read_only.source_status(plan_without_sender, no_owner)
+
+
+def test_xreserve_source_confirming_asserts_the_chain_before_reading():
+    """Mirrors the Hyperlane branch: a connection pointed at the wrong network must not read
+    receipts or logs from it."""
+    w3 = fake_web3()                                                                # chain 1, route wants 11155111
+    eth = make_bridge(environment="testnet", ethereum=Ethereum(w3=w3)).eth
+    receipt = Receipt(id=H2, protocol="xreserve", status=Status.SOURCE_CONFIRMING, source_tx_id=H2,
+                      protocol_state=xreserve_state())
+    with pytest.raises(ChainMismatchError):
+        eth.source_status(USDC_PLAN, receipt)
+    assert "eth_getTransactionReceipt" not in w3.provider.methods and "eth_getLogs" not in w3.provider.methods
 
 
 def test_is_delivered_reads_mailbox():

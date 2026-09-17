@@ -138,6 +138,30 @@ def test_first_dispatch_id_wins_when_receipt_has_two():
     assert result.message_id == Web3.to_hex(first_id)
 
 
+def test_dispatch_id_from_a_foreign_address_is_ignored():
+    """``process_receipt`` decodes by topic only — a ``DispatchId`` emitted by anything other than the
+    route's Mailbox is another protocol's event and must read as "no message id"."""
+    eth, w3 = setup(ETH_ROUTER, quotes={ETH_ROUTER: [(ZERO_ADDRESS, 1_000)]})
+    w3.provider.receipt_logs = lambda tx: [dispatch_id_log(WBTC, MESSAGE_ID, tx_hash=tx["hash"], log_index=1)]
+    result = eth.transfer_remote("eth", ALEO, amount_atomic=100).send(poll_seconds=0.001)
+    assert result.message_id is None and result.receipt.id == tx_hash_for(1)
+    assert result.receipt.status == Status.DELIVERY_PENDING and "messageId" not in result.receipt.protocol_state
+
+
+def test_mailbox_dispatch_id_wins_over_an_earlier_foreign_one():
+    """First match *among the Mailbox's own* events, not first match overall."""
+    foreign, mine = bytes.fromhex("11" * 32), bytes.fromhex("22" * 32)
+
+    def logs(tx):
+        return [dispatch_id_log(WBTC, foreign, tx_hash=tx["hash"], log_index=1),
+                dispatch_id_log(MAILBOX, mine, tx_hash=tx["hash"], log_index=2)]
+
+    eth, w3 = setup(ETH_ROUTER, quotes={ETH_ROUTER: [(ZERO_ADDRESS, 1_000)]})
+    w3.provider.receipt_logs = logs
+    result = eth.transfer_remote("eth", ALEO, amount_atomic=100).send(poll_seconds=0.001)
+    assert result.message_id == Web3.to_hex(mine)
+
+
 def test_missing_dispatch_id_log_keeps_tx_hash_as_id():
     eth, _ = setup(ETH_ROUTER, with_dispatch_log=False, quotes={ETH_ROUTER: [(ZERO_ADDRESS, 1_000)]})
     result = eth.transfer_remote("eth", ALEO, amount_atomic=100).send(poll_seconds=0.001)
