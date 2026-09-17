@@ -209,4 +209,9 @@ class AleoCall(Generic[R]):
         return self._build(prepared.transaction_id, root_outputs(decoded, self.program_id, self.function_name))
 
 
-__all__ = ["AleoCall", "extract_tx_id", "is_duplicate_submission", "output_values", "payload_transitions", "root_outputs"]
+class EvmCall:
+    """Completed in Task 2."""
+
+
+__all__ = ["AleoCall", "EvmCall", "extract_tx_id", "is_duplicate_submission", "output_values", "payload_transitions",
+           "root_outputs"]

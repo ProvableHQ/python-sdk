@@ -1,12 +1,14 @@
 import json
 
 import pytest
+from eth_account import Account as EthAccount
 
 from aleo.facade.errors import ProgramNotFound
 
 from aleo_bridge import Bridge, __main__ as cli
 from aleo_bridge._calls import AleoCall
 from aleo_bridge.errors import ConfigurationError, MissingExtraError
+from aleo_bridge.eth import Ethereum, EthModule
 from aleo_bridge.freezelist import FreezeList
 from aleo_bridge.hyperlane import HyperlaneModule
 from aleo_bridge.privacy import PrivacyModule
@@ -14,6 +16,7 @@ from aleo_bridge.registry import DEFAULT_REGISTRY, Registry
 from aleo_bridge.types import BridgeStatus
 from aleo_bridge.xreserve import XReserveModule
 from tests.conftest import SIGNER, FakeAleo, default_mappings
+from tests.fakes.fake_web3 import fake_web3
 
 
 def test_construction_defaults_and_namespaces(fake_aleo):
@@ -39,14 +42,14 @@ def test_construction_errors(fake_aleo):
         Bridge(FakeAleo(default_account=False)).aleo_address()
 
 
-def test_eth_and_sol_properties_before_plans_2_and_3(fake_aleo):
+def test_eth_property_wraps_connection_and_sol_property_before_plan_3(fake_aleo):
     bridge = Bridge(fake_aleo)
     with pytest.raises(ConfigurationError, match="ethereum="):
         bridge.eth
     with pytest.raises(ConfigurationError, match="solana="):
         bridge.sol
-    with pytest.raises(MissingExtraError, match="aleo-bridge-sdk\\[evm\\]"):   # plan 2 replaces: real Ethereum wraps a bare Web3
-        Bridge(fake_aleo, ethereum=object()).eth
+    eth_module = Bridge(fake_aleo, ethereum=fake_web3()).eth      # plan 2: real Ethereum wraps a bare Web3
+    assert isinstance(eth_module, EthModule)
     with pytest.raises(MissingExtraError, match="aleo-bridge-sdk\\[solana\\]"):
         Bridge(fake_aleo, solana=object()).sol
 
@@ -136,8 +139,9 @@ def test_from_env_side_chain_variables(monkeypatch, tmp_path):
     with pytest.raises(ConfigurationError, match="both or neither"):
         Bridge.from_env()
     monkeypatch.setenv("ETHEREUM_RPC_URL", "https://eth.example")
-    with pytest.raises(MissingExtraError, match="evm"):          # plan 2 makes this construct an Ethereum connection
-        Bridge.from_env()
+    bridge = Bridge.from_env()                                   # plan 2: real Ethereum connection now constructed
+    assert isinstance(bridge.ethereum, Ethereum)
+    assert bridge.ethereum.address == EthAccount.from_key("0x" + "11" * 32).address
     monkeypatch.delenv("EVM_PRIVATE_KEY")
     monkeypatch.delenv("ETHEREUM_RPC_URL")
     monkeypatch.setenv("SOLANA_PRIVATE_KEY", "5" * 88)

@@ -1,0 +1,166 @@
+"""Ethereum connection and the ``bridge.eth`` module (Hyperlane + xReserve, Ethereum origin).
+
+``web3`` and ``eth_account`` are imported lazily so ``import aleo_bridge`` works
+without the ``evm`` extra; the first call that needs them raises
+``MissingExtraError("evm", ...)``.
+"""
+from __future__ import annotations
+
+import os
+from typing import Any, Mapping
+
+from .errors import ConfigurationError, MissingExtraError
+
+
+def _web3():
+    try:
+        import web3
+    except ImportError as exc:  # pragma: no cover - exercised by test_import_without_web3
+        raise MissingExtraError("evm", "Ethereum connections") from exc
+    return web3
+
+
+def _eth_account():
+    try:
+        from eth_account import Account
+    except ImportError as exc:  # pragma: no cover
+        raise MissingExtraError("evm", "Ethereum signing") from exc
+    return Account
+
+
+class Ethereum:
+    """Transport + optional signer for Ethereum-origin bridge actions.
+
+    Three interchangeable forms::
+
+        Ethereum(rpc_url, private_key=key)          # SDK builds Web3(HTTPProvider(rpc_url))
+        Ethereum(w3=my_w3, signer=local_account)    # caller's Web3, caller's eth_account signer
+        Ethereum(w3=my_w3)                          # signs via w3.eth.default_account + caller middleware,
+                                                    # else read-only
+
+    Sending: with a ``LocalAccount`` the SDK fills nonce/gas/fee fields, signs, and
+    ``send_raw_transaction``s; in default-account mode it calls
+    ``w3.eth.send_transaction`` so the caller's middleware signs. Receipts are
+    polled on the same ``Web3``.
+    """
+
+    def __init__(self, rpc_url: str | None = None, *, w3: Any = None, signer: Any = None,
+                 private_key: str | None = None) -> None:
+        if (rpc_url is None) == (w3 is None):
+            raise ConfigurationError("Pass exactly one of rpc_url or w3 to Ethereum(...)")
+        if signer is not None and private_key is not None:
+            raise ConfigurationError("Pass at most one of signer or private_key to Ethereum(...)")
+        if w3 is None:
+            web3 = _web3()
+            w3 = web3.Web3(web3.HTTPProvider(rpc_url))
+        if private_key is not None:
+            signer = _eth_account().from_key(private_key)
+        self._w3 = w3
+        self._signer = signer
+        self._chain_id: int | None = None
+
+    @classmethod
+    def from_env(cls, env: Mapping[str, str] | None = None) -> "Ethereum | None":
+        """``EVM_PRIVATE_KEY`` + ``ETHEREUM_RPC_URL`` (both or neither) → signing connection; neither → None."""
+        env = os.environ if env is None else env
+        key = env.get("EVM_PRIVATE_KEY")
+        url = env.get("ETHEREUM_RPC_URL")
+        if bool(key) != bool(url):
+            raise ConfigurationError("Set both EVM_PRIVATE_KEY and ETHEREUM_RPC_URL or neither")
+        if not key:
+            return None
+        return cls(url, private_key=key)
+
+    @property
+    def w3(self) -> Any:
+        return self._w3
+
+    @property
+    def address(self) -> str | None:
+        """Checksummed sender address: signer → ``w3.eth.default_account`` → ``None``."""
+        if self._signer is not None:
+            return self._signer.address
+        default = getattr(self._w3.eth, "default_account", None)
+        if isinstance(default, str) and default:
+            return _web3().Web3.to_checksum_address(default)
+        return None
+
+    @property
+    def can_sign(self) -> bool:
+        return self.address is not None
+
+    @property
+    def chain_id(self) -> int:
+        """``eth_chainId``, read once and cached."""
+        if self._chain_id is None:
+            self._chain_id = int(self._w3.eth.chain_id)
+        return self._chain_id
+
+    def require_address(self) -> str:
+        address = self.address
+        if address is None:
+            raise ConfigurationError(
+                "This Ethereum connection is read-only: pass private_key= or signer= to Ethereum(...), "
+                "or set w3.eth.default_account with signing middleware")
+        return address
+
+    def send_transaction(self, tx: dict) -> str:
+        """Broadcast one transaction and return its ``0x`` hash.
+
+        Fills ``from``/``chainId``/``value`` when missing. Local signer: also fills
+        ``nonce``/``gas``/fee fields, signs, ``send_raw_transaction``. Default-account
+        mode: ``send_transaction`` (the caller's middleware signs and fills gas).
+        Read-only: ``ConfigurationError``.
+        """
+        sender = self.require_address()
+        Web3 = _web3().Web3
+        tx = dict(tx)
+        tx.setdefault("from", sender)
+        if Web3.to_checksum_address(tx["from"]) != sender:
+            raise ConfigurationError(f"Transaction sender {tx['from']} does not match the configured account {sender}")
+        tx.setdefault("chainId", self.chain_id)
+        tx.setdefault("value", 0)
+        if self._signer is None:
+            return Web3.to_hex(self._w3.eth.send_transaction(tx))
+        tx.setdefault("nonce", self._w3.eth.get_transaction_count(sender, "pending"))
+        if "gas" not in tx:
+            estimate_fields = {k: v for k, v in tx.items() if k in ("from", "to", "data", "value")}
+            tx["gas"] = int(self._w3.eth.estimate_gas(estimate_fields)) * 12 // 10
+        if "gasPrice" not in tx and "maxFeePerGas" not in tx:
+            base_fee = self._w3.eth.get_block("latest").get("baseFeePerGas")
+            if base_fee is None:
+                tx["gasPrice"] = int(self._w3.eth.gas_price)
+            else:
+                tip = int(self._w3.eth.max_priority_fee)
+                tx["maxPriorityFeePerGas"] = tip
+                tx["maxFeePerGas"] = int(base_fee) * 2 + tip
+        signed = self._signer.sign_transaction(tx)
+        return Web3.to_hex(self._w3.eth.send_raw_transaction(signed.raw_transaction))
+
+    def wait_for_receipt(self, tx_hash: str, *, timeout_seconds: float, poll_seconds: float) -> dict | None:
+        """Poll ``wait_for_transaction_receipt``; ``None`` on timeout (a timeout is not a failure)."""
+        from web3.exceptions import TimeExhausted
+
+        try:
+            return self._w3.eth.wait_for_transaction_receipt(tx_hash, timeout=timeout_seconds, poll_latency=poll_seconds)
+        except TimeExhausted:
+            return None
+
+    def get_receipt(self, tx_hash: str) -> dict | None:
+        """One ``eth_getTransactionReceipt`` read; ``None`` while the transaction is unmined or unknown."""
+        from web3.exceptions import TransactionNotFound
+
+        try:
+            return self._w3.eth.get_transaction_receipt(tx_hash)
+        except TransactionNotFound:
+            return None
+
+
+class EthModule:
+    """Completed in Task 2."""
+
+    def __init__(self, bridge: Any, conn: Ethereum) -> None:
+        self._bridge, self._conn = bridge, conn
+
+
+__all__ = ["Ethereum", "EthModule"]
