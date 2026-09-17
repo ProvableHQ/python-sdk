@@ -149,3 +149,21 @@ def test_from_env():
         Ethereum.from_env({"ETHEREUM_RPC_URL": "http://127.0.0.1:1"})
     conn = Ethereum.from_env({"EVM_PRIVATE_KEY": KEY, "ETHEREUM_RPC_URL": "http://127.0.0.1:1"})
     assert conn is not None and conn.address == ACCT.address and conn.w3.provider.endpoint_uri == "http://127.0.0.1:1"
+
+
+def test_from_env_aliases(monkeypatch):
+    """``BRIDGE_EVM_PRIVATE_KEY`` / ``BRIDGE_LIVE_ETHEREUM_RPC_URL`` stand in for the primary variables."""
+    from aleo_bridge.eth import Ethereum
+
+    for var in ("EVM_PRIVATE_KEY", "ETHEREUM_RPC_URL", "BRIDGE_EVM_PRIVATE_KEY", "BRIDGE_LIVE_ETHEREUM_RPC_URL"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("BRIDGE_EVM_PRIVATE_KEY", KEY)
+    with pytest.raises(ConfigurationError, match="both EVM_PRIVATE_KEY and ETHEREUM_RPC_URL"):
+        Ethereum.from_env()
+    monkeypatch.setenv("BRIDGE_LIVE_ETHEREUM_RPC_URL", "http://127.0.0.1:1")
+    conn = Ethereum.from_env()
+    assert conn is not None and conn.address == ACCT.address and conn.w3.provider.endpoint_uri == "http://127.0.0.1:1"
+    # the primary variable wins when both a primary and its alias are set
+    monkeypatch.setenv("ETHEREUM_RPC_URL", "http://127.0.0.1:2")
+    conn2 = Ethereum.from_env()
+    assert conn2.w3.provider.endpoint_uri == "http://127.0.0.1:2"

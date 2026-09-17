@@ -39,7 +39,8 @@ agent/MCP surface arrive in the following plans.
     bridge = Bridge(aleo, ethereum=Ethereum("https://eth.example/rpc", private_key=evm_key))   # SDK-built transport
     bridge = Bridge(aleo, ethereum=Ethereum(w3=my_w3, signer=my_local_account))               # your Web3 + your signer
     bridge = Bridge(aleo, ethereum=my_w3)        # bare Web3: read-only, or signs via w3.eth.default_account middleware
-    bridge = Bridge.from_env()                   # EVM_PRIVATE_KEY + ETHEREUM_RPC_URL (both or neither)
+    bridge = Bridge.from_env()                   # EVM_PRIVATE_KEY + ETHEREUM_RPC_URL (both or neither);
+                                                  # aliases BRIDGE_EVM_PRIVATE_KEY / BRIDGE_LIVE_ETHEREUM_RPC_URL
 
     quote = bridge.eth.quote_transfer_remote("wbtc", aleo_recipient, amount="0.001")
     print(quote.native_fee_atomic, quote.approval_required)
@@ -67,7 +68,9 @@ ALEO_E2E_PRIVATE_KEY=…` for the 2 USDC Sepolia leg.
 
 `BRIDGE_PRIVATE_KEY` (required by `from_env`), `ALEO_ENDPOINT` (default `https://edge.provable.com/api`),
 `ALEO_NETWORK` (`mainnet`|`testnet`), `ALEO_API_KEY`/`ALEO_CONSUMER_ID` (legacy hosts),
-`EVM_PRIVATE_KEY`+`ETHEREUM_RPC_URL`, `SOLANA_PRIVATE_KEY`(+`SOLANA_RPC_URL`), `BRIDGE_CHECKPOINT_DIR`.
+`EVM_PRIVATE_KEY`+`ETHEREUM_RPC_URL` (aliases `BRIDGE_EVM_PRIVATE_KEY`+`BRIDGE_LIVE_ETHEREUM_RPC_URL`, used by the
+user's live shell/veil config; the primary variable wins when both are set), `SOLANA_PRIVATE_KEY`(+`SOLANA_RPC_URL`),
+`BRIDGE_CHECKPOINT_DIR`.
 Profiles live at `$ALEO_BRIDGE_HOME` or `~/.aleo-bridge` and hold only the Aleo key (mode 600).
 
 ## Tests

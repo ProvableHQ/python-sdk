@@ -113,7 +113,8 @@ def test_from_env_builds_aleo_only(monkeypatch, fake_aleo):
 
     monkeypatch.setattr("aleo_bridge.client.build_aleo", fake_build)
     for var in ("BRIDGE_PRIVATE_KEY", "ALEO_ENDPOINT", "ALEO_NETWORK", "ALEO_API_KEY", "ALEO_CONSUMER_ID", "EVM_PRIVATE_KEY",
-                "ETHEREUM_RPC_URL", "SOLANA_PRIVATE_KEY", "SOLANA_RPC_URL", "BRIDGE_CHECKPOINT_DIR"):
+                "ETHEREUM_RPC_URL", "BRIDGE_EVM_PRIVATE_KEY", "BRIDGE_LIVE_ETHEREUM_RPC_URL",
+                "SOLANA_PRIVATE_KEY", "SOLANA_RPC_URL", "BRIDGE_CHECKPOINT_DIR"):
         monkeypatch.delenv(var, raising=False)
     with pytest.raises(ConfigurationError, match="BRIDGE_PRIVATE_KEY"):
         Bridge.from_env()
@@ -138,7 +139,8 @@ def test_from_env_builds_aleo_only(monkeypatch, fake_aleo):
 def test_from_env_side_chain_variables(monkeypatch, tmp_path):
     monkeypatch.setattr("aleo_bridge.client.build_aleo", lambda *a, **k: FakeAleo(mappings=default_mappings()))
     monkeypatch.setenv("BRIDGE_PRIVATE_KEY", "APrivateKey1zkpTest")
-    for var in ("EVM_PRIVATE_KEY", "ETHEREUM_RPC_URL", "SOLANA_PRIVATE_KEY", "SOLANA_RPC_URL", "BRIDGE_CHECKPOINT_DIR"):
+    for var in ("EVM_PRIVATE_KEY", "ETHEREUM_RPC_URL", "BRIDGE_EVM_PRIVATE_KEY", "BRIDGE_LIVE_ETHEREUM_RPC_URL",
+                "SOLANA_PRIVATE_KEY", "SOLANA_RPC_URL", "BRIDGE_CHECKPOINT_DIR"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("EVM_PRIVATE_KEY", "0x" + "11" * 32)
     with pytest.raises(ConfigurationError, match="both EVM_PRIVATE_KEY and ETHEREUM_RPC_URL"):
@@ -176,7 +178,8 @@ def test_from_profile_uses_profile_and_wires_no_side_chains(tmp_path, monkeypatc
         return FakeAleo(mappings=default_mappings(), network_name=network)
 
     monkeypatch.setattr("aleo_bridge.client.build_aleo", fake_build)
-    for var in ("BRIDGE_PRIVATE_KEY", "BRIDGE_PRIVATE_KEY_FILE", "EVM_PRIVATE_KEY", "ETHEREUM_RPC_URL", "SOLANA_PRIVATE_KEY", "ALEO_API_KEY", "ALEO_CONSUMER_ID"):
+    for var in ("BRIDGE_PRIVATE_KEY", "BRIDGE_PRIVATE_KEY_FILE", "EVM_PRIVATE_KEY", "ETHEREUM_RPC_URL",
+                "BRIDGE_EVM_PRIVATE_KEY", "BRIDGE_LIVE_ETHEREUM_RPC_URL", "SOLANA_PRIVATE_KEY", "ALEO_API_KEY", "ALEO_CONSUMER_ID"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("ALEO_BRIDGE_HOME", str(tmp_path / "home"))
     bridge = Bridge.from_profile(network="testnet", endpoint="https://api.provable.com/v2")

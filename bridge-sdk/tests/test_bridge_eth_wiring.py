@@ -3,7 +3,7 @@ from eth_account import Account
 from web3 import HTTPProvider, Web3
 
 from aleo_bridge import Bridge, Ethereum, EthModule, EvmCall
-from aleo_bridge.errors import ConfigurationError
+from aleo_bridge.errors import ChainMismatchError, ConfigurationError
 from aleo_bridge.types import BridgeStatus, ChainStatus
 from tests.fakes.fake_web3 import fake_web3, make_bridge
 
@@ -20,7 +20,8 @@ def test_package_exports():
 def test_eth_property_requires_a_connection():
     bridge = make_bridge()
     assert bridge.ethereum is None
-    with pytest.raises(ConfigurationError, match=r"Pass ethereum=Ethereum\(\.\.\.\) to Bridge\(\.\.\.\) or set ETHEREUM_RPC_URL"):
+    with pytest.raises(ConfigurationError,
+                       match=r"Pass ethereum=Ethereum\(\.\.\.\) to Bridge\(\.\.\.\) or set EVM_PRIVATE_KEY \+ ETHEREUM_RPC_URL"):
         bridge.eth
 
 
@@ -48,6 +49,8 @@ def test_from_env_requires_both_evm_variables(monkeypatch):
     monkeypatch.setenv("BRIDGE_PRIVATE_KEY", str(PrivateKey.random()))
     monkeypatch.delenv("SOLANA_PRIVATE_KEY", raising=False)
     monkeypatch.delenv("BRIDGE_CHECKPOINT_DIR", raising=False)
+    monkeypatch.delenv("BRIDGE_EVM_PRIVATE_KEY", raising=False)
+    monkeypatch.delenv("BRIDGE_LIVE_ETHEREUM_RPC_URL", raising=False)
     monkeypatch.setenv("EVM_PRIVATE_KEY", KEY)
     monkeypatch.delenv("ETHEREUM_RPC_URL", raising=False)
     with pytest.raises(ConfigurationError, match="both EVM_PRIVATE_KEY and ETHEREUM_RPC_URL"):
@@ -75,6 +78,20 @@ def test_chain_status_reads_native_and_erc20_balances():
     assert status.balances == {"ethereum/eth": 5, "ethereum/usdc": 2_000_000, "ethereum/wbtc": 7, "ethereum/usdt": 0}
     read_only = make_bridge(ethereum=Ethereum(w3=fake_web3())).eth.chain_status()
     assert read_only.address is None and not read_only.can_sign and read_only.balances == {}
+
+
+def test_chain_status_asserts_the_connected_chain(monkeypatch):
+    """A Web3 pointed at the wrong network must fail chain_status() (and therefore Bridge.status())
+    with ChainMismatchError before any balance is read."""
+    w3 = fake_web3(chain_id=999)
+    bridge = make_bridge(ethereum=Ethereum(w3=w3))
+    with pytest.raises(ChainMismatchError, match="expected 1"):
+        bridge.eth.chain_status()
+    assert "eth_getBalance" not in w3.provider.methods and "eth_call" not in w3.provider.methods
+    aleo_status = ChainStatus(chain_id="aleo", address=None, can_sign=False, balances={})
+    monkeypatch.setattr(Bridge, "_aleo_chain_status", lambda self: aleo_status)
+    with pytest.raises(ChainMismatchError, match="expected 1"):
+        bridge.status()
 
 
 def test_bridge_status_includes_evm_chain(monkeypatch):

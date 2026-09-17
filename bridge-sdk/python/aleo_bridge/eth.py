@@ -76,12 +76,20 @@ class Ethereum:
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Ethereum | None":
-        """``EVM_PRIVATE_KEY`` + ``ETHEREUM_RPC_URL`` (both or neither) → signing connection; neither → None."""
+        """``EVM_PRIVATE_KEY`` + ``ETHEREUM_RPC_URL`` (both or neither) → signing connection; neither → None.
+
+        Aliases (the user's live shell / veil config export these names instead):
+        ``BRIDGE_EVM_PRIVATE_KEY`` for the key, ``BRIDGE_LIVE_ETHEREUM_RPC_URL`` for the RPC url.
+        The primary variable wins when both a primary and its alias are set; the both-or-neither
+        rule applies to whichever pair resolves (primary, falling back to alias, per variable).
+        """
         env = os.environ if env is None else env
-        key = env.get("EVM_PRIVATE_KEY")
-        url = env.get("ETHEREUM_RPC_URL")
+        key = env.get("EVM_PRIVATE_KEY") or env.get("BRIDGE_EVM_PRIVATE_KEY")
+        url = env.get("ETHEREUM_RPC_URL") or env.get("BRIDGE_LIVE_ETHEREUM_RPC_URL")
         if bool(key) != bool(url):
-            raise ConfigurationError("Set both EVM_PRIVATE_KEY and ETHEREUM_RPC_URL or neither")
+            raise ConfigurationError(
+                "Set both EVM_PRIVATE_KEY and ETHEREUM_RPC_URL or neither "
+                "(aliases: BRIDGE_EVM_PRIVATE_KEY, BRIDGE_LIVE_ETHEREUM_RPC_URL)")
         if not key:
             return None
         return cls(url, private_key=key)
@@ -1131,7 +1139,10 @@ class EthModule:
         with a source transaction are observed through ``source_status``. ``required=True`` (plan
         4's resume-before-dispatch mode) demands the scan actually run — a known sender and a
         confirmed approval block — or raises, instead of quietly returning an approval-boundary
-        receipt.
+        receipt. ``required=True`` only makes the INABILITY to scan fatal: once the scan actually
+        runs, a completed scan that matches zero dispatches/deposits is a valid answer ("nothing
+        was submitted yet"), not an error, and returns ``SOURCE_SUBMISSION_PENDING`` so ``resume``
+        may re-authorize the send.
         """
         if checkpoint.version != 1 or checkpoint.intent.get("bridgeProtocol") != plan.protocol or checkpoint.route.get("id") != plan.route_id:
             raise CheckpointInvalidError("Bridge checkpoint does not match the prepared route")
@@ -1177,8 +1188,25 @@ class EthModule:
             return int(self._erc20(target.locator.value).functions.balanceOf(owner).call())
         raise UnsupportedRouteError(f"{target.id} is not an EVM asset")
 
+    def _chain_assertion_route(self) -> Route:
+        """Any route originating on this chain with a usable ``sourceChainId``, used only to bind
+        ``assert_chain`` to the registry's notion of this chain (never touches contracts)."""
+        routes = [r for r in self.registry.routes(include_unavailable=True, environment=self.bridge.environment)
+                  if self.registry.asset(r.source_asset_id).chain_id == self.chain.id
+                  and isinstance(r.metadata.get("sourceChainId"), int)]
+        if not routes:
+            raise UnsupportedRouteError(
+                f"No Hyperlane or xReserve route with sourceChainId is configured for {self.chain.id}")
+        return routes[0]
+
     def chain_status(self) -> ChainStatus:
-        """Address, signing ability, and atomic balances of every registry asset on this chain (empty when read-only)."""
+        """Address, signing ability, and atomic balances of every registry asset on this chain (empty when read-only).
+
+        Asserts the connected ``Web3``'s ``eth_chainId`` matches this chain's registry
+        ``sourceChainId`` first, so a connection pointed at the wrong network raises
+        ``ChainMismatchError`` instead of silently reading balances from the wrong chain.
+        """
+        self.assert_chain(self._chain_assertion_route())
         address = self.conn.address
         balances: dict[str, int] = {}
         if address is not None:

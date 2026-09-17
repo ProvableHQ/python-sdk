@@ -134,6 +134,16 @@ def test_hyperlane_required_scan_needs_sender_and_confirmed_approval():
     assert eth.recover_source(plan_no_sender, hyperlane_checkpoint(plan_no_sender)).status == Status.SOURCE_SUBMISSION_PENDING
 
 
+def test_hyperlane_required_scan_with_no_matching_dispatch_is_not_fatal():
+    """A completed scan (known sender, confirmed approval) that matches nothing is a valid answer,
+    not an inability to scan: required=True still returns SOURCE_SUBMISSION_PENDING, never sends."""
+    eth, w3 = mainnet_read_only()
+    w3.provider.add_receipt(APPROVAL, block_number=0x65)
+    receipt = eth.recover_source(WBTC_PLAN, hyperlane_checkpoint(), required=True)
+    assert receipt.status == Status.SOURCE_SUBMISSION_PENDING and receipt.id == APPROVAL
+    assert "eth_getLogs" in w3.provider.methods and w3.provider.sent == []
+
+
 def test_hyperlane_saved_dispatch_is_observed_not_resent():
     eth, w3 = mainnet_read_only()
     cp = hyperlane_checkpoint(tx_id=DISPATCH)
@@ -194,6 +204,19 @@ def test_xreserve_required_scan_needs_confirmed_approval():
     cp = xreserve_checkpoint(plan, bytes(65))
     with pytest.raises(BridgeError, match="no confirmed approval block"):
         eth.recover_source(plan, cp, required=True)
+
+
+def test_xreserve_required_scan_with_no_matching_deposit_is_not_fatal():
+    """Same ruling for xReserve: a completed scan (known sender, confirmed approval) that matches
+    nothing is a valid answer, not an inability to scan."""
+    w3 = fake_web3(chain_id=11155111)
+    eth = make_bridge(environment="testnet", ethereum=Ethereum(w3=w3)).eth
+    plan = _plan_for(DEFAULT_REGISTRY, USDC_ROUTE, amount_atomic=2_000_000, recipient=ALEO, sender=ACCT.address)
+    cp = xreserve_checkpoint(plan, bytes(65))
+    w3.provider.add_receipt(APPROVAL, block_number=0x65)
+    receipt = eth.recover_source(plan, cp, required=True)
+    assert receipt.status == Status.SOURCE_SUBMISSION_PENDING and receipt.id == APPROVAL
+    assert "eth_getLogs" in w3.provider.methods and w3.provider.sent == []
 
 
 def test_xreserve_private_recovery_uses_checkpointed_hook_and_wrapper_recipient():

@@ -144,7 +144,8 @@ class Bridge:
     def eth(self) -> EthModule:
         """Ethereum-origin actions (Hyperlane transferRemote, xReserve deposit, status, recovery)."""
         if self.ethereum is None:
-            raise ConfigurationError("Pass ethereum=Ethereum(...) to Bridge(...) or set ETHEREUM_RPC_URL")
+            raise ConfigurationError(
+                "Pass ethereum=Ethereum(...) to Bridge(...) or set EVM_PRIVATE_KEY + ETHEREUM_RPC_URL")
         if self._eth is None:
             self._eth = EthModule(self, self.ethereum)
         return self._eth
