@@ -14,11 +14,11 @@ from typing import Any, Mapping
 from . import encoding
 from ._calls import EvmCall, EvmOutcome, EvmStep
 from ._evm_abi import ERC20_ABI, EVM_CHAIN_BY_ENVIRONMENT, MAILBOX_ABI, WARP_ROUTE_ABI, ZERO_ADDRESS
-from .errors import (AmbiguousRouteError, BridgeError, ChainMismatchError, ConfigurationError, InvalidAmountError,
-                     InvalidRecipientError, MissingExtraError, RegistryVersionMismatchError, RouteNotFoundError,
-                     RouteUnavailableError)
+from .errors import (AmbiguousRouteError, BridgeError, ChainMismatchError, ConfigurationError, InsufficientBalanceError,
+                     InvalidAmountError, InvalidRecipientError, MissingExtraError, RegistryVersionMismatchError,
+                     RouteNotFoundError, RouteUnavailableError)
 from .registry import Asset, Chain, Registry, Route
-from .types import DispatchReceipt, EvmHyperlaneQuote, Fee, Plan, Receipt, Status, Step
+from .types import DispatchReceipt, EvmHyperlaneQuote, EvmXReserveQuote, Fee, Plan, Receipt, Status, Step
 from .units import format_decimal_amount, parse_decimal_amount, resolve_amount
 
 
@@ -214,6 +214,26 @@ class _HyperlaneQuote:
     requires_approval_reset: bool
 
 
+@dataclass(frozen=True)
+class _XReserveQuote:
+    """Contract-level facts behind an ``EvmXReserveQuote``; also rebuilt from receipts during status/recovery."""
+
+    xreserve_contract: str
+    token: str
+    source_chain_id: int
+    source_domain: int
+    remote_domain: int
+    remote_token_bytes32: bytes
+    remote_recipient_bytes32: bytes
+    amount_atomic: int
+    max_fee_atomic: int
+    hook_data: bytes
+    balance_atomic: int
+    allowance_atomic: int
+    bridge_program: str
+    wrapper_program: str
+
+
 class EthModule:
     """``bridge.eth`` — Ethereum-origin Hyperlane and xReserve actions (reads return values, writes return ``EvmCall``)."""
 
@@ -369,6 +389,72 @@ class EthModule:
                                  amount_out=format_decimal_amount(atomic, destination.decimals),
                                  recipient_bytes32=recipient32, native_value_atomic=q.native_value_atomic,
                                  native_fee_atomic=q.native_fee_atomic, approval_required=approval_required)
+
+    # -- xReserve quote -------------------------------------------------------------------------
+
+    def _xreserve_recipient_bytes32(self, route: Route, recipient: str, mint_mode: str) -> bytes:
+        """Invariant 7: private deposits are addressed to the wrapper program's account address."""
+        self._recipient_bytes32(route, recipient)                       # validates the intended recipient
+        if mint_mode == "private":
+            wrapper = str(route.metadata["wrapperProgram"])
+            return encoding.aleo_address_to_bytes32(encoding.aleo_program_address(wrapper, self.network))
+        return encoding.aleo_address_to_bytes32(recipient)
+
+    def _quote_xreserve(self, route: Route, recipient: str, amount_atomic: int, owner: str | None,
+                        mint_mode: str, secret_nonce: str) -> _XReserveQuote:
+        """Brief §3.2 quote: chain assert → minimum → hook data → wire recipient → balanceOf/allowance."""
+        if mint_mode not in ("public", "record", "private"):
+            raise BridgeError(f"mint_mode must be public, record or private; got {mint_mode!r}")
+        self.assert_chain(route)
+        Web3 = _web3().Web3
+        meta = route.metadata
+        minimum = int(str(meta["minimumAmountAtomic"]))
+        if amount_atomic < minimum:
+            raise InvalidAmountError(f"xReserve minimum deposit is {minimum} atomic units")
+        if owner is None:
+            raise ConfigurationError("xReserve quotes read the depositor's balance: pass sender= or configure a signer")
+        source = self.registry.asset(route.source_asset_id)
+        if source.locator is None or source.locator.kind != "evm-contract":
+            raise RouteUnavailableError(f"xReserve source token contract is missing: {route.id}")
+        token = Web3.to_checksum_address(source.locator.value)
+        xreserve = Web3.to_checksum_address(str(meta["xReserveContract"]))
+        hook_data = encoding.xreserve_hook_data(mint_mode, recipient, self.network, secret_nonce)
+        remote_recipient = self._xreserve_recipient_bytes32(route, recipient, mint_mode)
+        erc20 = self._erc20(token)
+        balance = int(erc20.functions.balanceOf(owner).call())
+        allowance = int(erc20.functions.allowance(owner, xreserve).call())
+        if balance < amount_atomic:
+            raise InsufficientBalanceError(f"Insufficient {source.symbol} balance: {balance} < {amount_atomic} atomic units")
+        return _XReserveQuote(
+            xreserve_contract=xreserve, token=token, source_chain_id=int(meta["sourceChainId"]),
+            source_domain=int(meta["sourceDomain"]), remote_domain=int(meta["remoteDomain"]),
+            remote_token_bytes32=bytes.fromhex(str(meta["remoteTokenBytes32"])[2:]),
+            remote_recipient_bytes32=remote_recipient, amount_atomic=amount_atomic,
+            max_fee_atomic=int(str(meta["maxFeeAtomic"])), hook_data=hook_data,
+            balance_atomic=balance, allowance_atomic=allowance,
+            bridge_program=str(meta["bridgeProgram"]), wrapper_program=str(meta["wrapperProgram"]))
+
+    def quote_deposit_usdc(self, recipient: str, *, amount: Any = None, amount_atomic: int | None = None,
+                           mint_mode: str = "public", secret_nonce: str = "0scalar",
+                           sender: str | None = None) -> EvmXReserveQuote:
+        """Quote a USDC → USDCx xReserve deposit without signing.
+
+        Checks the 2 USDC minimum, derives the 65-byte hook (``public``/``record``/``private``;
+        private commits ``recipient`` with ``secret_nonce`` via BHP256) and the wire recipient
+        (the shielded wrapper program's address for ``private``), and reads the depositor's
+        USDC balance and xReserve allowance. ``secret_nonce`` is never stored by the SDK.
+        """
+        route = self._xreserve_route()
+        atomic = self._amount_atomic(route, amount, amount_atomic)
+        owner = self._owner(sender)
+        q = self._quote_xreserve(route, recipient, atomic, owner, mint_mode, secret_nonce)
+        destination = self.registry.asset(route.destination_asset_id)
+        plan = _plan_for(self.registry, route, amount_atomic=atomic, recipient=recipient, sender=owner, mint_mode=mint_mode)
+        return EvmXReserveQuote(kind="evm-xreserve", plan=plan, fees=(),
+                                amount_out=format_decimal_amount(atomic, destination.decimals),
+                                hook_data=q.hook_data, remote_recipient_bytes32=q.remote_recipient_bytes32,
+                                balance_atomic=q.balance_atomic, allowance_atomic=q.allowance_atomic,
+                                approval_required=q.allowance_atomic < atomic, max_fee_atomic=q.max_fee_atomic)
 
     # -- Hyperlane execute --------------------------------------------------------------------
 

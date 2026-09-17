@@ -247,8 +247,9 @@ def fake_web3(**config: Any) -> Web3:
     return Web3(FakeRpcProvider(**config))
 
 
-def make_bridge(*, ethereum: Any = None, **aleo_kwargs: Any) -> Any:
-    """A ``Bridge`` over a fresh mainnet ``FakeAleo``, wired with *ethereum* so ``bridge.eth`` works.
+def make_bridge(*, ethereum: Any = None, environment: str | None = None, **aleo_kwargs: Any) -> Any:
+    """A ``Bridge`` over a fresh ``FakeAleo`` (mainnet unless *environment* says otherwise), wired
+    with *ethereum* so ``bridge.eth`` works.
 
     Kept here (rather than in ``tests/conftest.py``) so ``eth.py`` tests can import one fixture
     factory alongside ``fake_web3`` without pulling in pytest fixtures.
@@ -258,4 +259,6 @@ def make_bridge(*, ethereum: Any = None, **aleo_kwargs: Any) -> Any:
     from tests.conftest import FakeAleo, default_mappings
 
     aleo_kwargs.setdefault("mappings", default_mappings())
-    return Bridge(FakeAleo(**aleo_kwargs), ethereum=ethereum)
+    if environment is not None:
+        aleo_kwargs.setdefault("network_name", environment)
+    return Bridge(FakeAleo(**aleo_kwargs), ethereum=ethereum, environment=environment)
