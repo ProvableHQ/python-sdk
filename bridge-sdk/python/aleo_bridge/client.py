@@ -196,8 +196,17 @@ class Bridge:
         return self._programs[program_id]
 
     def mapping_value(self, program_id: str, mapping: str, key: str) -> str | None:
-        """Mapping value as a string, or None when the key is absent/null."""
-        value = self.program(program_id).mapping(mapping).get(key)
+        """Mapping value as a string, or None when the key is absent/null, or *program_id* does not exist.
+
+        A missing program is reported through the return value here, not an exception, so status()/freezelist
+        reads over a program that may not be deployed (yet) degrade to "no data" instead of raising. Callers
+        that want the error can still get it from ``program(program_id)`` directly.
+        """
+        from aleo.facade.errors import ProgramNotFound
+        try:
+            value = self.program(program_id).mapping(mapping).get(key)
+        except ProgramNotFound:
+            return None
         if value is None:
             return None
         text = str(value).strip().strip('"')

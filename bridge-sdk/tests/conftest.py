@@ -115,6 +115,9 @@ class FakePrograms:
         self._aleo = aleo
 
     def get(self, program_id: str) -> FakeProgram:
+        if program_id in self._aleo.missing_programs:
+            from aleo.facade.errors import ProgramNotFound
+            raise ProgramNotFound(program_id)
         self._aleo.fetched.append(program_id)
         return FakeProgram(self._aleo, program_id)
 
@@ -167,13 +170,16 @@ class FakeAleo:
     """Facade stand-in: mappings keyed program → mapping → key; records; network; process; recorders."""
 
     def __init__(self, mappings: dict | None = None, records: list[dict] | None = None,
-                 network_name: str = "mainnet", default_account: Any = None, imports: dict | None = None) -> None:
+                 network_name: str = "mainnet", default_account: Any = None, imports: dict | None = None,
+                 missing_programs: "set[str] | None" = None) -> None:
         self.network_name = network_name
         self.default_account = FakeAccount() if default_account is None else default_account
         self.mappings = mappings or {}
         # ``records`` is the module (aleo.records.find); the rows it returns live in ``record_rows``.
         self.record_rows = records if records is not None else [{"program": "usdcx_stablecoin.aleo", "record_plaintext": USDCX_RECORD}]
         self.imports = imports or {}
+        # program ids that raise ProgramNotFound from programs.get() instead of returning a FakeProgram.
+        self.missing_programs = set(missing_programs or ())
         self.calls: list = []
         self.simulated: list = []
         self.delegated: list = []

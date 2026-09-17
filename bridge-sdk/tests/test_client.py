@@ -2,6 +2,8 @@ import json
 
 import pytest
 
+from aleo.facade.errors import ProgramNotFound
+
 from aleo_bridge import Bridge, __main__ as cli
 from aleo_bridge._calls import AleoCall
 from aleo_bridge.errors import ConfigurationError, MissingExtraError
@@ -63,6 +65,14 @@ def test_program_cache_mapping_value_and_call_registration(fake_aleo):
     assert isinstance(call, AleoCall) and fake_aleo.registered == []
     call.simulate()
     assert fake_aleo.registered == ["token_registry.aleo", "hyp_mailbox.aleo", "hyp_warp_token_wbtc_v2.aleo"]  # dependencies first, root last
+
+
+def test_mapping_value_returns_none_for_missing_program(fake_aleo):
+    fake_aleo.missing_programs = {"missing.aleo"}
+    bridge = Bridge(fake_aleo)
+    assert bridge.mapping_value("missing.aleo", "balances", SIGNER) is None
+    with pytest.raises(ProgramNotFound):
+        bridge.program("missing.aleo")
 
 
 def test_amount_helpers_and_privacy_delegation(fake_aleo):
