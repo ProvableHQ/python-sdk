@@ -1,9 +1,11 @@
+import dataclasses
+
 import pytest
 from eth_account import Account
 from eth_utils import keccak
 from web3 import Web3
 
-from aleo_bridge.errors import ConfigurationError
+from aleo_bridge.errors import (BridgeError, ConfigurationError, RegistryVersionMismatchError, RouteUnavailableError)
 from aleo_bridge.eth import Ethereum
 from aleo_bridge.types import DispatchReceipt, Status
 from tests.fakes.fake_web3 import ZERO_ADDRESS, dispatch_id_log, event_log, fake_web3, make_bridge, tx_hash_for
@@ -11,6 +13,8 @@ from tests.fakes.fake_web3 import ZERO_ADDRESS, dispatch_id_log, event_log, fake
 KEY = "0x" + "11" * 32
 ACCT = Account.from_key(KEY)
 ALEO = "aleo1kypwp5m7qtk9mwazgcpg0tq8aal23mnrvwfvug65qgcg9xvsrqgspyjm6n"
+OTHER_ALEO = "aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px"
+OTHER = "0x0000000000000000000000000000000000000009"
 ALEO_BYTES32 = "0xb102e0d37e02ec5dbba2460287ac07ef7ea8ee636392ce235402308299901811"
 ETH_ROUTER = "0x38D447694f5c1f773ae3132cf93bF30B7Ec1Fa5A"
 WBTC, WBTC_ROUTER = "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599", "0x20CDC85778b732073F7EecEF3DF25c0d310f8772"
@@ -174,6 +178,42 @@ def test_build_lists_approval_then_dispatch_without_sending():
     txs = eth.transfer_remote("wbtc", ALEO, amount_atomic=100_000).build()
     assert [t["to"] for t in txs] == [Web3.to_checksum_address(WBTC), Web3.to_checksum_address(WBTC_ROUTER)]
     assert [t["value"] for t in txs] == [0, 50_000] and w3.provider.sent == []
+
+
+def test_plan_driven_transfer_is_identical_to_the_asset_driven_one():
+    eth, w3 = setup(WBTC_ROUTER, quotes={WBTC_ROUTER: [(ZERO_ADDRESS, 50_000), (WBTC, 100_000)]})
+    quote = eth.quote_transfer_remote("wbtc", ALEO, amount_atomic=100_000)
+    by_asset = eth.transfer_remote("wbtc", ALEO, amount_atomic=100_000).build()
+    by_plan = eth.transfer_remote(plan=quote.plan).build()
+    assert by_plan == by_asset and len(by_plan) == 2
+    assert eth.quote_transfer_remote(plan=quote.plan) == quote          # the quote round-trips through its own plan
+    assert w3.provider.sent == []
+
+
+def test_plan_driven_transfer_rejects_a_tampered_stale_or_foreign_plan():
+    """Nothing in a caller-supplied plan is trusted, and every rejection happens before any RPC."""
+    eth, w3 = setup(WBTC_ROUTER, quotes={WBTC_ROUTER: [(ZERO_ADDRESS, 50_000), (WBTC, 100_000)]})
+    plan = eth.quote_transfer_remote("wbtc", ALEO, amount_atomic=100_000).plan
+    w3.provider.methods.clear()
+    with pytest.raises(BridgeError, match="plan does not match the requested transfer: amount"):
+        eth.transfer_remote(plan=dataclasses.replace(plan, amount_atomic=99_999))
+    with pytest.raises(BridgeError, match="plan does not match the requested transfer: recipient"):
+        eth.transfer_remote(recipient=OTHER_ALEO, plan=plan)             # explicit argument vs the plan's own value
+    with pytest.raises(RegistryVersionMismatchError):
+        eth.transfer_remote(plan=dataclasses.replace(plan, registry_version="0000-00-00.stale"))
+    with pytest.raises(RouteUnavailableError, match="not a hyperlane one"):
+        eth.transfer_remote(plan=dataclasses.replace(plan, route_id="xreserve:ethereum/usdc->aleo/usdcx"))
+    with pytest.raises(RouteUnavailableError):
+        eth.transfer_remote(plan=dataclasses.replace(plan, route_id="hyperlane:nowhere/nothing->aleo/eth"))
+    with pytest.raises(ConfigurationError, match="does not match connected account"):
+        eth.transfer_remote(plan=dataclasses.replace(plan, sender=OTHER))
+    with pytest.raises(BridgeError, match="checksummed EVM address"):
+        eth.transfer_remote(plan=dataclasses.replace(plan, sender=None))
+    with pytest.raises(ValueError, match="not both"):
+        eth.transfer_remote("wbtc", plan=plan)
+    with pytest.raises(ValueError, match="not both"):
+        eth.quote_transfer_remote(plan=plan, sender=ACCT.address)
+    assert w3.provider.methods == [] and w3.provider.sent == []
 
 
 def test_read_only_connection_cannot_transfer():

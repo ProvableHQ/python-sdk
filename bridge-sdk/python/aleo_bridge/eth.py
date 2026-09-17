@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from typing import Any, Mapping
 
 from . import encoding
@@ -360,6 +360,62 @@ class EthModule:
             raise RouteUnavailableError(f"Route is not executable: {route.id}")
         return route
 
+    def _plan_route(self, plan: Plan, protocol: str) -> Route:
+        """Re-resolve a caller-supplied ``Plan``'s route by id (never trust plan-carried addresses)."""
+        if plan.registry_version != self.registry.version:
+            raise RegistryVersionMismatchError(
+                f"Plan uses registry {plan.registry_version}; this client has {self.registry.version}")
+        try:
+            route = self.registry.route(plan.route_id)
+        except RouteNotFoundError as exc:
+            raise RouteUnavailableError(f"Plan route {plan.route_id} is not in registry {self.registry.version}") from exc
+        if route.protocol != protocol:
+            raise RouteUnavailableError(f"{route.id} is a {route.protocol} route, not a {protocol} one")
+        if route.availability != "active":
+            raise RouteUnavailableError(f"Route is not executable ({route.availability}): {route.id}")
+        return route
+
+    def _plan_sender(self, plan: Plan, *, require_signer: bool) -> str:
+        """``plan.sender`` as a checksummed EVM address, bound to the connected account when there is one."""
+        Web3 = _web3().Web3
+        sender = plan.sender
+        if not isinstance(sender, str) or not Web3.is_address(sender) or Web3.to_checksum_address(sender) != sender:
+            raise BridgeError(f"Plan sender must be a checksummed EVM address; got {sender!r}")
+        connected = self.conn.require_address() if require_signer else self.conn.address
+        if connected is not None and sender != connected:                 # the rule EvmCall.send() applies
+            raise ConfigurationError(f"Prepared sender {sender} does not match connected account {connected}")
+        return sender
+
+    def _assert_plan_matches(self, plan: Plan, route: Route, *, sender: str, recipient: str, amount_atomic: int,
+                             mint_mode: str) -> None:
+        """The plan must be exactly what this module would have prepared for the same transfer."""
+        rebuilt = _plan_for(self.registry, route, amount_atomic=amount_atomic, recipient=recipient, sender=sender,
+                            mint_mode=mint_mode)
+        for field in fields(Plan):
+            mine, theirs = getattr(rebuilt, field.name), getattr(plan, field.name)
+            if mine != theirs:
+                raise BridgeError(f"plan does not match the requested transfer: {field.name} is {theirs!r} "
+                                  f"but this transfer prepares {mine!r}")
+
+    def _from_plan(self, plan: Plan, protocol: str, *, recipient: str | None, amount: Any, amount_atomic: int | None,
+                   mint_mode: str | None, require_signer: bool) -> tuple[Route, str, str, int, str]:
+        """Validate ``plan=`` and return ``(route, sender, recipient, amount_atomic, mint_mode)``.
+
+        Explicit ``recipient``/``amount``/``mint_mode`` arguments override the plan's own values and are
+        then caught by the field-by-field equality check, so a plan can never silently disagree with
+        the call that carries it.
+        """
+        route = self._plan_route(plan, protocol)
+        sender = self._plan_sender(plan, require_signer=require_signer)
+        recipient = plan.recipient if recipient is None else recipient
+        mint_mode = plan.mint_mode if mint_mode is None else mint_mode
+        if amount is None and amount_atomic is None:
+            amount_atomic = plan.amount_atomic
+        atomic = self._amount_atomic(route, amount, amount_atomic)
+        self._assert_plan_matches(plan, route, sender=sender, recipient=recipient, amount_atomic=atomic,
+                                  mint_mode=mint_mode)
+        return route, sender, recipient, atomic, mint_mode
+
     def assert_chain(self, route: Route) -> None:
         expected = int(route.metadata["sourceChainId"])
         actual = self.conn.chain_id
@@ -473,21 +529,36 @@ class EthModule:
                                amount_atomic, native_value, native_value, token_amount, allowance,
                                meta.requires_approval_reset)
 
-    def quote_transfer_remote(self, asset: Any, recipient: str, *, amount: Any = None, amount_atomic: int | None = None,
-                              route: Route | None = None, sender: str | None = None) -> EvmHyperlaneQuote:
+    def quote_transfer_remote(self, asset: Any = None, recipient: str | None = None, *, amount: Any = None,
+                              amount_atomic: int | None = None, route: Route | None = None, sender: str | None = None,
+                              plan: Plan | None = None) -> EvmHyperlaneQuote:
         """Quote an Ethereum → Aleo Hyperlane transfer without signing.
 
         Native routes (ETH): ``msg.value`` carries the asset and the relayer fee, so
         ``native_fee_atomic = native_value_atomic - amount``. Collateral routes (WBTC, USDT):
         ``msg.value`` is fee only and ``approval_required`` reflects the router's ERC-20
         allowance for ``sender`` (or the connection's account); it is ``None`` when no account is known.
+
+        ``plan=`` re-quotes a plan prepared earlier: it supplies the route, sender, recipient and
+        amount, and is validated against the live registry. It is mutually exclusive with
+        ``asset=``/``route=``/``sender=``.
         """
-        route = route or self._hyperlane_route(self._asset(asset))
-        if route.protocol != "hyperlane":
-            raise BridgeError(f"{route.id} is not a Hyperlane route; use quote_deposit_usdc for xReserve")
-        atomic = self._amount_atomic(route, amount, amount_atomic)
-        recipient32 = self._recipient_bytes32(route, recipient)
-        owner = self._owner(sender)
+        if plan is not None:
+            if asset is not None or route is not None or sender is not None:
+                raise ValueError("Pass plan= or asset=/route=/sender=, not both")
+            route, owner, recipient, atomic, _ = self._from_plan(
+                plan, "hyperlane", recipient=recipient, amount=amount, amount_atomic=amount_atomic,
+                mint_mode=None, require_signer=False)
+            recipient32 = self._recipient_bytes32(route, recipient)
+        else:
+            if asset is None and route is None:
+                raise ValueError("quote_transfer_remote needs asset=, route= or plan=")
+            route = route or self._hyperlane_route(self._asset(asset))
+            if route.protocol != "hyperlane":
+                raise BridgeError(f"{route.id} is not a Hyperlane route; use quote_deposit_usdc for xReserve")
+            atomic = self._amount_atomic(route, amount, amount_atomic)
+            recipient32 = self._recipient_bytes32(route, recipient)
+            owner = self._owner(sender)
         q = self._quote_hyperlane(route, recipient32, atomic, owner)
         destination = self.registry.asset(route.destination_asset_id)
         plan = _plan_for(self.registry, route, amount_atomic=atomic, recipient=recipient, sender=owner)
@@ -613,19 +684,33 @@ class EthModule:
             balance_atomic=balance, allowance_atomic=allowance,
             bridge_program=meta.bridge_program, wrapper_program=meta.wrapper_program)
 
-    def quote_deposit_usdc(self, recipient: str, *, amount: Any = None, amount_atomic: int | None = None,
-                           mint_mode: str = "public", secret_nonce: str = "0scalar",
-                           sender: str | None = None, route: Route | None = None) -> EvmXReserveQuote:
+    def quote_deposit_usdc(self, recipient: str | None = None, *, amount: Any = None, amount_atomic: int | None = None,
+                           mint_mode: str | None = None, secret_nonce: str = "0scalar",
+                           sender: str | None = None, route: Route | None = None,
+                           plan: Plan | None = None) -> EvmXReserveQuote:
         """Quote a USDC → USDCx xReserve deposit without signing.
 
         Checks the 2 USDC minimum, derives the 65-byte hook (``public``/``record``/``private``;
         private commits ``recipient`` with ``secret_nonce`` via BHP256) and the wire recipient
         (the shielded wrapper program's address for ``private``), and reads the depositor's
         USDC balance and xReserve allowance. ``secret_nonce`` is never stored by the SDK.
+        ``mint_mode`` defaults to ``plan.mint_mode`` when a plan is given, else ``"public"``.
+
+        ``plan=`` re-quotes a plan prepared earlier: it supplies the route, sender, recipient, amount
+        and mint mode, and is validated against the live registry. It is mutually exclusive with
+        ``route=``/``sender=``.
         """
-        route = route or self._xreserve_route()
-        atomic = self._amount_atomic(route, amount, amount_atomic)
-        owner = self._owner(sender)
+        if plan is not None:
+            if route is not None or sender is not None:
+                raise ValueError("Pass plan= or route=/sender=, not both")
+            route, owner, recipient, atomic, mint_mode = self._from_plan(
+                plan, "xreserve", recipient=recipient, amount=amount, amount_atomic=amount_atomic,
+                mint_mode=mint_mode, require_signer=False)
+        else:
+            route = route or self._xreserve_route()
+            mint_mode = "public" if mint_mode is None else mint_mode
+            atomic = self._amount_atomic(route, amount, amount_atomic)
+            owner = self._owner(sender)
         q = self._quote_xreserve(route, recipient, atomic, owner, mint_mode, secret_nonce)
         destination = self.registry.asset(route.destination_asset_id)
         plan = _plan_for(self.registry, route, amount_atomic=atomic, recipient=recipient, sender=owner, mint_mode=mint_mode)
@@ -681,8 +766,8 @@ class EthModule:
         return DispatchReceipt(transaction_id=outcome.source_tx_id or approvals[-1], route_id=route.id,
                                message_id=message_id, amount_atomic=q.amount_atomic, receipt=receipt)
 
-    def transfer_remote(self, asset: Any, recipient: str, *, amount: Any = None,
-                        amount_atomic: int | None = None) -> EvmCall[DispatchReceipt]:
+    def transfer_remote(self, asset: Any = None, recipient: str | None = None, *, amount: Any = None,
+                        amount_atomic: int | None = None, plan: Plan | None = None) -> EvmCall[DispatchReceipt]:
         """Send ETH, WBTC or USDT to Aleo through its Hyperlane Warp Route.
 
         Re-quotes ``quoteTransferRemote`` at send time. Collateral routes approve exactly the
@@ -690,12 +775,25 @@ class EthModule:
         reset to 0 first). Native ETH sends amount + fee as ``msg.value``; collateral routes
         send the fee only. Each hash is checkpointed before polling; a timeout returns a
         pending ``DispatchReceipt``. The message id comes from the Mailbox ``DispatchId`` log.
+
+        ``plan=`` executes a plan prepared earlier (typically ``quote.plan``): the route is
+        re-resolved by id against the live registry, the sender must be the connected account, and
+        the plan must equal what this call would have prepared itself. Mutually exclusive with ``asset=``.
         """
-        route = self._hyperlane_route(self._asset(asset))
-        sender = self.conn.require_address()
-        atomic = self._amount_atomic(route, amount, amount_atomic)
+        if plan is not None:
+            if asset is not None:
+                raise ValueError("Pass plan= or asset=, not both")
+            route, sender, recipient, atomic, _ = self._from_plan(
+                plan, "hyperlane", recipient=recipient, amount=amount, amount_atomic=amount_atomic,
+                mint_mode=None, require_signer=True)
+        else:
+            if asset is None:
+                raise ValueError("transfer_remote needs asset= or plan=")
+            route = self._hyperlane_route(self._asset(asset))
+            sender = self.conn.require_address()
+            atomic = self._amount_atomic(route, amount, amount_atomic)
+            plan = _plan_for(self.registry, route, amount_atomic=atomic, recipient=recipient, sender=sender)
         recipient32 = self._recipient_bytes32(route, recipient)
-        plan = _plan_for(self.registry, route, amount_atomic=atomic, recipient=recipient, sender=sender)
         latest: dict[str, _HyperlaneQuote] = {}
 
         def steps(owner: str) -> list[EvmStep]:
@@ -791,8 +889,9 @@ class EthModule:
                                                                        mint_mode=mint_mode, intended_recipient=intended_recipient))
         return DepositReceipt(transaction_id=rid, route_id=route.id, message_hash="", nonce="", receipt=receipt)
 
-    def deposit_usdc(self, recipient: str, *, amount: Any = None, amount_atomic: int | None = None,
-                     mint_mode: str = "public", secret_nonce: str = "0scalar") -> EvmCall[DepositReceipt]:
+    def deposit_usdc(self, recipient: str | None = None, *, amount: Any = None, amount_atomic: int | None = None,
+                     mint_mode: str | None = None, secret_nonce: str = "0scalar",
+                     plan: Plan | None = None) -> EvmCall[DepositReceipt]:
         """Deposit USDC into Circle xReserve for USDCx on Aleo (minimum 2 USDC; irreversible once confirmed).
 
         ``mint_mode``: ``public`` (public USDCx balance), ``record`` (protocol-minted private
@@ -800,12 +899,24 @@ class EthModule:
         run ``bridge.xreserve.private_mint`` / plan 4's ``complete`` with the same ``secret_nonce``,
         which the SDK never stores). Approves exactly the amount only when the allowance is
         short, then ``depositToRemote`` with no ``msg.value``. The confirmed ``DepositReceipt``
-        carries Circle's message hash (receipt id) and the deposit nonce.
+        carries Circle's message hash (receipt id) and the deposit nonce. ``mint_mode`` defaults to
+        ``plan.mint_mode`` when a plan is given, else ``"public"``.
+
+        ``plan=`` executes a plan prepared earlier (typically ``quote.plan``): the route is
+        re-resolved by id against the live registry, the sender must be the connected account, and
+        the plan must equal what this call would have prepared itself. ``secret_nonce`` is never
+        part of a plan, so a private deposit must still pass the same one it was quoted with.
         """
-        route = self._xreserve_route()
-        sender = self.conn.require_address()
-        atomic = self._amount_atomic(route, amount, amount_atomic)
-        plan = _plan_for(self.registry, route, amount_atomic=atomic, recipient=recipient, sender=sender, mint_mode=mint_mode)
+        if plan is not None:
+            route, sender, recipient, atomic, mint_mode = self._from_plan(
+                plan, "xreserve", recipient=recipient, amount=amount, amount_atomic=amount_atomic,
+                mint_mode=mint_mode, require_signer=True)
+        else:
+            route = self._xreserve_route()
+            mint_mode = "public" if mint_mode is None else mint_mode
+            sender = self.conn.require_address()
+            atomic = self._amount_atomic(route, amount, amount_atomic)
+            plan = _plan_for(self.registry, route, amount_atomic=atomic, recipient=recipient, sender=sender, mint_mode=mint_mode)
         latest: dict[str, _XReserveQuote] = {}
 
         def steps(owner: str) -> list[EvmStep]:

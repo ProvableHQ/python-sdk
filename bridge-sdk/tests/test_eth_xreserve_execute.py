@@ -1,3 +1,4 @@
+import dataclasses
 import json
 
 import pytest
@@ -7,7 +8,7 @@ from eth_utils import keccak
 from web3 import Web3
 
 from aleo_bridge import encoding
-from aleo_bridge.errors import BridgeError
+from aleo_bridge.errors import (BridgeError, ConfigurationError, RegistryVersionMismatchError, RouteUnavailableError)
 from aleo_bridge.eth import Ethereum
 from aleo_bridge.types import DepositReceipt, Status
 from tests.fakes.fake_web3 import deposited_log, fake_web3, make_bridge, tx_hash_for
@@ -17,6 +18,7 @@ ACCT = Account.from_key(KEY)
 ALEO = "aleo1kypwp5m7qtk9mwazgcpg0tq8aal23mnrvwfvug65qgcg9xvsrqgspyjm6n"
 USDC = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"
 XRESERVE = "0x008888878f94C0d87defdf0B07f46B93C1934442"
+OTHER = "0x0000000000000000000000000000000000000009"
 REMOTE_TOKEN = bytes.fromhex("b143ed52c774cd1d4a519d0e796f15916be5a9e1d45edcd9852dd23f68f53401")
 APPROVE = keccak(text="approve(address,uint256)")[:4].hex()
 DEPOSIT = keccak(text="depositToRemote(uint256,uint32,bytes32,address,uint256,bytes)")[:4].hex()
@@ -134,6 +136,37 @@ def test_timeouts_return_pending_receipts():
     result = eth.deposit_usdc(ALEO, amount="2").send(timeout_seconds=0.01, poll_seconds=0.001, on_checkpoint=seen.append)
     assert result.receipt.status == Status.SOURCE_CONFIRMING and result.receipt.source_tx_id == tx_hash_for(1)
     assert [cp.source for cp in seen] == [{"transactionId": tx_hash_for(1), "hookData": "0x" + "00" * 65}]
+
+
+def test_plan_driven_deposit_is_identical_to_the_recipient_driven_one():
+    eth, w3 = setup(allowance=5_000_000)
+    quote = eth.quote_deposit_usdc(ALEO, amount="2", mint_mode="record")
+    by_recipient = eth.deposit_usdc(ALEO, amount="2", mint_mode="record").build()
+    by_plan = eth.deposit_usdc(plan=quote.plan).build()                  # mint_mode comes from the plan
+    assert by_plan == by_recipient and len(by_plan) == 1 and by_plan[0]["data"][2:10] == DEPOSIT
+    assert eth.quote_deposit_usdc(plan=quote.plan) == quote
+    assert w3.provider.sent == []
+
+
+def test_plan_driven_deposit_rejects_a_tampered_stale_or_foreign_plan():
+    eth, w3 = setup(allowance=5_000_000)
+    plan = eth.quote_deposit_usdc(ALEO, amount="2").plan
+    w3.provider.methods.clear()
+    with pytest.raises(BridgeError, match="plan does not match the requested transfer: amount"):
+        eth.deposit_usdc(plan=dataclasses.replace(plan, amount_atomic=2_000_001))
+    with pytest.raises(BridgeError, match="plan does not match the requested transfer: steps"):
+        eth.deposit_usdc(plan=dataclasses.replace(plan, mint_mode="private"))   # steps still say "protocol"
+    with pytest.raises(BridgeError, match="plan does not match the requested transfer: mint_mode"):
+        eth.deposit_usdc(mint_mode="record", plan=plan)
+    with pytest.raises(RegistryVersionMismatchError):
+        eth.deposit_usdc(plan=dataclasses.replace(plan, registry_version="0000-00-00.stale"))
+    with pytest.raises(RouteUnavailableError, match="not a xreserve one"):
+        eth.deposit_usdc(plan=dataclasses.replace(plan, route_id="hyperlane:ethereum/eth->aleo/eth"))
+    with pytest.raises(ConfigurationError, match="does not match connected account"):
+        eth.deposit_usdc(plan=dataclasses.replace(plan, sender=OTHER))
+    with pytest.raises(ValueError, match="not both"):
+        eth.quote_deposit_usdc(ALEO, amount="2", sender=ACCT.address, plan=plan)
+    assert w3.provider.methods == [] and w3.provider.sent == []
 
 
 def test_reverted_deposit_raises():
