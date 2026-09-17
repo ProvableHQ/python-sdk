@@ -178,6 +178,51 @@ def test_plan_sender_must_match_connected_account():
     assert w3.provider.sent == []
 
 
+def test_build_rejects_a_plan_sender_that_is_not_the_connected_account():
+    w3 = fake_web3()
+    call, _ = make_call(w3, sender="0x0000000000000000000000000000000000000001")
+    with pytest.raises(ConfigurationError, match="does not match connected account"):
+        call.build()
+    assert w3.provider.sent == []
+
+
+class ExplodingStore:
+    """A checkpoint store whose disk is full / read-only."""
+
+    def __init__(self):
+        self.attempts = []
+
+    def save(self, checkpoint):
+        self.attempts.append(checkpoint)
+        raise OSError("read-only file system")
+
+    def load(self, checkpoint_id):          # pragma: no cover - never reached
+        return None
+
+    def list(self):                          # pragma: no cover - never reached
+        return []
+
+    def delete(self, checkpoint_id):         # pragma: no cover - never reached
+        return None
+
+
+def test_store_failure_after_broadcast_reports_the_tx_hash_and_never_hides_it():
+    """The transaction is already on the wire: the caller's callback must have run first, the
+    error must name the hash and the checkpoint, and no receipt poll may follow the failure."""
+    w3 = fake_web3()
+    store = ExplodingStore()
+    call, _ = make_call(w3, store=store, approvals=0)
+    seen = []
+    with pytest.raises(BridgeError) as exc:
+        call.send(on_checkpoint=seen.append, poll_seconds=0.001)
+    message = str(exc.value)
+    assert tx_hash_for(1) in message and "broadcast" in message and "checkpoint" in message.lower()
+    assert [cp.id for cp in seen] == [tx_hash_for(1)]                 # callback ran before the store
+    assert [cp.id for cp in store.attempts] == [tx_hash_for(1)]
+    assert len(w3.provider.sent) == 1                                # broadcast happened exactly once
+    assert "eth_getTransactionReceipt" not in w3.provider.methods    # nothing polled after the failure
+
+
 def test_bound_store_saves_every_checkpoint(tmp_path):
     w3 = fake_web3()
     store = FileCheckpointStore(tmp_path)

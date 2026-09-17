@@ -255,8 +255,6 @@ class EvmCall(Generic[R]):
         self._steps, self._finish, self._store = steps, finish, store
 
     def _sender(self) -> str:
-        from .errors import ConfigurationError
-
         sender = self._conn.require_address()
         if self.plan.sender:
             Web3 = self._conn.w3.__class__
@@ -266,10 +264,12 @@ class EvmCall(Generic[R]):
         return sender
 
     def build(self) -> list[dict]:
-        """Unsigned transaction dicts in submission order (approvals then main). Reads only."""
-        from .errors import ConfigurationError
+        """Unsigned transaction dicts in submission order (approvals then main). Reads only.
 
-        sender = self._conn.address or self.plan.sender
+        With an account configured the plan's sender must be that account (same rule ``send()``
+        applies), so a mismatched plan fails here rather than producing calldata nobody can sign.
+        """
+        sender = self._sender() if self._conn.address is not None else self.plan.sender
         if sender is None:
             raise ConfigurationError("build() needs a sender: configure a signer or set plan.sender")
         nonce = int(self._conn.w3.eth.get_transaction_count(sender, "pending"))
@@ -277,14 +277,25 @@ class EvmCall(Generic[R]):
                  "chainId": self._conn.chain_id, "nonce": nonce + i}
                 for i, step in enumerate(self._steps(sender))]
 
-    def _checkpoint(self, result: R, on_checkpoint: Callable[["Checkpoint"], None] | None) -> None:
+    def _checkpoint(self, result: R, on_checkpoint: Callable[["Checkpoint"], None] | None, tx_hash: str) -> None:
+        """Emit the checkpoint for a just-broadcast *tx_hash* to the caller first, then the store.
+
+        The caller's callback runs before the store because the transaction is already on the wire:
+        if persistence fails, the hash must still have reached the one channel that can act on it.
+        A store failure is then fatal and names the hash — losing it silently would strand funds.
+        """
         from .checkpoint import create_checkpoint
 
         checkpoint = create_checkpoint(self.plan, result.receipt, self._registry)  # type: ignore[attr-defined]
-        if self._store is not None:
-            self._store.save(checkpoint)
         if on_checkpoint is not None:
-            on_checkpoint(checkpoint)
+            on_checkpoint(checkpoint)                     # the caller's own callback: errors are theirs
+        if self._store is not None:
+            try:
+                self._store.save(checkpoint)
+            except Exception as exc:  # noqa: BLE001 — any store backend failure
+                raise BridgeError(
+                    f"Transaction {tx_hash} WAS broadcast but its checkpoint {checkpoint.id} could not be saved "
+                    f"({exc}); record the transaction hash before retrying — resending would double-spend") from exc
 
     def send(self, *, wait: bool = True, timeout_seconds: float = 120.0, poll_seconds: float = 1.0,
              on_checkpoint: Callable[["Checkpoint"], None] | None = None) -> R:
@@ -300,7 +311,7 @@ class EvmCall(Generic[R]):
             if step.kind == "approve":
                 approvals.append(tx_hash)
                 pending = self._finish(EvmOutcome("SOURCE_APPROVAL_PENDING", sender, tuple(approvals), None, None))
-                self._checkpoint(pending, on_checkpoint)
+                self._checkpoint(pending, on_checkpoint, tx_hash)
                 if not wait:
                     return pending
                 receipt = self._conn.wait_for_receipt(tx_hash, timeout_seconds=timeout_seconds, poll_seconds=poll_seconds)
@@ -309,7 +320,7 @@ class EvmCall(Generic[R]):
                 _assert_evm_success(receipt, tx_hash)
                 continue
             pending = self._finish(EvmOutcome("SOURCE_CONFIRMING", sender, tuple(approvals), tx_hash, None))
-            self._checkpoint(pending, on_checkpoint)
+            self._checkpoint(pending, on_checkpoint, tx_hash)
             if not wait:
                 return pending
             receipt = self._conn.wait_for_receipt(tx_hash, timeout_seconds=timeout_seconds, poll_seconds=poll_seconds)
@@ -317,7 +328,7 @@ class EvmCall(Generic[R]):
                 return pending
             _assert_evm_success(receipt, tx_hash)
             confirmed = self._finish(EvmOutcome("CONFIRMED", sender, tuple(approvals), tx_hash, receipt))
-            self._checkpoint(confirmed, on_checkpoint)
+            self._checkpoint(confirmed, on_checkpoint, tx_hash)
             return confirmed
         raise BridgeError("EvmCall has no main step")
 
