@@ -358,6 +358,22 @@ def test_a_mismatched_echoed_hash_stops_the_call_before_any_checkpoint():
     assert "eth_getTransactionReceipt" not in w3.provider.methods
 
 
+def test_a_mismatched_echoed_hash_also_arms_the_single_use_guard():
+    """The node answered, so the signed bytes may be in its mempool under the hash we computed —
+    the same ambiguity as a lost response, and the same reason not to resend."""
+    w3 = fake_web3()
+    w3.provider.echo_hashes[1] = "0x" + "ab" * 32
+    call, _ = make_call(w3, approvals=0)
+    with pytest.raises(BridgeError, match="echoed transaction hash"):
+        call.send(poll_seconds=0.001)
+    local_hash = w3.provider.hash_at(1)
+    with pytest.raises(BridgeError) as exc:
+        call.send(poll_seconds=0.001)
+    assert str(exc.value) == (f"this call already broadcast {local_hash}; use bridge.eth.source_status(plan, receipt) "
+                              "to follow it — do not resend")
+    assert w3.provider.methods.count("eth_sendRawTransaction") == 1
+
+
 def test_bound_store_saves_every_checkpoint(tmp_path):
     w3 = fake_web3()
     store = FileCheckpointStore(tmp_path)

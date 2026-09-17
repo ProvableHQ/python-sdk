@@ -234,6 +234,44 @@ def test_adapter_close_awaits_the_wrapped_clients_own_close_on_its_loop():
     adapter.close()                                      # idempotent: closes the client exactly once
 
 
+def test_adapter_close_still_stops_the_thread_when_the_wrapped_client_close_raises():
+    """A third-party client that fails to close must not leak our private event-loop thread."""
+    pytest.importorskip("solders")
+
+    class ExplodingClient:
+        def __init__(self):
+            self.attempts = 0
+
+        async def get_balance(self, pubkey, commitment=None):   # pragma: no cover - never called
+            return sol.RpcResult(7)
+
+        def close(self):
+            self.attempts += 1
+            raise OSError("socket already gone")
+
+    fake = ExplodingClient()
+    adapter = sol._AsyncClientAdapter(fake)
+    adapter.close()
+    assert adapter._thread.is_alive() is False
+    adapter.close()                                             # idempotent: no second close attempt
+    assert fake.attempts == 1
+
+
+def test_adapter_close_still_stops_the_thread_when_an_async_client_close_raises():
+    pytest.importorskip("solders")
+
+    class ExplodingAsyncClient:
+        async def get_balance(self, pubkey, commitment=None):    # pragma: no cover - never called
+            return sol.RpcResult(7)
+
+        async def close(self):
+            raise OSError("session already detached")
+
+    adapter = sol._AsyncClientAdapter(ExplodingAsyncClient())
+    adapter.close()
+    assert adapter._thread.is_alive() is False
+
+
 def test_solana_exit_never_raises_even_when_the_client_close_fails():
     pytest.importorskip("solders")
 

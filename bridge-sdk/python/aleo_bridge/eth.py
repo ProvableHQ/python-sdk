@@ -168,6 +168,12 @@ class Ethereum:
         tx.setdefault("chainId", self.chain_id)
         tx.setdefault("value", 0)
         if self._signer is None:
+            # Default-account mode: the caller's middleware signs, so the hash only exists once the node
+            # answers. There is nothing to capture beforehand and nothing to compare the answer against,
+            # so the ambiguous-send protections below (lost response, echo mismatch, EvmCall's single-use
+            # guard) cannot apply here — a failed send leaves the caller unable to tell whether the
+            # transaction is in the mempool. Prefer a local signer (private_key=/signer=) for anything
+            # that moves funds.
             return Web3.to_hex(self._w3.eth.send_transaction(tx))
         tx.setdefault("nonce", self._w3.eth.get_transaction_count(sender, "pending"))
         if "gas" not in tx:
@@ -196,10 +202,15 @@ class Ethereum:
             error.broadcast_id = local_hash          # type: ignore[attr-defined]
             raise error from exc
         if echoed.lower() != local_hash.lower():
-            raise BridgeError(
+            error = BridgeError(
                 f"Ethereum RPC echoed transaction hash {echoed} for a transaction signed as {local_hash}; "
                 "refusing to checkpoint or follow the wrong hash — check bridge.eth.source_status / the "
                 f"explorer for {local_hash} before retrying")
+            # The node ANSWERED, so it took the bytes: they may sit in its mempool under local_hash even
+            # though it echoed something else. That is the same ambiguity as a lost response, so arm
+            # EvmCall's single-use guard here too rather than letting a retry sign a second transfer.
+            error.broadcast_id = local_hash          # type: ignore[attr-defined]
+            raise error
         return local_hash
 
     def wait_for_receipt(self, tx_hash: str, *, timeout_seconds: float, poll_seconds: float) -> dict | None:

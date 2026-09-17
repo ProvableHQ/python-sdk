@@ -300,26 +300,33 @@ class _AsyncClientAdapter:
         self._thread.start()
         self._closed = False
 
-    def _run(self, coroutine: Any) -> Any:
-        return asyncio.run_coroutine_threadsafe(coroutine, self._loop).result()
+    def _run(self, coroutine: Any, timeout: float | None = None) -> Any:
+        return asyncio.run_coroutine_threadsafe(coroutine, self._loop).result(timeout)
 
     def close(self, timeout: float = 5.0) -> None:
         """Close the wrapped client, then stop the private loop thread. Idempotent.
 
         The wrapped client's own ``close()`` runs FIRST and on our loop: solana-py's ``AsyncClient``
         owns an aiohttp session that can only be closed from the loop it was created on, so stopping
-        the thread first would leak the connection pool. The loop itself is closed only once the
-        thread has actually exited — closing a running loop raises.
+        the thread first would leak the connection pool. It is bounded by *timeout* and its failure is
+        swallowed — a third-party transport that cannot close must not leave our loop thread running
+        forever — and the loop is stopped either way. ``_closed`` is set only once that stop has been
+        issued, so a raising ``close()`` cannot turn the next call into a no-op over a live thread.
+        The loop itself is closed only after the thread has actually exited; closing a running loop raises.
         """
         if self._closed:
             return
-        self._closed = True
-        closer = getattr(self._client, "close", None)
-        if callable(closer):
-            result = closer()
-            if inspect.isawaitable(result):
-                self._run(result)
-        self._loop.call_soon_threadsafe(self._loop.stop)
+        try:
+            closer = getattr(self._client, "close", None)
+            if callable(closer):
+                result = closer()
+                if inspect.isawaitable(result):
+                    self._run(result, timeout=timeout)
+        except Exception:                             # noqa: BLE001 — including a _run timeout
+            pass                                      # best-effort release; the thread still has to stop
+        finally:
+            self._loop.call_soon_threadsafe(self._loop.stop)
+            self._closed = True
         self._thread.join(timeout=timeout)
         if self._thread.is_alive():
             return                                    # still running: leave the loop alone rather than raise
