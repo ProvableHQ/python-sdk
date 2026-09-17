@@ -20,7 +20,9 @@ from typing import Any, Callable
 from aleo import AleoNetworkError
 from aleo.facade.errors import TransactionNotFound
 
-from aleo_bridge.errors import AttestationError, ConfigurationError, RegistryVersionMismatchError
+from aleo_bridge.checkpoint import Checkpoint, create_checkpoint
+from aleo_bridge.errors import (AttestationError, ConfigurationError, InvalidRecipientError,
+                                RegistryVersionMismatchError)
 from aleo_bridge.registry import DEFAULT_REGISTRY
 from aleo_bridge.types import (Attestation, BridgeStatus, BurnReceipt, ChainStatus, DepositReceipt,
                                DispatchReceipt, EvmHyperlaneQuote, EvmXReserveQuote, GasQuote,
@@ -74,17 +76,32 @@ class FakeAleoCall:
 
 
 class FakeEvmCall:
-    def __init__(self, fake: "FakeBridge", intermediates: list[Receipt], final: Any) -> None:
+    """Mirrors ``EvmCall``/``SolCall``: every broadcast boundary — each approval and the final
+    transaction — is reduced to a ``Checkpoint``, handed to ``on_checkpoint`` and only then saved
+    to the bound store, exactly like the real calls' own channel. Without a plan (the non-plan
+    call form) there is nothing to reduce against, so the raw receipt is passed through instead.
+    """
+
+    def __init__(self, fake: "FakeBridge", intermediates: list[Receipt], final: Any, *,
+                 plan: Any = None, store: Any = None) -> None:
         self.fake, self.intermediates, self.final = fake, intermediates, final
+        self.plan, self.store = plan, store
 
     def build(self) -> list[dict]:
         return [{"to": "0xrouter", "data": "0x", "value": 0}]
 
+    def _emit(self, receipt: Receipt, on_checkpoint) -> None:
+        payload = receipt if self.plan is None else create_checkpoint(self.plan, receipt, DEFAULT_REGISTRY)
+        if on_checkpoint is not None:
+            on_checkpoint(payload)                       # the caller's channel first: the tx is already on the wire
+        if self.store is not None and isinstance(payload, Checkpoint):
+            self.store.save(payload)
+
     def send(self, *, wait=True, timeout_seconds=120.0, poll_seconds=1.0, on_checkpoint=None):
         self.fake.events.append(("evm_send", timeout_seconds, poll_seconds))
         for receipt in self.intermediates:
-            if on_checkpoint is not None:
-                on_checkpoint(receipt)
+            self._emit(receipt, on_checkpoint)
+        self._emit(self.final.receipt, on_checkpoint)
         return self.final
 
 
@@ -200,6 +217,13 @@ class FakeEth:
     checked against ``DEFAULT_REGISTRY.version``, and the returned quote carries that same ``plan``
     object (``.plan is plan``) — ``lifecycle.quote`` is what canonicalizes the plan on the result, so
     the fake does not need to rebuild one the way the real module does.
+
+    The write side mirrors the same signatures: ``transfer_remote(asset=None, recipient=None, *,
+    amount=None, amount_atomic=None, plan=None)`` and ``deposit_usdc(recipient=None, *, amount=None,
+    amount_atomic=None, mint_mode=None, secret_nonce="0scalar", plan=None)``, with the real module's
+    guards — ``plan`` plus ``asset`` is a ``ValueError``, no plan and no recipient is an
+    ``InvalidRecipientError``, a stale plan is a ``RegistryVersionMismatchError``, and a plan whose
+    sender is not the connected account is a ``ConfigurationError``.
     """
 
     def __init__(self, fake: "FakeBridge", address: str) -> None:
@@ -231,15 +255,36 @@ class FakeEth:
                                  recipient_bytes32=b"\x00" * 32, native_value_atomic=(amount_atomic or 0) + 1000,
                                  native_fee_atomic=1000, approval_required=self.approval_required)
 
-    def transfer_remote(self, asset, recipient, *, amount=None, amount_atomic=None) -> FakeEvmCall:
-        self.fake.calls.append(("eth.transfer_remote", dict(asset=asset, recipient=recipient,
-                                                            amount_atomic=amount_atomic)))
-        route_id = f"hyperlane:{asset}->aleo/{asset.split('/')[1]}"
+    def _check_plan(self, plan) -> None:
+        if plan.registry_version != DEFAULT_REGISTRY.version:
+            raise RegistryVersionMismatchError(
+                f"Plan uses registry {plan.registry_version}; this client has {DEFAULT_REGISTRY.version}")
+        if plan.sender and plan.sender.lower() != self.address.lower():
+            raise ConfigurationError(f"Prepared sender {plan.sender} does not match connected account {self.address}")
+
+    def transfer_remote(self, asset=None, recipient=None, *, amount=None, amount_atomic=None,
+                        plan=None) -> FakeEvmCall:
+        if plan is not None:
+            if asset is not None:
+                raise ValueError("Pass plan= or asset=, not both")
+            self._check_plan(plan)
+            self.fake.calls.append(("eth.transfer_remote", {"plan": plan}))
+            route_id, recipient, amount_atomic = plan.route_id, plan.recipient, plan.amount_atomic
+        else:
+            if recipient is None:
+                raise InvalidRecipientError("recipient is required when no plan is given")
+            if asset is None:
+                raise ValueError("transfer_remote needs asset= or plan=")
+            self.fake.calls.append(("eth.transfer_remote", dict(asset=asset, recipient=recipient,
+                                                                amount_atomic=amount_atomic)))
+            route_id = f"hyperlane:{asset}->aleo/{asset.split('/')[1]}"
         tx = "0x" + "aa" * 32
         receipt = Receipt(id=tx, protocol="hyperlane", status=Status.SOURCE_CONFIRMING, source_tx_id=tx,
                           protocol_state={"routeId": route_id, "approvalTxIds": [], "sourceSender": self.address,
                                           "amountAtomic": str(amount_atomic or 0)})
-        return FakeEvmCall(self.fake, self.intermediates, DispatchReceipt(tx, route_id, None, amount_atomic or 0, receipt))
+        return FakeEvmCall(self.fake, self.intermediates,
+                           DispatchReceipt(tx, route_id, None, amount_atomic or 0, receipt),
+                           plan=plan, store=self.fake.checkpoints)
 
     def quote_deposit_usdc(self, recipient=None, *, amount=None, amount_atomic=None, mint_mode=None,
                            secret_nonce="0scalar", sender=None, route=None, plan=None):
@@ -263,12 +308,22 @@ class FakeEth:
                                 allowance_atomic=0 if self.approval_required else 10_000_000,
                                 approval_required=self.approval_required, max_fee_atomic=100_000)
 
-    def deposit_usdc(self, recipient, *, amount=None, amount_atomic=None, mint_mode="public",
-                     secret_nonce="0scalar") -> FakeEvmCall:
-        self.fake.calls.append(("eth.deposit_usdc", dict(recipient=recipient, amount_atomic=amount_atomic,
-                                                         mint_mode=mint_mode, secret_nonce=secret_nonce)))
-        route_id = ("xreserve:ethereum/usdc->aleo/usdcx" if self.fake.environment == "mainnet"
-                    else "xreserve:sepolia/usdc->aleo-testnet/usdcx")
+    def deposit_usdc(self, recipient=None, *, amount=None, amount_atomic=None, mint_mode=None,
+                     secret_nonce="0scalar", plan=None) -> FakeEvmCall:
+        if plan is not None:
+            self._check_plan(plan)
+            self.fake.calls.append(("eth.deposit_usdc", {"plan": plan, "secret_nonce": secret_nonce}))
+            recipient, amount_atomic = plan.recipient, plan.amount_atomic
+            mint_mode = plan.mint_mode if mint_mode is None else mint_mode
+            route_id = plan.route_id
+        else:
+            if recipient is None:
+                raise InvalidRecipientError("recipient is required when no plan is given")
+            mint_mode = "public" if mint_mode is None else mint_mode
+            self.fake.calls.append(("eth.deposit_usdc", dict(recipient=recipient, amount_atomic=amount_atomic,
+                                                             mint_mode=mint_mode, secret_nonce=secret_nonce)))
+            route_id = ("xreserve:ethereum/usdc->aleo/usdcx" if self.fake.environment == "mainnet"
+                        else "xreserve:sepolia/usdc->aleo-testnet/usdcx")
         tx = "0x" + "bb" * 32
         message_hash = "0x" + "cc" * 32
         receipt = Receipt(id=message_hash, protocol="xreserve", status=Status.ATTESTATION_PENDING, source_tx_id=tx,
@@ -278,7 +333,8 @@ class FakeEth:
                                           "payload": "0x" + "ee" * 305, "messageHash": message_hash,
                                           "bridgeProgram": "usdcx_bridge_v2.aleo"})
         return FakeEvmCall(self.fake, self.intermediates,
-                           DepositReceipt(tx, route_id, message_hash, "0x" + "dd" * 32, receipt))
+                           DepositReceipt(tx, route_id, message_hash, "0x" + "dd" * 32, receipt),
+                           plan=plan, store=self.fake.checkpoints)
 
     def balance(self, asset) -> int:
         self.fake.calls.append(("eth.balance", asset))
@@ -302,12 +358,16 @@ class FakeEth:
 class FakeSol:
     """Mirrors ``aleo_bridge.sol.SolModule``'s public surface for lifecycle tests.
 
-    ``quote_transfer_remote`` mirrors the REAL ``SolModule.quote_transfer_remote`` signature
-    exactly: ``recipient`` is required positionally (no default, unlike ``EthModule``'s quote
-    methods) and, when ``plan=`` is given, the real module silently overwrites
-    recipient/amount/amount_atomic/sender from the plan rather than raising ``ValueError`` on a
-    conflict — there is no ``asset=``/``route=`` kwarg to conflict with in the first place. This
-    fake matches that real behavior rather than the more Eth-like ``ValueError`` ruling.
+    ``quote_transfer_remote(recipient=None, *, amount=None, amount_atomic=None, sender=None,
+    plan=None)`` and ``transfer_remote(recipient=None, *, amount=None, amount_atomic=None,
+    plan=None)`` mirror the real ``SolModule`` signatures: ``plan=`` alone is enough (it supplies
+    recipient, amount and sender), ``plan`` together with ``sender=`` is a ``ValueError``, and
+    neither a plan nor a recipient is an ``InvalidRecipientError``. There is no ``asset=``/``route=``
+    kwarg to conflict with, so a plan overrides recipient/amount silently — the real module's
+    behavior, not the Eth-like ``ValueError`` on every conflict.
+
+    Solana addresses are base58 and therefore case-SENSITIVE: the plan-sender check compares them
+    exactly, unlike ``FakeEth``'s case-insensitive EVM comparison.
     """
 
     def __init__(self, fake: "FakeBridge", address: str) -> None:
@@ -316,30 +376,48 @@ class FakeSol:
         self.source_status_result: Receipt | None = None
         self.intermediates: list[Receipt] = []
 
-    def quote_transfer_remote(self, recipient, *, amount=None, amount_atomic=None, sender=None, plan=None):
+    def _check_plan(self, plan) -> None:
+        if plan.registry_version != DEFAULT_REGISTRY.version:
+            raise RegistryVersionMismatchError(
+                f"Plan uses registry {plan.registry_version}; this client has {DEFAULT_REGISTRY.version}")
+        if plan.sender and plan.sender != self.address:            # base58: compared exactly
+            raise ConfigurationError(f"Prepared sender {plan.sender} does not match connected account {self.address}")
+
+    def quote_transfer_remote(self, recipient=None, *, amount=None, amount_atomic=None, sender=None, plan=None):
         if plan is not None:
-            if plan.registry_version != DEFAULT_REGISTRY.version:
-                raise RegistryVersionMismatchError(
-                    f"Plan uses registry {plan.registry_version}; this client has {DEFAULT_REGISTRY.version}")
+            if sender is not None:
+                raise ValueError("Pass plan= or sender=, not both: the plan carries its own sender")
+            self._check_plan(plan)
             self.fake.calls.append(("sol.quote_transfer_remote", {"plan": plan}))
             return SolanaHyperlaneQuote(kind="solana-hyperlane", plan=plan, fees=(), amount_out=None,
                                         igp_lamports=2_900_000, network_fee_lamports=10_000, rent_lamports=5_004_240,
                                         total_lamports=plan.amount_atomic + 7_914_240,
                                         unique_message_address="uniq1111111111111111111111111111111111111111")
+        if recipient is None:
+            raise InvalidRecipientError("recipient is required when no plan is given")
         self.fake.calls.append(("sol.quote_transfer_remote", dict(recipient=recipient, amount_atomic=amount_atomic)))
         return SolanaHyperlaneQuote(kind="solana-hyperlane", plan=None, fees=(), amount_out=None,
                                     igp_lamports=2_900_000, network_fee_lamports=10_000, rent_lamports=5_004_240,
                                     total_lamports=(amount_atomic or 0) + 7_914_240,
                                     unique_message_address="uniq1111111111111111111111111111111111111111")
 
-    def transfer_remote(self, recipient, *, amount=None, amount_atomic=None) -> FakeSolCall:
-        self.fake.calls.append(("sol.transfer_remote", dict(recipient=recipient, amount_atomic=amount_atomic)))
+    def transfer_remote(self, recipient=None, *, amount=None, amount_atomic=None, plan=None) -> FakeSolCall:
+        if plan is not None:
+            self._check_plan(plan)
+            self.fake.calls.append(("sol.transfer_remote", {"plan": plan}))
+            recipient, amount_atomic = plan.recipient, plan.amount_atomic
+        else:
+            if recipient is None:
+                raise InvalidRecipientError("recipient is required when no plan is given")
+            self.fake.calls.append(("sol.transfer_remote", dict(recipient=recipient, amount_atomic=amount_atomic)))
         route_id = "hyperlane:solana/sol->aleo/sol"
         sig = "5igNature" * 8
         receipt = Receipt(id=sig, protocol="hyperlane", status=Status.SOURCE_CONFIRMING, source_tx_id=sig,
                           protocol_state={"routeId": route_id, "signature": sig, "blockhash": "recent",
                                           "lastValidBlockHeight": "123456789"})
-        return FakeSolCall(self.fake, self.intermediates, DispatchReceipt(sig, route_id, None, amount_atomic or 0, receipt))
+        return FakeSolCall(self.fake, self.intermediates,
+                           DispatchReceipt(sig, route_id, None, amount_atomic or 0, receipt),
+                           plan=plan, store=self.fake.checkpoints)
 
     def balance(self) -> int:
         self.fake.calls.append(("sol.balance",))
