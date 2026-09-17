@@ -24,16 +24,21 @@ APPROVE = keccak(text="approve(address,uint256)")[:4].hex()
 DEPOSIT = keccak(text="depositToRemote(uint256,uint32,bytes32,address,uint256,bytes)")[:4].hex()
 
 
-def deposit_logs(*, remote_token32=REMOTE_TOKEN, value_override=None, log_index=3):
-    """Echo the depositToRemote calldata back as a DepositedToRemote log, optionally corrupting one field."""
+def deposit_fields(tx):
+    """The DepositedToRemote fields the contract would emit for this depositToRemote calldata."""
+    value, remote_domain, remote_recipient, local_token, max_fee, hook = decode(
+        ["uint256", "uint32", "bytes32", "address", "uint256", "bytes"], bytes.fromhex(tx["data"][10:]))
+    return {"local_token": Web3.to_checksum_address(local_token), "depositor": tx["from"],
+            "remote_recipient32": remote_recipient, "value": value, "remote_domain": remote_domain,
+            "remote_token32": REMOTE_TOKEN, "max_fee": max_fee, "hook_data": hook}
+
+
+def deposit_logs(*, log_index=3, **overrides):
+    """Echo the depositToRemote calldata back as a DepositedToRemote log, optionally corrupting fields."""
     def logs(tx):
         if tx["to"] != Web3.to_checksum_address(XRESERVE) or tx["data"][2:10] != DEPOSIT:
             return []
-        value, remote_domain, remote_recipient, local_token, max_fee, hook = decode(
-            ["uint256", "uint32", "bytes32", "address", "uint256", "bytes"], bytes.fromhex(tx["data"][10:]))
-        return [deposited_log(XRESERVE, local_token=Web3.to_checksum_address(local_token), depositor=tx["from"],
-                              remote_recipient32=remote_recipient, value=value_override or value, remote_domain=remote_domain,
-                              remote_token32=remote_token32, max_fee=max_fee, hook_data=hook, tx_hash=tx["hash"], log_index=log_index)]
+        return [deposited_log(XRESERVE, tx_hash=tx["hash"], log_index=log_index, **{**deposit_fields(tx), **overrides})]
     return logs
 
 
@@ -112,7 +117,7 @@ def test_private_mode_deposits_to_wrapper_and_never_persists_the_secret():
 
 
 def test_event_mismatch_or_absence_raises():
-    eth, _ = setup(allowance=5_000_000, logs=deposit_logs(value_override=1))
+    eth, _ = setup(allowance=5_000_000, logs=deposit_logs(value=1))
     with pytest.raises(BridgeError, match="does not match the prepared transfer"):
         eth.deposit_usdc(ALEO, amount="2").send(poll_seconds=0.001)
     eth, _ = setup(allowance=5_000_000, logs=deposit_logs(remote_token32=bytes(32)))
@@ -121,6 +126,42 @@ def test_event_mismatch_or_absence_raises():
     eth, _ = setup(allowance=5_000_000, logs=lambda tx: [])
     with pytest.raises(BridgeError, match="DepositedToRemote"):
         eth.deposit_usdc(ALEO, amount="2").send(poll_seconds=0.001)
+
+
+@pytest.mark.parametrize("field, corrupted", [
+    ("local_token", OTHER),
+    ("depositor", OTHER),
+    ("value", 1_999_999),
+    ("remote_domain", 10_003),
+    ("remote_recipient32", bytes(32)),
+    ("remote_token32", bytes(32)),
+    ("max_fee", 99_999),
+    ("hook_data", b"\x01" + bytes(64)),
+])
+def test_every_re_verified_deposit_field_must_match(field, corrupted):
+    """All eight canonical DepositedToRemote fields are load-bearing: corrupting any one of them
+    alone must make the event stop counting as this transfer's deposit."""
+    eth, _ = setup(allowance=5_000_000, logs=deposit_logs(**{field: corrupted}))
+    with pytest.raises(BridgeError, match="does not match the prepared transfer"):
+        eth.deposit_usdc(ALEO, amount="2").send(poll_seconds=0.001)
+
+
+@pytest.mark.parametrize("ours_first", [True, False])
+def test_our_deposit_event_is_selected_among_other_accounts_deposits(ours_first):
+    """A batched transaction carries several accounts' deposits; ours is whichever event matches all
+    eight fields, not whichever happens to be last in the receipt."""
+    def logs(tx):
+        if tx["to"] != Web3.to_checksum_address(XRESERVE) or tx["data"][2:10] != DEPOSIT:
+            return []
+        fields = deposit_fields(tx)
+        ours = deposited_log(XRESERVE, tx_hash=tx["hash"], log_index=3, **fields)
+        theirs = deposited_log(XRESERVE, tx_hash=tx["hash"], log_index=7, **{**fields, "depositor": OTHER})
+        return [ours, theirs] if ours_first else [theirs, ours]
+
+    eth, _ = setup(allowance=5_000_000, logs=logs)
+    result = eth.deposit_usdc(ALEO, amount="2").send(poll_seconds=0.001)
+    assert result.receipt.status == Status.ATTESTATION_PENDING
+    assert result.receipt.protocol_state["depositLogIndex"] == 3        # ours, whatever the order
 
 
 def test_timeouts_return_pending_receipts():

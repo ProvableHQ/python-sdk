@@ -479,8 +479,9 @@ class EthModule:
     def _native_fee(self, amount_wei: int) -> Fee:
         native = [a for a in self.registry.assets(chain=self.chain.id) if a.kind == "native"]
         asset_id = native[0].id if native else f"{self.chain.id}/{self.chain.native_symbol.lower()}"
+        decimals = native[0].decimals if native else 18   # only an unlisted chain falls back to the EVM default
         return Fee(kind="network", chain_id=self.chain.id, asset_id=asset_id,
-                   amount=format_decimal_amount(amount_wei, 18), estimated=True)
+                   amount=format_decimal_amount(amount_wei, decimals), estimated=True)
 
     # -- Hyperlane quote ----------------------------------------------------------------------
 
@@ -862,6 +863,8 @@ class EthModule:
         from web3.logs import DISCARD
 
         Web3 = _web3().Web3
+        # Kept even though send() already asserted success: _recover_xreserve_from_history reaches
+        # this with receipts nothing has checked, so the revert test must live here too.
         if int(receipt["status"]) == 0:
             raise BridgeError(f"EVM transaction reverted: {source_tx_id}")
         xreserve = self._contract(q.xreserve_contract, XRESERVE_ABI)
@@ -869,17 +872,23 @@ class EthModule:
                   if Web3.to_checksum_address(ev["address"]) == q.xreserve_contract]
         if not events:
             raise BridgeError("Confirmed receipt does not contain a valid DepositedToRemote event")
-        ev = events[-1]
-        a = ev["args"]
-        if (Web3.to_checksum_address(a["localToken"]) != q.token
-                or Web3.to_checksum_address(a["localDepositor"]) != owner
-                or int(a["value"]) != q.amount_atomic
-                or int(a["remoteDomain"]) != q.remote_domain
-                or bytes(a["remoteRecipient"]) != q.remote_recipient_bytes32
-                or bytes(a["remoteToken"]) != q.remote_token_bytes32
-                or int(a["maxFee"]) != q.max_fee_atomic
-                or bytes(a["hookData"]) != q.hook_data):
+
+        def matches(args: Mapping[str, Any]) -> bool:
+            return (Web3.to_checksum_address(args["localToken"]) == q.token
+                    and Web3.to_checksum_address(args["localDepositor"]) == owner
+                    and int(args["value"]) == q.amount_atomic
+                    and int(args["remoteDomain"]) == q.remote_domain
+                    and bytes(args["remoteRecipient"]) == q.remote_recipient_bytes32
+                    and bytes(args["remoteToken"]) == q.remote_token_bytes32
+                    and int(args["maxFee"]) == q.max_fee_atomic
+                    and bytes(args["hookData"]) == q.hook_data)
+
+        # One transaction can batch several accounts' deposits, so take OUR event rather than the
+        # last one: every one of the eight canonical fields has to match for it to be ours.
+        ev = next((e for e in events if matches(e["args"])), None)
+        if ev is None:
             raise BridgeError("DepositedToRemote event does not match the prepared transfer")
+        a = ev["args"]
         log_index = int(ev["logIndex"])
         if log_index < 0:
             raise BridgeError("DepositedToRemote log index is missing or invalid")
@@ -965,7 +974,7 @@ class EthModule:
 
     @staticmethod
     def _require_hash(value: Any, what: str) -> str:
-        if not isinstance(value, str) or not _HASH_RE.match(value):
+        if not isinstance(value, str) or not _HASH_RE.fullmatch(value):
             raise CheckpointInvalidError(f"Receipt is missing a valid {what}")
         return value
 
@@ -979,13 +988,13 @@ class EthModule:
         state = receipt.protocol_state
         recipient32 = encoding.aleo_address_to_bytes32(plan.recipient)
         if (receipt.protocol != "hyperlane"
-                or state.get("destinationDomain") != int(route.metadata["destinationDomain"])
+                or state.get("destinationDomain") != self._hyperlane_metadata(route).destination_domain
                 or state.get("amountAtomic") != str(plan.amount_atomic)
                 or not isinstance(state.get("recipientBytes32"), str)
                 or state["recipientBytes32"].lower() != "0x" + recipient32.hex()):
             raise CheckpointInvalidError("Hyperlane checkpoint does not match the prepared transfer")
         ids = state.get("approvalTxIds", [])
-        if not isinstance(ids, list) or any(not isinstance(i, str) or not _HASH_RE.match(i) for i in ids):
+        if not isinstance(ids, list) or any(not isinstance(i, str) or not _HASH_RE.fullmatch(i) for i in ids):
             raise CheckpointInvalidError("Hyperlane checkpoint contains invalid approval transaction ids")
         return recipient32
 
@@ -1015,7 +1024,7 @@ class EthModule:
         try:
             ok = (Web3.is_address(s["xReserveContract"]) and Web3.is_address(s["tokenAddress"])
                   and isinstance(s["sourceChainId"], int) and isinstance(s["remoteDomain"], int)
-                  and _HASH_RE.match(s["remoteRecipientBytes32"]) is not None
+                  and _HASH_RE.fullmatch(s["remoteRecipientBytes32"]) is not None
                   and isinstance(s["hookData"], str) and len(s["hookData"]) == 132 and s["hookData"].startswith("0x")
                   and str(s["amountAtomic"]).isdigit() and str(s["maxFeeAtomic"]).isdigit())
         except (KeyError, TypeError):
@@ -1023,7 +1032,7 @@ class EthModule:
         if not ok:
             raise CheckpointInvalidError("Checkpoint contains invalid xReserve submission state")
         ids = s.get("approvalTxIds", [])
-        if not isinstance(ids, list) or any(not isinstance(i, str) or not _HASH_RE.match(i) for i in ids):
+        if not isinstance(ids, list) or any(not isinstance(i, str) or not _HASH_RE.fullmatch(i) for i in ids):
             raise CheckpointInvalidError("Checkpoint contains invalid xReserve approval transaction ids")
         meta = self._xreserve_metadata(route)   # reuse the registry validator rather than trusting raw metadata again
         return _XReserveQuote(
@@ -1053,7 +1062,8 @@ class EthModule:
             return receipt
         if int(observed["status"]) == 0:
             return self._failed(receipt, "sourceError", f"EVM transaction reverted: {source_tx_id}")
-        return self._confirmed_deposit_receipt(route, q, owner=owner, approval_tx_ids=list(receipt.protocol_state["approvalTxIds"]),
+        return self._confirmed_deposit_receipt(route, q, owner=owner,
+                                               approval_tx_ids=list(receipt.protocol_state.get("approvalTxIds", [])),
                                                source_tx_id=source_tx_id, receipt=observed, mint_mode=plan.mint_mode,
                                                intended_recipient=plan.recipient)
 
@@ -1093,7 +1103,7 @@ class EthModule:
 
     def _checkpoint_approvals(self, checkpoint: Checkpoint) -> list[str]:
         approvals = list((checkpoint.source or {}).get("approvalTransactionIds", []))
-        if any(not isinstance(a, str) or not _HASH_RE.match(a) for a in approvals):
+        if any(not isinstance(a, str) or not _HASH_RE.fullmatch(a) for a in approvals):
             raise CheckpointInvalidError("Bridge checkpoint contains an invalid approval transaction id")
         return approvals
 
@@ -1181,6 +1191,10 @@ class EthModule:
                     or Web3.to_checksum_address(tx["to"]) != router):
                 continue
             if int(observed["status"]) == 0:
+                # Deliberately asymmetric with the xReserve scan below, and identical to veil: a
+                # reverted Hyperlane candidate raises (hyperlane/evm.ts) because sender+router+args
+                # already identify it as ours, while xreserve/evmToAleo.ts swallows a rejected
+                # candidate because the shared contract's logs are mostly other accounts' deposits.
                 raise BridgeError(f"EVM transaction reverted: {tx_hash}")
             message_id = self._message_id_from_receipt(route, observed)
             state = dict(receipt.protocol_state)
@@ -1330,7 +1344,23 @@ class EthModule:
         raise UnsupportedRouteError(f"No Ethereum recovery for protocol {route.protocol}")
 
     def _mailbox_address(self) -> str:
-        for route in self.registry.routes(protocol="hyperlane", include_unavailable=True, environment=self.bridge.environment):
+        """The Hyperlane Mailbox deployed on this chain.
+
+        Prefer a route that ORIGINATES here and passes the full metadata validator: its
+        ``mailboxAddress`` is the contract this chain's own dispatches go through, checksummed and
+        checked. Only if no such route exists do we fall back to any route that merely touches this
+        chain (whose ``mailboxAddress`` may be the remote one, and is unvalidated).
+        """
+        routes = list(self.registry.routes(protocol="hyperlane", include_unavailable=True,
+                                           environment=self.bridge.environment))
+        for route in routes:
+            if self.registry.asset(route.source_asset_id).chain_id != self.chain.id:
+                continue
+            try:
+                return self._hyperlane_metadata(route).mailbox
+            except (ConfigurationError, RouteUnavailableError):
+                continue
+        for route in routes:
             chains = {self.registry.asset(route.source_asset_id).chain_id, self.registry.asset(route.destination_asset_id).chain_id}
             mailbox = route.metadata.get("mailboxAddress")
             if self.chain.id in chains and isinstance(mailbox, str):
