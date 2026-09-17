@@ -1,3 +1,5 @@
+import dataclasses
+
 import pytest
 from eth_account import Account
 
@@ -5,6 +7,7 @@ from aleo_bridge.encoding import aleo_address_to_bytes32, aleo_program_address, 
 from aleo_bridge.errors import (BridgeError, ChainMismatchError, ConfigurationError, InsufficientBalanceError,
                                 InvalidAmountError)
 from aleo_bridge.eth import Ethereum
+from aleo_bridge.registry import DEFAULT_REGISTRY
 from aleo_bridge.types import EvmXReserveQuote
 from tests.fakes.fake_web3 import fake_web3, make_bridge
 
@@ -86,3 +89,56 @@ def test_mainnet_environment_selects_ethereum_route():
     eth = make_bridge(environment="mainnet", ethereum=Ethereum(w3=w3, private_key=KEY)).eth
     q = eth.quote_deposit_usdc(ALEO, amount="2")
     assert q.plan.route_id == "xreserve:ethereum/usdc->aleo/usdcx" and q.approval_required is True
+
+
+def _corrupted_xreserve_route(**overrides):
+    route = DEFAULT_REGISTRY.route("xreserve:sepolia/usdc->aleo-testnet/usdcx")
+    return dataclasses.replace(route, metadata={**route.metadata, **overrides})
+
+
+def test_corrupted_xreserve_contract_is_refused_before_any_contract_read():
+    eth, w3 = sepolia()
+    route = _corrupted_xreserve_route(xReserveContract="not-an-address")
+    with pytest.raises(ConfigurationError, match="xReserveContract"):
+        eth.quote_deposit_usdc(ALEO, amount="2", route=route)
+    assert "eth_call" not in w3.provider.methods
+
+
+def test_non_hex_remote_token_bytes32_is_refused_before_any_contract_read():
+    eth, w3 = sepolia()
+    route = _corrupted_xreserve_route(remoteTokenBytes32="not-hex")
+    with pytest.raises(ConfigurationError, match="remoteTokenBytes32"):
+        eth.quote_deposit_usdc(ALEO, amount="2", route=route)
+    assert "eth_call" not in w3.provider.methods
+
+
+def test_short_remote_token_bytes32_is_refused_before_any_contract_read():
+    eth, w3 = sepolia()
+    route = _corrupted_xreserve_route(remoteTokenBytes32="0x" + "ab" * 16)   # 16 bytes, not 32
+    with pytest.raises(ConfigurationError, match="remoteTokenBytes32"):
+        eth.quote_deposit_usdc(ALEO, amount="2", route=route)
+    assert "eth_call" not in w3.provider.methods
+
+
+def test_bridge_program_without_aleo_suffix_is_refused_before_any_contract_read():
+    eth, w3 = sepolia()
+    route = _corrupted_xreserve_route(bridgeProgram="not_a_program")
+    with pytest.raises(ConfigurationError, match="bridgeProgram"):
+        eth.quote_deposit_usdc(ALEO, amount="2", route=route)
+    assert "eth_call" not in w3.provider.methods
+
+
+def test_negative_remote_domain_is_refused_before_any_contract_read():
+    eth, w3 = sepolia()
+    route = _corrupted_xreserve_route(remoteDomain=-1)
+    with pytest.raises(ConfigurationError, match="remoteDomain"):
+        eth.quote_deposit_usdc(ALEO, amount="2", route=route)
+    assert "eth_call" not in w3.provider.methods
+
+
+def test_non_digit_minimum_amount_atomic_is_refused_before_any_contract_read():
+    eth, w3 = sepolia()
+    route = _corrupted_xreserve_route(minimumAmountAtomic="2_000_000")
+    with pytest.raises(ConfigurationError, match="minimumAmountAtomic"):
+        eth.quote_deposit_usdc(ALEO, amount="2", route=route)
+    assert "eth_call" not in w3.provider.methods

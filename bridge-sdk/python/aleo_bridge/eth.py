@@ -238,6 +238,32 @@ class _HyperlaneQuote:
     requires_approval_reset: bool
 
 
+_DIGIT_STRING_RE = re.compile(r"^[0-9]+$")
+
+
+@dataclass(frozen=True)
+class _XReserveRouteMetadata:
+    """Validated xReserve route metadata (mirrors veil ``protocols/xreserve/evmToAleo.ts`` ``routeMetadata``).
+
+    Every address, domain, program name and fee that reaches a contract call or an Aleo encoder is
+    checked here first, so a corrupted or malformed registry entry fails with ``ConfigurationError``
+    before any RPC read.
+    """
+
+    xreserve_contract: str
+    source_chain_id: int
+    source_domain: int
+    remote_domain: int
+    remote_token_bytes32: bytes
+    minimum_amount_atomic: int
+    withdrawal_fee_atomic: int
+    max_fee_atomic: int
+    bridge_program: str
+    wrapper_program: str
+    remote_token: str
+    attestation_base_url: str
+
+
 @dataclass(frozen=True)
 class _XReserveQuote:
     """Contract-level facts behind an ``EvmXReserveQuote``; also rebuilt from receipts during status/recovery."""
@@ -460,51 +486,123 @@ class EthModule:
 
     # -- xReserve quote -------------------------------------------------------------------------
 
-    def _xreserve_recipient_bytes32(self, route: Route, recipient: str, mint_mode: str) -> bytes:
+    def _metadata_digits(self, meta: Mapping[str, Any], key: str, route_id: str) -> int:
+        """A digit-string atomic-amount metadata field as ``int``; never bool/float/junk."""
+        value = meta.get(key)
+        if not isinstance(value, str) or not _DIGIT_STRING_RE.fullmatch(value):
+            raise ConfigurationError(f"xReserve route metadata {key!r} must be a digit string ({route_id}): {value!r}")
+        return int(value)
+
+    def _metadata_aleo_program(self, meta: Mapping[str, Any], key: str, route_id: str) -> str:
+        value = meta.get(key)
+        if not isinstance(value, str) or not value.endswith(".aleo") or value == ".aleo":
+            raise ConfigurationError(f"xReserve route metadata {key!r} must be an .aleo program name ({route_id}): {value!r}")
+        return value
+
+    def _xreserve_metadata(self, route: Route) -> _XReserveRouteMetadata:
+        """Brief §3.2 route metadata validator (mirrors veil ``protocols/xreserve/evmToAleo.ts`` ``routeMetadata``).
+
+        Called by every path that is about to touch the xReserve contract or an Aleo program address
+        (``_quote_xreserve``, ``_xreserve_recipient_bytes32``, and Task 6's deposit execute) so no
+        unvalidated address, domain, fee, or program name from the registry ever reaches an RPC call.
+        """
+        if route is None or route.protocol != "xreserve" or route.availability != "active":
+            raise RouteUnavailableError(f"xReserve route is not executable: {getattr(route, 'id', route)!r}")
+        source_chain = self.registry.chain(self.registry.asset(route.source_asset_id).chain_id)
+        if source_chain.family != "evm":
+            raise ConfigurationError(f"xReserve route source chain must be an EVM chain ({route.id}): {source_chain.id!r}")
+        expected_aleo_chain = "aleo-testnet" if self.network == "testnet" else "aleo"
+        destination_chain_id = self.registry.asset(route.destination_asset_id).chain_id
+        if destination_chain_id != expected_aleo_chain:
+            raise ConfigurationError(
+                f"xReserve route destination chain must be {expected_aleo_chain!r} ({route.id}): {destination_chain_id!r}")
+        meta = route.metadata
+        xreserve_contract = self._metadata_address(meta, "xReserveContract", route.id)
+        source_chain_id = meta.get("sourceChainId")
+        if isinstance(source_chain_id, bool) or not isinstance(source_chain_id, int) or source_chain_id <= 0:
+            raise ConfigurationError(
+                f"xReserve route metadata sourceChainId must be a positive int ({route.id}): {source_chain_id!r}")
+        source_domain = meta.get("sourceDomain")
+        if isinstance(source_domain, bool) or not isinstance(source_domain, int) or source_domain < 0:
+            raise ConfigurationError(
+                f"xReserve route metadata sourceDomain must be a non-negative int ({route.id}): {source_domain!r}")
+        remote_domain = meta.get("remoteDomain")
+        if isinstance(remote_domain, bool) or not isinstance(remote_domain, int) or remote_domain < 0:
+            raise ConfigurationError(
+                f"xReserve route metadata remoteDomain must be a non-negative int ({route.id}): {remote_domain!r}")
+        remote_token_bytes32_raw = meta.get("remoteTokenBytes32")
+        if not isinstance(remote_token_bytes32_raw, str):
+            raise ConfigurationError(
+                f"xReserve route metadata remoteTokenBytes32 must be a hex string ({route.id}): {remote_token_bytes32_raw!r}")
+        hex_text = remote_token_bytes32_raw[2:] if remote_token_bytes32_raw[:2] in ("0x", "0X") else remote_token_bytes32_raw
+        try:
+            remote_token_bytes32 = bytes.fromhex(hex_text)
+        except ValueError as exc:
+            raise ConfigurationError(
+                f"xReserve route metadata remoteTokenBytes32 is not valid hex ({route.id}): {remote_token_bytes32_raw!r}") from exc
+        if len(remote_token_bytes32) != 32:
+            raise ConfigurationError(
+                f"xReserve route metadata remoteTokenBytes32 must be exactly 32 bytes ({route.id}): {remote_token_bytes32_raw!r}")
+        minimum_amount_atomic = self._metadata_digits(meta, "minimumAmountAtomic", route.id)
+        withdrawal_fee_atomic = self._metadata_digits(meta, "withdrawalFeeAtomic", route.id)
+        max_fee_atomic = self._metadata_digits(meta, "maxFeeAtomic", route.id)
+        bridge_program = self._metadata_aleo_program(meta, "bridgeProgram", route.id)
+        wrapper_program = self._metadata_aleo_program(meta, "wrapperProgram", route.id)
+        remote_token = self._metadata_aleo_program(meta, "remoteToken", route.id)
+        attestation_base_url = meta.get("attestationBaseUrl")
+        if not isinstance(attestation_base_url, str) or not attestation_base_url.startswith("https://"):
+            raise ConfigurationError(
+                f"xReserve route metadata attestationBaseUrl must start with https:// ({route.id}): {attestation_base_url!r}")
+        return _XReserveRouteMetadata(
+            xreserve_contract=xreserve_contract, source_chain_id=source_chain_id, source_domain=source_domain,
+            remote_domain=remote_domain, remote_token_bytes32=remote_token_bytes32,
+            minimum_amount_atomic=minimum_amount_atomic, withdrawal_fee_atomic=withdrawal_fee_atomic,
+            max_fee_atomic=max_fee_atomic, bridge_program=bridge_program, wrapper_program=wrapper_program,
+            remote_token=remote_token, attestation_base_url=attestation_base_url)
+
+    def _xreserve_recipient_bytes32(self, route: Route, meta: _XReserveRouteMetadata, recipient: str,
+                                    mint_mode: str) -> bytes:
         """Invariant 7: private deposits are addressed to the wrapper program's account address."""
         self._recipient_bytes32(route, recipient)                       # validates the intended recipient
         if mint_mode == "private":
-            wrapper = str(route.metadata["wrapperProgram"])
-            return encoding.aleo_address_to_bytes32(encoding.aleo_program_address(wrapper, self.network))
+            return encoding.aleo_address_to_bytes32(encoding.aleo_program_address(meta.wrapper_program, self.network))
         return encoding.aleo_address_to_bytes32(recipient)
 
     def _quote_xreserve(self, route: Route, recipient: str, amount_atomic: int, owner: str | None,
                         mint_mode: str, secret_nonce: str) -> _XReserveQuote:
-        """Brief §3.2 quote: chain assert → minimum → hook data → wire recipient → balanceOf/allowance."""
+        """Brief §3.2 quote: chain assert → metadata validation → minimum → hook data → wire recipient →
+        balanceOf/allowance."""
         if mint_mode not in ("public", "record", "private"):
             raise BridgeError(f"mint_mode must be public, record or private; got {mint_mode!r}")
         self.assert_chain(route)
-        Web3 = _web3().Web3
-        meta = route.metadata
-        minimum = int(str(meta["minimumAmountAtomic"]))
-        if amount_atomic < minimum:
-            raise InvalidAmountError(f"xReserve minimum deposit is {minimum} atomic units")
+        meta = self._xreserve_metadata(route)
+        if amount_atomic < meta.minimum_amount_atomic:
+            raise InvalidAmountError(f"xReserve minimum deposit is {meta.minimum_amount_atomic} atomic units")
         if owner is None:
             raise ConfigurationError("xReserve quotes read the depositor's balance: pass sender= or configure a signer")
         source = self.registry.asset(route.source_asset_id)
         if source.locator is None or source.locator.kind != "evm-contract":
             raise RouteUnavailableError(f"xReserve source token contract is missing: {route.id}")
-        token = Web3.to_checksum_address(source.locator.value)
-        xreserve = Web3.to_checksum_address(str(meta["xReserveContract"]))
+        token = _web3().Web3.to_checksum_address(source.locator.value)
         hook_data = encoding.xreserve_hook_data(mint_mode, recipient, self.network, secret_nonce)
-        remote_recipient = self._xreserve_recipient_bytes32(route, recipient, mint_mode)
+        remote_recipient = self._xreserve_recipient_bytes32(route, meta, recipient, mint_mode)
         erc20 = self._erc20(token)
         balance = int(erc20.functions.balanceOf(owner).call())
-        allowance = int(erc20.functions.allowance(owner, xreserve).call())
+        allowance = int(erc20.functions.allowance(owner, meta.xreserve_contract).call())
         if balance < amount_atomic:
             raise InsufficientBalanceError(f"Insufficient {source.symbol} balance: {balance} < {amount_atomic} atomic units")
         return _XReserveQuote(
-            xreserve_contract=xreserve, token=token, source_chain_id=int(meta["sourceChainId"]),
-            source_domain=int(meta["sourceDomain"]), remote_domain=int(meta["remoteDomain"]),
-            remote_token_bytes32=bytes.fromhex(str(meta["remoteTokenBytes32"])[2:]),
+            xreserve_contract=meta.xreserve_contract, token=token, source_chain_id=meta.source_chain_id,
+            source_domain=meta.source_domain, remote_domain=meta.remote_domain,
+            remote_token_bytes32=meta.remote_token_bytes32,
             remote_recipient_bytes32=remote_recipient, amount_atomic=amount_atomic,
-            max_fee_atomic=int(str(meta["maxFeeAtomic"])), hook_data=hook_data,
+            max_fee_atomic=meta.max_fee_atomic, hook_data=hook_data,
             balance_atomic=balance, allowance_atomic=allowance,
-            bridge_program=str(meta["bridgeProgram"]), wrapper_program=str(meta["wrapperProgram"]))
+            bridge_program=meta.bridge_program, wrapper_program=meta.wrapper_program)
 
     def quote_deposit_usdc(self, recipient: str, *, amount: Any = None, amount_atomic: int | None = None,
                            mint_mode: str = "public", secret_nonce: str = "0scalar",
-                           sender: str | None = None) -> EvmXReserveQuote:
+                           sender: str | None = None, route: Route | None = None) -> EvmXReserveQuote:
         """Quote a USDC → USDCx xReserve deposit without signing.
 
         Checks the 2 USDC minimum, derives the 65-byte hook (``public``/``record``/``private``;
@@ -512,7 +610,7 @@ class EthModule:
         (the shielded wrapper program's address for ``private``), and reads the depositor's
         USDC balance and xReserve allowance. ``secret_nonce`` is never stored by the SDK.
         """
-        route = self._xreserve_route()
+        route = route or self._xreserve_route()
         atomic = self._amount_atomic(route, amount, amount_atomic)
         owner = self._owner(sender)
         q = self._quote_xreserve(route, recipient, atomic, owner, mint_mode, secret_nonce)
@@ -530,7 +628,7 @@ class EthModule:
         """Hyperlane Mailbox ``DispatchId(bytes32 indexed messageId)`` from a confirmed receipt; ``None`` if absent."""
         from web3.logs import DISCARD
 
-        mailbox = self._contract(str(route.metadata["mailboxAddress"]), MAILBOX_ABI)
+        mailbox = self._contract(self._hyperlane_metadata(route).mailbox, MAILBOX_ABI)
         events = mailbox.events.DispatchId().process_receipt(receipt, errors=DISCARD)
         if not events:
             return None
