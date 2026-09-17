@@ -74,6 +74,9 @@ ALEO_E2E_PRIVATE_KEY=…` for the 2 USDC Sepolia leg.
 `EVM_PRIVATE_KEY`+`ETHEREUM_RPC_URL` (aliases `BRIDGE_EVM_PRIVATE_KEY`+`BRIDGE_LIVE_ETHEREUM_RPC_URL`, used by the
 user's live shell/veil config; the primary variable wins when both are set), `SOLANA_PRIVATE_KEY`(+`SOLANA_RPC_URL`),
 `BRIDGE_CHECKPOINT_DIR`.
+Note that `BRIDGE_LIVE_ETHEREUM_RPC_URL` is not live-test-only: ordinary `Ethereum.from_env()` /
+`Bridge.from_env()` read it as an alias for `ETHEREUM_RPC_URL`, so leaving it exported points everyday
+calls at that endpoint too.
 Profiles live at `$ALEO_BRIDGE_HOME` or `~/.aleo-bridge` and hold only the Aleo key (mode 600).
 
 ## Tests
