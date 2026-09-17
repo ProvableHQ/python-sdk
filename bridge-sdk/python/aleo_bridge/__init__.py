@@ -21,6 +21,14 @@ from .types import (  # noqa: E402
     MintReceipt, Plan, PreparedTx, PrivacyReceipt, Progress, Quote, Receipt, SolanaHyperlaneQuote, Status, Step,
     to_progress,
 )
+from ._calls import AleoCall  # noqa: E402
+from .circle import CircleClient  # noqa: E402
+from .client import Bridge  # noqa: E402
+from .freezelist import EMPTY_MERKLE_PROOF_PAIR, FreezeList  # noqa: E402
+from .hyperlane import HyperlaneModule  # noqa: E402
+from .privacy import PrivacyModule  # noqa: E402
+from .profile import DEFAULT_ENDPOINT, Profile  # noqa: E402
+from .xreserve import XReserveModule  # noqa: E402
 
 __all__ = [
     "__version__", "AmbiguousRouteError", "AttestationError", "BridgeError", "ChainMismatchError",
@@ -33,4 +41,6 @@ __all__ = [
     "BurnReceipt", "ChainStatus", "DepositReceipt", "DispatchReceipt", "EvmHyperlaneQuote", "EvmXReserveQuote",
     "Fee", "GasQuote", "MintReceipt", "Plan", "PreparedTx", "PrivacyReceipt", "Progress", "Quote", "Receipt",
     "SolanaHyperlaneQuote", "Status", "Step", "to_progress",
+    "AleoCall", "Bridge", "CircleClient", "DEFAULT_ENDPOINT", "EMPTY_MERKLE_PROOF_PAIR", "FreezeList",
+    "HyperlaneModule", "PrivacyModule", "Profile", "XReserveModule",
 ]

@@ -1,7 +1,6 @@
 """Hermetic stand-ins for the aleo facade. Records every call so tests assert on exact inputs."""
 from __future__ import annotations
 
-import importlib
 import json
 from typing import Any
 
@@ -226,46 +225,7 @@ def fake_aleo(monkeypatch) -> FakeAleo:
     return FakeAleo(mappings=default_mappings())
 
 
-class _BridgeStub:
-    """The five Bridge seams protocol modules use, until Task 11 wires the real Bridge into this fixture."""
-
-    def __init__(self, aleo: FakeAleo) -> None:
-        from aleo_bridge._calls import AleoCall
-        from aleo_bridge.registry import DEFAULT_REGISTRY
-
-        self.aleo = aleo
-        self.registry = DEFAULT_REGISTRY
-        self.environment = self.network = aleo.network_name
-        self._AleoCall = AleoCall
-        self._programs: dict = {}
-        for attr, module, cls in (("hyperlane", "hyperlane", "HyperlaneModule"), ("xreserve", "xreserve", "XReserveModule"),
-                                  ("freezelist", "freezelist", "FreezeList"), ("privacy", "privacy", "PrivacyModule")):
-            try:
-                setattr(self, attr, getattr(importlib.import_module(f"aleo_bridge.{module}"), cls)(self))
-            except ImportError:
-                setattr(self, attr, None)
-
-    def aleo_address(self) -> str:
-        return str(self.aleo.default_account.address)
-
-    def program(self, program_id: str):
-        if program_id not in self._programs:
-            self._programs[program_id] = self.aleo.programs.get(program_id)
-        return self._programs[program_id]
-
-    def mapping_value(self, program_id: str, mapping: str, key: str) -> str | None:
-        value = self.program(program_id).mapping(mapping).get(key)
-        if value is None:
-            return None
-        text = str(value).strip().strip('"')
-        return None if text in ("", "null", "None") else text
-
-    def _call(self, program_id: str, function: str, inputs: list[str], build_result):
-        program = self.program(program_id)
-        bound = program.functions[function](*inputs)
-        return self._AleoCall(self.aleo, bound, build_result, imports={program_id: program.source})
-
-
 @pytest.fixture
-def bridge(fake_aleo) -> Any:
-    return _BridgeStub(fake_aleo)
+def bridge(fake_aleo):
+    from aleo_bridge import Bridge
+    return Bridge(fake_aleo)
