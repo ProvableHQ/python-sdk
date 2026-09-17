@@ -3,6 +3,7 @@ from eth_account import Account
 from web3 import Web3
 
 from aleo_bridge._calls import EvmCall, EvmOutcome, EvmStep
+from aleo_bridge._plan import build_plan
 from aleo_bridge._evm_abi import ERC20_ABI, WARP_ROUTE_ABI
 from aleo_bridge.checkpoint import FileCheckpointStore
 from aleo_bridge.errors import BridgeError, ConfigurationError
@@ -70,6 +71,40 @@ def test_plan_for_hyperlane_and_xreserve_shapes():
     assert public.steps[-1].executor == "protocol"
     with pytest.raises(BridgeError, match="mint_mode"):
         _plan_for(DEFAULT_REGISTRY, ROUTE, amount_atomic=1, recipient=ALEO, sender=None, mint_mode="private")
+
+
+def test_build_plan_is_the_shared_builder_eth_re_exports():
+    from aleo_bridge import _plan, eth
+
+    assert eth._plan_for is _plan.build_plan
+
+
+def test_build_plan_derives_the_wallet_executor_from_the_source_chain_family():
+    """Ethereum-origin plans are identical to the ones the hard-coded "evm-wallet" used to produce."""
+    eth_plan = build_plan(DEFAULT_REGISTRY, DEFAULT_REGISTRY.route("hyperlane:ethereum/eth->aleo/eth"),
+                          amount_atomic=100, recipient=ALEO, sender=ACCT.address)
+    assert [(s.id, s.kind, s.executor, s.irreversible) for s in eth_plan.steps] == [
+        ("source-dispatch", "dispatch", "evm-wallet", True),
+        ("message-delivery", "wait-delivery", "protocol", False),
+        ("destination-confirmation", "confirm-delivery", "protocol", False),
+    ]
+    usdc_plan = build_plan(DEFAULT_REGISTRY, USDC_ROUTE, amount_atomic=2_000_000, recipient=ALEO, sender=ACCT.address)
+    assert [(s.id, s.kind, s.executor, s.irreversible) for s in usdc_plan.steps] == [
+        ("source-approval", "approve", "evm-wallet", False),
+        ("source-deposit", "deposit", "evm-wallet", True),
+        ("deposit-attestation", "wait-attestation", "protocol", False),
+        ("destination-mint", "mint", "protocol", False),
+    ]
+
+
+def test_build_plan_uses_a_solana_wallet_for_a_solana_origin():
+    plan = build_plan(DEFAULT_REGISTRY, DEFAULT_REGISTRY.route("hyperlane:solana/sol->aleo/sol"),
+                      amount_atomic=1, recipient=ALEO, sender="11111111111111111111111111111111")
+    assert [(s.id, s.kind, s.executor, s.irreversible) for s in plan.steps] == [
+        ("source-dispatch", "dispatch", "solana-wallet", True),          # SOL is native: no approval step
+        ("message-delivery", "wait-delivery", "protocol", False),
+        ("destination-confirmation", "confirm-delivery", "protocol", False),
+    ]
 
 
 def test_build_returns_unsigned_dicts_in_order_without_sending():

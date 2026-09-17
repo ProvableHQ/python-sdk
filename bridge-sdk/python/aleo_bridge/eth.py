@@ -14,13 +14,14 @@ from typing import Any, Mapping
 from . import encoding
 from ._calls import EvmCall, EvmOutcome, EvmStep
 from ._evm_abi import ERC20_ABI, EVM_CHAIN_BY_ENVIRONMENT, MAILBOX_ABI, WARP_ROUTE_ABI, XRESERVE_ABI, ZERO_ADDRESS
+from ._plan import build_plan as _plan_for   # kept as a module-level name: existing callers import eth._plan_for
 from .checkpoint import Checkpoint
 from .errors import (AmbiguousRouteError, BridgeError, ChainMismatchError, CheckpointInvalidError, ConfigurationError,
                      InsufficientBalanceError, InvalidAmountError, InvalidRecipientError, MissingExtraError,
                      RegistryVersionMismatchError, RouteNotFoundError, RouteUnavailableError, UnsupportedRouteError)
 from .registry import Asset, Chain, Registry, Route
 from .types import (ChainStatus, DepositReceipt, DispatchReceipt, EvmHyperlaneQuote, EvmXReserveQuote, Fee, Plan,
-                    Receipt, Status, Step)
+                    Receipt, Status)
 from .units import format_decimal_amount, parse_decimal_amount, resolve_amount
 
 
@@ -200,37 +201,6 @@ class Ethereum:
             return self._w3.eth.get_transaction_receipt(tx_hash)
         except TransactionNotFound:
             return None
-
-
-def _plan_for(registry: Registry, route: Route, *, amount_atomic: int, recipient: str, sender: str | None,
-              mint_mode: str = "public") -> Plan:
-    """Build the ``Plan`` for an Ethereum-origin route (mirrors veil ``prepare`` steps, brief §2.1).
-
-    Plan 4's ``lifecycle.prepare`` is the Tier-1 entry point; this helper is the Tier-2
-    path so ``bridge.eth.*`` calls carry a checkpointable plan without importing lifecycle.
-    """
-    source: Asset = registry.asset(route.source_asset_id)
-    destination: Asset = registry.asset(route.destination_asset_id)
-    if mint_mode not in ("public", "record", "private"):
-        raise BridgeError(f"mint_mode must be public, record or private; got {mint_mode!r}")
-    if mint_mode != "public" and route.protocol != "xreserve":
-        raise BridgeError("mint_mode other than public applies only to xReserve deposits to Aleo")
-    if amount_atomic <= 0:
-        raise BridgeError("amount_atomic must be positive")
-    if route.protocol == "xreserve":
-        steps = (Step("source-approval", "approve", "evm-wallet", False),
-                 Step("source-deposit", "deposit", "evm-wallet", True),
-                 Step("deposit-attestation", "wait-attestation", "protocol", False),
-                 Step("destination-mint", "mint", "aleo-wallet" if mint_mode == "private" else "protocol", False))
-    else:
-        steps = tuple([Step("source-approval", "approve", "evm-wallet", False)] if source.kind == "token" else []) + (
-            Step("source-dispatch", "dispatch", "evm-wallet", True),
-            Step("message-delivery", "wait-delivery", "protocol", False),
-            Step("destination-confirmation", "confirm-delivery", "protocol", False))
-    return Plan(route_id=route.id, registry_version=registry.version, protocol=route.protocol,
-                environment=route.environment, source_asset_id=source.id, destination_asset_id=destination.id,
-                amount=format_decimal_amount(amount_atomic, source.decimals), amount_atomic=amount_atomic,
-                recipient=recipient, sender=sender, mint_mode=mint_mode, steps=steps)
 
 
 _REGISTRY_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$", re.IGNORECASE)
