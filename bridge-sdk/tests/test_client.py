@@ -7,7 +7,7 @@ from aleo.facade.errors import ProgramNotFound
 
 from aleo_bridge import Bridge, __main__ as cli
 from aleo_bridge._calls import AleoCall
-from aleo_bridge.errors import ConfigurationError, MissingExtraError
+from aleo_bridge.errors import ConfigurationError
 from aleo_bridge.eth import Ethereum, EthModule
 from aleo_bridge.freezelist import FreezeList
 from aleo_bridge.hyperlane import HyperlaneModule
@@ -42,7 +42,11 @@ def test_construction_errors(fake_aleo):
         Bridge(FakeAleo(default_account=False)).aleo_address()
 
 
-def test_eth_property_wraps_connection_and_sol_property_before_plan_3(fake_aleo):
+def test_eth_property_wraps_connection_and_sol_property_now_wraps_a_bare_client(fake_aleo):
+    """Plan 3 (task 5) landed ``SolModule``, so ``bridge.sol`` on a configured connection now
+    succeeds instead of degrading to ``MissingExtraError`` (that fallback covered the window
+    before ``SolModule`` existed; ``sol.py``'s ``try/except ImportError`` around the import is
+    still exercised by ``test_sol_connection.py``'s no-solders scenarios)."""
     bridge = Bridge(fake_aleo)
     with pytest.raises(ConfigurationError, match="ethereum="):
         bridge.eth
@@ -50,8 +54,12 @@ def test_eth_property_wraps_connection_and_sol_property_before_plan_3(fake_aleo)
         bridge.sol
     eth_module = Bridge(fake_aleo, ethereum=fake_web3()).eth      # plan 2: real Ethereum wraps a bare Web3
     assert isinstance(eth_module, EthModule)
-    with pytest.raises(MissingExtraError, match="aleo-bridge-sdk\\[solana\\]"):
-        Bridge(fake_aleo, solana=object()).sol
+    pytest.importorskip("solders")
+    from aleo_bridge.sol import SolModule
+    from tests.fakes.fake_solana import FakeSolanaClient
+
+    sol_module = Bridge(fake_aleo, solana=FakeSolanaClient()).sol  # plan 3: bare client is wrapped in Solana
+    assert isinstance(sol_module, SolModule)
 
 
 def test_program_cache_mapping_value_and_call_registration(fake_aleo):

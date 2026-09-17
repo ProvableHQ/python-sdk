@@ -20,6 +20,7 @@ from typing import Any, Callable, Mapping, Protocol, Sequence, runtime_checkable
 import requests
 
 from . import _sealevel as sl
+from ._plan import build_plan
 from .encoding import aleo_address_to_bytes32
 from .errors import (
     BridgeError,
@@ -29,6 +30,7 @@ from .errors import (
     InvalidAmountError,
     MissingExtraError,
     RegistryVersionMismatchError,
+    RouteNotFoundError,
     UnsupportedRouteError,
 )
 from .registry import Route
@@ -434,3 +436,152 @@ class Solana:
         if self._signer is None:
             raise ConfigurationError("Solana connection is read-only: pass signer= or private_key= to Solana() to sign")
         return self._signer.sign_message(bytes(message))
+
+
+def _confirmation_name(status: Any) -> str | None:
+    """Normalise solders' TransactionConfirmationStatus enum (or a plain string) to 'processed'|'confirmed'|'finalized'."""
+    value = getattr(status, "confirmation_status", None)
+    if value is None:
+        return None
+    name = getattr(value, "name", None) or str(value)
+    return str(name).rsplit(".", 1)[-1].lower()
+
+
+class SolModule:
+    """``bridge.sol`` — Solana-origin SOL → Aleo over the Hyperlane warp route (spec §6).
+
+    Reads (``balance``, ``quote_transfer_remote``, ``source_status``) work on a read-only
+    connection; ``transfer_remote(...).send()`` needs a signer. Route metadata is re-validated
+    from the live registry on every call.
+    """
+
+    def __init__(self, bridge: Any, conn: Solana) -> None:
+        self._bridge = bridge
+        self.conn = conn
+
+    @property
+    def client(self) -> Any:
+        return self.conn.client
+
+    @property
+    def registry(self) -> Any:
+        return self._bridge.registry
+
+    @property
+    def environment(self) -> str:
+        return self._bridge.environment
+
+    def outbound_route(self) -> Route:
+        """The environment's SOL → Aleo Hyperlane route (RouteNotFoundError on testnet, which has none).
+
+        ``SOLANA_SOL_ASSET_ID``/``ALEO_SOL_ASSET_ID`` are fixed mainnet asset ids (there is no
+        testnet Solana chain in the registry), so ``find_route`` alone would resolve the mainnet
+        route regardless of ``self.environment``; this guards that the route's own environment
+        matches the module's, mirroring how ``EthModule`` scopes its route lookups by environment.
+        """
+        route = self.registry.find_route(SOLANA_SOL_ASSET_ID, ALEO_SOL_ASSET_ID, protocol="hyperlane")
+        if route.environment != self.environment:
+            raise RouteNotFoundError(f"No Solana Hyperlane route to Aleo for environment {self.environment!r}")
+        return route
+
+    def metadata(self, route: Route | None = None) -> sl.SolanaRouteMetadata:
+        return sl.solana_route_metadata(route or self.outbound_route())
+
+    # --- reads ------------------------------------------------------------------------------
+
+    def _pubkey(self, address: str) -> Any:
+        return _libs().Pubkey.from_string(address)
+
+    def _account_data(self, address: str) -> bytes | None:
+        value = self.client.get_account_info(self._pubkey(address), commitment=CONFIRMED, encoding="base64").value
+        if value is None:
+            return None
+        data = value.data
+        if isinstance(data, (list, tuple)):          # raw JSON shape: ["<base64>", "base64"]
+            return base64.b64decode(data[0])
+        return bytes(data)
+
+    def _balance_of(self, address: str) -> int:
+        return int(self.client.get_balance(self._pubkey(address), commitment=CONFIRMED).value)
+
+    def balance(self) -> int:
+        """Lamports held by the connected wallet."""
+        address = self.conn.address
+        if address is None:
+            raise ConfigurationError("Solana connection is read-only: pass signer= or private_key= to Solana() to read the wallet balance")
+        return self._balance_of(address)
+
+    # --- quote ------------------------------------------------------------------------------
+
+    def _make_plan(self, route: Route, *, recipient: str, amount_atomic: int, sender: str, decimals: int) -> Plan:
+        return build_plan(self.registry, route, amount_atomic=amount_atomic, recipient=recipient, sender=sender)
+
+    def _compile_message(self, metadata: sl.SolanaRouteMetadata, *, sender: str, unique_message: str,
+                         recipient32: bytes, amount_atomic: int) -> tuple[Any, str, int]:
+        """v0 message: [SetComputeUnitLimit(400_000), TransferRemote] with a confirmed blockhash."""
+        libs = _libs()
+        data = sl.build_transfer_remote_instruction_data(metadata.destination_domain, recipient32, amount_atomic)
+        metas = [libs.AccountMeta(libs.Pubkey.from_string(m.address), is_signer=m.signer, is_writable=m.writable)
+                 for m in sl.account_metas(metadata, sender, unique_message)]
+        instruction = libs.Instruction(libs.Pubkey.from_string(metadata.warp_program_address), data, metas)
+        latest = self.client.get_latest_blockhash(commitment=CONFIRMED).value
+        message = libs.MessageV0.try_compile(
+            libs.Pubkey.from_string(sender),
+            [libs.set_compute_unit_limit(sl.COMPUTE_UNIT_LIMIT), instruction],
+            [],
+            latest.blockhash,
+        )
+        return message, str(latest.blockhash), int(latest.last_valid_block_height)
+
+    def quote_transfer_remote(self, recipient: str, *, amount: str | None = None, amount_atomic: int | None = None,
+                              sender: str | None = None, plan: Plan | None = None) -> SolanaHyperlaneQuote:
+        """Lamports required for a SOL → Aleo transfer: amount + IGP payment + network fee + rent (spec §5 kind
+        ``solana-hyperlane``). Reads Solana; never signs. ``sender`` defaults to the connected wallet and is required
+        for the fee estimate; ``plan`` (from ``Bridge.quote``) pins recipient/amount/sender and must match the live
+        registry version."""
+        libs = _libs()
+        route = self.outbound_route()
+        metadata = sl.solana_route_metadata(route)
+        decimals = self.registry.asset(route.source_asset_id).decimals
+        if plan is not None:
+            if plan.registry_version != self.registry.version:
+                raise RegistryVersionMismatchError(
+                    f"plan was prepared against registry {plan.registry_version}; this client runs {self.registry.version} — re-run quote()")
+            if plan.route_id != route.id:
+                raise UnsupportedRouteError(f"plan route {plan.route_id} is not the Solana Hyperlane route {route.id}")
+            recipient, amount_atomic, amount, sender = plan.recipient, plan.amount_atomic, None, plan.sender
+        amount_atomic = resolve_amount(amount=amount, amount_atomic=amount_atomic, decimals=decimals)
+        if amount_atomic <= 0:
+            raise InvalidAmountError("amount must be positive")
+        recipient32 = aleo_address_to_bytes32(recipient)
+        sender = sender or self.conn.address
+        if sender is None:
+            raise ConfigurationError("Solana sender is required to quote the transaction fee: configure a signer or pass sender=<base58 address>")
+        if plan is None:
+            plan = self._make_plan(route, recipient=recipient, amount_atomic=amount_atomic, sender=sender, decimals=decimals)
+
+        igp_data = self._account_data(metadata.igp_account)
+        if igp_data is None:
+            raise BridgeError(f"Solana IGP account does not exist: {metadata.igp_account}")
+        igp = sl.quote_igp_lamports(igp_data, metadata.destination_domain, metadata.destination_gas_amount)
+
+        unique = libs.Keypair()                       # disposable: only its pubkey seeds the fee-estimate message
+        message, _blockhash, _height = self._compile_message(
+            metadata, sender=sender, unique_message=str(unique.pubkey()), recipient32=recipient32, amount_atomic=amount_atomic)
+        fee_value = self.client.get_fee_for_message(message, commitment=CONFIRMED).value
+        if fee_value is None:
+            raise BridgeError("Solana RPC getFeeForMessage returned no fee (the blockhash is unknown to the node); retry")
+        fee = int(fee_value)
+        rent = sum(int(self.client.get_minimum_balance_for_rent_exemption(size).value)
+                   for size in (sl.GAS_PAYMENT_ACCOUNT_DATA_LENGTH, sl.DISPATCHED_MESSAGE_ACCOUNT_DATA_LENGTH, 0))
+        total = amount_atomic + igp + fee + rent
+        fees = (
+            Fee("interchain-gas", SOLANA_CHAIN_ID, route.source_asset_id, format_decimal_amount(igp, decimals), True),
+            Fee("network", SOLANA_CHAIN_ID, route.source_asset_id, format_decimal_amount(fee, decimals), True),
+            Fee("rent", SOLANA_CHAIN_ID, route.source_asset_id, format_decimal_amount(rent, decimals), True),
+        )
+        return SolanaHyperlaneQuote(
+            kind="solana-hyperlane", plan=plan, fees=fees, amount_out=plan.amount,
+            igp_lamports=igp, network_fee_lamports=fee, rent_lamports=rent, total_lamports=total,
+            unique_message_address=str(unique.pubkey()),
+        )
