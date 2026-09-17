@@ -375,6 +375,8 @@ class FakeSol:
         self.balance_lamports = 0
         self.source_status_result: Receipt | None = None
         self.intermediates: list[Receipt] = []
+        self.transaction_logs_result: list[str] | None = None
+        self.transaction_logs_error: Exception | None = None
 
     def _check_plan(self, plan) -> None:
         if plan.registry_version != DEFAULT_REGISTRY.version:
@@ -426,6 +428,12 @@ class FakeSol:
     def source_status(self, plan, receipt) -> Receipt:
         self.fake.calls.append(("sol.source_status", receipt.status))
         return self.source_status_result or receipt
+
+    def _transaction_logs(self, signature) -> list[str] | None:
+        self.fake.calls.append(("sol._transaction_logs", signature))
+        if self.transaction_logs_error is not None:
+            raise self.transaction_logs_error
+        return self.transaction_logs_result
 
 
 class FakeBridge:

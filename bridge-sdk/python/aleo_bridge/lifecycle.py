@@ -17,11 +17,13 @@ import re
 from dataclasses import dataclass, replace
 from typing import Any, Callable
 
+from . import _sealevel
 from ._plan import build_plan
 from .checkpoint import Checkpoint, create_checkpoint
 from .errors import (
     CheckpointInvalidError,
     ConfigurationError,
+    DeliveryUnknownError,
     InvalidAmountError,
     InvalidRecipientError,
     RegistryVersionMismatchError,
@@ -455,4 +457,212 @@ def execute(bridge, plan: Plan, *, on_checkpoint: Callable | None = None, provin
     raise UnsupportedRouteError(f"Unsupported {plan.protocol} source chain family: {family} ({plan.route_id})")
 
 
-__all__ = ["MINT_MODES", "ResolvedRoute", "execute", "prepare", "quote", "resolve_route"]
+# ── Aleo transaction status ───────────────────────────────────────────────────
+
+def aleo_transaction_status(bridge, tx_id: str) -> tuple[str, str | None]:
+    """``("accepted" | "rejected" | "pending", error)`` from the confirmed-transaction envelope.
+
+    Reads ``GET /transaction/confirmed/{id}`` through the facade.  A 404
+    (``TransactionNotFound``) means not confirmed yet → ``pending``.  The
+    envelope's top-level ``status`` is the node's verdict; it carries no reason,
+    so the error text is generic.
+    """
+    from aleo.facade.errors import TransactionNotFound
+    try:
+        confirmed = bridge.aleo.network.get_confirmed_transaction(tx_id)
+    except TransactionNotFound:
+        return "pending", None
+    status = confirmed.get("status") if isinstance(confirmed, dict) else getattr(confirmed, "status", None)
+    if status == "accepted":
+        return "accepted", None
+    if status == "rejected":
+        return "rejected", f"Aleo transaction {tx_id} was rejected by the network"
+    return "pending", None
+
+
+_HEX = re.compile(r"^0x[0-9a-fA-F]*$")
+_MESSAGE_ID_RE = re.compile(r"^0x[0-9a-fA-F]{64}$")
+
+
+def _hex_bytes(value: Any, *, length: int | None = None) -> bytes | None:
+    """Strict ``0x`` hex → bytes, or None when malformed / wrong length."""
+    if not isinstance(value, str) or not _HEX.match(value) or len(value) % 2:
+        return None
+    data = bytes.fromhex(value[2:])
+    if length is not None and len(data) != length:
+        return None
+    return data
+
+
+def _check_receipt(plan: Plan, receipt: Receipt) -> None:
+    if receipt.protocol != plan.protocol or receipt.protocol_state.get("routeId") != plan.route_id:
+        raise CheckpointInvalidError("Bridge receipt does not match the prepared route")
+
+
+def _clear_action(receipt: Receipt, **changes) -> Receipt:
+    return receipt.replace(next_action=None, **changes)
+
+
+def _message_id(receipt: Receipt) -> str | None:
+    """``protocol_state["messageId"]`` first; else ``receipt.id`` when it is itself a message id.
+
+    Solana and EVM Hyperlane receipts carry the id in ``protocol_state["messageId"]`` once
+    known; a receipt that instead carries the message id AS its own ``id`` (some Aleo-origin
+    shapes) falls back to that, but only when it is an exact 32-byte ``0x`` hex string — never a
+    signature or an unrelated transaction hash of a different width.
+    """
+    state = receipt.protocol_state
+    message_id = state.get("messageId")
+    if isinstance(message_id, str) and message_id:
+        return message_id
+    if isinstance(receipt.id, str) and _MESSAGE_ID_RE.fullmatch(receipt.id):
+        return receipt.id
+    return None
+
+
+# ── get_status ────────────────────────────────────────────────────────────────
+
+def get_status(bridge, plan: Plan, receipt: Receipt) -> Receipt:
+    """One refresh of the transfer's state — no polling, no signing.
+
+    Ports veil's branch table in order: terminal receipts (``COMPLETED``/``FAILED``/``EXPIRED``)
+    return untouched; EVM approvals and source confirmations delegate to the chain module (never
+    called for any other status — both ``EthModule.source_status`` and ``SolModule.source_status``
+    raise otherwise); Aleo source acceptance moves to ``DELIVERY_PENDING``; Hyperlane delivery is
+    read from the destination Mailbox by message id (filling a missing Solana message id from the
+    source transaction's logs first, never handing a signature to ``is_delivered``), or from the
+    destination balance baseline for Aleo-origin routes; inbound xReserve reads the destination
+    nullifier FIRST (invariant 6), then Circle's attestation (private mode stops at
+    ``DESTINATION_ACTION_REQUIRED`` with ``next_action`` = ``{"kind": "xreserve-private-mint",
+    "chainId": ...}``), then the private mint's acceptance.  Returns the SAME object when nothing
+    changed.
+
+    A Solana transport failure inside ``SolModule.source_status`` (or the message-id log read) is
+    not swallowed here: a single refresh may raise on a flaky public RPC, and retrying with backoff
+    is ``wait``'s job, not this function's.
+    """
+    resolved = resolve_route(bridge.registry, plan)
+    _check_receipt(plan, receipt)
+    if receipt.status in TERMINAL:
+        return receipt
+    route, src, dst = resolved.route, resolved.source_chain, resolved.destination_chain
+    state = receipt.protocol_state
+
+    # 1. EVM approval → wallet boundary
+    if receipt.status is Status.SOURCE_APPROVAL_PENDING and src.family == "evm":
+        return _module(bridge, "eth").source_status(plan, receipt)
+
+    # 2. Aleo source acceptance is the irreversible boundary
+    if receipt.status is Status.SOURCE_CONFIRMING and src.family == "aleo":
+        if not receipt.source_tx_id:
+            raise CheckpointInvalidError("Bridge receipt is missing its Aleo source transaction id")
+        verdict, error = aleo_transaction_status(bridge, receipt.source_tx_id)
+        if verdict == "accepted":
+            return _clear_action(receipt, status=Status.DELIVERY_PENDING)
+        if verdict == "rejected":
+            return _clear_action(receipt, status=Status.FAILED,
+                                 protocol_state={**state, "sourceError": error})
+        return receipt
+
+    # 3/4. Hyperlane source confirmation on EVM / Solana (extracts messageId)
+    if receipt.status is Status.SOURCE_CONFIRMING and route.protocol == "hyperlane":
+        if src.family == "evm":
+            return _module(bridge, "eth").source_status(plan, receipt)
+        if src.family == "solana":
+            return _module(bridge, "sol").source_status(plan, receipt)
+
+    # 5. Hyperlane delivery: the destination Mailbox is canonical
+    message_id = _message_id(receipt)
+    if (message_id is None and receipt.status is Status.DELIVERY_PENDING and route.protocol == "hyperlane"
+            and src.family == "solana" and state.get("messageIdUnavailable") and receipt.source_tx_id):
+        try:
+            logs = _module(bridge, "sol")._transaction_logs(receipt.source_tx_id)
+        except Exception:                                             # noqa: BLE001 — advisory fill-in only
+            logs = None
+        filled = None if logs is None else _sealevel.extract_hyperlane_message_id(logs)
+        if filled is not None:
+            new_state = {k: v for k, v in state.items() if k != "messageIdUnavailable"}
+            new_state["messageId"] = filled
+            receipt = receipt.replace(id=filled, protocol_state=new_state)
+            state, message_id = new_state, filled
+        # else: still unavailable — fall through unchanged; never hand the signature to is_delivered
+
+    if (receipt.status is Status.DELIVERY_PENDING and route.protocol == "hyperlane"
+            and message_id is not None and dst.family in ("aleo", "evm")):
+        delivered = (bridge.hyperlane.is_delivered(message_id) if dst.family == "aleo"
+                     else _module(bridge, "eth").is_delivered(message_id))
+        return _clear_action(receipt, status=Status.COMPLETED) if delivered else receipt
+
+    # 6. Aleo-origin Hyperlane without a message id: destination balance baseline
+    if receipt.status is Status.DELIVERY_PENDING and route.protocol == "hyperlane" and src.family == "aleo":
+        before, expected = state.get("destinationBalanceBeforeAtomic"), state.get("expectedDestinationIncreaseAtomic")
+        if not (isinstance(before, str) and before.isdigit() and isinstance(expected, str) and expected.isdigit()):
+            return receipt
+        current = _read_destination_balance(bridge, plan, resolved)
+        if current is None:
+            raise DeliveryUnknownError(
+                f"No destination balance reader is configured for {dst.id}: bind the {dst.id} connection "
+                "whose address is the recipient, or confirm delivery out of band")
+        if current < int(before) + int(expected):
+            return receipt
+        return _clear_action(receipt, status=Status.COMPLETED)
+
+    # 7. Other Hyperlane states are observed elsewhere
+    if route.protocol == "hyperlane":
+        return receipt
+
+    # 8. xReserve Aleo→EVM: Circle exposes no canonical delivery query
+    if (receipt.status is Status.DELIVERY_PENDING and route.protocol == "xreserve"
+            and src.family == "aleo" and dst.family == "evm"):
+        return receipt
+
+    # 9. Everything else that is not inbound xReserve
+    if route.protocol != "xreserve" or src.family != "evm" or dst.family != "aleo":
+        raise UnsupportedRouteError("Status refresh is not implemented for this bridge route")
+
+    # 10. xReserve EVM→Aleo — destination nullifier first (invariant 6)
+    if receipt.status in (Status.ATTESTATION_PENDING, Status.DELIVERY_PENDING, Status.DESTINATION_ACTION_REQUIRED):
+        nonce = state.get("nonce")
+        if not isinstance(nonce, str):
+            payload = _hex_bytes(state.get("payload"))
+            if payload is not None:
+                from .encoding import xreserve_nonce_from_payload
+                nonce = "0x" + xreserve_nonce_from_payload(payload).hex()
+        if isinstance(nonce, str) and nonce and bridge.xreserve.is_delivered(nonce, route=route):
+            return _clear_action(receipt, status=Status.COMPLETED)
+
+    if receipt.status is Status.SOURCE_CONFIRMING:
+        return _module(bridge, "eth").source_status(plan, receipt)
+
+    if receipt.status is Status.ATTESTATION_PENDING:
+        message_hash = state.get("messageHash")
+        if _hex_bytes(message_hash, length=32) is None:
+            raise CheckpointInvalidError("xReserve receipt is missing its Circle message hash")
+        attestation = bridge.xreserve.get_attestation(message_hash, route=route)
+        if attestation is None:
+            return receipt
+        with_att = {**state, "attestation": "0x" + attestation.attestation.hex()}
+        if plan.mint_mode != "private":
+            return receipt.replace(status=Status.DELIVERY_PENDING, protocol_state=with_att)
+        return receipt.replace(status=Status.DESTINATION_ACTION_REQUIRED, protocol_state=with_att,
+                               next_action={"kind": "xreserve-private-mint", "chainId": dst.id})
+
+    if receipt.status is Status.DESTINATION_ACTION_REQUIRED:
+        return receipt
+
+    if receipt.status is Status.DESTINATION_CONFIRMING:
+        if not receipt.destination_tx_id:
+            raise CheckpointInvalidError("xReserve receipt is missing its Aleo destination transaction id")
+        verdict, error = aleo_transaction_status(bridge, receipt.destination_tx_id)
+        if verdict == "accepted":
+            return _clear_action(receipt, status=Status.COMPLETED)
+        if verdict == "rejected":
+            return _clear_action(receipt, status=Status.FAILED,
+                                 protocol_state={**state, "destinationError": error})
+        return receipt
+
+    return receipt
+
+
+__all__ = ["MINT_MODES", "ResolvedRoute", "aleo_transaction_status", "execute", "get_status", "prepare",
+           "quote", "resolve_route"]
