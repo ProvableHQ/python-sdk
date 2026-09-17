@@ -1,3 +1,4 @@
+import requests
 import pytest
 
 from aleo_bridge._keccak import keccak256
@@ -19,6 +20,14 @@ class _Response:
         return self._body
 
 
+class _BadJsonResponse:
+    """A 200 whose body isn't valid JSON (``.json()`` raises, as ``requests`` does)."""
+    status_code = 200
+
+    def json(self):
+        raise ValueError("Expecting value: line 1 column 1 (char 0)")
+
+
 class _Session:
     def __init__(self, *responses):
         self._responses, self.urls = list(responses), []
@@ -26,6 +35,15 @@ class _Session:
     def get(self, url, timeout=None):
         self.urls.append((url, timeout))
         return self._responses.pop(0)
+
+
+class _RaisingSession:
+    """A session whose ``get`` raises a transport-level ``requests`` exception."""
+    def __init__(self, exc):
+        self._exc = exc
+
+    def get(self, url, timeout=None):
+        raise self._exc
 
 
 def _body(payload=PAYLOAD, signature=SIG, message_hash=HASH):
@@ -59,3 +77,16 @@ def test_rejects_http_errors_and_bad_bodies():
         CircleClient(BASE, session=_Session()).get_attestation("0x1234")
     with pytest.raises(ConfigurationError, match="https"):
         CircleClient("http://insecure.example")
+
+
+def test_wraps_transport_and_json_failures():
+    for exc in (requests.exceptions.ConnectionError("connection refused"), requests.exceptions.Timeout("timed out")):
+        session = _RaisingSession(exc)
+        with pytest.raises(AttestationError, match="Circle attester request failed") as excinfo:
+            CircleClient(BASE, session=session).get_attestation("0x" + HASH.hex())
+        assert excinfo.value.__cause__ is exc
+
+    session = _Session(_BadJsonResponse())
+    with pytest.raises(AttestationError, match="Circle attester request failed") as excinfo:
+        CircleClient(BASE, session=session).get_attestation("0x" + HASH.hex())
+    assert isinstance(excinfo.value.__cause__, ValueError)

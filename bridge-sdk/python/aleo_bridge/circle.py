@@ -26,12 +26,18 @@ class CircleClient:
             digest = enc.hex_to_bytes(message_hash_hex, 32)
         except ValueError as exc:
             raise AttestationError(f"Circle attestation lookup needs a 32-byte message hash, got {message_hash_hex!r}") from exc
-        response = self._session.get(f"{self.base_url}/{enc.to_hex(digest)}", timeout=self.timeout)
+        try:
+            response = self._session.get(f"{self.base_url}/{enc.to_hex(digest)}", timeout=self.timeout)
+        except requests.exceptions.RequestException as exc:
+            raise AttestationError(f"Circle attester request failed: {exc}") from exc
         if response.status_code == 404:
             return None
         if response.status_code != 200:
             raise AttestationError(f"Circle attester request failed with HTTP {response.status_code}")
-        body = response.json()
+        try:
+            body = response.json()
+        except ValueError as exc:
+            raise AttestationError(f"Circle attester request failed: {exc}") from exc
         value = body.get("attestation") if isinstance(body, dict) else None
         if not isinstance(value, dict):
             raise AttestationError("Circle attester returned an invalid response (no attestation object)")
