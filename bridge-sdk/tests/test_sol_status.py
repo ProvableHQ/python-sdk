@@ -49,6 +49,18 @@ def test_processed_and_unknown_without_lifetime_are_unchanged():
     assert "is_blockhash_valid" not in fake2.calls
 
 
+def test_a_status_row_without_a_confirmation_level_counts_as_processed():
+    """A row with err=None and no confirmationStatus means the transaction EXISTS (processed at
+    least). Treating it as 'unknown' would probe the blockhash and report EXPIRED on a landed
+    transfer — an invitation to resend."""
+    lifetime = {"blockhash": str(BLOCKHASH), "lastValidBlockHeight": "100"}
+    fake = FakeSolanaClient(statuses=[FakeSignatureStatus(err=None, confirmation_status=None)], blockhash_valid=False)
+    mod, _, plan = setup(fake)
+    original = receipt(plan, **lifetime)
+    assert mod.source_status(plan, original) == original
+    assert "is_blockhash_valid" not in fake.calls
+
+
 def test_unknown_signature_with_lifetime_checks_the_blockhash():
     lifetime = {"blockhash": str(BLOCKHASH), "lastValidBlockHeight": "100"}
     mod, fake, plan = setup(FakeSolanaClient(statuses=[None], blockhash_valid=True))

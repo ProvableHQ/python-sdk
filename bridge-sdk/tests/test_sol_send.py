@@ -274,6 +274,17 @@ def test_processed_is_never_reported_expired_and_skips_the_blockhash_probe():
     assert len(fake.sent) == 1
 
 
+def test_a_status_row_without_a_confirmation_level_is_never_reported_expired():
+    """err=None with no confirmationStatus means the transaction landed; only a MISSING row is unknown."""
+    fake = FakeSolanaClient(statuses=[FakeSignatureStatus(err=None, confirmation_status=None)], blockhash_valid=False)
+    mod, _, _ = module(fake)
+    result = mod.transfer_remote(RECIPIENT, amount_atomic=1).send(timeout_seconds=0)
+    receipt = result.receipt
+    assert receipt.status is Status.SOURCE_CONFIRMING and receipt.id == fake.sent_signature()
+    assert "blockhashExpired" not in receipt.protocol_state
+    assert "is_blockhash_valid" not in fake.calls and len(fake.sent) == 1
+
+
 def test_log_fetch_failure_after_confirmation_degrades_to_message_id_unavailable():
     """The logs only carry the message id: an RPC failure there must not fail a settled transfer."""
     fake = FakeSolanaClient(get_transaction_error=RuntimeError("rpc"))

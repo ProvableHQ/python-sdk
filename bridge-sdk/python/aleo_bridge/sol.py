@@ -487,7 +487,13 @@ class SolBuild:
 
 
 def _signature_status(client: Any, signature: Any) -> str | None:
-    """'failed' | 'processed' | 'confirmed' | 'finalized' | None (unknown); raises on RPC errors."""
+    """'failed' | 'processed' | 'confirmed' | 'finalized' | None (unknown); raises on RPC errors.
+
+    ``None`` means one thing only: the node has NO row for this signature. A row that exists but
+    carries no ``confirmationStatus`` (and no ``err``) is a transaction the node has seen — processed
+    at least — so it reports ``'processed'``. Collapsing that into ``None`` would send both callers to
+    the blockhash probe and let a landed transfer be reported EXPIRED, inviting a resend.
+    """
     value = client.get_signature_statuses([signature], search_transaction_history=True).value
     status = value[0] if value else None
     if status is None:
@@ -495,7 +501,9 @@ def _signature_status(client: Any, signature: Any) -> str | None:
     if getattr(status, "err", None) is not None:
         return "failed"
     name = _confirmation_name(status)
-    if name not in (None, "processed", "confirmed", "finalized"):
+    if name is None:
+        return "processed"
+    if name not in ("processed", "confirmed", "finalized"):
         raise BridgeError(f"Solana RPC getSignatureStatuses returned unsupported confirmation status: {name}")
     return name
 
