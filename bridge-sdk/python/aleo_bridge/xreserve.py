@@ -9,8 +9,8 @@ from . import encoding as enc
 from ._calls import AleoCall
 from ._keccak import keccak256
 from .circle import CircleClient
-from .errors import (AttestationError, ConfigurationError, InvalidAmountError, RouteNotFoundError,
-                     RouteUnavailableError, UnsupportedRouteError)
+from .errors import (AttestationError, ConfigurationError, InvalidAmountError, InvalidRecipientError,
+                     RouteNotFoundError, RouteUnavailableError, UnsupportedRouteError)
 from .registry import Route
 from .types import Attestation, BurnReceipt, MintReceipt, Receipt, Status
 from .units import format_decimal_amount, resolve_amount
@@ -30,14 +30,8 @@ class XReserveModule:
         self.circle_session: Any = None   # injectable HTTP session (tests); None → requests.Session()
 
     # ── routes ──
-    def _aleo_chain_id(self) -> str:
-        chains = [c for c in self._bridge.registry.chains(environment=self._bridge.environment) if c.family == "aleo"]
-        if len(chains) != 1:
-            raise ConfigurationError(f"Registry must define exactly one Aleo chain for {self._bridge.environment}")
-        return chains[0].id
-
     def _single(self, direction: str) -> Route:
-        registry, aleo = self._bridge.registry, self._aleo_chain_id()
+        registry, aleo = self._bridge.registry, self._bridge.aleo_chain().id
         matches = [r for r in registry.routes(protocol="xreserve", include_unavailable=True, environment=self._bridge.environment)
                    if registry.asset(r.destination_asset_id if direction == "inbound" else r.source_asset_id).chain_id == aleo]
         if not matches:
@@ -102,6 +96,11 @@ class XReserveModule:
         """Burn USDCx for USDC on Ethereum. ``private`` (default) spends a Token record via the wrapper and needs a
         freeze-list exclusion proof — both are resolved from chain state when not supplied. Minimum: more than
         the 2 USDCx withdrawal fee. The Aleo burn-attestation service forwards accepted burns to Circle."""
+        if mode not in BURN_MODES:
+            raise ConfigurationError(f"Unsupported USDCx burn mode {mode!r}; expected one of {BURN_MODES}")
+        if mode != "private" and (record is not None or merkle_proof is not None):
+            raise ConfigurationError(
+                f"mode={mode!r} burns the public balance; record=/merkle_proof= only apply to mode='private'")
         route = self._validated(self.outbound_route(), direction="burn")
         source = self._bridge.registry.asset(route.source_asset_id)
         atomic = resolve_amount(amount=amount, amount_atomic=amount_atomic, decimals=source.decimals)
@@ -185,7 +184,7 @@ class XReserveModule:
         route = route if route is not None else self.inbound_route()
         try:
             raw = enc.hex_to_bytes(nonce, 32)
-        except ValueError as exc:
+        except (ValueError, InvalidRecipientError) as exc:
             raise ConfigurationError("xReserve delivery requires a 32-byte deposit nonce") from exc
         value = self._bridge.mapping_value(route.meta_str("bridgeProgram"), "nullifier", enc.u8_array_literal(raw))
         return value is not None and value.strip() == "true"

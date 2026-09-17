@@ -1,8 +1,8 @@
 import pytest
 
 from aleo_bridge import encoding as enc
-from aleo_bridge.errors import (AttestationError, ConfigurationError, InvalidAmountError, InvalidRecipientError,
-                                UnsupportedRouteError)
+from aleo_bridge.errors import (AttestationError, BridgeError, ConfigurationError, InvalidAmountError,
+                                InvalidRecipientError, UnsupportedRouteError)
 from aleo_bridge.registry import DEFAULT_REGISTRY as REG
 from aleo_bridge.types import Attestation, BurnReceipt, MintReceipt, Status
 from tests.conftest import NULLIFIED_NONCE, USDCX_RECORD
@@ -72,6 +72,20 @@ def test_burn_builds_call_and_receipt(bridge):
     assert (public.program_id, public.function_name, public.inputs) == ("usdcx_bridge_v2.aleo", "burn_public_as_signer", ["3000000u128", "0u32", ONE_LIT])
 
 
+def test_burn_validates_mode_before_any_amount_or_chain_work(bridge):
+    with pytest.raises(ConfigurationError, match="Unsupported USDCx burn mode"):
+        bridge.xreserve.burn(EVM1, mode="unknown")   # no amount= given: an amount check first would raise a different error
+    assert bridge.aleo.record_queries == []            # never reached the record scan
+
+
+def test_burn_rejects_record_or_merkle_proof_for_public_modes(bridge):
+    with pytest.raises(ConfigurationError, match="record=/merkle_proof="):
+        bridge.xreserve.burn(EVM1, amount="2.5", mode="public", record=USDCX_RECORD)
+    with pytest.raises(ConfigurationError, match="record=/merkle_proof="):
+        bridge.xreserve.burn(EVM1, amount="2.5", mode="public-as-signer", merkle_proof="[x]")
+    assert bridge.aleo.record_queries == []
+
+
 def _attested(bridge, nonce="7scalar", recipient=RECIPIENT) -> Attestation:
     hook = bridge.xreserve.hook_data("private", recipient, nonce)
     payload = bytes.fromhex("5a2e0acd00000001") + bytes(228) + bytes.fromhex("00000041") + hook
@@ -136,6 +150,11 @@ def test_get_attestation_uses_route_base_url(bridge):
     assert session.urls == ["https://xreserve-api.circle.com/v1/attestations/0x" + "22" * 32]
     bridge.xreserve.get_attestation(bytes.fromhex("33" * 32), route=REG.route("xreserve:sepolia/usdc->aleo-testnet/usdcx"))
     assert session.urls[-1].startswith("https://xreserve-api-testnet.circle.com/v1/attestations/0x33")
+
+
+def test_get_attestation_rejects_non_hex_message_hash(bridge):
+    with pytest.raises(BridgeError):
+        bridge.xreserve.get_attestation("nope")
 
 
 def test_is_delivered_reads_bridge_program_nullifier(bridge):

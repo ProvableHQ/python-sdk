@@ -6,13 +6,13 @@ Seven-input ``transfer_remote`` with allowance slot 0 = live IGP payment; IGP qu
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 from . import encoding as enc
 from ._calls import AleoCall
 from .errors import (AmbiguousRouteError, ConfigurationError, InvalidAmountError, InvalidRecipientError,
                      RouteNotFoundError, RouteUnavailableError, UnsupportedRouteError)
-from .registry import Asset, Chain, Route
+from .registry import Asset, Route
 from .types import DispatchReceipt, GasQuote, Receipt, Status
 from .units import format_decimal_amount, parse_decimal_amount, resolve_amount
 
@@ -60,15 +60,9 @@ class HyperlaneModule:
         self._bridge = bridge
 
     # ── route resolution ──
-    def _aleo_chain(self) -> Chain:
-        chains = [c for c in self._bridge.registry.chains(environment=self._bridge.environment) if c.family == "aleo"]
-        if len(chains) != 1:
-            raise ConfigurationError(f"Registry must define exactly one Aleo chain for {self._bridge.environment}")
-        return chains[0]
-
     def _aleo_asset(self, asset: Any) -> Asset:
         resolved = self._bridge.registry.asset(asset)
-        if resolved.chain_id != self._aleo_chain().id:
+        if resolved.chain_id != self._bridge.aleo_chain().id:
             raise UnsupportedRouteError(
                 f"{resolved.id} is not an Aleo asset on {self._bridge.environment}; Aleo-origin Hyperlane transfers "
                 "start from aleo/eth, aleo/wbtc, aleo/usdt or aleo/sol (use bridge.eth / bridge.sol for other origins)")
@@ -126,7 +120,7 @@ class HyperlaneModule:
         """Whether ``hyp_mailbox.aleo/deliveries`` holds the message (mapping presence is the acceptance signal)."""
         try:
             raw = enc.hex_to_bytes(message_id, 32)
-        except ValueError as exc:
+        except (ValueError, InvalidRecipientError) as exc:
             raise ConfigurationError("Hyperlane delivery requires a 32-byte message id") from exc
         return self._bridge.mapping_value(self._mailbox_program(), "deliveries", enc.hyperlane_delivery_key(raw)) is not None
 
