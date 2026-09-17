@@ -21,13 +21,13 @@ ROUTE = DEFAULT_REGISTRY.route("hyperlane:ethereum/wbtc->aleo/wbtc")
 USDC_ROUTE = DEFAULT_REGISTRY.route("xreserve:ethereum/usdc->aleo/usdcx")
 
 
-def make_call(w3, *, sender=None, store=None, approvals=1):
+def make_call(w3, *, sender=None, store=None, approvals=1, steps=None):
     conn = Ethereum(w3=w3, private_key=KEY)
     plan = _plan_for(DEFAULT_REGISTRY, ROUTE, amount_atomic=100_000, recipient=ALEO, sender=sender)
     token = w3.eth.contract(address=Web3.to_checksum_address(WBTC), abi=ERC20_ABI)
     warp = w3.eth.contract(address=Web3.to_checksum_address(ROUTER), abi=WARP_ROUTE_ABI)
 
-    def steps(owner):
+    def default_steps(owner):
         out = [EvmStep("approve", token.address, token.encode_abi("approve", args=[warp.address, 100_000]), 0)
                for _ in range(approvals)]
         out.append(EvmStep("main", warp.address, warp.encode_abi("transferRemote", args=[1634493807, b"\x11" * 32, 100_000]), 50_000))
@@ -41,7 +41,8 @@ def make_call(w3, *, sender=None, store=None, approvals=1):
                                           "sourceSender": outcome.sender})
         return DispatchReceipt(transaction_id=rid, route_id=ROUTE.id, message_id=None, amount_atomic=100_000, receipt=receipt)
 
-    return EvmCall(conn, plan=plan, registry=DEFAULT_REGISTRY, steps=steps, finish=finish, store=store), plan
+    return EvmCall(conn, plan=plan, registry=DEFAULT_REGISTRY, steps=steps or default_steps,
+                   finish=finish, store=store), plan
 
 
 def test_plan_for_hyperlane_and_xreserve_shapes():
@@ -280,6 +281,67 @@ def test_store_failure_after_broadcast_reports_the_tx_hash_and_never_hides_it():
     assert [cp.id for cp in store.attempts] == [w3.provider.hash_at(1)]
     assert len(w3.provider.sent) == 1                                # broadcast happened exactly once
     assert "eth_getTransactionReceipt" not in w3.provider.methods    # nothing polled after the failure
+
+
+def test_a_call_is_single_use_once_it_has_broadcast():
+    """Re-sending the same call would spend the approval and dispatch a second transfer."""
+    w3 = fake_web3()
+    call, _ = make_call(w3, approvals=0)
+    call.send(poll_seconds=0.001)
+    tx_hash = w3.provider.hash_at(1)
+    with pytest.raises(BridgeError) as exc:
+        call.send(poll_seconds=0.001)
+    assert str(exc.value) == (f"this call already broadcast {tx_hash}; use bridge.eth.source_status(plan, receipt) "
+                              "to follow it — do not resend")
+    assert len(w3.provider.sent) == 1
+
+
+def test_the_guard_is_armed_by_the_first_broadcast_of_a_multi_step_send():
+    """The approval alone is enough: a resend would re-approve and re-dispatch."""
+    w3 = fake_web3()
+    w3.provider.pending_nth.add(1)
+    call, _ = make_call(w3)                                        # approval + main
+    call.send(timeout_seconds=0.01, poll_seconds=0.001)            # stops pending after the approval
+    with pytest.raises(BridgeError, match=f"already broadcast {w3.provider.hash_at(1)}"):
+        call.send(poll_seconds=0.001)
+    assert len(w3.provider.sent) == 1
+
+
+def test_a_lost_send_response_also_arms_the_single_use_guard():
+    w3 = fake_web3()
+    w3.provider.send_errors[1] = "connection reset by peer"
+    call, _ = make_call(w3, approvals=0)
+    with pytest.raises(BridgeError, match="may have been broadcast"):
+        call.send(poll_seconds=0.001)
+    with pytest.raises(BridgeError, match="already broadcast"):
+        call.send(poll_seconds=0.001)
+    assert w3.provider.methods.count("eth_sendRawTransaction") == 1
+
+
+def test_a_failure_before_any_broadcast_leaves_the_call_usable():
+    w3 = fake_web3()
+    failures = []
+
+    def steps(owner):
+        if not failures:
+            failures.append(owner)
+            raise BridgeError("router quote unavailable")          # a read failed; nothing was sent
+        return [EvmStep("main", Web3.to_checksum_address(ROUTER), "0x", 0)]
+
+    call, _ = make_call(w3, steps=steps)
+    with pytest.raises(BridgeError, match="router quote unavailable"):
+        call.send()
+    assert w3.provider.sent == []
+    result = call.send(poll_seconds=0.001)                         # the guard was never armed
+    assert result.receipt.status == Status.DELIVERY_PENDING and len(w3.provider.sent) == 1
+
+
+def test_build_stays_repeatable_after_a_send():
+    w3 = fake_web3()
+    call, _ = make_call(w3, approvals=0)
+    call.send(poll_seconds=0.001)
+    assert [t["to"] for t in call.build()] == [Web3.to_checksum_address(ROUTER)]   # a preview never spends
+    assert len(w3.provider.sent) == 1
 
 
 def test_a_mismatched_echoed_hash_stops_the_call_before_any_checkpoint():

@@ -791,7 +791,8 @@ class SolModule:
 
     def _submit(self, built: SolBuild, *, wait: bool, timeout_seconds: float, poll_seconds: float,
                 on_checkpoint: "Callable[[Checkpoint], None] | None" = None,
-                store: "CheckpointStore | None" = None) -> Receipt:
+                store: "CheckpointStore | None" = None,
+                on_broadcast: "Callable[[str], None] | None" = None) -> Receipt:
         libs = _libs()
         quote = built.quote
         balance = self._balance_of(built.sender)
@@ -812,9 +813,13 @@ class SolModule:
         try:
             response = self.client.send_raw_transaction(bytes(signed), opts=opts)
         except Exception as exc:  # noqa: BLE001 — any transport/decoding failure loses the response, not the send
+            if on_broadcast is not None:
+                on_broadcast(signature)               # it may be on the wire: never let the caller resend
             raise BridgeError(
                 f"Solana transaction {signature} may have been broadcast; the RPC response was lost: {exc}"
                 " — check bridge.sol.source_status / the explorer before retrying") from exc
+        if on_broadcast is not None:
+            on_broadcast(signature)
         echoed = str(response.value)
         if echoed != signature:
             raise BridgeError(

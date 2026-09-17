@@ -324,6 +324,52 @@ def test_send_requires_a_signer():
     assert fake.sent == []
 
 
+def test_a_call_is_single_use_once_it_has_broadcast():
+    """Re-sending the same call would sign a second transfer of the same funds."""
+    mod, fake, _ = module()
+    call = mod.transfer_remote(RECIPIENT, amount_atomic=1)
+    call.send()
+    signature = fake.sent_signature()
+    with pytest.raises(BridgeError) as excinfo:
+        call.send()
+    message = str(excinfo.value)
+    assert message == (f"this call already broadcast {signature}; use bridge.sol.source_status(plan, receipt) "
+                       "to follow it — do not resend")
+    assert len(fake.sent) == 1
+
+
+def test_a_lost_send_response_also_arms_the_single_use_guard():
+    """The bytes may be on the wire; a resend is exactly what must not happen next."""
+    fake = FakeSolanaClient(send_error=RuntimeError("connection reset by peer"))
+    mod, _, _ = module(fake)
+    call = mod.transfer_remote(RECIPIENT, amount_atomic=1)
+    with pytest.raises(BridgeError, match="may have been broadcast"):
+        call.send()
+    with pytest.raises(BridgeError, match="already broadcast"):
+        call.send()
+    assert len(fake.sent) == 1
+
+
+def test_a_failure_before_any_broadcast_leaves_the_call_usable():
+    fake = FakeSolanaClient(balance=0)
+    mod, _, _ = module(fake)
+    call = mod.transfer_remote(RECIPIENT, amount_atomic=1)
+    with pytest.raises(InsufficientBalanceError):
+        call.send()
+    assert fake.sent == []
+    fake.balance = 800_000_000_000
+    result = call.send()                                          # the guard was never armed
+    assert result.receipt.status is Status.DELIVERY_PENDING and len(fake.sent) == 1
+
+
+def test_build_stays_repeatable_after_a_send():
+    mod, fake, _ = module()
+    call = mod.transfer_remote(RECIPIENT, amount_atomic=1)
+    call.send()
+    assert isinstance(call.build(), VersionedTransaction)          # a preview never spends
+    assert len(fake.sent) == 1
+
+
 def test_a_lost_send_response_names_the_local_signature_and_never_polls_or_checkpoints():
     """The bytes may already be on the wire: losing the RPC answer must not lose the signature."""
     fake = FakeSolanaClient(send_error=RuntimeError("connection reset by peer"))

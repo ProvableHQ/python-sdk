@@ -253,6 +253,18 @@ class EvmCall(Generic[R]):
                  store: "CheckpointStore | None" = None) -> None:
         self._conn, self.plan, self._registry = conn, plan, registry
         self._steps, self._finish, self._store = steps, finish, store
+        self._broadcast_id: str | None = None
+
+    def _record_broadcast(self, tx_hash: str) -> None:
+        """Arm the single-use guard with the FIRST hash this call put on the wire."""
+        if self._broadcast_id is None:
+            self._broadcast_id = tx_hash
+
+    def _refuse_a_second_send(self) -> None:
+        if self._broadcast_id is not None:
+            raise BridgeError(
+                f"this call already broadcast {self._broadcast_id}; use bridge.eth.source_status(plan, receipt) "
+                "to follow it — do not resend")
 
     def _sender(self) -> str:
         sender = self._conn.require_address()
@@ -303,11 +315,26 @@ class EvmCall(Generic[R]):
 
         ``wait=False`` broadcasts only the first step and returns its pending result; call
         ``bridge.eth.source_status`` (or plan 4's ``resume``) to continue.
+
+        A call is single-use once ANY of its steps has broadcast: a second ``send()`` raises rather
+        than re-approving and re-dispatching the same funds. The approval and main broadcasts of one
+        ``send()`` are of course fine, and a failure before the first broadcast (a validation error, a
+        failed read) leaves the call usable. ``build()`` stays repeatable — it spends nothing.
         """
+        self._refuse_a_second_send()
         sender = self._sender()
         approvals: list[str] = []
         for step in self._steps(sender):
-            tx_hash = self._conn.send_transaction({"from": sender, "to": step.to, "data": step.data, "value": step.value})
+            try:
+                tx_hash = self._conn.send_transaction({"from": sender, "to": step.to, "data": step.data, "value": step.value})
+            except BridgeError as exc:
+                # A send whose RPC response was lost may still have reached the node — arm the guard
+                # with the hash it named, so a retry cannot turn an ambiguous send into a double spend.
+                lost = getattr(exc, "broadcast_id", None)
+                if lost is not None:
+                    self._record_broadcast(str(lost))
+                raise
+            self._record_broadcast(tx_hash)
             if step.kind == "approve":
                 approvals.append(tx_hash)
                 pending = self._finish(EvmOutcome("SOURCE_APPROVAL_PENDING", sender, tuple(approvals), None, None))
@@ -356,6 +383,12 @@ class SolCall(Generic[R]):
         self._store = store
         self.quote: Any = None
         self._built: Any = None
+        self._broadcast_id: str | None = None
+
+    def _record_broadcast(self, signature: str) -> None:
+        """Arm the single-use guard with the signature this call put on the wire (or may have)."""
+        if self._broadcast_id is None:
+            self._broadcast_id = signature
 
     def build(self) -> Any:
         """Partially signed ``VersionedTransaction`` (unique-message signer only); sets ``self.quote``."""
@@ -366,10 +399,18 @@ class SolCall(Generic[R]):
 
     def send(self, *, wait: bool = True, timeout_seconds: float = 120.0, poll_seconds: float = 1.0,
              on_checkpoint: Callable[[Any], None] | None = None) -> R:
+        """Broadcast once. A call is single-use from the moment its transaction reaches the node (or
+        may have, when the RPC response was lost): a second ``send()`` raises rather than signing a
+        second transfer of the same funds. A failure before the broadcast — a stale plan, an
+        insufficient balance — leaves the call usable, and ``build()`` stays repeatable."""
+        if self._broadcast_id is not None:
+            raise BridgeError(
+                f"this call already broadcast {self._broadcast_id}; use bridge.sol.source_status(plan, receipt) "
+                "to follow it — do not resend")
         self.build()
         receipt = self._module._submit(self._built, wait=wait, timeout_seconds=timeout_seconds,
                                        poll_seconds=poll_seconds, on_checkpoint=on_checkpoint,
-                                       store=self._store)
+                                       store=self._store, on_broadcast=self._record_broadcast)
         return self._build_result(receipt)
 
 

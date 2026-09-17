@@ -189,9 +189,12 @@ class Ethereum:
         try:
             echoed = Web3.to_hex(self._w3.eth.send_raw_transaction(signed.raw_transaction))
         except Exception as exc:  # noqa: BLE001 — any transport/JSON-RPC failure loses the response, not the send
-            raise BridgeError(
+            error = BridgeError(
                 f"Ethereum transaction {local_hash} may have been broadcast; the RPC response was lost: {exc}"
-                " — check bridge.eth.source_status / the explorer before retrying") from exc
+                " — check bridge.eth.source_status / the explorer before retrying")
+            # EvmCall reads this to arm its single-use guard: an ambiguous send must not be retried.
+            error.broadcast_id = local_hash          # type: ignore[attr-defined]
+            raise error from exc
         if echoed.lower() != local_hash.lower():
             raise BridgeError(
                 f"Ethereum RPC echoed transaction hash {echoed} for a transaction signed as {local_hash}; "
