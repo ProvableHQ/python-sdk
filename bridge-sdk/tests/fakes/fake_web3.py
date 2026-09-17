@@ -36,7 +36,13 @@ TOPIC_DEPOSITED_TO_REMOTE = "0x" + keccak(
 
 
 def tx_hash_for(n: int) -> str:
-    """Deterministic hash of the n-th (1-based) transaction the fake accepted."""
+    """Deterministic hash of the n-th (1-based) transaction the fake accepted through ``eth_sendTransaction``.
+
+    Raw (locally signed) transactions get their REAL hash — ``keccak(raw)`` — because eth.py now
+    checks the node's echoed hash against the one it computed locally, exactly as a real node would
+    answer. Use ``provider.hash_at(n)`` to read a hash back after the send, and the ``*_nth`` knobs
+    to arm ``pending``/``reverted``/``receipt_delay`` for a transaction not yet broadcast.
+    """
     return "0x" + keccak(text=f"fake-tx-{n}").hex()
 
 
@@ -122,6 +128,13 @@ class FakeRpcProvider(BaseProvider):
         self.pending: set[str] = set()                   # hashes whose receipt stays None
         self.reverted: set[str] = set()                  # hashes whose receipt has status 0
         self.receipt_delay: dict[str, int] = {}          # hash -> remaining polls that return None before mined
+        # A locally signed transaction's hash is only known once it is signed, so these arm the three
+        # knobs above by 1-based send order instead; _accept translates them the moment it accepts.
+        self.pending_nth: set[int] = set()
+        self.reverted_nth: set[int] = set()
+        self.receipt_delay_nth: dict[int, int] = {}
+        self.send_errors: dict[int, str] = {}            # 1-based send -> JSON-RPC error (the response is lost)
+        self.echo_hashes: dict[int, str] = {}            # 1-based send -> hash to echo INSTEAD of the real one
         self.receipt_poll_counts: dict[str, int] = {}     # hash -> eth_getTransactionReceipt calls seen for it
         self.receipt_logs: Callable[[dict], list[dict]] = lambda tx: []   # logs for a sent tx's receipt
         self.history_logs: list[dict] = []               # served by eth_getLogs (filtered by address/from/toBlock)
@@ -197,7 +210,11 @@ class FakeRpcProvider(BaseProvider):
         if method == "eth_call":
             return self._ok(self._call(params[0]))
         if method == "eth_sendRawTransaction":
-            return self._ok(self._accept(_decode_raw(bytes.fromhex(params[0][2:]))))
+            raw = bytes.fromhex(params[0][2:])
+            message = self.send_errors.get(len(self.sent) + 1)
+            if message is not None:                       # the node took it, the answer never came back
+                return {"jsonrpc": "2.0", "id": 1, "error": {"code": -32000, "message": message}}
+            return self._ok(self._accept(_decode_raw(raw), raw=raw))
         if method == "eth_sendTransaction":
             p = params[0]
             raw_value = p.get("value", 0)
@@ -235,10 +252,21 @@ class FakeRpcProvider(BaseProvider):
                              "v": "0x0", "r": "0x0", "s": "0x0"})
         raise NotImplementedError(method)
 
-    def _accept(self, tx: dict) -> str:
+    def _accept(self, tx: dict, raw: bytes | None = None) -> str:
         self.sent.append(tx)
-        tx["hash"] = tx_hash_for(len(self.sent))
-        return tx["hash"]
+        n = len(self.sent)
+        tx["hash"] = ("0x" + keccak(raw).hex()) if raw is not None else tx_hash_for(n)
+        if n in self.pending_nth:
+            self.pending.add(tx["hash"])
+        if n in self.reverted_nth:
+            self.reverted.add(tx["hash"])
+        if n in self.receipt_delay_nth:
+            self.receipt_delay[tx["hash"]] = self.receipt_delay_nth[n]
+        return self.echo_hashes.get(n, tx["hash"])
+
+    def hash_at(self, n: int) -> str:
+        """Hash of the n-th (1-based) accepted transaction — the real one for a locally signed send."""
+        return self.sent[n - 1]["hash"]
 
     def _receipt(self, h: str) -> dict | None:
         if h in self.pending:

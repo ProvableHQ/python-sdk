@@ -13,6 +13,7 @@ from typing import Any
 
 from solders.hash import Hash
 from solders.signature import Signature
+from solders.transaction import VersionedTransaction
 
 from aleo_bridge.registry import DEFAULT_REGISTRY
 from tests.fakes.sealevel_fixtures import (
@@ -63,7 +64,8 @@ class FakeSolanaClient:
                  fee: int = NETWORK_FEE_LAMPORTS, rents: dict[int, int] | None = None,
                  statuses: list[Any] | None = None, blockhash_valid: Any = True,
                  logs: list[str] | None = None, no_logs: bool = False,
-                 signature: Signature = STUB_SIGNATURE, get_transaction_error: Exception | None = None) -> None:
+                 signature: Signature | None = None, get_transaction_error: Exception | None = None,
+                 send_error: Exception | None = None) -> None:
         self.balance = balance
         self.accounts = {IGP["address"]: igp_account_data()} if accounts is None else accounts
         self.fee = fee
@@ -72,8 +74,11 @@ class FakeSolanaClient:
         self.blockhash_valid = blockhash_valid
         # logs=None → the recorded mainnet logs; logs=[] → confirmed but no dispatch line; no_logs → transaction not found
         self.logs = None if no_logs else (list(TRANSFER["logMessages"]) if logs is None else list(logs))
+        # None → echo the transaction's own fee-payer signature, as a real node does. A Signature here
+        # makes the node answer with a DIFFERENT id than the one the client signed (the mismatch case).
         self.signature = signature
         self.get_transaction_error = get_transaction_error      # raised by get_transaction (RPC/decode failure)
+        self.send_error = send_error                            # raised by send_raw_transaction (response lost)
         self.calls: list[str] = []
         self.fee_messages: list[Any] = []
         self.sent: list[bytes] = []
@@ -105,9 +110,16 @@ class FakeSolanaClient:
 
     def send_raw_transaction(self, txn, opts=None):
         self.calls.append("send_raw_transaction")
-        self.sent.append(bytes(txn))
+        raw = bytes(txn)
+        self.sent.append(raw)
         self.sent_opts.append(opts)
-        return _Resp(self.signature)
+        if self.send_error is not None:
+            raise self.send_error
+        return _Resp(self.signature if self.signature is not None else VersionedTransaction.from_bytes(raw).signatures[0])
+
+    def sent_signature(self, index: int = 0) -> str:
+        """Fee-payer signature of the index-th broadcast transaction — the id the node echoed back."""
+        return str(VersionedTransaction.from_bytes(self.sent[index]).signatures[0])
 
     def get_signature_statuses(self, signatures, search_transaction_history=False):
         self.calls.append("get_signature_statuses")

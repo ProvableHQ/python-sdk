@@ -26,7 +26,6 @@ from tests.fakes.sealevel_fixtures import EXPECTED_MESSAGE_ID, TRANSFER, WARP_PR
 
 RECIPIENT = TRANSFER["recipientAleoAddress"]
 AMOUNT = TRANSFER["amountLamports"]
-SIGNATURE = str(STUB_SIGNATURE)
 CHECKPOINT_SOURCE_KEYS = {"transactionId", "blockhash", "lastValidBlockHeight"}
 
 
@@ -102,11 +101,12 @@ def test_send_adds_the_fee_payer_signature_confirms_and_extracts_the_message_id(
     mod, fake, keypair = module()
     result = mod.transfer_remote(RECIPIENT, amount_atomic=AMOUNT).send()
     assert isinstance(result, DispatchReceipt)
-    assert result.transaction_id == SIGNATURE and result.route_id == sl.SOLANA_ROUTE_ID
+    signature = fake.sent_signature()
+    assert result.transaction_id == signature and result.route_id == sl.SOLANA_ROUTE_ID
     assert result.message_id == EXPECTED_MESSAGE_ID and result.amount_atomic == AMOUNT
     receipt = result.receipt
     assert receipt.status is Status.DELIVERY_PENDING and receipt.id == EXPECTED_MESSAGE_ID
-    assert receipt.source_tx_id == SIGNATURE and receipt.protocol == "hyperlane"
+    assert receipt.source_tx_id == signature and receipt.protocol == "hyperlane"
     assert receipt.protocol_state["messageId"] == EXPECTED_MESSAGE_ID
     assert "messageIdUnavailable" not in receipt.protocol_state
     assert len(fake.sent) == 1
@@ -189,10 +189,10 @@ def test_send_checkpoints_source_confirming_before_the_first_status_read():
     mod.transfer_remote(RECIPIENT, amount_atomic=AMOUNT).send(on_checkpoint=on_checkpoint)
     assert len(seen) == 1
     checkpoint = seen[0]
-    assert checkpoint.id == SIGNATURE
+    assert checkpoint.id == fake.sent_signature()
     assert checkpoint.route == {"id": sl.SOLANA_ROUTE_ID, "registryVersion": mod.registry.version}
     assert set(checkpoint.source) == CHECKPOINT_SOURCE_KEYS
-    assert checkpoint.source["transactionId"] == SIGNATURE
+    assert checkpoint.source["transactionId"] == fake.sent_signature()
     assert checkpoint.source["blockhash"] == str(BLOCKHASH) and checkpoint.source["lastValidBlockHeight"] == "100"
     assert fake.calls.index("send_raw_transaction") < fake.calls.index("checkpoint") < fake.calls.index("get_signature_statuses")
 
@@ -216,7 +216,7 @@ def test_bound_store_saves_the_source_checkpoint_after_the_caller_callback():
     mod, fake, _ = module(checkpoints=RecordingStore())
     seen = []
     mod.transfer_remote(RECIPIENT, amount_atomic=1).send(on_checkpoint=seen.append)
-    assert [cp.id for cp in saved] == [SIGNATURE] == [cp.id for cp in seen]
+    assert [cp.id for cp in saved] == [fake.sent_signature()] == [cp.id for cp in seen]
 
 
 def test_store_failure_after_broadcast_reports_the_signature_and_never_hides_it():
@@ -228,24 +228,26 @@ def test_store_failure_after_broadcast_reports_the_signature_and_never_hides_it(
     with pytest.raises(BridgeError) as excinfo:
         mod.transfer_remote(RECIPIENT, amount_atomic=1).send(on_checkpoint=seen.append)
     message = str(excinfo.value)
-    assert SIGNATURE in message and "broadcast" in message and "checkpoint" in message.lower()
-    assert [cp.id for cp in seen] == [SIGNATURE]                  # callback ran before the store
-    assert [cp.id for cp in store.attempts] == [SIGNATURE]
+    signature = fake.sent_signature()
+    assert signature in message and "broadcast" in message and "checkpoint" in message.lower()
+    assert [cp.id for cp in seen] == [signature]                  # callback ran before the store
+    assert [cp.id for cp in store.attempts] == [signature]
     assert len(fake.sent) == 1                                    # broadcast happened exactly once
     assert "get_signature_statuses" not in fake.calls             # nothing polled after the failure
 
 
 def test_send_failed_status_raises_naming_the_signature():
-    mod, _, _ = module(FakeSolanaClient(statuses=[FakeSignatureStatus(err={"InstructionError": [2, "Custom"]})]))
-    with pytest.raises(BridgeError, match=SIGNATURE):
+    mod, fake, _ = module(FakeSolanaClient(statuses=[FakeSignatureStatus(err={"InstructionError": [2, "Custom"]})]))
+    with pytest.raises(BridgeError) as excinfo:
         mod.transfer_remote(RECIPIENT, amount_atomic=1).send()
+    assert fake.sent_signature() in str(excinfo.value)
 
 
 def test_send_timeout_returns_a_pending_source_confirming_receipt():
     mod, fake, _ = module(FakeSolanaClient(statuses=[None]))
     result = mod.transfer_remote(RECIPIENT, amount_atomic=1).send(timeout_seconds=0)
     receipt = result.receipt
-    assert receipt.status is Status.SOURCE_CONFIRMING and receipt.id == SIGNATURE
+    assert receipt.status is Status.SOURCE_CONFIRMING and receipt.id == fake.sent_signature()
     assert result.message_id is None and "messageId" not in receipt.protocol_state
     assert "get_transaction" not in fake.calls and len(fake.sent) == 1
 
@@ -256,7 +258,7 @@ def test_send_expired_blockhash_returns_expired_without_resubmitting():
     receipt = result.receipt
     assert receipt.status is Status.EXPIRED
     assert receipt.protocol_state["blockhashExpired"] is True
-    assert SIGNATURE in receipt.protocol_state["sourceError"]
+    assert fake.sent_signature() in receipt.protocol_state["sourceError"]
     assert len(fake.sent) == 1
 
 
@@ -266,7 +268,7 @@ def test_processed_is_never_reported_expired_and_skips_the_blockhash_probe():
     mod, _, _ = module(fake)
     result = mod.transfer_remote(RECIPIENT, amount_atomic=1).send(timeout_seconds=0)
     receipt = result.receipt
-    assert receipt.status is Status.SOURCE_CONFIRMING and receipt.id == SIGNATURE
+    assert receipt.status is Status.SOURCE_CONFIRMING and receipt.id == fake.sent_signature()
     assert "blockhashExpired" not in receipt.protocol_state
     assert "is_blockhash_valid" not in fake.calls
     assert len(fake.sent) == 1
@@ -278,7 +280,7 @@ def test_log_fetch_failure_after_confirmation_degrades_to_message_id_unavailable
     mod, _, _ = module(fake)
     result = mod.transfer_remote(RECIPIENT, amount_atomic=1).send()
     receipt = result.receipt
-    assert receipt.status is Status.DELIVERY_PENDING and receipt.id == SIGNATURE
+    assert receipt.status is Status.DELIVERY_PENDING and receipt.id == fake.sent_signature()
     assert receipt.protocol_state["messageIdUnavailable"] is True
     assert "messageId" not in receipt.protocol_state and result.message_id is None
     assert len(fake.sent) == 1
@@ -304,10 +306,10 @@ def test_send_without_wait_skips_polling():
 
 
 def test_finalized_counts_as_confirmed_and_missing_log_marks_message_id_unavailable():
-    mod, _, _ = module(FakeSolanaClient(statuses=[FakeSignatureStatus(confirmation_status="finalized")], logs=[]))
+    mod, fake, _ = module(FakeSolanaClient(statuses=[FakeSignatureStatus(confirmation_status="finalized")], logs=[]))
     result = mod.transfer_remote(RECIPIENT, amount_atomic=1).send()
     receipt = result.receipt
-    assert receipt.status is Status.DELIVERY_PENDING and receipt.id == SIGNATURE
+    assert receipt.status is Status.DELIVERY_PENDING and receipt.id == fake.sent_signature()
     assert receipt.protocol_state["messageIdUnavailable"] is True and result.message_id is None
     processed_then_confirmed = FakeSolanaClient(statuses=[FakeSignatureStatus(confirmation_status="processed"), FakeSignatureStatus()])
     mod2, _, _ = module(processed_then_confirmed)
@@ -320,3 +322,29 @@ def test_send_requires_a_signer():
     with pytest.raises(ConfigurationError, match="read-only"):
         read_only.transfer_remote(RECIPIENT, amount_atomic=1).build()
     assert fake.sent == []
+
+
+def test_a_lost_send_response_names_the_local_signature_and_never_polls_or_checkpoints():
+    """The bytes may already be on the wire: losing the RPC answer must not lose the signature."""
+    fake = FakeSolanaClient(send_error=RuntimeError("connection reset by peer"))
+    mod, _, _ = module(fake)
+    seen = []
+    with pytest.raises(BridgeError) as excinfo:
+        mod.transfer_remote(RECIPIENT, amount_atomic=1).send(on_checkpoint=seen.append)
+    message = str(excinfo.value)
+    assert fake.sent_signature() in message                       # the id the caller needs to investigate
+    assert "may have been broadcast" in message and "connection reset by peer" in message
+    assert fake.calls.count("send_raw_transaction") == 1           # exactly one attempt, never retried
+    assert "get_signature_statuses" not in fake.calls and seen == []
+
+
+def test_a_node_signature_that_differs_from_the_signed_one_is_refused_without_checkpointing():
+    """Checkpointing the node's id would follow — and later resend — the wrong transaction."""
+    fake = FakeSolanaClient(signature=STUB_SIGNATURE)
+    mod, _, _ = module(fake)
+    seen = []
+    with pytest.raises(BridgeError) as excinfo:
+        mod.transfer_remote(RECIPIENT, amount_atomic=1).send(on_checkpoint=seen.append)
+    message = str(excinfo.value)
+    assert fake.sent_signature() in message and str(STUB_SIGNATURE) in message
+    assert seen == [] and "get_signature_statuses" not in fake.calls

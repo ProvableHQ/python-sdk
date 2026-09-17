@@ -4,7 +4,7 @@ from web3 import Web3
 from web3.middleware import SignAndSendRawMiddlewareBuilder
 
 from aleo_bridge.errors import ConfigurationError
-from tests.fakes.fake_web3 import fake_web3, tx_hash_for
+from tests.fakes.fake_web3 import fake_web3
 
 KEY = "0x" + "11" * 32
 ACCT = Account.from_key(KEY)
@@ -67,7 +67,7 @@ def test_w3_default_account_uses_callers_middleware():
     conn = Ethereum(w3=w3)
     assert conn.address == ACCT.address and conn.can_sign
     h = conn.send_transaction({"to": TO, "value": 1, "data": "0x"})
-    assert h == tx_hash_for(1)
+    assert h == w3.provider.hash_at(1)
     assert "eth_sendRawTransaction" in w3.provider.methods          # the caller's middleware signed
     assert w3.provider.sent[0]["from"] == ACCT.address and w3.provider.sent[0]["value"] == 1
 
@@ -78,7 +78,7 @@ def test_local_account_path_signs_and_sends_raw():
     w3 = fake_web3()
     conn = Ethereum(w3=w3, private_key=KEY)
     h = conn.send_transaction({"to": TO, "value": 7, "data": "0x"})
-    assert h == tx_hash_for(1)
+    assert h == w3.provider.hash_at(1)
     assert "eth_sendRawTransaction" in w3.provider.methods and "eth_sendTransaction" not in w3.provider.methods
     sent = w3.provider.sent[0]
     assert sent["from"] == ACCT.address and sent["to"] == Web3.to_checksum_address(TO) and sent["value"] == 7
@@ -102,7 +102,7 @@ def test_legacy_gas_price_path_when_no_base_fee():
     w3 = fake_web3(legacy=True)
     conn = Ethereum(w3=w3, private_key=KEY)
     h = conn.send_transaction({"to": TO, "value": 3, "data": "0x"})
-    assert h == tx_hash_for(1)
+    assert h == w3.provider.hash_at(1)
     sent = w3.provider.sent[0]
     assert sent["gasPrice"] == 10**9
     assert "maxFeePerGas" not in sent and "maxPriorityFeePerGas" not in sent
@@ -115,6 +115,40 @@ def test_sender_mismatch_is_refused():
     conn = Ethereum(w3=fake_web3(), private_key=KEY)
     with pytest.raises(ConfigurationError, match="does not match the configured account"):
         conn.send_transaction({"from": TO, "to": TO, "value": 0, "data": "0x"})
+
+
+def test_a_lost_send_response_names_the_locally_computed_hash():
+    """``eth_sendRawTransaction`` failing tells us nothing about whether the node took the bytes:
+    the hash is already determined by the signature, so it must reach the caller."""
+    from aleo_bridge.errors import BridgeError
+    from aleo_bridge.eth import Ethereum
+
+    w3 = fake_web3()
+    w3.provider.send_errors[1] = "connection reset by peer"
+    conn = Ethereum(w3=w3, private_key=KEY)
+    signed = ACCT.sign_transaction({"to": Web3.to_checksum_address(TO), "value": 5, "data": "0x", "chainId": 1,
+                                    "nonce": 0, "gas": 150_000 * 12 // 10, "maxPriorityFeePerGas": 10**8,
+                                    "maxFeePerGas": 10**9 * 2 + 10**8})
+    with pytest.raises(BridgeError) as exc:
+        conn.send_transaction({"to": TO, "value": 5, "data": "0x"})
+    message = str(exc.value)
+    assert Web3.to_hex(signed.hash) in message and "may have been broadcast" in message
+    assert "connection reset by peer" in message
+    assert w3.provider.methods.count("eth_sendRawTransaction") == 1      # exactly one attempt
+
+
+def test_a_node_hash_that_differs_from_the_signed_one_is_refused():
+    from aleo_bridge.errors import BridgeError
+    from aleo_bridge.eth import Ethereum
+
+    w3 = fake_web3()
+    other = "0x" + "ab" * 32
+    w3.provider.echo_hashes[1] = other
+    conn = Ethereum(w3=w3, private_key=KEY)
+    with pytest.raises(BridgeError) as exc:
+        conn.send_transaction({"to": TO, "value": 5, "data": "0x"})
+    message = str(exc.value)
+    assert other in message and w3.provider.hash_at(1) in message
 
 
 def test_wait_for_receipt_returns_none_on_timeout_and_dict_on_success():

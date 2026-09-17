@@ -805,7 +805,22 @@ class SolModule:
         signatures[payer_index] = self.conn.sign_message(libs.to_bytes_versioned(built.message))
         signed = libs.VersionedTransaction.populate(built.message, signatures)
         opts = SendOptions(skip_preflight=False, preflight_commitment=CONFIRMED)
-        signature = str(self.client.send_raw_transaction(bytes(signed), opts=opts).value)
+        # A Solana transaction's id IS its fee-payer signature, so it is known before the send. Capture it
+        # first: if the RPC answer is lost the bytes may still have reached the cluster, and a caller who
+        # never learns the signature cannot tell a failed send from a landed one (and would resend).
+        signature = str(signed.signatures[0])
+        try:
+            response = self.client.send_raw_transaction(bytes(signed), opts=opts)
+        except Exception as exc:  # noqa: BLE001 — any transport/decoding failure loses the response, not the send
+            raise BridgeError(
+                f"Solana transaction {signature} may have been broadcast; the RPC response was lost: {exc}"
+                " — check bridge.sol.source_status / the explorer before retrying") from exc
+        echoed = str(response.value)
+        if echoed != signature:
+            raise BridgeError(
+                f"Solana RPC echoed signature {echoed} for a transaction signed as {signature}; refusing to "
+                "checkpoint or follow the wrong id — check bridge.sol.source_status / the explorer for "
+                f"{signature} before retrying")
         receipt = self._source_receipt(built, signature)
         self._checkpoint(quote.plan, receipt, on_checkpoint, store, signature)
         if not wait:

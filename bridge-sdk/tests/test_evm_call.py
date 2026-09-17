@@ -10,7 +10,7 @@ from aleo_bridge.errors import BridgeError, ConfigurationError
 from aleo_bridge.eth import Ethereum, _plan_for
 from aleo_bridge.registry import DEFAULT_REGISTRY
 from aleo_bridge.types import DispatchReceipt, Receipt, Status
-from tests.fakes.fake_web3 import fake_web3, tx_hash_for
+from tests.fakes.fake_web3 import fake_web3
 
 KEY = "0x" + "11" * 32
 ACCT = Account.from_key(KEY)
@@ -146,8 +146,8 @@ def test_send_runs_approve_then_main_and_checkpoints_each_hash_before_polling():
     # Make both receipts resolve only after a couple of pending polls, so the ordering
     # test actually exercises "checkpoint fires, THEN polling happens" rather than a
     # same-tick resolution that would pass even if the code checkpointed after polling.
-    w3.provider.receipt_delay[tx_hash_for(1)] = 2
-    w3.provider.receipt_delay[tx_hash_for(2)] = 2
+    w3.provider.receipt_delay_nth[1] = 2
+    w3.provider.receipt_delay_nth[2] = 2
     call, plan = make_call(w3)
     seen = []
     poll_counts_at_checkpoint = []
@@ -160,29 +160,29 @@ def test_send_runs_approve_then_main_and_checkpoints_each_hash_before_polling():
     assert isinstance(result, DispatchReceipt) and result.receipt.status == Status.DELIVERY_PENDING
     assert [t["to"] for t in w3.provider.sent] == [Web3.to_checksum_address(WBTC), Web3.to_checksum_address(ROUTER)]
     assert w3.provider.sent[1]["value"] == 50_000
-    assert result.receipt.protocol_state["approvalTxIds"] == [tx_hash_for(1)] and result.receipt.source_tx_id == tx_hash_for(2)
+    assert result.receipt.protocol_state["approvalTxIds"] == [w3.provider.hash_at(1)] and result.receipt.source_tx_id == w3.provider.hash_at(2)
     assert [cp.source for cp in seen] == [
-        {"approvalTransactionIds": [tx_hash_for(1)]},
-        {"approvalTransactionIds": [tx_hash_for(1)], "transactionId": tx_hash_for(2)},
-        {"approvalTransactionIds": [tx_hash_for(1)], "transactionId": tx_hash_for(2)},
+        {"approvalTransactionIds": [w3.provider.hash_at(1)]},
+        {"approvalTransactionIds": [w3.provider.hash_at(1)], "transactionId": w3.provider.hash_at(2)},
+        {"approvalTransactionIds": [w3.provider.hash_at(1)], "transactionId": w3.provider.hash_at(2)},
     ]
     assert all(cp.route == {"id": plan.route_id, "registryVersion": plan.registry_version} for cp in seen)
     assert seen[0].intent["sender"] == ACCT.address
 
     # Checkpoint-before-poll ordering, per hash:
     # cp0 (approval broadcast) fires before any eth_getTransactionReceipt for hash1.
-    assert poll_counts_at_checkpoint[0].get(tx_hash_for(1), 0) == 0
-    assert tx_hash_for(2) not in poll_counts_at_checkpoint[0]
+    assert poll_counts_at_checkpoint[0].get(w3.provider.hash_at(1), 0) == 0
+    assert w3.provider.hash_at(2) not in poll_counts_at_checkpoint[0]
     # cp1 (main broadcast) fires after hash1 was fully polled to confirmation, but
     # before any eth_getTransactionReceipt for hash2.
-    assert poll_counts_at_checkpoint[1].get(tx_hash_for(1), 0) > 0
-    assert poll_counts_at_checkpoint[1].get(tx_hash_for(2), 0) == 0
+    assert poll_counts_at_checkpoint[1].get(w3.provider.hash_at(1), 0) > 0
+    assert poll_counts_at_checkpoint[1].get(w3.provider.hash_at(2), 0) == 0
     # cp2 (confirmed) fires only after hash2 has itself been polled.
-    assert poll_counts_at_checkpoint[2].get(tx_hash_for(2), 0) > 0
+    assert poll_counts_at_checkpoint[2].get(w3.provider.hash_at(2), 0) > 0
     # ... and each hash's poll count strictly increases after its own checkpoint fired
     # (the receipt_delay=2 knob forces at least one more poll beyond the checkpoint tick).
-    assert w3.provider.receipt_poll_counts[tx_hash_for(1)] > poll_counts_at_checkpoint[0].get(tx_hash_for(1), 0)
-    assert w3.provider.receipt_poll_counts[tx_hash_for(2)] > poll_counts_at_checkpoint[1].get(tx_hash_for(2), 0)
+    assert w3.provider.receipt_poll_counts[w3.provider.hash_at(1)] > poll_counts_at_checkpoint[0].get(w3.provider.hash_at(1), 0)
+    assert w3.provider.receipt_poll_counts[w3.provider.hash_at(2)] > poll_counts_at_checkpoint[1].get(w3.provider.hash_at(2), 0)
 
     # Full RPC sequence: approve is sent and fully confirmed (>=1 receipt poll) before
     # the main call is ever broadcast, and the main call is polled only afterwards.
@@ -198,19 +198,19 @@ def test_send_runs_approve_then_main_and_checkpoints_each_hash_before_polling():
 
 def test_approval_timeout_returns_pending_and_stops():
     w3 = fake_web3()
-    w3.provider.pending.add(tx_hash_for(1))
+    w3.provider.pending_nth.add(1)
     call, _ = make_call(w3)
     result = call.send(timeout_seconds=0.01, poll_seconds=0.001)
     assert result.receipt.status == Status.SOURCE_APPROVAL_PENDING and result.receipt.source_tx_id is None
-    assert result.receipt.protocol_state["approvalTxIds"] == [tx_hash_for(1)] and len(w3.provider.sent) == 1
+    assert result.receipt.protocol_state["approvalTxIds"] == [w3.provider.hash_at(1)] and len(w3.provider.sent) == 1
 
 
 def test_main_timeout_returns_source_confirming():
     w3 = fake_web3()
-    w3.provider.pending.add(tx_hash_for(1))
+    w3.provider.pending_nth.add(1)
     call, _ = make_call(w3, approvals=0)
     result = call.send(timeout_seconds=0.01, poll_seconds=0.001)
-    assert result.receipt.status == Status.SOURCE_CONFIRMING and result.receipt.source_tx_id == tx_hash_for(1)
+    assert result.receipt.status == Status.SOURCE_CONFIRMING and result.receipt.source_tx_id == w3.provider.hash_at(1)
 
 
 def test_wait_false_returns_after_first_broadcast():
@@ -222,10 +222,11 @@ def test_wait_false_returns_after_first_broadcast():
 
 def test_reverted_transaction_raises():
     w3 = fake_web3()
-    w3.provider.reverted.add(tx_hash_for(1))
+    w3.provider.reverted_nth.add(1)
     call, _ = make_call(w3)
-    with pytest.raises(BridgeError, match=f"EVM transaction reverted: {tx_hash_for(1)}"):
+    with pytest.raises(BridgeError) as exc:
         call.send(poll_seconds=0.001)
+    assert str(exc.value) == f"EVM transaction reverted: {w3.provider.hash_at(1)}"
 
 
 def test_plan_sender_must_match_connected_account():
@@ -274,11 +275,25 @@ def test_store_failure_after_broadcast_reports_the_tx_hash_and_never_hides_it():
     with pytest.raises(BridgeError) as exc:
         call.send(on_checkpoint=seen.append, poll_seconds=0.001)
     message = str(exc.value)
-    assert tx_hash_for(1) in message and "broadcast" in message and "checkpoint" in message.lower()
-    assert [cp.id for cp in seen] == [tx_hash_for(1)]                 # callback ran before the store
-    assert [cp.id for cp in store.attempts] == [tx_hash_for(1)]
+    assert w3.provider.hash_at(1) in message and "broadcast" in message and "checkpoint" in message.lower()
+    assert [cp.id for cp in seen] == [w3.provider.hash_at(1)]                 # callback ran before the store
+    assert [cp.id for cp in store.attempts] == [w3.provider.hash_at(1)]
     assert len(w3.provider.sent) == 1                                # broadcast happened exactly once
     assert "eth_getTransactionReceipt" not in w3.provider.methods    # nothing polled after the failure
+
+
+def test_a_mismatched_echoed_hash_stops_the_call_before_any_checkpoint():
+    """Checkpointing the node's hash would strand the real transaction under an id nobody can find."""
+    w3 = fake_web3()
+    w3.provider.echo_hashes[1] = "0x" + "ab" * 32
+    store = ExplodingStore()
+    call, _ = make_call(w3, store=store, approvals=0)
+    seen = []
+    with pytest.raises(BridgeError) as exc:
+        call.send(on_checkpoint=seen.append, poll_seconds=0.001)
+    assert "0x" + "ab" * 32 in str(exc.value) and w3.provider.hash_at(1) in str(exc.value)
+    assert seen == [] and store.attempts == []
+    assert "eth_getTransactionReceipt" not in w3.provider.methods
 
 
 def test_bound_store_saves_every_checkpoint(tmp_path):
@@ -287,4 +302,4 @@ def test_bound_store_saves_every_checkpoint(tmp_path):
     call, _ = make_call(w3, store=store)
     result = call.send(poll_seconds=0.001)
     ids = {cp.id for cp in store.list()}
-    assert tx_hash_for(1) in ids and result.receipt.id in ids
+    assert w3.provider.hash_at(1) in ids and result.receipt.id in ids

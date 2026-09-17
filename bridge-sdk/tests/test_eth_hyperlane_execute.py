@@ -8,7 +8,7 @@ from web3 import Web3
 from aleo_bridge.errors import (BridgeError, ConfigurationError, RegistryVersionMismatchError, RouteUnavailableError)
 from aleo_bridge.eth import Ethereum
 from aleo_bridge.types import DispatchReceipt, Status
-from tests.fakes.fake_web3 import ZERO_ADDRESS, dispatch_id_log, event_log, fake_web3, make_bridge, tx_hash_for
+from tests.fakes.fake_web3 import ZERO_ADDRESS, dispatch_id_log, event_log, fake_web3, make_bridge
 
 KEY = "0x" + "11" * 32
 ACCT = Account.from_key(KEY)
@@ -44,7 +44,7 @@ def test_native_eth_dispatch_is_one_transaction_with_value():
     receipt = result.receipt
     assert receipt.status == Status.DELIVERY_PENDING and receipt.protocol == "hyperlane"
     assert result.message_id == Web3.to_hex(MESSAGE_ID) and receipt.id == result.message_id
-    assert receipt.source_tx_id == tx_hash_for(1) == result.transaction_id and result.amount_atomic == 100
+    assert receipt.source_tx_id == w3.provider.hash_at(1) == result.transaction_id and result.amount_atomic == 100
     assert receipt.protocol_state == {
         "routeId": "hyperlane:ethereum/eth->aleo/eth", "approvalTxIds": [], "sourceSender": ACCT.address,
         "recipientBytes32": ALEO_BYTES32, "destinationDomain": 1634493807,
@@ -59,7 +59,7 @@ def test_wbtc_approves_exact_token_amount_then_dispatches_with_fee_value():
     assert [t["to"] for t in sent] == [Web3.to_checksum_address(WBTC), Web3.to_checksum_address(WBTC_ROUTER)]
     assert sent[0]["data"][2:].lower() == APPROVE + WBTC_ROUTER[2:].lower().rjust(64, "0") + format(100_000, "064x")
     assert sent[0]["value"] == 0 and sent[1]["value"] == 0xC350
-    assert result.receipt.protocol_state["approvalTxIds"] == [tx_hash_for(1)] and result.receipt.source_tx_id == tx_hash_for(2)
+    assert result.receipt.protocol_state["approvalTxIds"] == [w3.provider.hash_at(1)] and result.receipt.source_tx_id == w3.provider.hash_at(2)
 
 
 def test_wbtc_sufficient_allowance_skips_approval():
@@ -78,7 +78,7 @@ def test_usdt_resets_non_zero_allowance_first():
     assert sent[0]["data"][2:].lower() == APPROVE + USDT_ROUTER[2:].lower().rjust(64, "0") + "0" * 64
     assert sent[1]["data"][2:].lower() == APPROVE + USDT_ROUTER[2:].lower().rjust(64, "0") + format(1_000_000, "064x")
     assert sent[2]["data"][2:10] == TRANSFER_REMOTE
-    assert result.receipt.protocol_state["approvalTxIds"] == [tx_hash_for(1), tx_hash_for(2)]
+    assert result.receipt.protocol_state["approvalTxIds"] == [w3.provider.hash_at(1), w3.provider.hash_at(2)]
 
 
 def test_usdt_zero_allowance_needs_no_reset():
@@ -89,13 +89,13 @@ def test_usdt_zero_allowance_needs_no_reset():
 
 def test_approval_timeout_is_pending_and_checkpointed_before_polling():
     eth, w3 = setup(WBTC_ROUTER, quotes={WBTC_ROUTER: [(ZERO_ADDRESS, 50_000), (WBTC, 100_000)]})
-    w3.provider.pending.add(tx_hash_for(1))
+    w3.provider.pending_nth.add(1)
     seen = []
     result = eth.transfer_remote("wbtc", ALEO, amount_atomic=100_000).send(
         timeout_seconds=0.01, poll_seconds=0.001, on_checkpoint=seen.append)
     assert result.receipt.status == Status.SOURCE_APPROVAL_PENDING and result.receipt.source_tx_id is None
-    assert result.receipt.id == tx_hash_for(1) and result.message_id is None and len(w3.provider.sent) == 1
-    assert [cp.source for cp in seen] == [{"approvalTransactionIds": [tx_hash_for(1)]}]
+    assert result.receipt.id == w3.provider.hash_at(1) and result.message_id is None and len(w3.provider.sent) == 1
+    assert [cp.source for cp in seen] == [{"approvalTransactionIds": [w3.provider.hash_at(1)]}]
     assert seen[0].intent == {"source": {"chain": "ethereum", "asset": "wbtc"}, "destination": {"chain": "aleo", "asset": "wbtc"},
                               "bridgeProtocol": "hyperlane", "amount": "0.001", "recipient": ALEO,
                               "sender": ACCT.address, "mintMode": "public"}
@@ -103,13 +103,13 @@ def test_approval_timeout_is_pending_and_checkpointed_before_polling():
 
 def test_dispatch_timeout_is_source_confirming_with_hash():
     eth, w3 = setup(ETH_ROUTER, quotes={ETH_ROUTER: [(ZERO_ADDRESS, 1_000)]})
-    w3.provider.pending.add(tx_hash_for(1))
+    w3.provider.pending_nth.add(1)
     seen = []
     result = eth.transfer_remote("eth", ALEO, amount_atomic=100).send(
         timeout_seconds=0.01, poll_seconds=0.001, on_checkpoint=seen.append)
-    assert result.receipt.status == Status.SOURCE_CONFIRMING and result.receipt.source_tx_id == tx_hash_for(1)
-    assert result.receipt.id == tx_hash_for(1) and "messageId" not in result.receipt.protocol_state
-    assert [cp.source for cp in seen] == [{"transactionId": tx_hash_for(1)}]
+    assert result.receipt.status == Status.SOURCE_CONFIRMING and result.receipt.source_tx_id == w3.provider.hash_at(1)
+    assert result.receipt.id == w3.provider.hash_at(1) and "messageId" not in result.receipt.protocol_state
+    assert [cp.source for cp in seen] == [{"transactionId": w3.provider.hash_at(1)}]
 
 
 def test_dispatch_id_survives_unrelated_log_before_it():
@@ -148,7 +148,7 @@ def test_dispatch_id_from_a_foreign_address_is_ignored():
     eth, w3 = setup(ETH_ROUTER, quotes={ETH_ROUTER: [(ZERO_ADDRESS, 1_000)]})
     w3.provider.receipt_logs = lambda tx: [dispatch_id_log(WBTC, MESSAGE_ID, tx_hash=tx["hash"], log_index=1)]
     result = eth.transfer_remote("eth", ALEO, amount_atomic=100).send(poll_seconds=0.001)
-    assert result.message_id is None and result.receipt.id == tx_hash_for(1)
+    assert result.message_id is None and result.receipt.id == w3.provider.hash_at(1)
     assert result.receipt.status == Status.DELIVERY_PENDING and "messageId" not in result.receipt.protocol_state
 
 
@@ -167,10 +167,10 @@ def test_mailbox_dispatch_id_wins_over_an_earlier_foreign_one():
 
 
 def test_missing_dispatch_id_log_keeps_tx_hash_as_id():
-    eth, _ = setup(ETH_ROUTER, with_dispatch_log=False, quotes={ETH_ROUTER: [(ZERO_ADDRESS, 1_000)]})
+    eth, w3 = setup(ETH_ROUTER, with_dispatch_log=False, quotes={ETH_ROUTER: [(ZERO_ADDRESS, 1_000)]})
     result = eth.transfer_remote("eth", ALEO, amount_atomic=100).send(poll_seconds=0.001)
     assert result.receipt.status == Status.DELIVERY_PENDING and result.message_id is None
-    assert result.receipt.id == tx_hash_for(1) and "messageId" not in result.receipt.protocol_state
+    assert result.receipt.id == w3.provider.hash_at(1) and "messageId" not in result.receipt.protocol_state
 
 
 def test_build_lists_approval_then_dispatch_without_sending():

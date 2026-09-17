@@ -11,7 +11,7 @@ from aleo_bridge import encoding
 from aleo_bridge.errors import (BridgeError, ConfigurationError, RegistryVersionMismatchError, RouteUnavailableError)
 from aleo_bridge.eth import Ethereum
 from aleo_bridge.types import DepositReceipt, Status
-from tests.fakes.fake_web3 import deposited_log, fake_web3, make_bridge, tx_hash_for
+from tests.fakes.fake_web3 import deposited_log, fake_web3, make_bridge
 
 KEY = "0x" + "11" * 32
 ACCT = Account.from_key(KEY)
@@ -68,10 +68,10 @@ def test_record_mode_deposit_derives_nonce_payload_and_message_hash():
     assert sent[0]["data"][2:].lower() == APPROVE + XRESERVE[2:].lower().rjust(64, "0") + format(2_000_000, "064x")
     receipt = result.receipt
     assert receipt.status == Status.ATTESTATION_PENDING and receipt.protocol == "xreserve"
-    assert receipt.source_tx_id == tx_hash_for(2) == result.transaction_id
+    assert receipt.source_tx_id == w3.provider.hash_at(2) == result.transaction_id
     hook = b"\x01" + bytes(64)
     recipient32 = encoding.aleo_address_to_bytes32(ALEO)
-    nonce = encoding.xreserve_deposit_nonce(0, bytes.fromhex(tx_hash_for(2)[2:]), 3)
+    nonce = encoding.xreserve_deposit_nonce(0, bytes.fromhex(w3.provider.hash_at(2)[2:]), 3)
     payload = encoding.xreserve_deposit_payload(amount=2_000_000, remote_domain=10002, remote_token=REMOTE_TOKEN,
                                                 remote_recipient=recipient32, local_token=USDC, depositor=ACCT.address,
                                                 max_fee=100_000, nonce=nonce, hook_data=hook)
@@ -81,7 +81,7 @@ def test_record_mode_deposit_derives_nonce_payload_and_message_hash():
     assert result.nonce == "0x" + nonce.hex() == receipt.protocol_state["nonce"]
     assert receipt.protocol_state["payload"] == "0x" + payload.hex()
     state = receipt.protocol_state
-    assert state["routeId"] == "xreserve:sepolia/usdc->aleo-testnet/usdcx" and state["approvalTxIds"] == [tx_hash_for(1)]
+    assert state["routeId"] == "xreserve:sepolia/usdc->aleo-testnet/usdcx" and state["approvalTxIds"] == [w3.provider.hash_at(1)]
     assert state["sourceSender"] == ACCT.address and state["mintMode"] == "record" and state["intendedRecipient"] == ALEO
     assert state["xReserveContract"] == Web3.to_checksum_address(XRESERVE) and state["tokenAddress"] == Web3.to_checksum_address(USDC)
     assert state["sourceChainId"] == 11155111 and state["sourceDomain"] == 0 and state["remoteDomain"] == 10002
@@ -89,9 +89,9 @@ def test_record_mode_deposit_derives_nonce_payload_and_message_hash():
     assert state["amountAtomic"] == "2000000" and state["maxFeeAtomic"] == "100000" and state["depositLogIndex"] == 3
     assert state["bridgeProgram"] == "test_usdcx_bridge_v2.aleo" and state["wrapperProgram"] == "shielded_usdcx_wrapper.aleo"
     assert [cp.source for cp in seen] == [
-        {"approvalTransactionIds": [tx_hash_for(1)], "hookData": "0x" + hook.hex()},
-        {"approvalTransactionIds": [tx_hash_for(1)], "transactionId": tx_hash_for(2), "hookData": "0x" + hook.hex()},
-        {"approvalTransactionIds": [tx_hash_for(1)], "transactionId": tx_hash_for(2), "hookData": "0x" + hook.hex()},
+        {"approvalTransactionIds": [w3.provider.hash_at(1)], "hookData": "0x" + hook.hex()},
+        {"approvalTransactionIds": [w3.provider.hash_at(1)], "transactionId": w3.provider.hash_at(2), "hookData": "0x" + hook.hex()},
+        {"approvalTransactionIds": [w3.provider.hash_at(1)], "transactionId": w3.provider.hash_at(2), "hookData": "0x" + hook.hex()},
     ]
     assert seen[-1].id == message_hash and seen[-1].intent["mintMode"] == "record"
 
@@ -166,17 +166,17 @@ def test_our_deposit_event_is_selected_among_other_accounts_deposits(ours_first)
 
 def test_timeouts_return_pending_receipts():
     eth, w3 = setup()
-    w3.provider.pending.add(tx_hash_for(1))
+    w3.provider.pending_nth.add(1)
     result = eth.deposit_usdc(ALEO, amount="2").send(timeout_seconds=0.01, poll_seconds=0.001)
     assert result.receipt.status == Status.SOURCE_APPROVAL_PENDING and result.receipt.source_tx_id is None
-    assert result.receipt.id == tx_hash_for(1) and result.message_hash == "" and result.nonce == ""
+    assert result.receipt.id == w3.provider.hash_at(1) and result.message_hash == "" and result.nonce == ""
     assert len(w3.provider.sent) == 1
     eth, w3 = setup(allowance=5_000_000)
-    w3.provider.pending.add(tx_hash_for(1))
+    w3.provider.pending_nth.add(1)
     seen = []
     result = eth.deposit_usdc(ALEO, amount="2").send(timeout_seconds=0.01, poll_seconds=0.001, on_checkpoint=seen.append)
-    assert result.receipt.status == Status.SOURCE_CONFIRMING and result.receipt.source_tx_id == tx_hash_for(1)
-    assert [cp.source for cp in seen] == [{"transactionId": tx_hash_for(1), "hookData": "0x" + "00" * 65}]
+    assert result.receipt.status == Status.SOURCE_CONFIRMING and result.receipt.source_tx_id == w3.provider.hash_at(1)
+    assert [cp.source for cp in seen] == [{"transactionId": w3.provider.hash_at(1), "hookData": "0x" + "00" * 65}]
 
 
 def test_plan_driven_deposit_is_identical_to_the_recipient_driven_one():
@@ -212,6 +212,6 @@ def test_plan_driven_deposit_rejects_a_tampered_stale_or_foreign_plan():
 
 def test_reverted_deposit_raises():
     eth, w3 = setup(allowance=5_000_000)
-    w3.provider.reverted.add(tx_hash_for(1))
+    w3.provider.reverted_nth.add(1)
     with pytest.raises(BridgeError, match="reverted"):
         eth.deposit_usdc(ALEO, amount="2").send(poll_seconds=0.001)

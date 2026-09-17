@@ -182,7 +182,22 @@ class Ethereum:
                 tx["maxPriorityFeePerGas"] = tip
                 tx["maxFeePerGas"] = int(base_fee) * 2 + tip
         signed = self._signer.sign_transaction(tx)
-        return Web3.to_hex(self._w3.eth.send_raw_transaction(signed.raw_transaction))
+        # The hash is fixed by the signature, so it exists before the broadcast. Capture it first: if the
+        # RPC answer is lost the node may still have accepted the bytes, and a caller who never learns the
+        # hash cannot tell a failed send from a landed one (and would resend, risking a double spend).
+        local_hash = Web3.to_hex(signed.hash)
+        try:
+            echoed = Web3.to_hex(self._w3.eth.send_raw_transaction(signed.raw_transaction))
+        except Exception as exc:  # noqa: BLE001 — any transport/JSON-RPC failure loses the response, not the send
+            raise BridgeError(
+                f"Ethereum transaction {local_hash} may have been broadcast; the RPC response was lost: {exc}"
+                " — check bridge.eth.source_status / the explorer before retrying") from exc
+        if echoed.lower() != local_hash.lower():
+            raise BridgeError(
+                f"Ethereum RPC echoed transaction hash {echoed} for a transaction signed as {local_hash}; "
+                "refusing to checkpoint or follow the wrong hash — check bridge.eth.source_status / the "
+                f"explorer for {local_hash} before retrying")
+        return local_hash
 
     def wait_for_receipt(self, tx_hash: str, *, timeout_seconds: float, poll_seconds: float) -> dict | None:
         """Poll ``wait_for_transaction_receipt``; ``None`` on timeout (a timeout is not a failure)."""
