@@ -1,9 +1,11 @@
+import dataclasses
+
 import pytest
 from eth_account import Account
 
 from aleo_bridge.encoding import aleo_address_to_bytes32, bytes32_to_aleo_address
-from aleo_bridge.errors import (AmbiguousRouteError, BridgeError, ChainMismatchError, InvalidAmountError,
-                                InvalidRecipientError, RouteUnavailableError)
+from aleo_bridge.errors import (AmbiguousRouteError, BridgeError, ChainMismatchError, ConfigurationError,
+                                InvalidAmountError, InvalidRecipientError, RouteUnavailableError)
 from aleo_bridge.eth import Ethereum
 from aleo_bridge.registry import DEFAULT_REGISTRY
 from aleo_bridge.types import EvmHyperlaneQuote
@@ -93,6 +95,43 @@ def test_unavailable_unknown_and_explicit_routes():
         eth.quote_transfer_remote("ethereum/usdc", ALEO, amount_atomic=1)
     route = DEFAULT_REGISTRY.route("hyperlane:ethereum/eth->aleo/eth")
     assert eth.quote_transfer_remote("eth", ALEO, amount_atomic=1, route=route).plan.route_id == route.id
+
+
+def _corrupted_eth_route(**overrides):
+    route = DEFAULT_REGISTRY.route("hyperlane:ethereum/eth->aleo/eth")
+    return dataclasses.replace(route, metadata={**route.metadata, **overrides})
+
+
+def test_corrupted_router_address_is_refused_before_any_contract_read():
+    eth, w3 = eth_module(quotes={ETH_ROUTER: [(ZERO_ADDRESS, 10**15)]})
+    route = _corrupted_eth_route(routerAddress="not-an-address")
+    with pytest.raises(ConfigurationError, match="routerAddress"):
+        eth.quote_transfer_remote("eth", ALEO, amount_atomic=1, route=route)
+    assert "eth_call" not in w3.provider.methods
+
+
+def test_bad_router_type_is_refused_before_any_contract_read():
+    eth, w3 = eth_module(quotes={ETH_ROUTER: [(ZERO_ADDRESS, 10**15)]})
+    route = _corrupted_eth_route(routerType="burn")
+    with pytest.raises(ConfigurationError, match="routerType"):
+        eth.quote_transfer_remote("eth", ALEO, amount_atomic=1, route=route)
+    assert "eth_call" not in w3.provider.methods
+
+
+def test_out_of_range_destination_domain_is_refused_before_any_contract_read():
+    eth, w3 = eth_module(quotes={ETH_ROUTER: [(ZERO_ADDRESS, 10**15)]})
+    route = _corrupted_eth_route(destinationDomain=2**32)
+    with pytest.raises(ConfigurationError, match="destinationDomain"):
+        eth.quote_transfer_remote("eth", ALEO, amount_atomic=1, route=route)
+    assert "eth_call" not in w3.provider.methods
+
+
+def test_bad_registry_commit_is_refused_before_any_contract_read():
+    eth, w3 = eth_module(quotes={ETH_ROUTER: [(ZERO_ADDRESS, 10**15)]})
+    route = _corrupted_eth_route(registryCommit="not-hex")
+    with pytest.raises(ConfigurationError, match="registryCommit"):
+        eth.quote_transfer_remote("eth", ALEO, amount_atomic=1, route=route)
+    assert "eth_call" not in w3.provider.methods
 
 
 def test_amount_and_recipient_validation():

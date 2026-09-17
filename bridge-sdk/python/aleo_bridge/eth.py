@@ -197,6 +197,30 @@ def _plan_for(registry: Registry, route: Route, *, amount_atomic: int, recipient
                 recipient=recipient, sender=sender, mint_mode=mint_mode, steps=steps)
 
 
+_REGISTRY_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$", re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class _HyperlaneRouteMetadata:
+    """Validated Hyperlane route metadata (mirrors veil ``protocols/hyperlane/evm.ts`` ``routeMetadata``).
+
+    Every address/domain that reaches a contract call is checked here first, so a corrupted or
+    malformed registry entry fails with ``ConfigurationError`` before any RPC read.
+    """
+
+    router: str
+    router_type: str            # "native" | "collateral"
+    token: str | None           # collateral ERC-20; None on native
+    mailbox: str
+    interchain_gas_paymaster: str
+    interchain_security_module: str
+    source_chain_id: int
+    destination_domain: int
+    destination_router: str
+    registry_commit: str
+    requires_approval_reset: bool
+
+
 @dataclass(frozen=True)
 class _HyperlaneQuote:
     """Router-level facts behind an ``EvmHyperlaneQuote`` (addresses never leave the module)."""
@@ -339,32 +363,76 @@ class EthModule:
 
     # -- Hyperlane quote ----------------------------------------------------------------------
 
-    def _quote_hyperlane(self, route: Route, recipient_bytes32: bytes, amount_atomic: int, owner: str | None) -> _HyperlaneQuote:
-        """Brief §3.1: chain assert → quoteTransferRemote → native/collateral split → allowance."""
-        self.assert_chain(route)
-        Web3 = _web3().Web3
+    def _metadata_address(self, meta: Mapping[str, Any], key: str, route_id: str) -> str:
+        """Checksum a metadata address field; any malformed value is a ``ConfigurationError``, never
+        a raw ``ValueError``/``KeyError`` (a missing key reads as ``None`` via ``.get``, which also fails here)."""
+        value = meta.get(key)
+        try:
+            return _web3().Web3.to_checksum_address(str(value))
+        except (ValueError, TypeError) as exc:
+            raise ConfigurationError(f"Hyperlane route metadata {key!r} is not a valid address ({route_id}): {value!r}") from exc
+
+    def _hyperlane_metadata(self, route: Route) -> _HyperlaneRouteMetadata:
+        """Brief §3.1 route metadata validator (mirrors veil ``protocols/hyperlane/evm.ts`` ``routeMetadata``).
+
+        Called by every path that is about to touch a Hyperlane contract (``_quote_hyperlane``, and
+        transitively ``transfer_remote``'s step builder through the ``_HyperlaneQuote`` it returns) so
+        no unvalidated address or domain from the registry ever reaches an RPC call.
+        """
+        if route is None or route.protocol != "hyperlane" or route.availability != "active":
+            raise RouteUnavailableError(f"Hyperlane route is not executable: {getattr(route, 'id', route)!r}")
         meta = route.metadata
-        router = Web3.to_checksum_address(str(meta["routerAddress"]))
-        router_type = str(meta["routerType"])
-        destination_domain = int(meta["destinationDomain"])
-        quotes = self._contract(router, WARP_ROUTE_ABI).functions.quoteTransferRemote(
-            destination_domain, recipient_bytes32, amount_atomic).call()
+        router = self._metadata_address(meta, "routerAddress", route.id)
+        mailbox = self._metadata_address(meta, "mailboxAddress", route.id)
+        igp = self._metadata_address(meta, "interchainGasPaymaster", route.id)
+        ism = self._metadata_address(meta, "interchainSecurityModule", route.id)
+        source_chain_id = meta.get("sourceChainId")
+        if isinstance(source_chain_id, bool) or not isinstance(source_chain_id, int) or source_chain_id <= 0:
+            raise ConfigurationError(
+                f"Hyperlane route metadata sourceChainId must be a positive int ({route.id}): {source_chain_id!r}")
+        destination_domain = meta.get("destinationDomain")
+        if isinstance(destination_domain, bool) or not isinstance(destination_domain, int) \
+                or not (0 <= destination_domain <= 2**32 - 1):
+            raise ConfigurationError(
+                f"Hyperlane route metadata destinationDomain must be a uint32 ({route.id}): {destination_domain!r}")
+        router_type = meta.get("routerType")
+        if router_type not in ("native", "collateral"):
+            raise ConfigurationError(
+                f"Hyperlane route metadata routerType must be native or collateral ({route.id}): {router_type!r}")
+        token = self._metadata_address(meta, "tokenAddress", route.id) if router_type == "collateral" else None
+        destination_router = meta.get("destinationRouter")
+        if not isinstance(destination_router, str) or not destination_router.strip():
+            raise ConfigurationError(f"Hyperlane route metadata destinationRouter must be non-empty ({route.id})")
+        registry_commit = meta.get("registryCommit")
+        if not isinstance(registry_commit, str) or not _REGISTRY_COMMIT_RE.fullmatch(registry_commit):
+            raise ConfigurationError(
+                f"Hyperlane route metadata registryCommit must be 40 hex chars ({route.id}): {registry_commit!r}")
+        return _HyperlaneRouteMetadata(
+            router=router, router_type=router_type, token=token, mailbox=mailbox,
+            interchain_gas_paymaster=igp, interchain_security_module=ism, source_chain_id=source_chain_id,
+            destination_domain=destination_domain, destination_router=destination_router,
+            registry_commit=registry_commit, requires_approval_reset=meta.get("requiresApprovalReset") is True)
+
+    def _quote_hyperlane(self, route: Route, recipient_bytes32: bytes, amount_atomic: int, owner: str | None) -> _HyperlaneQuote:
+        """Brief §3.1: chain assert → metadata validation → quoteTransferRemote → native/collateral split → allowance."""
+        self.assert_chain(route)
+        meta = self._hyperlane_metadata(route)
+        Web3 = _web3().Web3
+        quotes = self._contract(meta.router, WARP_ROUTE_ABI).functions.quoteTransferRemote(
+            meta.destination_domain, recipient_bytes32, amount_atomic).call()
         native_value = sum(int(q[1]) for q in quotes if Web3.to_checksum_address(q[0]) == ZERO_ADDRESS)
-        if router_type == "native":
+        if meta.router_type == "native":
             if native_value < amount_atomic:
                 raise BridgeError("Native Hyperlane quote does not cover the transfer amount")
-            return _HyperlaneQuote(router, "native", None, destination_domain, recipient_bytes32, amount_atomic,
-                                   native_value, native_value - amount_atomic, 0, None, False)
-        if router_type != "collateral":
-            raise RouteUnavailableError(f"Hyperlane route has an invalid routerType {router_type!r}: {route.id}")
-        token = Web3.to_checksum_address(str(meta["tokenAddress"]))
-        token_amount = sum(int(q[1]) for q in quotes if Web3.to_checksum_address(q[0]) == token)
+            return _HyperlaneQuote(meta.router, "native", None, meta.destination_domain, recipient_bytes32,
+                                   amount_atomic, native_value, native_value - amount_atomic, 0, None, False)
+        token_amount = sum(int(q[1]) for q in quotes if Web3.to_checksum_address(q[0]) == meta.token)
         if token_amount < amount_atomic:
             raise BridgeError("Collateral Hyperlane quote does not cover the transfer amount")
-        allowance = int(self._erc20(token).functions.allowance(owner, router).call()) if owner else None
-        return _HyperlaneQuote(router, "collateral", token, destination_domain, recipient_bytes32, amount_atomic,
-                               native_value, native_value, token_amount, allowance,
-                               meta.get("requiresApprovalReset") is True)
+        allowance = int(self._erc20(meta.token).functions.allowance(owner, meta.router).call()) if owner else None
+        return _HyperlaneQuote(meta.router, "collateral", meta.token, meta.destination_domain, recipient_bytes32,
+                               amount_atomic, native_value, native_value, token_amount, allowance,
+                               meta.requires_approval_reset)
 
     def quote_transfer_remote(self, asset: Any, recipient: str, *, amount: Any = None, amount_atomic: int | None = None,
                               route: Route | None = None, sender: str | None = None) -> EvmHyperlaneQuote:
@@ -466,7 +534,7 @@ class EthModule:
         events = mailbox.events.DispatchId().process_receipt(receipt, errors=DISCARD)
         if not events:
             return None
-        return _web3().Web3.to_hex(events[-1]["args"]["messageId"])
+        return _web3().Web3.to_hex(events[0]["args"]["messageId"])   # veil messageIdFromReceipt: first match wins
 
     @staticmethod
     def _hyperlane_protocol_state(route: Route, *, recipient_bytes32: bytes, destination_domain: int,

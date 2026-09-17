@@ -6,7 +6,7 @@ from web3 import Web3
 from aleo_bridge.errors import ConfigurationError
 from aleo_bridge.eth import Ethereum
 from aleo_bridge.types import DispatchReceipt, Status
-from tests.fakes.fake_web3 import ZERO_ADDRESS, dispatch_id_log, fake_web3, make_bridge, tx_hash_for
+from tests.fakes.fake_web3 import ZERO_ADDRESS, dispatch_id_log, event_log, fake_web3, make_bridge, tx_hash_for
 
 KEY = "0x" + "11" * 32
 ACCT = Account.from_key(KEY)
@@ -106,6 +106,36 @@ def test_dispatch_timeout_is_source_confirming_with_hash():
     assert result.receipt.status == Status.SOURCE_CONFIRMING and result.receipt.source_tx_id == tx_hash_for(1)
     assert result.receipt.id == tx_hash_for(1) and "messageId" not in result.receipt.protocol_state
     assert [cp.source for cp in seen] == [{"transactionId": tx_hash_for(1)}]
+
+
+def test_dispatch_id_survives_unrelated_log_before_it():
+    """A log from an unrelated event (different address/topic, e.g. an ERC-20 Transfer) preceding the
+    Mailbox DispatchId log in the receipt must not prevent the message id from being decoded."""
+    noise_topic = "0x" + keccak(text="Transfer(address,address,uint256)").hex()
+
+    def logs_with_noise_first(tx):
+        noise = event_log(WBTC, [noise_topic], "0x", log_index=1, tx_hash=tx["hash"])
+        dispatch = dispatch_id_log(MAILBOX, MESSAGE_ID, tx_hash=tx["hash"], log_index=2)
+        return [noise, dispatch] if tx["to"] == Web3.to_checksum_address(ETH_ROUTER) else []
+
+    eth, w3 = setup(ETH_ROUTER, quotes={ETH_ROUTER: [(ZERO_ADDRESS, 1_000)]})
+    w3.provider.receipt_logs = logs_with_noise_first
+    result = eth.transfer_remote("eth", ALEO, amount_atomic=100).send(poll_seconds=0.001)
+    assert result.message_id == Web3.to_hex(MESSAGE_ID)
+
+
+def test_first_dispatch_id_wins_when_receipt_has_two():
+    """veil's ``messageIdFromReceipt`` returns the FIRST matching DispatchId event, not the last."""
+    first_id, second_id = bytes.fromhex("11" * 32), bytes.fromhex("22" * 32)
+
+    def two_dispatch_logs(tx):
+        return [dispatch_id_log(MAILBOX, first_id, tx_hash=tx["hash"], log_index=1),
+                dispatch_id_log(MAILBOX, second_id, tx_hash=tx["hash"], log_index=2)]
+
+    eth, w3 = setup(ETH_ROUTER, quotes={ETH_ROUTER: [(ZERO_ADDRESS, 1_000)]})
+    w3.provider.receipt_logs = two_dispatch_logs
+    result = eth.transfer_remote("eth", ALEO, amount_atomic=100).send(poll_seconds=0.001)
+    assert result.message_id == Web3.to_hex(first_id)
 
 
 def test_missing_dispatch_id_log_keeps_tx_hash_as_id():
