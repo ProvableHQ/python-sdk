@@ -21,8 +21,16 @@ if TYPE_CHECKING:  # pragma: no cover
 ZERO_ADDRESS = "aleo1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq3ljyzc"
 DEFAULT_DEPTH = 15                    # TS getSiblingPath default; tree capacity 2**(depth-1) leaves
 PROOF_SIBLINGS = 16                   # struct MerkleProof { siblings: [field; 16u32], leaf_index: u32 }
-FREEZE_LIST_MAPPING = "freeze_list"                    # u32 => address
+FREEZE_LIST_MAPPING = "freeze_list"                    # address => bool (frozen flag, NOT the list)
 FREEZE_LIST_LAST_INDEX_MAPPING = "freeze_list_last_index"   # bool => u32, keyed "true"
+FREEZE_LIST_INDEX_MAPPING = "freeze_list_index"        # u32 => address (the ordered list; [0u32] = zero-address sentinel)
+FREEZE_LIST_ROOT_MAPPING = "freeze_list_root"          # u8 => field, keyed "1u8" (current) / "2u8" (previous)
+CURRENT_ROOT_KEY = "1u8"
+# Token program -> its freeze-list program, for when Bridge.program(token).imports is unavailable.
+FREEZE_LIST_PROGRAMS = {
+    "usdcx_stablecoin.aleo": "usdcx_freezelist.aleo",
+    "test_usdcx_stablecoin.aleo": "test_usdcx_freezelist.aleo",
+}
 EMPTY_TREE_ROOT = 3642222252059314292809609689035560016959342421640560347114299934615987159853
 _EMPTY_PROOF = "{ siblings: [" + ", ".join(["0field"] * PROOF_SIBLINGS) + "], leaf_index: 1u32 }"
 EMPTY_MERKLE_PROOF_PAIR = f"[{_EMPTY_PROOF}, {_EMPTY_PROOF}]"
@@ -110,31 +118,62 @@ class FreezeList:
     def __init__(self, bridge: "Bridge") -> None:
         self._bridge = bridge
 
+    def freeze_list_program(self, token_program: str) -> str:
+        """The freeze-list program backing *token_program* (usually a token program that imports it)."""
+        if token_program.endswith("freezelist.aleo"):
+            return token_program
+        try:
+            imports = self._bridge.program(token_program).imports
+        except Exception:
+            imports = []
+        for dep in imports:
+            if str(dep).endswith("freezelist.aleo"):
+                return str(dep)
+        fallback = FREEZE_LIST_PROGRAMS.get(token_program)
+        if fallback:
+            return fallback
+        raise ConfigurationError(f"{token_program} has no freeze-list program; pass merkle_proof explicitly")
+
     def leaves(self, program: str) -> list[str]:
-        """Frozen addresses from ``program``'s ``freeze_list`` mapping (indices 0..last inclusive); ``[]`` when none."""
-        last = self._bridge.mapping_value(program, FREEZE_LIST_LAST_INDEX_MAPPING, "true")
+        """Frozen addresses from *program*'s freeze-list ``freeze_list_index`` mapping (0..last inclusive),
+        with the zero-address sentinel dropped; ``[]`` when the list is empty/unreadable."""
+        fl_program = self.freeze_list_program(program)
+        last = self._bridge.mapping_value(fl_program, FREEZE_LIST_LAST_INDEX_MAPPING, "true")
         if last is None:
             return []
         try:
             count = int(last.removesuffix("u32"))
         except ValueError as exc:
-            raise ConfigurationError(f"{program}/{FREEZE_LIST_LAST_INDEX_MAPPING} returned {last!r}, expected a u32") from exc
+            raise ConfigurationError(f"{fl_program}/{FREEZE_LIST_LAST_INDEX_MAPPING} returned {last!r}, expected a u32") from exc
         addresses = []
         for index in range(count + 1):
-            value = self._bridge.mapping_value(program, FREEZE_LIST_MAPPING, f"{index}u32")
+            value = self._bridge.mapping_value(fl_program, FREEZE_LIST_INDEX_MAPPING, f"{index}u32")
             if value and value != ZERO_ADDRESS:
                 addresses.append(value)
         return addresses
 
+    def _verified_tree(self, fl_program: str, leaves: list[str]) -> list[int]:
+        tree = build_tree(generate_leaves(leaves), self._bridge.network)
+        on_chain_root = self._bridge.mapping_value(fl_program, FREEZE_LIST_ROOT_MAPPING, CURRENT_ROOT_KEY)
+        if on_chain_root is not None:
+            computed_root = f"{tree[-1]}field"
+            if computed_root != on_chain_root:
+                raise ConfigurationError(
+                    f"computed freeze-list root {computed_root} != on-chain root {on_chain_root} for {fl_program}; "
+                    "refusing to build a proof")
+        return tree
+
     def tree(self, program: str) -> list[int]:
-        return build_tree(generate_leaves(self.leaves(program)), self._bridge.network)
+        """Merkle tree over *program*'s frozen addresses, verified against the on-chain root when readable."""
+        return self._verified_tree(self.freeze_list_program(program), self.leaves(program))
 
     def exclusion_proof(self, address: str, program: str) -> str:
         """``[MerkleProof; 2]`` proving *address* is not frozen on *program*; veil's empty pair when the list is empty."""
+        fl_program = self.freeze_list_program(program)
         leaves = self.leaves(program)
+        tree = self._verified_tree(fl_program, leaves)     # verifies the on-chain root, empty list included
         if not leaves:
             return EMPTY_MERKLE_PROOF_PAIR
-        tree = build_tree(generate_leaves(leaves), self._bridge.network)
         count = (len(tree) + 1) // 2
         target = address_to_field_int(address)
         if target in tree[:count]:
@@ -144,6 +183,8 @@ class FreezeList:
                                    (sibling_path(tree, right, PROOF_SIBLINGS), right))
 
 
-__all__ = ["DEFAULT_DEPTH", "EMPTY_MERKLE_PROOF_PAIR", "EMPTY_TREE_ROOT", "FREEZE_LIST_LAST_INDEX_MAPPING",
-           "FREEZE_LIST_MAPPING", "PROOF_SIBLINGS", "ZERO_ADDRESS", "FreezeList", "address_to_field_int",
-           "build_tree", "format_merkle_proof", "generate_leaves", "hash_two", "leaf_indices", "sibling_path"]
+__all__ = ["CURRENT_ROOT_KEY", "DEFAULT_DEPTH", "EMPTY_MERKLE_PROOF_PAIR", "EMPTY_TREE_ROOT",
+           "FREEZE_LIST_INDEX_MAPPING", "FREEZE_LIST_LAST_INDEX_MAPPING", "FREEZE_LIST_MAPPING",
+           "FREEZE_LIST_PROGRAMS", "FREEZE_LIST_ROOT_MAPPING", "PROOF_SIBLINGS", "ZERO_ADDRESS", "FreezeList",
+           "address_to_field_int", "build_tree", "format_merkle_proof", "generate_leaves", "hash_two",
+           "leaf_indices", "sibling_path"]

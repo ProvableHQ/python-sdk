@@ -10,7 +10,8 @@ A_FIELD = 3501665755452795161867664882580888971213780722176652848275908626939553
 B_FIELD = 1295133970529764960316948294624974168921228814652993007266766481909235735940
 RECIPIENT = "aleo1kypwp5m7qtk9mwazgcpg0tq8aal23mnrvwfvug65qgcg9xvsrqgspyjm6n"
 ZERO = fl.ZERO_ADDRESS
-PROGRAM = "usdcx_stablecoin.aleo"
+PROGRAM = "usdcx_stablecoin.aleo"           # the TOKEN program, as callers (privacy.py, xreserve.py) pass it
+FREEZE_LIST_PROGRAM = "usdcx_freezelist.aleo"   # the program that actually holds the freeze list
 EMPTY_ONE = "{ siblings: [" + ", ".join(["0field"] * 16) + "], leaf_index: 1u32 }"
 
 
@@ -84,10 +85,10 @@ def test_pure_exclusion_proof_of_empty_tree_equals_veil_literal():
 
 
 def test_freezelist_reads_mappings_and_builds_proof(bridge):
-    mappings = bridge.aleo.mappings[PROGRAM]
+    mappings = bridge.aleo.mappings.setdefault(FREEZE_LIST_PROGRAM, {})
     assert bridge.freezelist.leaves(PROGRAM) == [] and bridge.freezelist.exclusion_proof(RECIPIENT, PROGRAM) == fl.EMPTY_MERKLE_PROOF_PAIR
     mappings["freeze_list_last_index"] = {"true": "1u32"}
-    mappings["freeze_list"] = {"0u32": A, "1u32": ZERO}
+    mappings["freeze_list_index"] = {"0u32": A, "1u32": ZERO}
     assert bridge.freezelist.leaves(PROGRAM) == [A]                    # zero address filtered
     assert bridge.freezelist.tree(PROGRAM)[:2] == [0, A_FIELD]
     one = "{ siblings: [" + f"{A_FIELD}field, 0field, " + ", ".join(["0field"] * 14) + "], leaf_index: 1u32 }"
@@ -97,7 +98,43 @@ def test_freezelist_reads_mappings_and_builds_proof(bridge):
 
 
 def test_freezelist_last_index_parsing_is_not_rstrip(bridge):
-    mappings = bridge.aleo.mappings[PROGRAM]
+    mappings = bridge.aleo.mappings.setdefault(FREEZE_LIST_PROGRAM, {})
     mappings["freeze_list_last_index"] = {"true": "12u32"}
-    mappings["freeze_list"] = {f"{i}u32": ZERO for i in range(12)} | {"12u32": B}
+    mappings["freeze_list_index"] = {f"{i}u32": ZERO for i in range(12)} | {"12u32": B}
     assert bridge.freezelist.leaves(PROGRAM) == [B]
+
+
+def test_freeze_list_program_resolves_via_imports(bridge):
+    bridge.aleo.imports["usdcx_stablecoin.aleo"] = ["credits.aleo", FREEZE_LIST_PROGRAM]
+    assert bridge.freezelist.freeze_list_program(PROGRAM) == FREEZE_LIST_PROGRAM
+
+
+def test_freeze_list_program_resolves_via_fallback_table_when_imports_unavailable(bridge):
+    # default fixture sets no imports for usdcx_stablecoin.aleo -> falls back to the static table
+    assert bridge.freezelist.freeze_list_program(PROGRAM) == FREEZE_LIST_PROGRAM
+    assert bridge.freezelist.freeze_list_program("test_usdcx_stablecoin.aleo") == "test_usdcx_freezelist.aleo"
+    assert bridge.freezelist.freeze_list_program(FREEZE_LIST_PROGRAM) == FREEZE_LIST_PROGRAM  # already a freezelist program
+
+
+def test_freeze_list_program_raises_for_unknown_program(bridge):
+    with pytest.raises(ConfigurationError, match="no freeze-list program"):
+        bridge.freezelist.freeze_list_program("arc20_wbtc.aleo")
+
+
+def test_leaves_reads_from_freeze_list_program_not_token_program(bridge):
+    # the token program's own mappings are deliberately wrong, to prove they are never consulted
+    bridge.aleo.mappings[PROGRAM]["freeze_list_last_index"] = {"true": "0u32"}
+    bridge.aleo.mappings[PROGRAM]["freeze_list_index"] = {"0u32": A}
+    fl_mappings = bridge.aleo.mappings.setdefault(FREEZE_LIST_PROGRAM, {})
+    fl_mappings["freeze_list_last_index"] = {"true": "1u32"}
+    fl_mappings["freeze_list_index"] = {"0u32": ZERO, "1u32": B}       # index 0 is the zero-address sentinel
+    assert bridge.freezelist.leaves(PROGRAM) == [B]
+
+
+def test_exclusion_proof_verifies_onchain_root(bridge):
+    fl_mappings = bridge.aleo.mappings.setdefault(FREEZE_LIST_PROGRAM, {})
+    fl_mappings["freeze_list_root"] = {"1u8": "123field"}
+    with pytest.raises(ConfigurationError, match="freeze-list root"):
+        bridge.freezelist.exclusion_proof(RECIPIENT, PROGRAM)
+    fl_mappings["freeze_list_root"] = {"1u8": f"{fl.EMPTY_TREE_ROOT}field"}
+    assert bridge.freezelist.exclusion_proof(RECIPIENT, PROGRAM) == fl.EMPTY_MERKLE_PROOF_PAIR
