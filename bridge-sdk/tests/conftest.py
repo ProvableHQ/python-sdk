@@ -139,7 +139,11 @@ class FakeNetwork:
     def submit_transaction(self, transaction: Any) -> str:
         self._aleo.submitted.append(transaction)
         if self._aleo.duplicate_on_submit:
-            raise RuntimeError("Transaction 'at1prepared' already exists in the ledger")
+            from aleo.facade.errors import AleoNetworkError
+            # Mirrors the real facade: a node's duplicate-broadcast rejection is an AleoNetworkError
+            # whose message contains "already exists" (matched by is_duplicate_submission), not a
+            # bare RuntimeError.
+            raise AleoNetworkError("Transaction 'at1prepared' already exists in the ledger")
         if isinstance(transaction, str):
             return str(json.loads(transaction)["id"])
         return str(getattr(transaction, "id", "at1built"))
@@ -153,6 +157,15 @@ class FakeNetwork:
 
     def get_transaction_object(self, tx_id: str) -> FakeTx:
         return FakeTx(tx_id, "hyp_warp_token_wbtc_v2.aleo", "transfer_remote", [{"value": "99field"}])
+
+    def get_confirmed_transaction(self, tx_id: str) -> Any:
+        """Script via ``FakeAleo.confirmed_transactions[tx_id] = <json>``; else raises TransactionNotFound
+        (mirrors the real facade's 404 mapping) — additive for lifecycle recovery/status tests."""
+        self._aleo.confirmed_transaction_queries.append(tx_id)
+        if tx_id in self._aleo.confirmed_transactions:
+            return self._aleo.confirmed_transactions[tx_id]
+        from aleo.facade.errors import TransactionNotFound
+        raise TransactionNotFound(tx_id)
 
 
 class FakeProcess:
@@ -189,6 +202,8 @@ class FakeAleo:
         self.fetched: list = []
         self.registered: list = []
         self.record_queries: list = []
+        self.confirmed_transactions: dict[str, Any] = {}      # tx id -> confirmed-transaction JSON (script for get_confirmed_transaction)
+        self.confirmed_transaction_queries: list = []
         self.duplicate_on_submit = False
         self.delegate_returns_id_only = False
         self.wait_raises = False
