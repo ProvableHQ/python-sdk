@@ -80,6 +80,23 @@ def _coerce_ethereum(value: Any) -> Ethereum | None:
     raise ConfigurationError("ethereum= must be an aleo_bridge.Ethereum connection or a web3.Web3 instance")
 
 
+def _coerce_solana(value: Any) -> Solana | None:
+    """Accept a ``Solana``, an RPC URL string, or a bare solana-py ``Client`` (wrapped read-only).
+
+    Mirrors :func:`_coerce_ethereum`: anything else is a configuration mistake caught here rather
+    than as an ``AttributeError`` from the first RPC read.
+    """
+    if value is None or isinstance(value, Solana):
+        return value
+    if isinstance(value, str):
+        return Solana(rpc_url=value)
+    if callable(getattr(value, "get_latest_blockhash", None)) and callable(getattr(value, "get_account_info", None)):
+        return Solana(client=value)                   # spec §3: a bare client is a read-only connection
+    raise ConfigurationError(
+        "solana= must be an aleo_bridge.Solana connection, an RPC URL string, or a solana-py Client "
+        "(an object with get_latest_blockhash and get_account_info)")
+
+
 def solana_from_env() -> Any:
     """``Solana.from_env()``: SOLANA_PRIVATE_KEY/BRIDGE_SOLANA_PRIVATE_KEY (+ SOLANA_RPC_URL/
     BRIDGE_LIVE_SOLANA_RPC_URL) or None; a key alone signs, a URL alone is read-only, neither → None."""
@@ -121,9 +138,8 @@ class Bridge:
             raise ConfigurationError(f"Registry {self.registry.version} has no chains for {environment}")
         self.checkpoints = checkpoints
         self.ethereum: Ethereum | None = _coerce_ethereum(ethereum)
-        if solana is not None and not isinstance(solana, Solana):
-            solana = Solana(client=solana)            # bare solana-py Client → read-only connection (spec §3)
-        self.solana: Solana | None = solana
+        self.solana: Solana | None = _coerce_solana(solana)
+        solana = self.solana
         self._sol: SolModule | None = SolModule(self, solana) if solana is not None else None
         self.profile: Profile | None = None
         self._eth: EthModule | None = None
@@ -162,6 +178,11 @@ class Bridge:
         if len(chains) != 1:
             raise ConfigurationError(f"Registry must define exactly one Aleo chain for {self.environment}")
         return chains[0]
+
+    def solana_chain(self) -> Chain | None:
+        """The environment's Solana chain, or None — only mainnet has one."""
+        chains = [c for c in self.registry.chains(environment=self.environment) if c.family == "solana"]
+        return chains[0] if chains else None
 
     def aleo_address(self) -> str:
         account = getattr(self.aleo, "default_account", None)
@@ -253,9 +274,14 @@ class Bridge:
         chains = [self._aleo_chain_status()]
         if self.ethereum is not None:
             chains.append(self.eth.chain_status())
-        if self.solana is not None:
-            balances = {"solana/sol": self.sol.balance()} if self.solana.address is not None else {}
-            chains.append(ChainStatus(chain_id="solana", address=self.solana.address,
+        solana_chain = self.solana_chain()
+        if self.solana is not None and solana_chain is not None:
+            # Chain id and asset id come from the registry, not literals: a testnet client (no Solana
+            # chain at all) reports no Solana row rather than one naming a chain this environment lacks.
+            native = next((a for a in self.registry.assets(chain=solana_chain.id) if a.kind == "native"), None)
+            balances = ({native.id: self.sol.balance()}
+                        if native is not None and self.solana.address is not None else {})
+            chains.append(ChainStatus(chain_id=solana_chain.id, address=self.solana.address,
                                       can_sign=self.solana.can_sign, balances=balances))
         pending: list["Progress"] = []
         return BridgeStatus(environment=self.environment, registry_version=self.registry.version,

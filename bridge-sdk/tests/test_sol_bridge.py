@@ -43,6 +43,38 @@ def test_configured_connection_reports_sol_balance_in_status():
     assert solana_status.balances == {"solana/sol": 1_234}
 
 
+def test_an_rpc_url_string_becomes_a_read_only_connection():
+    bridge = Bridge(FakeAleo(), solana="https://rpc.example")
+    assert isinstance(bridge.solana, Solana) and bridge.solana.rpc_url == "https://rpc.example"
+    assert bridge.solana.can_sign is False
+
+
+def test_an_object_that_is_not_a_solana_client_is_refused():
+    class NotAClient:
+        def get_latest_blockhash(self, commitment=None):    # pragma: no cover - never called
+            return None
+
+    with pytest.raises(ConfigurationError, match="solana="):
+        Bridge(FakeAleo(), solana=NotAClient())             # no get_account_info
+    with pytest.raises(ConfigurationError, match="solana="):
+        Bridge(FakeAleo(), solana=object())
+
+
+def test_status_omits_the_solana_row_when_the_environment_has_no_solana_chain():
+    """Only mainnet has a Solana chain; a testnet client must not invent a "solana" row."""
+    bridge = Bridge(FakeAleo(network_name="testnet"), solana=FakeSolanaClient())
+    assert [c.chain_id for c in bridge.status().chains if c.chain_id == "solana"] == []
+
+
+def test_status_derives_the_solana_chain_and_native_asset_from_the_registry():
+    keypair = Keypair()
+    bridge = Bridge(FakeAleo(), solana=Solana(client=FakeSolanaClient(balance=7), signer=keypair))
+    chain = [c for c in bridge.registry.chains(environment="mainnet") if c.family == "solana"][0]
+    native = [a for a in bridge.registry.assets(chain=chain.id) if a.kind == "native"][0]
+    row = [c for c in bridge.status().chains if c.chain_id == chain.id][0]
+    assert row.balances == {native.id: 7}
+
+
 def test_from_env_builds_the_solana_connection(monkeypatch):
     key = b58encode(bytes(Keypair()))
     seen = {}
