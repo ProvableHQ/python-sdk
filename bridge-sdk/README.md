@@ -50,6 +50,9 @@ agent/MCP surface arrive in the following plans.
     result = call.send(on_checkpoint=store.save)  # approvals → dispatch; each hash checkpointed before polling
     result.message_id, result.receipt.status      # Hyperlane message id, DELIVERY_PENDING
 
+    usdc_quote = bridge.eth.quote_deposit_usdc(aleo_recipient, amount="2", mint_mode="public")
+    print(usdc_quote.balance_atomic, usdc_quote.approval_required)
+
     deposit = bridge.eth.deposit_usdc(aleo_recipient, amount="2", mint_mode="public").send()
     deposit.message_hash                          # Circle attestation lookup key (receipt id), ATTESTATION_PENDING
 

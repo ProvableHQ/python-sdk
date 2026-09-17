@@ -16,9 +16,12 @@ import requests
 from aleo_bridge.errors import InsufficientBalanceError
 from aleo_bridge.eth import Ethereum
 
-pytestmark = pytest.mark.skipif(
-    os.environ.get("BRIDGE_LIVE_READS") != "1" or not os.environ.get("ETHEREUM_RPC_URL"),
-    reason="set BRIDGE_LIVE_READS=1 and ETHEREUM_RPC_URL")
+pytestmark = [
+    pytest.mark.live,
+    pytest.mark.skipif(
+        os.environ.get("BRIDGE_LIVE_READS") != "1" or not os.environ.get("ETHEREUM_RPC_URL"),
+        reason="set BRIDGE_LIVE_READS=1 and ETHEREUM_RPC_URL"),
+]
 
 ALEO_RECIPIENT = "aleo1kypwp5m7qtk9mwazgcpg0tq8aal23mnrvwfvug65qgcg9xvsrqgspyjm6n"
 # The xReserve contract custodies deposited USDC, so its balance exceeds the 2 USDC minimum and its
@@ -38,6 +41,8 @@ def _run(fn):
         raise
     except requests.exceptions.ConnectionError as exc:
         pytest.skip(f"public RPC unreachable: {exc}")
+    except requests.exceptions.Timeout:
+        pytest.skip("public RPC timed out")
 
 
 @pytest.fixture(scope="module")
