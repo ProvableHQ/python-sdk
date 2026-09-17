@@ -9,9 +9,10 @@ checkpointable path: prove on the DPS, hand back the serialized transaction, the
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import Any, Callable, Generic, TypeVar
 
-from .errors import ConfigurationError
+from .errors import BridgeError, ConfigurationError
 from .types import PreparedTx
 
 R = TypeVar("R")
@@ -209,9 +210,115 @@ class AleoCall(Generic[R]):
         return self._build(prepared.transaction_id, root_outputs(decoded, self.program_id, self.function_name))
 
 
-class EvmCall:
-    """Completed in Task 2."""
+@dataclass(frozen=True)
+class EvmStep:
+    """One unsigned EVM transaction the call will broadcast, in order."""
+
+    kind: str          # "approve" | "main"
+    to: str
+    data: str          # 0x calldata
+    value: int = 0     # wei (msg.value)
 
 
-__all__ = ["AleoCall", "EvmCall", "extract_tx_id", "is_duplicate_submission", "output_values", "payload_transitions",
-           "root_outputs"]
+@dataclass(frozen=True)
+class EvmOutcome:
+    """What the step runner observed; the module's ``finish`` turns it into the typed result."""
+
+    status: str                        # "SOURCE_APPROVAL_PENDING" | "SOURCE_CONFIRMING" | "CONFIRMED"
+    sender: str
+    approval_tx_ids: tuple[str, ...]
+    source_tx_id: str | None
+    receipt: Any | None                # web3 receipt when status == "CONFIRMED"
+
+
+def _assert_evm_success(receipt: Any, tx_hash: str) -> None:
+    if int(receipt["status"]) == 0:
+        raise BridgeError(f"EVM transaction reverted: {tx_hash}")
+
+
+class EvmCall(Generic[R]):
+    """A prepared Ethereum write: ``build()`` for unsigned transaction dicts, ``send()`` to broadcast.
+
+    ``steps(sender)`` is evaluated at ``build``/``send`` time so allowances and router
+    fees are read at the last responsible moment. ``send`` broadcasts approvals then the
+    main call, emits a ``Checkpoint`` after every broadcast (before polling) and after
+    confirmation, and returns a pending result when a receipt does not arrive within
+    ``timeout_seconds`` — a timeout is not a failure.
+    """
+
+    def __init__(self, conn: Any, *, plan: "Plan", registry: "Registry",
+                 steps: Callable[[str], list[EvmStep]], finish: Callable[[EvmOutcome], R],
+                 store: "CheckpointStore | None" = None) -> None:
+        self._conn, self.plan, self._registry = conn, plan, registry
+        self._steps, self._finish, self._store = steps, finish, store
+
+    def _sender(self) -> str:
+        from .errors import ConfigurationError
+
+        sender = self._conn.require_address()
+        if self.plan.sender:
+            Web3 = self._conn.w3.__class__
+            if Web3.to_checksum_address(self.plan.sender) != sender:
+                raise ConfigurationError(
+                    f"Prepared sender {self.plan.sender} does not match connected account {sender}")
+        return sender
+
+    def build(self) -> list[dict]:
+        """Unsigned transaction dicts in submission order (approvals then main). Reads only."""
+        from .errors import ConfigurationError
+
+        sender = self._conn.address or self.plan.sender
+        if sender is None:
+            raise ConfigurationError("build() needs a sender: configure a signer or set plan.sender")
+        nonce = int(self._conn.w3.eth.get_transaction_count(sender, "pending"))
+        return [{"from": sender, "to": step.to, "data": step.data, "value": step.value,
+                 "chainId": self._conn.chain_id, "nonce": nonce + i}
+                for i, step in enumerate(self._steps(sender))]
+
+    def _checkpoint(self, result: R, on_checkpoint: Callable[["Checkpoint"], None] | None) -> None:
+        from .checkpoint import create_checkpoint
+
+        checkpoint = create_checkpoint(self.plan, result.receipt, self._registry)  # type: ignore[attr-defined]
+        if self._store is not None:
+            self._store.save(checkpoint)
+        if on_checkpoint is not None:
+            on_checkpoint(checkpoint)
+
+    def send(self, *, wait: bool = True, timeout_seconds: float = 120.0, poll_seconds: float = 1.0,
+             on_checkpoint: Callable[["Checkpoint"], None] | None = None) -> R:
+        """Broadcast every step in order; checkpoint each hash before polling; pending on timeout.
+
+        ``wait=False`` broadcasts only the first step and returns its pending result; call
+        ``bridge.eth.source_status`` (or plan 4's ``resume``) to continue.
+        """
+        sender = self._sender()
+        approvals: list[str] = []
+        for step in self._steps(sender):
+            tx_hash = self._conn.send_transaction({"from": sender, "to": step.to, "data": step.data, "value": step.value})
+            if step.kind == "approve":
+                approvals.append(tx_hash)
+                pending = self._finish(EvmOutcome("SOURCE_APPROVAL_PENDING", sender, tuple(approvals), None, None))
+                self._checkpoint(pending, on_checkpoint)
+                if not wait:
+                    return pending
+                receipt = self._conn.wait_for_receipt(tx_hash, timeout_seconds=timeout_seconds, poll_seconds=poll_seconds)
+                if receipt is None:
+                    return pending
+                _assert_evm_success(receipt, tx_hash)
+                continue
+            pending = self._finish(EvmOutcome("SOURCE_CONFIRMING", sender, tuple(approvals), tx_hash, None))
+            self._checkpoint(pending, on_checkpoint)
+            if not wait:
+                return pending
+            receipt = self._conn.wait_for_receipt(tx_hash, timeout_seconds=timeout_seconds, poll_seconds=poll_seconds)
+            if receipt is None:
+                return pending
+            _assert_evm_success(receipt, tx_hash)
+            confirmed = self._finish(EvmOutcome("CONFIRMED", sender, tuple(approvals), tx_hash, receipt))
+            self._checkpoint(confirmed, on_checkpoint)
+            return confirmed
+        raise BridgeError("EvmCall has no main step")
+
+
+__all__ = ["AleoCall", "EvmCall", "EvmOutcome", "EvmStep", "extract_tx_id", "is_duplicate_submission",
+           "output_values", "payload_transitions", "root_outputs"]

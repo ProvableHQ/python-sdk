@@ -9,7 +9,11 @@ from __future__ import annotations
 import os
 from typing import Any, Mapping
 
-from .errors import ConfigurationError, MissingExtraError
+from ._evm_abi import EVM_CHAIN_BY_ENVIRONMENT
+from .errors import BridgeError, ConfigurationError, MissingExtraError
+from .registry import Asset, Chain, Registry, Route
+from .types import Plan, Step
+from .units import format_decimal_amount
 
 
 def _web3():
@@ -156,11 +160,46 @@ class Ethereum:
             return None
 
 
+def _plan_for(registry: Registry, route: Route, *, amount_atomic: int, recipient: str, sender: str | None,
+              mint_mode: str = "public") -> Plan:
+    """Build the ``Plan`` for an Ethereum-origin route (mirrors veil ``prepare`` steps, brief §2.1).
+
+    Plan 4's ``lifecycle.prepare`` is the Tier-1 entry point; this helper is the Tier-2
+    path so ``bridge.eth.*`` calls carry a checkpointable plan without importing lifecycle.
+    """
+    source: Asset = registry.asset(route.source_asset_id)
+    destination: Asset = registry.asset(route.destination_asset_id)
+    if mint_mode not in ("public", "record", "private"):
+        raise BridgeError(f"mint_mode must be public, record or private; got {mint_mode!r}")
+    if mint_mode != "public" and route.protocol != "xreserve":
+        raise BridgeError("mint_mode other than public applies only to xReserve deposits to Aleo")
+    if amount_atomic <= 0:
+        raise BridgeError("amount_atomic must be positive")
+    if route.protocol == "xreserve":
+        steps = (Step("source-approval", "approve", "evm-wallet", False),
+                 Step("source-deposit", "deposit", "evm-wallet", True),
+                 Step("deposit-attestation", "wait-attestation", "protocol", False),
+                 Step("destination-mint", "mint", "aleo-wallet" if mint_mode == "private" else "protocol", False))
+    else:
+        steps = tuple([Step("source-approval", "approve", "evm-wallet", False)] if source.kind == "token" else []) + (
+            Step("source-dispatch", "dispatch", "evm-wallet", True),
+            Step("message-delivery", "wait-delivery", "protocol", False),
+            Step("destination-confirmation", "confirm-delivery", "protocol", False))
+    return Plan(route_id=route.id, registry_version=registry.version, protocol=route.protocol,
+                environment=route.environment, source_asset_id=source.id, destination_asset_id=destination.id,
+                amount=format_decimal_amount(amount_atomic, source.decimals), amount_atomic=amount_atomic,
+                recipient=recipient, sender=sender, mint_mode=mint_mode, steps=steps)
+
+
 class EthModule:
-    """Completed in Task 2."""
+    """``bridge.eth`` — Ethereum-origin Hyperlane and xReserve actions (reads return values, writes return ``EvmCall``)."""
 
     def __init__(self, bridge: Any, conn: Ethereum) -> None:
-        self._bridge, self._conn = bridge, conn
+        self.bridge = bridge
+        self.conn = conn
+        self.registry: Registry = bridge.registry
+        self.network: str = bridge.network            # "mainnet" | "testnet" → aleo.<network> for encoders
+        self.chain: Chain = self.registry.chain(EVM_CHAIN_BY_ENVIRONMENT[bridge.environment])
 
 
 __all__ = ["Ethereum", "EthModule"]
