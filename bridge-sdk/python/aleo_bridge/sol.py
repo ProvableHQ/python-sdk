@@ -786,3 +786,42 @@ class SolModule:
             raise BridgeError(f"Solana Hyperlane transfer {signature} failed after broadcast: {exc}") from exc
         except Exception as exc:  # noqa: BLE001 — any post-broadcast failure names the signature
             raise BridgeError(f"Solana Hyperlane transfer {signature} failed after broadcast: {exc}") from exc
+
+    # --- status -----------------------------------------------------------------------------
+
+    def source_status(self, plan: Plan, receipt: Receipt) -> Receipt:
+        """One refresh of a SOURCE_CONFIRMING Solana receipt (veil ``getSourceStatus``): unknown → unchanged, or
+        EXPIRED once the checkpointed blockhash is invalid; processed → unchanged; failed → raises;
+        confirmed/finalized → DELIVERY_PENDING with the Mailbox message id when the log is available."""
+        if receipt.protocol != "hyperlane" or receipt.status is not Status.SOURCE_CONFIRMING or not receipt.source_tx_id:
+            raise BridgeError("Solana Hyperlane source status requires a source-confirming Hyperlane receipt with a signature")
+        if receipt.protocol_state.get("routeId") != plan.route_id:
+            raise BridgeError(f"receipt route {receipt.protocol_state.get('routeId')} does not match plan route {plan.route_id}")
+        libs = _libs()
+        signature = receipt.source_tx_id
+        status = _signature_status(self.client, libs.Signature.from_string(signature))
+        if status is None:
+            blockhash = receipt.protocol_state.get("blockhash")
+            height = receipt.protocol_state.get("lastValidBlockHeight")
+            if blockhash is None and height is None:
+                return receipt
+            if not isinstance(blockhash, str) or not blockhash or not isinstance(height, str) or not height.isdigit():
+                raise CheckpointInvalidError("Solana Hyperlane source receipt has an invalid blockhash lifetime")
+            try:
+                hash_ = libs.Hash.from_string(blockhash)
+            except Exception as exc:
+                raise CheckpointInvalidError("Solana Hyperlane source receipt has an invalid blockhash lifetime") from exc
+            try:
+                valid = bool(self.client.is_blockhash_valid(hash_, commitment=CONFIRMED).value)
+            except Exception:
+                return receipt                          # advisory read; keep waiting
+            if not valid:
+                return receipt.replace(status=Status.EXPIRED, protocol_state={
+                    **receipt.protocol_state, "blockhashExpired": True,
+                    "sourceError": f"Solana transaction expired before confirmation: {signature}"})
+            return receipt
+        if status == "processed":
+            return receipt
+        if status == "failed":
+            raise BridgeError(f"Solana Hyperlane transfer failed on-chain: {signature}")
+        return self._delivery_pending(receipt, signature)
