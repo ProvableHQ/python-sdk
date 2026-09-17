@@ -392,7 +392,7 @@ class SolCall(Generic[R]):
 
     def build(self) -> Any:
         """Partially signed ``VersionedTransaction`` (unique-message signer only); sets ``self.quote``."""
-        self._built = self._module._build_transaction(route=self.route, recipient=self.recipient,
+        self._built = self._module._build_transaction(recipient=self.recipient,
                                                       amount_atomic=self.amount_atomic, plan=self.plan)
         self.quote = self._built.quote
         return self._built.transaction

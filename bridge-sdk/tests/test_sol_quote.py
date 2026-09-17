@@ -106,6 +106,56 @@ def test_quote_with_plan_checks_registry_version_and_reuses_the_plan():
         mod.quote_transfer_remote(RECIPIENT, plan=stale)
 
 
+def test_a_plan_alone_supplies_recipient_amount_and_sender():
+    mod, _ = module()
+    plan = mod.quote_transfer_remote(RECIPIENT, amount_atomic=5, sender=SENDER).plan
+    quoted = mod.quote_transfer_remote(plan=plan)                  # no positional recipient
+    assert quoted.plan is plan and quoted.plan.sender == SENDER
+    assert quoted.total_lamports == 5 + EXPECTED_IGP_PAYMENT_LAMPORTS + NETWORK_FEE_LAMPORTS + RENT
+
+
+def test_a_plan_is_mutually_exclusive_with_sender_and_a_differing_amount():
+    mod, _ = module()
+    plan = mod.quote_transfer_remote(RECIPIENT, amount_atomic=5, sender=SENDER).plan
+    with pytest.raises(ValueError, match="plan"):
+        mod.quote_transfer_remote(plan=plan, sender=SENDER)
+    with pytest.raises(ValueError, match="plan"):
+        mod.quote_transfer_remote(plan=plan, amount_atomic=6)
+    assert mod.quote_transfer_remote(plan=plan, amount_atomic=5).plan is plan       # identical is fine
+
+
+def test_neither_a_plan_nor_a_recipient_is_refused():
+    mod, fake = module()
+    with pytest.raises(InvalidRecipientError, match="recipient is required when no plan is given"):
+        mod.quote_transfer_remote(amount_atomic=1, sender=SENDER)
+    with pytest.raises(InvalidRecipientError, match="recipient is required when no plan is given"):
+        mod.transfer_remote(amount_atomic=1)
+    assert fake.sent == []
+
+
+def test_a_malformed_json_private_key_never_carries_the_secret_into_the_traceback():
+    """A chained JSONDecodeError keeps the whole document in .doc — which IS the private key."""
+    from aleo_bridge.sol import keypair_from_private_key
+
+    secret = "[17,42,99,128"                                       # a truncated solana-cli id.json
+    with pytest.raises(ConfigurationError) as excinfo:
+        keypair_from_private_key(secret)
+    exc = excinfo.value
+    assert exc.__cause__ is None and exc.__context__ is None
+    assert "17" not in repr(exc) and secret not in repr(exc)
+
+
+def test_a_malformed_base58_private_key_never_carries_the_secret_into_the_traceback():
+    from aleo_bridge.sol import keypair_from_private_key
+
+    secret = "5JueXBoJHvOoPeKeYsEcReT"
+    with pytest.raises(ConfigurationError) as excinfo:
+        keypair_from_private_key(secret)
+    exc = excinfo.value
+    assert exc.__cause__ is None and exc.__context__ is None
+    assert secret not in repr(exc)
+
+
 def test_balance_reads_the_connected_wallet():
     keypair = Keypair()
     mod, fake = module(FakeSolanaClient(balance=42), signer=keypair)

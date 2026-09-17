@@ -29,6 +29,7 @@ from .errors import (
     ConfigurationError,
     InsufficientBalanceError,
     InvalidAmountError,
+    InvalidRecipientError,
     MissingExtraError,
     RegistryVersionMismatchError,
     RouteNotFoundError,
@@ -371,20 +372,32 @@ def keypair_from_private_key(private_key: str | bytes) -> Any:
     if isinstance(private_key, (bytes, bytearray, memoryview)):
         raw = bytes(private_key)
     else:
+        # Every failure below raises OUTSIDE its except block, so neither __cause__ nor __context__ is
+        # set: a chained JSONDecodeError carries the whole document in .doc, and a solders parse error
+        # may echo its input — either one would print the private key with the traceback.
         text = private_key.strip()
         if text.startswith("["):
+            values: Any = None
+            malformed = False
             try:
                 values = json.loads(text)
-            except ValueError as exc:
-                raise ConfigurationError("Solana private key JSON array is malformed; expected the 64 integers of a solana-cli id.json") from exc
+            except ValueError:
+                malformed = True
+            if malformed:
+                raise ConfigurationError(
+                    "Solana private key JSON array is malformed; expected the 64 integers of a solana-cli id.json")
             if not isinstance(values, list) or not all(isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 255 for v in values):
                 raise ConfigurationError("Solana private key JSON array must hold integers 0–255")
             raw = bytes(values)
         else:
+            keypair = None
             try:
-                return libs.Keypair.from_base58_string(text)
-            except Exception as exc:  # solders raises its own parse error types
-                raise ConfigurationError("Solana private key is not a valid base58 64-byte secret") from exc
+                keypair = libs.Keypair.from_base58_string(text)
+            except Exception:  # noqa: BLE001 — solders raises its own parse error types
+                keypair = None
+            if keypair is None:
+                raise ConfigurationError("Solana private key is not a valid base58 64-byte secret")
+            return keypair
     if len(raw) == 64:
         return libs.Keypair.from_bytes(raw)
     if len(raw) == 32:
@@ -496,6 +509,17 @@ def _confirmation_name(status: Any) -> str | None:
         return None
     name = getattr(value, "name", None) or str(value)
     return str(name).rsplit(".", 1)[-1].lower()
+
+
+def _assert_amount_matches_plan(plan: Plan, *, amount: str | None, amount_atomic: int | None, decimals: int) -> None:
+    """A plan pins the amount. Re-stating the same one is harmless; a different one is a mistake the
+    caller must see, not a silent override of the plan they prepared (``EthModule``'s rule)."""
+    if amount is None and amount_atomic is None:
+        return
+    given = resolve_amount(amount=amount, amount_atomic=amount_atomic, decimals=decimals)
+    if given != plan.amount_atomic:
+        raise ValueError(f"plan is for {plan.amount_atomic} atomic units, but {given} was passed; "
+                         "pass plan= alone or re-run quote() for the amount you want")
 
 
 @dataclass
@@ -654,23 +678,34 @@ class SolModule:
         )
         return message, str(latest.blockhash), int(latest.last_valid_block_height)
 
-    def quote_transfer_remote(self, recipient: str, *, amount: str | None = None, amount_atomic: int | None = None,
-                              sender: str | None = None, plan: Plan | None = None) -> SolanaHyperlaneQuote:
+    def quote_transfer_remote(self, recipient: str | None = None, *, amount: str | None = None,
+                              amount_atomic: int | None = None, sender: str | None = None,
+                              plan: Plan | None = None) -> SolanaHyperlaneQuote:
         """Lamports required for a SOL → Aleo transfer: amount + IGP payment + network fee + rent (spec §5 kind
         ``solana-hyperlane``). Reads Solana; never signs. ``sender`` defaults to the connected wallet and is required
-        for the fee estimate; ``plan`` (from ``Bridge.quote``) pins recipient/amount/sender and must match the live
-        registry version."""
+        for the fee estimate.
+
+        ``plan`` (from ``Bridge.quote``) supplies recipient, amount and sender, and must match the live registry
+        version and route; like ``EthModule`` it is mutually exclusive with ``sender=``, and an ``amount``/
+        ``amount_atomic`` that disagrees with the plan is a ``ValueError`` (an identical one is tolerated, so
+        re-stating the plan's own amount is harmless). Without a plan, ``recipient`` is required.
+        """
         libs = _libs()
         route = self.outbound_route()
         metadata = sl.solana_route_metadata(route)
         decimals = self.registry.asset(route.source_asset_id).decimals
         if plan is not None:
+            if sender is not None:
+                raise ValueError("Pass plan= or sender=, not both: the plan carries its own sender")
             if plan.registry_version != self.registry.version:
                 raise RegistryVersionMismatchError(
                     f"plan was prepared against registry {plan.registry_version}; this client runs {self.registry.version} — re-run quote()")
             if plan.route_id != route.id:
                 raise UnsupportedRouteError(f"plan route {plan.route_id} is not the Solana Hyperlane route {route.id}")
+            _assert_amount_matches_plan(plan, amount=amount, amount_atomic=amount_atomic, decimals=decimals)
             recipient, amount_atomic, amount, sender = plan.recipient, plan.amount_atomic, None, plan.sender
+        elif recipient is None:
+            raise InvalidRecipientError("recipient is required when no plan is given")
         amount_atomic = resolve_amount(amount=amount, amount_atomic=amount_atomic, decimals=decimals)
         if amount_atomic <= 0:
             raise InvalidAmountError("amount must be positive")
@@ -709,41 +744,59 @@ class SolModule:
 
     # --- write ------------------------------------------------------------------------------
 
-    def transfer_remote(self, recipient: str, *, amount: str | None = None, amount_atomic: int | None = None,
-                        plan: Plan | None = None) -> SolCall[DispatchReceipt]:
+    def transfer_remote(self, recipient: str | None = None, *, amount: str | None = None,
+                        amount_atomic: int | None = None, plan: Plan | None = None) -> SolCall[DispatchReceipt]:
         """Send native SOL to an Aleo address over the Hyperlane warp route (spec §6).
 
         Returns a :class:`SolCall`: ``build()`` previews the partially signed transaction,
         ``send()`` moves funds (amount + IGP payment + network fee + rent leave the wallet).
-        ``plan`` (from ``Bridge.execute``) must have been prepared for the connected wallet; its
-        registry version and route id are re-checked against the live registry when the call runs.
+
+        ``plan`` (from ``Bridge.execute``) supplies recipient and amount and must have been prepared for
+        the connected wallet; its registry version and route id are re-checked against the live registry
+        when the call runs. An ``amount``/``amount_atomic`` that disagrees with the plan is a
+        ``ValueError``. Without a plan, ``recipient`` is required.
         """
         route = self.outbound_route()
         sl.solana_route_metadata(route)                                  # refuse inactive/malformed routes early
         decimals = self.registry.asset(route.source_asset_id).decimals
         if plan is not None:
+            _assert_amount_matches_plan(plan, amount=amount, amount_atomic=amount_atomic, decimals=decimals)
             recipient, amount_atomic, amount = plan.recipient, plan.amount_atomic, None
+        elif recipient is None:
+            raise InvalidRecipientError("recipient is required when no plan is given")
         amount_atomic = resolve_amount(amount=amount, amount_atomic=amount_atomic, decimals=decimals)
         if amount_atomic <= 0:
             raise InvalidAmountError("amount must be positive")
         aleo_address_to_bytes32(recipient)
 
         def build_result(receipt: Receipt) -> DispatchReceipt:
-            return DispatchReceipt(transaction_id=receipt.source_tx_id or receipt.id, route_id=route.id,
+            # The receipt's routeId comes from the route resolved at build time, which is the one the
+            # transaction was actually compiled against; route.id here is only the snapshot's fallback.
+            return DispatchReceipt(transaction_id=receipt.source_tx_id or receipt.id,
+                                   route_id=receipt.protocol_state.get("routeId") or route.id,
                                    message_id=receipt.protocol_state.get("messageId"),
                                    amount_atomic=amount_atomic, receipt=receipt)
 
         return SolCall(self, route=route, recipient=recipient, amount_atomic=amount_atomic, plan=plan,
                        build_result=build_result, store=getattr(self._bridge, "checkpoints", None))
 
-    def _build_transaction(self, *, route: Route, recipient: str, amount_atomic: int, plan: Plan | None) -> SolBuild:
+    def _build_transaction(self, *, recipient: str, amount_atomic: int, plan: Plan | None) -> SolBuild:
         libs = _libs()
         sender = self.conn.address
         if sender is None:
             raise ConfigurationError("Solana connection is read-only: pass signer= or private_key= to Solana() to build transactions")
         if plan is not None and plan.sender and plan.sender != sender:
             raise ConfigurationError(f"Prepared sender {plan.sender} does not match connected account {sender}")
-        quote = self.quote_transfer_remote(recipient, amount_atomic=amount_atomic, sender=sender, plan=plan)
+        quote = (self.quote_transfer_remote(plan=plan) if plan is not None          # the plan carries the sender
+                 else self.quote_transfer_remote(recipient, amount_atomic=amount_atomic, sender=sender))
+        # Re-resolved here rather than reusing the route snapshotted when transfer_remote() was called:
+        # the registry may have moved since, and compiling the instruction against a stale deployment
+        # while the quote priced the live one would sign a transfer to the wrong program.
+        route = self.outbound_route()
+        if route.id != quote.plan.route_id:
+            raise UnsupportedRouteError(
+                f"the Solana Hyperlane route is now {route.id}, but this transfer was quoted for "
+                f"{quote.plan.route_id} — re-run quote()")
         metadata = sl.solana_route_metadata(route)
         unique = libs.Keypair()                       # fresh per build: seeds the dispatched-message and gas-payment PDAs
         message, blockhash, last_valid_block_height = self._compile_message(

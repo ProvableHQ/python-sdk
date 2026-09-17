@@ -27,6 +27,7 @@ from tests.fakes.sealevel_fixtures import EXPECTED_MESSAGE_ID, TRANSFER, WARP_PR
 RECIPIENT = TRANSFER["recipientAleoAddress"]
 AMOUNT = TRANSFER["amountLamports"]
 CHECKPOINT_SOURCE_KEYS = {"transactionId", "blockhash", "lastValidBlockHeight"}
+OTHER_WARP_PROGRAM_ADDRESS = "6HCbFm2P3NWG8SKhzvMLgQHBJAjZvBrbfP6uFtQKpyfd"     # a redeployed warp route
 
 
 @pytest.fixture(autouse=True)
@@ -332,6 +333,31 @@ def test_send_requires_a_signer():
     read_only = SolModule(stub_bridge(), Solana(client=fake))
     with pytest.raises(ConfigurationError, match="read-only"):
         read_only.transfer_remote(RECIPIENT, amount_atomic=1).build()
+    assert fake.sent == []
+
+
+def test_transfer_remote_accepts_a_plan_without_a_recipient():
+    mod, fake, keypair = module()
+    plan = mod.quote_transfer_remote(RECIPIENT, amount_atomic=3).plan
+    result = mod.transfer_remote(plan=plan).send()                 # no positional recipient
+    assert result.receipt.status is Status.DELIVERY_PENDING and len(fake.sent) == 1
+    with pytest.raises(ValueError, match="plan"):
+        mod.transfer_remote(plan=plan, amount_atomic=4)
+    assert mod.transfer_remote(plan=plan, amount_atomic=3) is not None      # identical is fine
+
+
+def test_build_compiles_against_the_re_resolved_route_not_the_one_snapshotted_at_transfer_remote():
+    """The registry can move between transfer_remote() and build(); building the instruction from the
+    stale snapshot while the quote used the fresh route would sign against the wrong program."""
+    mod, fake, _ = module()
+    call = mod.transfer_remote(RECIPIENT, amount_atomic=1)
+    original = mod.outbound_route()
+    moved = dataclasses.replace(original, metadata={**original.metadata,
+                                                    "warpProgramAddress": OTHER_WARP_PROGRAM_ADDRESS})
+    mod.outbound_route = lambda: moved                             # the live registry now says otherwise
+    transaction = call.build()
+    programs = [str(transaction.message.account_keys[ix.program_id_index]) for ix in transaction.message.instructions]
+    assert OTHER_WARP_PROGRAM_ADDRESS in programs and WARP_PROGRAM_ADDRESS not in programs
     assert fake.sent == []
 
 
