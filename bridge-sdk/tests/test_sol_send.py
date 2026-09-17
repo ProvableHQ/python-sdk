@@ -71,6 +71,14 @@ def test_extract_message_id_reads_only_the_mailbox_dispatch_line():
     assert sl.extract_hyperlane_message_id([]) is None
 
 
+def test_extract_message_id_refuses_an_over_long_hex_id():
+    """A 65+-hex id is not a 32-byte message id; truncating it to 64 would report a plausible wrong id."""
+    over_long = "Program log: Dispatched message to 1634493807, ID 0x" + "a" * 65
+    assert sl.extract_hyperlane_message_id([over_long]) is None
+    exact = "Program log: Dispatched message to 1634493807, ID 0x" + "a" * 64
+    assert sl.extract_hyperlane_message_id([exact]) == "0x" + "a" * 64
+
+
 def test_build_returns_a_transaction_signed_only_by_the_unique_message_key():
     mod, fake, keypair = module()
     call = mod.transfer_remote(RECIPIENT, amount_atomic=AMOUNT)
@@ -249,6 +257,30 @@ def test_send_expired_blockhash_returns_expired_without_resubmitting():
     assert receipt.status is Status.EXPIRED
     assert receipt.protocol_state["blockhashExpired"] is True
     assert SIGNATURE in receipt.protocol_state["sourceError"]
+    assert len(fake.sent) == 1
+
+
+def test_processed_is_never_reported_expired_and_skips_the_blockhash_probe():
+    """A processed transaction has landed; calling it EXPIRED would invite a resend (double spend)."""
+    fake = FakeSolanaClient(statuses=[FakeSignatureStatus(confirmation_status="processed")], blockhash_valid=False)
+    mod, _, _ = module(fake)
+    result = mod.transfer_remote(RECIPIENT, amount_atomic=1).send(timeout_seconds=0)
+    receipt = result.receipt
+    assert receipt.status is Status.SOURCE_CONFIRMING and receipt.id == SIGNATURE
+    assert "blockhashExpired" not in receipt.protocol_state
+    assert "is_blockhash_valid" not in fake.calls
+    assert len(fake.sent) == 1
+
+
+def test_log_fetch_failure_after_confirmation_degrades_to_message_id_unavailable():
+    """The logs only carry the message id: an RPC failure there must not fail a settled transfer."""
+    fake = FakeSolanaClient(get_transaction_error=RuntimeError("rpc"))
+    mod, _, _ = module(fake)
+    result = mod.transfer_remote(RECIPIENT, amount_atomic=1).send()
+    receipt = result.receipt
+    assert receipt.status is Status.DELIVERY_PENDING and receipt.id == SIGNATURE
+    assert receipt.protocol_state["messageIdUnavailable"] is True
+    assert "messageId" not in receipt.protocol_state and result.message_id is None
     assert len(fake.sent) == 1
 
 

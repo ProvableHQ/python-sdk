@@ -63,7 +63,7 @@ class FakeSolanaClient:
                  fee: int = NETWORK_FEE_LAMPORTS, rents: dict[int, int] | None = None,
                  statuses: list[Any] | None = None, blockhash_valid: Any = True,
                  logs: list[str] | None = None, no_logs: bool = False,
-                 signature: Signature = STUB_SIGNATURE) -> None:
+                 signature: Signature = STUB_SIGNATURE, get_transaction_error: Exception | None = None) -> None:
         self.balance = balance
         self.accounts = {IGP["address"]: igp_account_data()} if accounts is None else accounts
         self.fee = fee
@@ -73,6 +73,7 @@ class FakeSolanaClient:
         # logs=None → the recorded mainnet logs; logs=[] → confirmed but no dispatch line; no_logs → transaction not found
         self.logs = None if no_logs else (list(TRANSFER["logMessages"]) if logs is None else list(logs))
         self.signature = signature
+        self.get_transaction_error = get_transaction_error      # raised by get_transaction (RPC/decode failure)
         self.calls: list[str] = []
         self.fee_messages: list[Any] = []
         self.sent: list[bytes] = []
@@ -125,6 +126,8 @@ class FakeSolanaClient:
     def get_transaction(self, tx_sig, encoding="json", commitment=None, max_supported_transaction_version=None):
         self.calls.append("get_transaction")
         self.transaction_calls.append((commitment, max_supported_transaction_version))
+        if self.get_transaction_error is not None:
+            raise self.get_transaction_error
         if self.logs is None:
             return _Resp(None)
         meta = SimpleNamespace(log_messages=list(self.logs))

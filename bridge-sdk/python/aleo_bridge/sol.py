@@ -504,7 +504,11 @@ def _poll_for_confirmation(client: Any, signature: str, blockhash: str, timeout_
                            poll_seconds: float) -> str | None:
     """Poll until confirmed/finalized ('confirmed'|'finalized'), the blockhash expires ('expired'), or the
     deadline passes (None). A status read that raises is swallowed — the transaction is already broadcast,
-    so a transient RPC error must not be reported as a transfer failure. An on-chain ``err`` raises."""
+    so a transient RPC error must not be reported as a transfer failure. An on-chain ``err`` raises.
+
+    The blockhash probe runs only while the signature has NO status at all: a ``processed`` transaction has
+    already landed, and reporting it 'expired' would invite a resend (the same rule ``source_status`` applies).
+    ``processed`` therefore keeps polling until it confirms or the deadline passes."""
     libs = _libs()
     sig = libs.Signature.from_string(signature)
     hash_ = libs.Hash.from_string(blockhash)
@@ -519,11 +523,12 @@ def _poll_for_confirmation(client: Any, signature: str, blockhash: str, timeout_
             raise BridgeError(f"Solana Hyperlane transfer failed on-chain: {signature}")
         if status in ("confirmed", "finalized"):
             return status
-        try:
-            if not client.is_blockhash_valid(hash_, commitment=CONFIRMED).value:
-                return "expired"
-        except Exception:                           # noqa: BLE001
-            pass                                    # advisory while the signature may still land
+        if status is None:                          # no status at all: only then can the blockhash have expired
+            try:
+                if not client.is_blockhash_valid(hash_, commitment=CONFIRMED).value:
+                    return "expired"
+            except Exception:                       # noqa: BLE001
+                pass                                # advisory while the signature may still land
         if time.monotonic() >= deadline:
             return None
         time.sleep(interval)
@@ -745,7 +750,17 @@ class SolModule:
         return None if meta is None else meta.log_messages
 
     def _delivery_pending(self, receipt: Receipt, signature: str) -> Receipt:
-        message_id = sl.extract_hyperlane_message_id(self._transaction_logs(signature))
+        """Settle a confirmed signature as DELIVERY_PENDING, with the Mailbox message id when readable.
+
+        The logs supply nothing but the message id, and ``messageIdUnavailable`` already covers a missing
+        dispatch line, so a failing ``getTransaction`` degrades to that fallback instead of turning a
+        transfer that is already on-chain into a reported failure.
+        """
+        try:
+            logs = self._transaction_logs(signature)
+        except Exception:                           # noqa: BLE001 — RPC or decode failure reading the logs
+            logs = None
+        message_id = sl.extract_hyperlane_message_id(logs)
         state = dict(receipt.protocol_state)
         if message_id:
             state["messageId"] = message_id

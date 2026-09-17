@@ -374,7 +374,8 @@ def account_metas(metadata: SolanaRouteMetadata, sender: str, unique_message: st
 
 # SEALEVEL_NOTES §5: only the Mailbox dispatch line carries the full id; the IGP and warp-completion
 # lines print H256 with Display (truncated "0xffe0…7805") and must never be parsed.
-DISPATCHED_MESSAGE_LOG_PATTERN = re.compile(r"Dispatched message to \d+, ID (0x[0-9a-fA-F]{64})")
+# The trailing lookahead refuses a 65+-hex id outright rather than truncating it to a plausible-looking one.
+DISPATCHED_MESSAGE_LOG_PATTERN = re.compile(r"Dispatched message to \d+, ID (0x[0-9a-fA-F]{64})(?![0-9a-fA-F])")
 
 
 def extract_hyperlane_message_id(logs: "list[str] | None") -> str | None:
