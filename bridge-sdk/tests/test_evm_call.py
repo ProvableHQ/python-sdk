@@ -107,6 +107,29 @@ def test_build_plan_uses_a_solana_wallet_for_a_solana_origin():
     ]
 
 
+def test_build_plan_generalizes_xreserve_to_an_aleo_origin_burn():
+    """Aleo-origin xReserve withdrawal is a different step shape than the EVM-origin deposit."""
+    plan = build_plan(DEFAULT_REGISTRY, DEFAULT_REGISTRY.route("xreserve:aleo/usdcx->ethereum/usdc"),
+                      amount_atomic=10_000_000, recipient=WBTC, sender=None)
+    assert [(s.id, s.kind, s.executor, s.irreversible) for s in plan.steps] == [
+        ("source-burn", "burn", "aleo-wallet", True),
+        ("withdrawal-attestation", "wait-attestation", "protocol", False),
+        ("destination-withdrawal", "withdraw", "protocol", False),
+        ("destination-confirmation", "confirm-delivery", "protocol", False),
+    ]
+
+
+def test_build_plan_skips_approval_for_aleo_token_sources_over_hyperlane():
+    """Aleo ARC-20 tokens (wBTC/USDT mirrored on Aleo) need no approval, unlike their EVM counterparts."""
+    plan = build_plan(DEFAULT_REGISTRY, DEFAULT_REGISTRY.route("hyperlane:aleo/wbtc->ethereum/wbtc"),
+                      amount_atomic=1, recipient=WBTC, sender=None)
+    assert [(s.id, s.kind, s.executor, s.irreversible) for s in plan.steps] == [
+        ("source-dispatch", "dispatch", "aleo-wallet", True),
+        ("message-delivery", "wait-delivery", "protocol", False),
+        ("destination-confirmation", "confirm-delivery", "protocol", False),
+    ]
+
+
 def test_build_returns_unsigned_dicts_in_order_without_sending():
     w3 = fake_web3()
     call, _ = make_call(w3)
