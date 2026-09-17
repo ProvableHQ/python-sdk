@@ -79,6 +79,11 @@ def test_mapping_value_returns_none_for_missing_program(fake_aleo):
 
 
 def test_amount_helpers_and_privacy_delegation(fake_aleo):
+    from aleo_bridge.freezelist import EMPTY_TREE_ROOT
+
+    # unshield()'s default (unsupplied) merkle_proof= resolves through freezelist.exclusion_proof(),
+    # which now requires a readable on-chain root (item 4) — seed the empty-list root.
+    fake_aleo.mappings.setdefault("usdcx_freezelist.aleo", {})["freeze_list_root"] = {"1u8": f"{EMPTY_TREE_ROOT}field"}
     bridge = Bridge(fake_aleo)
     assert bridge.to_atomic("0.001", "aleo/wbtc") == 100_000 and bridge.from_atomic(100_000, ("aleo", "wbtc")) == "0.001"
     assert bridge.to_atomic("1", DEFAULT_REGISTRY.asset("ethereum/usdc")) == 1_000_000

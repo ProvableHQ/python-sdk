@@ -122,9 +122,10 @@ class FreezeList:
         """The freeze-list program backing *token_program* (usually a token program that imports it)."""
         if token_program.endswith("freezelist.aleo"):
             return token_program
+        from aleo.facade.errors import AleoError, ProgramNotFound
         try:
             imports = self._bridge.program(token_program).imports
-        except Exception:
+        except (ProgramNotFound, AleoError):
             imports = []
         for dep in imports:
             if str(dep).endswith("freezelist.aleo"):
@@ -155,12 +156,14 @@ class FreezeList:
     def _verified_tree(self, fl_program: str, leaves: list[str]) -> list[int]:
         tree = build_tree(generate_leaves(leaves), self._bridge.network)
         on_chain_root = self._bridge.mapping_value(fl_program, FREEZE_LIST_ROOT_MAPPING, CURRENT_ROOT_KEY)
-        if on_chain_root is not None:
-            computed_root = f"{tree[-1]}field"
-            if computed_root != on_chain_root:
-                raise ConfigurationError(
-                    f"computed freeze-list root {computed_root} != on-chain root {on_chain_root} for {fl_program}; "
-                    "refusing to build a proof")
+        if on_chain_root is None:
+            raise ConfigurationError(
+                f"{fl_program}/{FREEZE_LIST_ROOT_MAPPING}[{CURRENT_ROOT_KEY}] is unreadable; pass merkle_proof= explicitly")
+        computed_root = f"{tree[-1]}field"
+        if computed_root != on_chain_root:
+            raise ConfigurationError(
+                f"computed freeze-list root {computed_root} != on-chain root {on_chain_root} for {fl_program}; "
+                "refusing to build a proof")
         return tree
 
     def tree(self, program: str) -> list[int]:

@@ -1,7 +1,7 @@
 import pytest
 
 from aleo_bridge.errors import ConfigurationError, InsufficientBalanceError, InvalidAmountError, InvalidRecipientError, UnsupportedRouteError
-from aleo_bridge.freezelist import EMPTY_MERKLE_PROOF_PAIR
+from aleo_bridge.freezelist import EMPTY_MERKLE_PROOF_PAIR, EMPTY_TREE_ROOT
 from aleo_bridge.privacy import record_amount
 from aleo_bridge.types import PrivacyReceipt
 from tests.conftest import SIGNER, USDCX_RECORD, USDCX_RECORD_SMALL
@@ -56,6 +56,7 @@ def test_unshield_arc20_recipient_must_match_caller(bridge):
 
 
 def test_unshield_arc22_defaults_to_signer_record_and_empty_proof(bridge):
+    bridge.aleo.mappings.setdefault("usdcx_freezelist.aleo", {})["freeze_list_root"] = {"1u8": f"{EMPTY_TREE_ROOT}field"}
     call = bridge.privacy.unshield("aleo/usdcx", amount="2.5")
     assert (call.program_id, call.function_name) == ("usdcx_stablecoin.aleo", "transfer_private_to_public")
     assert call.inputs[:3] == [SIGNER, "2500000u128", USDCX_RECORD]
@@ -92,6 +93,9 @@ def test_select_record_reports_largest_available(bridge):
 
 def test_private_burn_defaults_resolve_through_privacy_and_freezelist(bridge):
     ONE_LIT = "[" + ",".join(["0u8"] * 31 + ["1u8"]) + "]"
+    # The freeze-list root must be readable on chain for the default (unsupplied) merkle_proof=
+    # to resolve — an unreadable root is now fatal (see test_freezelist.py).
+    bridge.aleo.mappings.setdefault("usdcx_freezelist.aleo", {})["freeze_list_root"] = {"1u8": f"{EMPTY_TREE_ROOT}field"}
     call = bridge.xreserve.burn("0x0000000000000000000000000000000000000001", amount="2.5")
     assert call.inputs == [USDCX_RECORD, "2500000u128", "0u32", ONE_LIT, EMPTY_MERKLE_PROOF_PAIR]
     assert bridge.aleo.record_queries[-1]["program"] == "usdcx_stablecoin.aleo"

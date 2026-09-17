@@ -86,15 +86,30 @@ def test_pure_exclusion_proof_of_empty_tree_equals_veil_literal():
 
 def test_freezelist_reads_mappings_and_builds_proof(bridge):
     mappings = bridge.aleo.mappings.setdefault(FREEZE_LIST_PROGRAM, {})
-    assert bridge.freezelist.leaves(PROGRAM) == [] and bridge.freezelist.exclusion_proof(RECIPIENT, PROGRAM) == fl.EMPTY_MERKLE_PROOF_PAIR
+    assert bridge.freezelist.leaves(PROGRAM) == []
+    # An unreadable on-chain root is fatal now (item 4): no silent fallback to an unverified proof.
+    with pytest.raises(ConfigurationError, match="unreadable"):
+        bridge.freezelist.exclusion_proof(RECIPIENT, PROGRAM)
+    mappings["freeze_list_root"] = {"1u8": f"{fl.EMPTY_TREE_ROOT}field"}
+    assert bridge.freezelist.exclusion_proof(RECIPIENT, PROGRAM) == fl.EMPTY_MERKLE_PROOF_PAIR
     mappings["freeze_list_last_index"] = {"true": "1u32"}
     mappings["freeze_list_index"] = {"0u32": A, "1u32": ZERO}
     assert bridge.freezelist.leaves(PROGRAM) == [A]                    # zero address filtered
+    # The root moved once the list gained a member; seed the fake with the matching root.
+    mappings["freeze_list_root"] = {"1u8": f"{fl.build_tree(fl.generate_leaves([A]), 'mainnet')[-1]}field"}
     assert bridge.freezelist.tree(PROGRAM)[:2] == [0, A_FIELD]
     one = "{ siblings: [" + f"{A_FIELD}field, 0field, " + ", ".join(["0field"] * 14) + "], leaf_index: 1u32 }"
     assert bridge.freezelist.exclusion_proof(RECIPIENT, PROGRAM) == f"[{one}, {one}]"
     with pytest.raises(ConfigurationError, match="freeze list"):
         bridge.freezelist.exclusion_proof(A, PROGRAM)
+
+
+def test_exclusion_proof_raises_when_root_unreadable(bridge):
+    # No usdcx_freezelist.aleo/freeze_list_root mapping at all — must raise, never fall back.
+    with pytest.raises(ConfigurationError, match=r"freeze_list_root\[1u8\] is unreadable"):
+        bridge.freezelist.exclusion_proof(RECIPIENT, PROGRAM)
+    with pytest.raises(ConfigurationError, match="unreadable"):
+        bridge.freezelist.tree(PROGRAM)
 
 
 def test_freezelist_last_index_parsing_is_not_rstrip(bridge):
@@ -119,6 +134,17 @@ def test_freeze_list_program_resolves_via_fallback_table_when_imports_unavailabl
 def test_freeze_list_program_raises_for_unknown_program(bridge):
     with pytest.raises(ConfigurationError, match="no freeze-list program"):
         bridge.freezelist.freeze_list_program("arc20_wbtc.aleo")
+
+
+def test_freeze_list_program_propagates_unrelated_exceptions(bridge, monkeypatch):
+    # Only ProgramNotFound/AleoError fall back to the static table; a transient failure of any
+    # other type (e.g. a network hiccup) must propagate, not be swallowed as "no imports".
+    def boom(program_id):
+        raise RuntimeError("rpc hiccup")
+
+    monkeypatch.setattr(bridge, "program", boom)
+    with pytest.raises(RuntimeError, match="rpc hiccup"):
+        bridge.freezelist.freeze_list_program(PROGRAM)
 
 
 def test_leaves_reads_from_freeze_list_program_not_token_program(bridge):
