@@ -74,7 +74,13 @@ def deposited_log(xreserve: str, *, local_token: str, depositor: str, remote_rec
 
 
 def _decode_raw(raw: bytes) -> dict:
-    """Signed raw tx → {to, value, data, from}. Typed (0x02) and legacy envelopes."""
+    """Signed raw tx → {to, value, data, from, nonce, gas, ...fee fields}. Typed (0x02) and legacy envelopes.
+
+    Keeps whichever fee fields the sender actually filled in (``gasPrice`` for a
+    legacy/type-0 envelope, ``maxFeePerGas``/``maxPriorityFeePerGas`` for a type-2
+    one) so tests can assert on the exact values ``eth.py``'s fee-filling logic
+    computed, not just that *some* transaction was sent.
+    """
     from eth_account.typed_transactions import TypedTransaction
 
     sender = Account.recover_transaction(raw)
@@ -87,7 +93,11 @@ def _decode_raw(raw: bytes) -> dict:
         fields = rlp.decode(raw, Transaction).as_dict()
     data = fields.get("data", b"")
     data_hex = data if isinstance(data, str) else "0x" + bytes(data).hex()
-    return {"to": to_checksum_address(fields["to"]), "value": int(fields.get("value", 0)), "data": data_hex, "from": sender}
+    tx = {"to": to_checksum_address(fields["to"]), "value": int(fields.get("value", 0)), "data": data_hex, "from": sender}
+    for key in ("nonce", "gas", "gasPrice", "maxFeePerGas", "maxPriorityFeePerGas"):
+        if fields.get(key) is not None:
+            tx[key] = int(fields[key])
+    return tx
 
 
 class FakeRpcProvider(BaseProvider):
@@ -97,9 +107,10 @@ class FakeRpcProvider(BaseProvider):
                  token_balances: dict[tuple[str, str], int] | None = None,
                  allowances: dict[tuple[str, str, str], int] | None = None,
                  quotes: dict[str, list[tuple[str, int]]] | None = None,
-                 delivered: set[str] | None = None) -> None:
+                 delivered: set[str] | None = None, legacy: bool = False) -> None:
         super().__init__()
         self.chain_id = chain_id
+        self.legacy = legacy                              # True: eth_getBlockByNumber omits baseFeePerGas
         self.eth_balances = {to_checksum_address(k): v for k, v in (eth_balances or {}).items()}
         self.token_balances = {(to_checksum_address(t), to_checksum_address(o)): v
                                for (t, o), v in (token_balances or {}).items()}
@@ -110,6 +121,8 @@ class FakeRpcProvider(BaseProvider):
         self.sent: list[dict] = []                       # {to, value, data, from, hash} in send order
         self.pending: set[str] = set()                   # hashes whose receipt stays None
         self.reverted: set[str] = set()                  # hashes whose receipt has status 0
+        self.receipt_delay: dict[str, int] = {}          # hash -> remaining polls that return None before mined
+        self.receipt_poll_counts: dict[str, int] = {}     # hash -> eth_getTransactionReceipt calls seen for it
         self.receipt_logs: Callable[[dict], list[dict]] = lambda tx: []   # logs for a sent tx's receipt
         self.history_logs: list[dict] = []               # served by eth_getLogs (filtered by address/fromBlock)
         self.transactions: dict[str, dict] = {}          # extra eth_getTransactionByHash answers
@@ -134,13 +147,16 @@ class FakeRpcProvider(BaseProvider):
             return self._ok({"baseFeePerGas": [_hex(10**9)] * 2, "gasUsedRatio": [0.5],
                              "oldestBlock": "0x1", "reward": [[_hex(10**8)]]})
         if method == "eth_getBlockByNumber":
-            return self._ok({"number": _hex(self.block_number), "baseFeePerGas": _hex(10**9), "gasLimit": _hex(30_000_000),
-                             "gasUsed": "0x0", "timestamp": "0x0", "hash": "0x" + "ab" * 32, "parentHash": "0x" + "00" * 32,
-                             "transactions": [], "difficulty": "0x0", "extraData": "0x", "logsBloom": "0x" + "00" * 256,
-                             "miner": ZERO_ADDRESS, "mixHash": "0x" + "00" * 32, "nonce": "0x0000000000000000",
-                             "receiptsRoot": "0x" + "00" * 32, "sha3Uncles": "0x" + "00" * 32, "size": "0x1",
-                             "stateRoot": "0x" + "00" * 32, "totalDifficulty": "0x0",
-                             "transactionsRoot": "0x" + "00" * 32, "uncles": []})
+            block = {"number": _hex(self.block_number), "gasLimit": _hex(30_000_000),
+                     "gasUsed": "0x0", "timestamp": "0x0", "hash": "0x" + "ab" * 32, "parentHash": "0x" + "00" * 32,
+                     "transactions": [], "difficulty": "0x0", "extraData": "0x", "logsBloom": "0x" + "00" * 256,
+                     "miner": ZERO_ADDRESS, "mixHash": "0x" + "00" * 32, "nonce": "0x0000000000000000",
+                     "receiptsRoot": "0x" + "00" * 32, "sha3Uncles": "0x" + "00" * 32, "size": "0x1",
+                     "stateRoot": "0x" + "00" * 32, "totalDifficulty": "0x0",
+                     "transactionsRoot": "0x" + "00" * 32, "uncles": []}
+            if not self.legacy:
+                block["baseFeePerGas"] = _hex(10**9)
+            return self._ok(block)
         if method == "eth_getTransactionCount":
             return self._ok(_hex(len(self.sent)))
         if method == "eth_estimateGas":
@@ -158,7 +174,9 @@ class FakeRpcProvider(BaseProvider):
             return self._ok(self._accept({"to": to_checksum_address(p["to"]), "value": value,
                                           "data": p.get("data", "0x"), "from": to_checksum_address(p["from"])}))
         if method == "eth_getTransactionReceipt":
-            return self._ok(self._receipt(params[0]))
+            h = params[0]
+            self.receipt_poll_counts[h] = self.receipt_poll_counts.get(h, 0) + 1
+            return self._ok(self._receipt(h))
         if method == "eth_getLogs":
             f = params[0]
             addr = f.get("address")
@@ -188,6 +206,10 @@ class FakeRpcProvider(BaseProvider):
 
     def _receipt(self, h: str) -> dict | None:
         if h in self.pending:
+            return None
+        delay = self.receipt_delay.get(h, 0)
+        if delay > 0:
+            self.receipt_delay[h] = delay - 1
             return None
         if h in self.receipts:
             return self.receipts[h]

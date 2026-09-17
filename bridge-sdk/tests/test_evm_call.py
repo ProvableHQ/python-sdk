@@ -85,9 +85,20 @@ def test_build_returns_unsigned_dicts_in_order_without_sending():
 
 def test_send_runs_approve_then_main_and_checkpoints_each_hash_before_polling():
     w3 = fake_web3()
+    # Make both receipts resolve only after a couple of pending polls, so the ordering
+    # test actually exercises "checkpoint fires, THEN polling happens" rather than a
+    # same-tick resolution that would pass even if the code checkpointed after polling.
+    w3.provider.receipt_delay[tx_hash_for(1)] = 2
+    w3.provider.receipt_delay[tx_hash_for(2)] = 2
     call, plan = make_call(w3)
     seen = []
-    result = call.send(on_checkpoint=seen.append, poll_seconds=0.001)
+    poll_counts_at_checkpoint = []
+
+    def on_checkpoint(cp):
+        seen.append(cp)
+        poll_counts_at_checkpoint.append(dict(w3.provider.receipt_poll_counts))
+
+    result = call.send(on_checkpoint=on_checkpoint, poll_seconds=0.001)
     assert isinstance(result, DispatchReceipt) and result.receipt.status == Status.DELIVERY_PENDING
     assert [t["to"] for t in w3.provider.sent] == [Web3.to_checksum_address(WBTC), Web3.to_checksum_address(ROUTER)]
     assert w3.provider.sent[1]["value"] == 50_000
@@ -99,6 +110,32 @@ def test_send_runs_approve_then_main_and_checkpoints_each_hash_before_polling():
     ]
     assert all(cp.route == {"id": plan.route_id, "registryVersion": plan.registry_version} for cp in seen)
     assert seen[0].intent["sender"] == ACCT.address
+
+    # Checkpoint-before-poll ordering, per hash:
+    # cp0 (approval broadcast) fires before any eth_getTransactionReceipt for hash1.
+    assert poll_counts_at_checkpoint[0].get(tx_hash_for(1), 0) == 0
+    assert tx_hash_for(2) not in poll_counts_at_checkpoint[0]
+    # cp1 (main broadcast) fires after hash1 was fully polled to confirmation, but
+    # before any eth_getTransactionReceipt for hash2.
+    assert poll_counts_at_checkpoint[1].get(tx_hash_for(1), 0) > 0
+    assert poll_counts_at_checkpoint[1].get(tx_hash_for(2), 0) == 0
+    # cp2 (confirmed) fires only after hash2 has itself been polled.
+    assert poll_counts_at_checkpoint[2].get(tx_hash_for(2), 0) > 0
+    # ... and each hash's poll count strictly increases after its own checkpoint fired
+    # (the receipt_delay=2 knob forces at least one more poll beyond the checkpoint tick).
+    assert w3.provider.receipt_poll_counts[tx_hash_for(1)] > poll_counts_at_checkpoint[0].get(tx_hash_for(1), 0)
+    assert w3.provider.receipt_poll_counts[tx_hash_for(2)] > poll_counts_at_checkpoint[1].get(tx_hash_for(2), 0)
+
+    # Full RPC sequence: approve is sent and fully confirmed (>=1 receipt poll) before
+    # the main call is ever broadcast, and the main call is polled only afterwards.
+    relevant = [m for m in w3.provider.methods if m in ("eth_sendRawTransaction", "eth_getTransactionReceipt")]
+    first_send = relevant.index("eth_sendRawTransaction")
+    second_send = relevant.index("eth_sendRawTransaction", first_send + 1)
+    assert relevant[first_send] == "eth_sendRawTransaction"
+    between = relevant[first_send + 1:second_send]
+    assert between and all(m == "eth_getTransactionReceipt" for m in between)
+    after = relevant[second_send + 1:]
+    assert after and all(m == "eth_getTransactionReceipt" for m in after)
 
 
 def test_approval_timeout_returns_pending_and_stops():

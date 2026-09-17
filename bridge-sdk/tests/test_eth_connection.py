@@ -82,6 +82,31 @@ def test_local_account_path_signs_and_sends_raw():
     assert "eth_sendRawTransaction" in w3.provider.methods and "eth_sendTransaction" not in w3.provider.methods
     sent = w3.provider.sent[0]
     assert sent["from"] == ACCT.address and sent["to"] == Web3.to_checksum_address(TO) and sent["value"] == 7
+    # eth.py's fee-filling (EIP-1559 path, since the fake's eth_getBlockByNumber carries baseFeePerGas):
+    #   nonce <- eth_getTransactionCount(sender, "pending")
+    #   gas <- eth_estimateGas(...) * 12 // 10                       (a 20% buffer)
+    #   maxPriorityFeePerGas <- eth_maxPriorityFeePerGas
+    #   maxFeePerGas <- baseFeePerGas * 2 + maxPriorityFeePerGas
+    assert sent["nonce"] == 0
+    assert sent["gas"] == 150_000 * 12 // 10
+    assert sent["maxPriorityFeePerGas"] == 10**8
+    assert sent["maxFeePerGas"] == 10**9 * 2 + 10**8
+    assert "gasPrice" not in sent
+
+
+def test_legacy_gas_price_path_when_no_base_fee():
+    """With no ``baseFeePerGas`` on the latest block (pre-EIP-1559 chain), eth.py falls back
+    to a plain ``gasPrice`` from ``eth_gasPrice`` and sets no 1559 fee fields."""
+    from aleo_bridge.eth import Ethereum
+
+    w3 = fake_web3(legacy=True)
+    conn = Ethereum(w3=w3, private_key=KEY)
+    h = conn.send_transaction({"to": TO, "value": 3, "data": "0x"})
+    assert h == tx_hash_for(1)
+    sent = w3.provider.sent[0]
+    assert sent["gasPrice"] == 10**9
+    assert "maxFeePerGas" not in sent and "maxPriorityFeePerGas" not in sent
+    assert "eth_maxPriorityFeePerGas" not in w3.provider.methods
 
 
 def test_sender_mismatch_is_refused():
