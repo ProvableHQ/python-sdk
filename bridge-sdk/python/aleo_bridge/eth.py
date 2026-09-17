@@ -13,12 +13,13 @@ from typing import Any, Mapping
 
 from . import encoding
 from ._calls import EvmCall, EvmOutcome, EvmStep
-from ._evm_abi import ERC20_ABI, EVM_CHAIN_BY_ENVIRONMENT, MAILBOX_ABI, WARP_ROUTE_ABI, ZERO_ADDRESS
+from ._evm_abi import ERC20_ABI, EVM_CHAIN_BY_ENVIRONMENT, MAILBOX_ABI, WARP_ROUTE_ABI, XRESERVE_ABI, ZERO_ADDRESS
 from .errors import (AmbiguousRouteError, BridgeError, ChainMismatchError, ConfigurationError, InsufficientBalanceError,
                      InvalidAmountError, InvalidRecipientError, MissingExtraError, RegistryVersionMismatchError,
                      RouteNotFoundError, RouteUnavailableError)
 from .registry import Asset, Chain, Registry, Route
-from .types import DispatchReceipt, EvmHyperlaneQuote, EvmXReserveQuote, Fee, Plan, Receipt, Status, Step
+from .types import (DepositReceipt, DispatchReceipt, EvmHyperlaneQuote, EvmXReserveQuote, Fee, Plan, Receipt, Status,
+                    Step)
 from .units import format_decimal_amount, parse_decimal_amount, resolve_amount
 
 
@@ -700,6 +701,111 @@ class EthModule:
 
         return EvmCall(self.conn, plan=plan, registry=self.registry, steps=steps, finish=finish,
                        store=self.bridge.checkpoints)
+
+    # -- xReserve execute -----------------------------------------------------------------------
+
+    @staticmethod
+    def _xreserve_protocol_state(route: Route, q: _XReserveQuote, *, approval_tx_ids: list[str], sender: str | None,
+                                 mint_mode: str, intended_recipient: str) -> dict[str, Any]:
+        return {
+            "routeId": route.id, "approvalTxIds": list(approval_tx_ids), "sourceSender": sender,
+            "mintMode": mint_mode, "intendedRecipient": intended_recipient,
+            "xReserveContract": q.xreserve_contract, "tokenAddress": q.token, "sourceChainId": q.source_chain_id,
+            "remoteDomain": q.remote_domain, "remoteRecipientBytes32": "0x" + q.remote_recipient_bytes32.hex(),
+            "hookData": "0x" + q.hook_data.hex(), "amountAtomic": str(q.amount_atomic), "maxFeeAtomic": str(q.max_fee_atomic),
+        }
+
+    def _confirmed_deposit_receipt(self, route: Route, q: _XReserveQuote, *, owner: str, approval_tx_ids: list[str],
+                                   source_tx_id: str, receipt: Any, mint_mode: str, intended_recipient: str) -> Receipt:
+        """Brief §3.2 confirm: find the xReserve ``DepositedToRemote`` log, re-verify every field, derive nonce/payload/hash."""
+        from web3.logs import DISCARD
+
+        Web3 = _web3().Web3
+        if int(receipt["status"]) == 0:
+            raise BridgeError(f"EVM transaction reverted: {source_tx_id}")
+        xreserve = self._contract(q.xreserve_contract, XRESERVE_ABI)
+        events = [ev for ev in xreserve.events.DepositedToRemote().process_receipt(receipt, errors=DISCARD)
+                  if Web3.to_checksum_address(ev["address"]) == q.xreserve_contract]
+        if not events:
+            raise BridgeError("Confirmed receipt does not contain a valid DepositedToRemote event")
+        ev = events[-1]
+        a = ev["args"]
+        if (Web3.to_checksum_address(a["localToken"]) != q.token
+                or Web3.to_checksum_address(a["localDepositor"]) != owner
+                or int(a["value"]) != q.amount_atomic
+                or int(a["remoteDomain"]) != q.remote_domain
+                or bytes(a["remoteRecipient"]) != q.remote_recipient_bytes32
+                or bytes(a["remoteToken"]) != q.remote_token_bytes32
+                or int(a["maxFee"]) != q.max_fee_atomic
+                or bytes(a["hookData"]) != q.hook_data):
+            raise BridgeError("DepositedToRemote event does not match the prepared transfer")
+        log_index = int(ev["logIndex"])
+        if log_index < 0:
+            raise BridgeError("DepositedToRemote log index is missing or invalid")
+        # xReserve identifies a deposit by (source domain, tx hash, log index); the ordered payload is
+        # what Circle signs, so its keccak is the only safe attestation lookup key.
+        nonce = encoding.xreserve_deposit_nonce(q.source_domain, bytes.fromhex(source_tx_id[2:]), log_index)
+        payload = encoding.xreserve_deposit_payload(
+            amount=int(a["value"]), remote_domain=int(a["remoteDomain"]), remote_token=bytes(a["remoteToken"]),
+            remote_recipient=bytes(a["remoteRecipient"]), local_token=Web3.to_checksum_address(a["localToken"]),
+            depositor=Web3.to_checksum_address(a["localDepositor"]), max_fee=int(a["maxFee"]), nonce=nonce,
+            hook_data=bytes(a["hookData"]))
+        message_hash = "0x" + encoding.xreserve_message_hash(payload).hex()
+        state = self._xreserve_protocol_state(route, q, approval_tx_ids=approval_tx_ids, sender=owner,
+                                              mint_mode=mint_mode, intended_recipient=intended_recipient)
+        state.update({"sourceDomain": q.source_domain, "remoteDomain": q.remote_domain, "depositLogIndex": log_index,
+                      "nonce": "0x" + nonce.hex(), "payload": "0x" + payload.hex(), "messageHash": message_hash,
+                      "bridgeProgram": q.bridge_program, "wrapperProgram": q.wrapper_program})
+        return Receipt(id=message_hash, protocol="xreserve", status=Status.ATTESTATION_PENDING,
+                       source_tx_id=source_tx_id, protocol_state=state)
+
+    def _xreserve_result(self, route: Route, q: _XReserveQuote, outcome: EvmOutcome, *, mint_mode: str,
+                         intended_recipient: str) -> DepositReceipt:
+        approvals = list(outcome.approval_tx_ids)
+        if outcome.status == "CONFIRMED":
+            receipt = self._confirmed_deposit_receipt(route, q, owner=outcome.sender, approval_tx_ids=approvals,
+                                                      source_tx_id=outcome.source_tx_id, receipt=outcome.receipt,
+                                                      mint_mode=mint_mode, intended_recipient=intended_recipient)
+            return DepositReceipt(transaction_id=outcome.source_tx_id, route_id=route.id, message_hash=receipt.id,
+                                  nonce=receipt.protocol_state["nonce"], receipt=receipt)
+        rid = outcome.source_tx_id or approvals[-1]
+        receipt = Receipt(id=rid, protocol="xreserve", status=Status(outcome.status), source_tx_id=outcome.source_tx_id,
+                          protocol_state=self._xreserve_protocol_state(route, q, approval_tx_ids=approvals, sender=outcome.sender,
+                                                                       mint_mode=mint_mode, intended_recipient=intended_recipient))
+        return DepositReceipt(transaction_id=rid, route_id=route.id, message_hash="", nonce="", receipt=receipt)
+
+    def deposit_usdc(self, recipient: str, *, amount: Any = None, amount_atomic: int | None = None,
+                     mint_mode: str = "public", secret_nonce: str = "0scalar") -> EvmCall[DepositReceipt]:
+        """Deposit USDC into Circle xReserve for USDCx on Aleo (minimum 2 USDC; irreversible once confirmed).
+
+        ``mint_mode``: ``public`` (public USDCx balance), ``record`` (protocol-minted private
+        record), or ``private`` (deposit addressed to the shielded wrapper program; you must later
+        run ``bridge.xreserve.private_mint`` / plan 4's ``complete`` with the same ``secret_nonce``,
+        which the SDK never stores). Approves exactly the amount only when the allowance is
+        short, then ``depositToRemote`` with no ``msg.value``. The confirmed ``DepositReceipt``
+        carries Circle's message hash (receipt id) and the deposit nonce.
+        """
+        route = self._xreserve_route()
+        sender = self.conn.require_address()
+        atomic = self._amount_atomic(route, amount, amount_atomic)
+        plan = _plan_for(self.registry, route, amount_atomic=atomic, recipient=recipient, sender=sender, mint_mode=mint_mode)
+        latest: dict[str, _XReserveQuote] = {}
+
+        def steps(owner: str) -> list[EvmStep]:
+            q = self._quote_xreserve(route, recipient, atomic, owner, mint_mode, secret_nonce)   # fresh balance/allowance
+            latest["q"] = q
+            out: list[EvmStep] = []
+            if q.allowance_atomic < atomic:
+                out.append(EvmStep("approve", q.token, self._erc20(q.token).encode_abi("approve", args=[q.xreserve_contract, atomic])))
+            xreserve = self._contract(q.xreserve_contract, XRESERVE_ABI)
+            out.append(EvmStep("main", q.xreserve_contract, xreserve.encode_abi(
+                "depositToRemote", args=[atomic, q.remote_domain, q.remote_recipient_bytes32, q.token, q.max_fee_atomic, q.hook_data]), 0))
+            return out
+
+        def finish(outcome: EvmOutcome) -> DepositReceipt:
+            return self._xreserve_result(route, latest["q"], outcome, mint_mode=mint_mode, intended_recipient=recipient)
+
+        return EvmCall(self.conn, plan=plan, registry=self.registry, steps=steps, finish=finish, store=self.bridge.checkpoints)
 
 
 __all__ = ["Ethereum", "EthModule"]
