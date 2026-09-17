@@ -99,6 +99,8 @@ class PrivacyModule:
                 self._bridge.freezelist.exclusion_proof(self._bridge.aleo_address(), privacy.program)
             function, inputs = "transfer_private_to_public", [self._recipient(resolved, recipient), literal, record, proof]
         else:
+            if recipient is not None and recipient != self._bridge.aleo_address():
+                raise ConfigurationError("ARC-20 unshield always credits the caller; omit recipient=")
             if merkle_proof is not None:
                 raise ConfigurationError("ARC-20 unshield takes no Merkle proof; omit merkle_proof=")
             function, inputs = "unshield", [record, literal]

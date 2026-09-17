@@ -47,6 +47,14 @@ def test_unshield_arc20_selects_smallest_covering_record(bridge):
         bridge.privacy.unshield("aleo/sol", amount="0.25", merkle_proof="[x]")
 
 
+def test_unshield_arc20_recipient_must_match_caller(bridge):
+    bridge.aleo.record_rows = [{"program": "arc20_sol.aleo", "record_plaintext": SOL_RECORD}]
+    call = bridge.privacy.unshield("aleo/sol", amount="0.25", recipient=SIGNER)
+    assert (call.program_id, call.function_name, call.inputs) == ("arc20_sol.aleo", "unshield", [SOL_RECORD, "250000000u128"])
+    with pytest.raises(ConfigurationError, match="ARC-20 unshield always credits the caller"):
+        bridge.privacy.unshield("aleo/sol", amount="0.25", recipient=OTHER)
+
+
 def test_unshield_arc22_defaults_to_signer_record_and_empty_proof(bridge):
     call = bridge.privacy.unshield("aleo/usdcx", amount="2.5")
     assert (call.program_id, call.function_name) == ("usdcx_stablecoin.aleo", "transfer_private_to_public")
