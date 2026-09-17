@@ -5,6 +5,7 @@ import pytest
 
 import aleo_bridge
 from aleo_bridge import types
+from aleo_bridge.errors import ConfigurationError
 from aleo_bridge.types import (CALLER_BOUNDARIES, TERMINAL, AleoHyperlaneQuote, Attestation, BridgeStatus,
                                ChainStatus, DispatchReceipt, Fee, GasQuote, Plan, PreparedTx, PrivacyReceipt,
                                Progress, Receipt, Status, Step, to_progress)
@@ -72,7 +73,7 @@ def test_to_progress_error_derivation():
 def test_to_progress_accepts_status_strings_and_requires_route_id():
     receipt = Receipt(id="at1x", protocol="hyperlane", status="COMPLETED", protocol_state={"routeId": "r"})
     assert to_progress(_plan(), receipt).next == "done"
-    with pytest.raises(ValueError, match="routeId"):
+    with pytest.raises(ConfigurationError, match="routeId"):
         to_progress(_plan(), Receipt(id="at1x", protocol="hyperlane", status=Status.COMPLETED))
 
 
@@ -91,6 +92,13 @@ def test_receipt_replace_and_defaults():
     r2 = r.replace(status=Status.DESTINATION_ACTION_REQUIRED, next_action={"kind": "xreserve-private-mint", "chainId": "aleo"})
     assert r2.status is Status.DESTINATION_ACTION_REQUIRED and r.status is Status.ATTESTATION_PENDING
     assert r2.protocol_state == {"routeId": "x"} and r2.next_action["kind"] == "xreserve-private-mint"
+    # replace() must copy protocol_state/next_action, never alias the source's dicts
+    r2.protocol_state["routeId"] = "mutated"
+    r2.next_action["kind"] = "mutated"
+    assert r.protocol_state == {"routeId": "x"} and r.next_action is None
+    r3 = r2.replace(status=Status.COMPLETED)          # replace() with neither field explicit still copies, not aliases
+    r3.protocol_state["routeId"] = "again"
+    assert r2.protocol_state["routeId"] == "mutated"
 
 
 def test_result_dataclasses():

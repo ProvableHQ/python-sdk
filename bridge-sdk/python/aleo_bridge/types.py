@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from .errors import ConfigurationError
+
 
 class Status(str, Enum):
     PREPARED = "PREPARED"
@@ -145,6 +147,10 @@ class Receipt:
         self.status = Status(self.status)
 
     def replace(self, **changes: Any) -> "Receipt":
+        # Copy the mutable fields (never alias self's dicts) so mutating the returned Receipt
+        # can never reach back into the one it was derived from.
+        changes.setdefault("protocol_state", dict(self.protocol_state))
+        changes.setdefault("next_action", None if self.next_action is None else dict(self.next_action))
         return dataclasses.replace(self, **changes)
 
 
@@ -160,7 +166,7 @@ def to_progress(plan: Plan, receipt: Receipt) -> Progress:
     """brief §2.5: SOURCE_SUBMISSION_PENDING→resume, DESTINATION_ACTION_REQUIRED→complete, COMPLETED→done,
     FAILED|EXPIRED→failed, everything else→wait. For FAILED|EXPIRED, derive error from protocol_state."""
     if "routeId" not in receipt.protocol_state:
-        raise ValueError("Receipt.protocol_state must carry routeId")
+        raise ConfigurationError("Receipt.protocol_state must carry routeId")
     status = Status(receipt.status)
     next_val = _NEXT_BY_STATUS.get(status, "wait")
 
