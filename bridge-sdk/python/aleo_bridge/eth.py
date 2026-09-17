@@ -14,6 +14,7 @@ from typing import Any, Mapping
 from . import encoding
 from ._calls import EvmCall, EvmOutcome, EvmStep
 from ._evm_abi import ERC20_ABI, EVM_CHAIN_BY_ENVIRONMENT, MAILBOX_ABI, WARP_ROUTE_ABI, XRESERVE_ABI, ZERO_ADDRESS
+from .checkpoint import Checkpoint
 from .errors import (AmbiguousRouteError, BridgeError, ChainMismatchError, CheckpointInvalidError, ConfigurationError,
                      InsufficientBalanceError, InvalidAmountError, InvalidRecipientError, MissingExtraError,
                      RegistryVersionMismatchError, RouteNotFoundError, RouteUnavailableError, UnsupportedRouteError)
@@ -936,6 +937,216 @@ class EthModule:
             return self._xreserve_source_status(route, plan, receipt)
         raise BridgeError("source_status refreshes SOURCE_APPROVAL_PENDING and SOURCE_CONFIRMING receipts only; "
                           "use bridge.get_status for later stages")
+
+    # -- recovery -----------------------------------------------------------------------------
+
+    def _checkpoint_approvals(self, checkpoint: Checkpoint) -> list[str]:
+        approvals = list((checkpoint.source or {}).get("approvalTransactionIds", []))
+        if any(not isinstance(a, str) or not _HASH_RE.match(a) for a in approvals):
+            raise CheckpointInvalidError("Bridge checkpoint contains an invalid approval transaction id")
+        return approvals
+
+    def _approval_scan_block(self, approvals: list[str]) -> int | None:
+        """Highest block of a confirmed approval; an unresolved hash is skipped, a reverted one is an error."""
+        block: int | None = None
+        for approval in approvals:
+            observed = self.conn.get_receipt(approval)
+            if observed is None:
+                continue
+            if int(observed["status"]) == 0:
+                raise BridgeError(f"EVM transaction reverted: {approval}")
+            number = int(observed["blockNumber"])
+            block = number if block is None or number > block else block
+        return block
+
+    def _recover_hyperlane_from_history(self, route: Route, recipient32: bytes, receipt: Receipt, approvals: list[str],
+                                        *, required: bool) -> Receipt | None:
+        """Scan router ``SentTransferRemote`` logs after the last confirmed approval; sender and router must match."""
+        from web3.exceptions import TransactionNotFound
+
+        Web3 = _web3().Web3
+        sender = receipt.protocol_state.get("sourceSender")
+        if not isinstance(sender, str) or not Web3.is_address(sender):
+            if required:
+                raise BridgeError("Cannot safely resume Hyperlane without the source account used by the approval")
+            return None
+        from_block = self._approval_scan_block(approvals)
+        if from_block is None:
+            if required:
+                raise BridgeError("Cannot safely resume Hyperlane because no confirmed approval block is available "
+                                  "for source history verification")
+            return None
+        amount = int(receipt.protocol_state["amountAtomic"])
+        meta = self._hyperlane_metadata(route)                # reuse the registry validator before touching the router
+        destination = meta.destination_domain
+        router = meta.router
+        warp = self._contract(router, WARP_ROUTE_ABI)
+        topic = Web3.keccak(text="SentTransferRemote(uint32,bytes32,uint256)")
+        candidates: list[str] = []
+        for log in self.conn.w3.eth.get_logs({"address": router, "fromBlock": from_block}):
+            if not log["topics"] or bytes(log["topics"][0]) != bytes(topic):
+                continue
+            args = warp.events.SentTransferRemote().process_log(log)["args"]
+            tx_hash = Web3.to_hex(log["transactionHash"])
+            if (int(args["destination"]) == destination and bytes(args["recipient"]) == recipient32
+                    and int(args["amount"]) == amount and tx_hash not in candidates):
+                candidates.append(tx_hash)
+        matches: list[Receipt] = []
+        for tx_hash in candidates:
+            try:
+                tx = self.conn.w3.eth.get_transaction(tx_hash)
+            except TransactionNotFound:
+                continue
+            observed = self.conn.get_receipt(tx_hash)
+            if (tx is None or observed is None or tx["to"] is None
+                    or Web3.to_checksum_address(tx["from"]) != Web3.to_checksum_address(sender)
+                    or Web3.to_checksum_address(tx["to"]) != router):
+                continue
+            if int(observed["status"]) == 0:
+                raise BridgeError(f"EVM transaction reverted: {tx_hash}")
+            message_id = self._message_id_from_receipt(route, observed)
+            state = dict(receipt.protocol_state)
+            if message_id is not None:
+                state["messageId"] = message_id
+            matches.append(receipt.replace(id=message_id or tx_hash, status=Status.DELIVERY_PENDING,
+                                           source_tx_id=tx_hash, protocol_state=state))
+        if len(matches) > 1:
+            raise BridgeError("Multiple matching Hyperlane dispatches were found; recovery cannot safely choose one source transaction")
+        return matches[0] if matches else None
+
+    def _recover_hyperlane(self, route: Route, plan: Plan, checkpoint: Checkpoint, *, required: bool) -> Receipt:
+        Web3 = _web3().Web3
+        recipient32 = encoding.aleo_address_to_bytes32(plan.recipient)
+        approvals = self._checkpoint_approvals(checkpoint)
+        sender = Web3.to_checksum_address(plan.sender) if plan.sender and Web3.is_address(plan.sender) else None
+        meta = self._hyperlane_metadata(route)
+        state = self._hyperlane_protocol_state(route, recipient_bytes32=recipient32,
+                                               destination_domain=meta.destination_domain,
+                                               native_value_atomic=0, amount_atomic=plan.amount_atomic,
+                                               approval_tx_ids=approvals, sender=sender)
+        transaction_id = (checkpoint.source or {}).get("transactionId")
+        if not transaction_id:
+            if not approvals:
+                raise CheckpointInvalidError("Bridge checkpoint contains no submitted transaction")
+            pending = Receipt(id=approvals[-1], protocol="hyperlane", status=Status.SOURCE_APPROVAL_PENDING, protocol_state=state)
+            observed = self.conn.get_receipt(approvals[-1])
+            if observed is None:
+                if required:
+                    raise BridgeError("Cannot safely resume Hyperlane because no confirmed approval block is available "
+                                      "for source history verification")
+                return pending
+            if int(observed["status"]) == 0:
+                return self._failed(pending, "sourceError", f"EVM approval transaction reverted: {approvals[-1]}")
+            recovered = self._recover_hyperlane_from_history(route, recipient32, pending, approvals, required=required)
+            return recovered or pending.replace(status=Status.SOURCE_SUBMISSION_PENDING)
+        transaction_id = self._require_hash(transaction_id, "source transaction id")
+        pending = Receipt(id=transaction_id, protocol="hyperlane", status=Status.SOURCE_CONFIRMING,
+                          source_tx_id=transaction_id, protocol_state=state)
+        observed = self._hyperlane_source_status(route, plan, pending)
+        if observed is not pending:
+            return observed
+        return self._recover_hyperlane_from_history(route, recipient32, pending, approvals, required=False) or observed
+
+    def _recover_xreserve_from_history(self, route: Route, plan: Plan, q: _XReserveQuote, owner: str, approvals: list[str],
+                                       *, required: bool) -> Receipt | None:
+        """Scan xReserve logs after the last confirmed approval; a candidate matches only if every event field matches."""
+        Web3 = _web3().Web3
+        from_block = self._approval_scan_block(approvals)
+        if from_block is None:
+            if required:
+                raise BridgeError("Cannot safely resume xReserve because no confirmed approval block is available "
+                                  "for source history verification")
+            return None
+        hashes: list[str] = []
+        for log in self.conn.w3.eth.get_logs({"address": q.xreserve_contract, "fromBlock": from_block}):
+            tx_hash = Web3.to_hex(log["transactionHash"])
+            if tx_hash not in hashes:
+                hashes.append(tx_hash)
+        matches: list[Receipt] = []
+        for tx_hash in hashes:
+            observed = self.conn.get_receipt(tx_hash)
+            if observed is None:
+                continue
+            try:
+                matches.append(self._confirmed_deposit_receipt(route, q, owner=owner, approval_tx_ids=approvals, source_tx_id=tx_hash,
+                                                               receipt=observed, mint_mode=plan.mint_mode, intended_recipient=plan.recipient))
+            except BridgeError:
+                continue                       # other accounts' deposits share the contract; unrelated unless every field matches
+        if len(matches) > 1:
+            raise BridgeError("Multiple matching xReserve deposits were found; recovery cannot safely choose one source transaction")
+        return matches[0] if matches else None
+
+    def _recover_xreserve(self, route: Route, plan: Plan, checkpoint: Checkpoint, *, required: bool) -> Receipt:
+        Web3 = _web3().Web3
+        owner = self._observed_owner(plan, None)
+        approvals = self._checkpoint_approvals(checkpoint)
+        source = checkpoint.source or {}
+        stored_hook = source.get("hookData")
+        if stored_hook is not None and (not isinstance(stored_hook, str) or not re.fullmatch(r"0x[0-9a-fA-F]{130}", stored_hook)):
+            raise CheckpointInvalidError("Bridge checkpoint contains invalid xReserve hook data")
+        hook = bytes.fromhex(stored_hook[2:]) if stored_hook else encoding.xreserve_hook_data(
+            plan.mint_mode, plan.recipient, self.network, "0scalar")
+        meta = self._xreserve_metadata(route)                 # reuse the registry validator rather than trusting raw metadata
+        token = self.registry.asset(route.source_asset_id).locator
+        if token is None or token.kind != "evm-contract":
+            raise RouteUnavailableError(f"xReserve source token contract is missing: {route.id}")
+        q = _XReserveQuote(
+            xreserve_contract=meta.xreserve_contract, token=Web3.to_checksum_address(token.value),
+            source_chain_id=meta.source_chain_id, source_domain=meta.source_domain, remote_domain=meta.remote_domain,
+            remote_token_bytes32=meta.remote_token_bytes32,
+            remote_recipient_bytes32=self._xreserve_recipient_bytes32(route, meta, plan.recipient, plan.mint_mode),
+            amount_atomic=plan.amount_atomic, max_fee_atomic=meta.max_fee_atomic, hook_data=hook,
+            balance_atomic=0, allowance_atomic=0, bridge_program=meta.bridge_program, wrapper_program=meta.wrapper_program)
+        state = self._xreserve_protocol_state(route, q, approval_tx_ids=approvals, sender=owner, mint_mode=plan.mint_mode,
+                                              intended_recipient=plan.recipient)
+        transaction_id = source.get("transactionId")
+        if not transaction_id:
+            if not approvals:
+                raise CheckpointInvalidError("Bridge checkpoint contains no submitted transaction")
+            pending = Receipt(id=approvals[-1], protocol="xreserve", status=Status.SOURCE_APPROVAL_PENDING, protocol_state=state)
+            observed = self.conn.get_receipt(approvals[-1])
+            if observed is None:
+                if required:
+                    raise BridgeError("Cannot safely resume xReserve because no confirmed approval block is available "
+                                      "for source history verification")
+                return pending
+            if int(observed["status"]) == 0:
+                return self._failed(pending, "sourceError", f"EVM approval transaction reverted: {approvals[-1]}")
+            recovered = self._recover_xreserve_from_history(route, plan, q, owner, approvals, required=required)
+            return recovered or pending.replace(status=Status.SOURCE_SUBMISSION_PENDING)
+        transaction_id = self._require_hash(transaction_id, "xReserve source transaction id")
+        pending = Receipt(id=transaction_id, protocol="xreserve", status=Status.SOURCE_CONFIRMING,
+                          source_tx_id=transaction_id, protocol_state=state)
+        observed = self._xreserve_source_status(route, plan, pending)
+        if observed is not pending:
+            return observed
+        return self._recover_xreserve_from_history(route, plan, q, owner, approvals, required=False) or observed
+
+    def recover_source(self, plan: Plan, checkpoint: Checkpoint, *, required: bool = False) -> Receipt:
+        """Reconstruct an interrupted Ethereum source leg from a checkpoint without signing (brief §2.7, §3.1, §3.2).
+
+        Approval-only checkpoints: observe the last approval; when confirmed, scan the router /
+        xReserve logs from its block for a matching dispatch or deposit and stop at
+        ``SOURCE_SUBMISSION_PENDING`` when none exists — recovery never moves funds. Checkpoints
+        with a source transaction are observed through ``source_status``. ``required=True`` (plan
+        4's resume-before-dispatch mode) demands the scan actually run — a known sender and a
+        confirmed approval block — or raises, instead of quietly returning an approval-boundary
+        receipt.
+        """
+        if checkpoint.version != 1 or checkpoint.intent.get("bridgeProtocol") != plan.protocol or checkpoint.route.get("id") != plan.route_id:
+            raise CheckpointInvalidError("Bridge checkpoint does not match the prepared route")
+        if checkpoint.route.get("registryVersion") != self.registry.version:
+            raise RegistryVersionMismatchError(
+                f"Checkpoint uses registry {checkpoint.route.get('registryVersion')}; this client has {self.registry.version}")
+        if plan.protocol == "hyperlane" and checkpoint.destination:
+            raise CheckpointInvalidError("Hyperlane checkpoints must not carry a destination leg")
+        route = self._route_for_plan(plan)
+        self.assert_chain(route)
+        if route.protocol == "hyperlane":
+            return self._recover_hyperlane(route, plan, checkpoint, required=required)
+        if route.protocol == "xreserve":
+            return self._recover_xreserve(route, plan, checkpoint, required=required)
+        raise UnsupportedRouteError(f"No Ethereum recovery for protocol {route.protocol}")
 
     def _mailbox_address(self) -> str:
         for route in self.registry.routes(protocol="hyperlane", include_unavailable=True, environment=self.bridge.environment):
