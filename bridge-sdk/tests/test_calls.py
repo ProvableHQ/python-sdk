@@ -41,6 +41,19 @@ def test_attributes_and_simulate(fake_aleo):
     assert fake_aleo.submitted == [] and fake_aleo.delegated == []
 
 
+def test_repr_never_leaks_input_literals(fake_aleo):
+    # private_burn input 0 is a USDCx record plaintext; a secret nonce (private_mint input 3) is
+    # just as sensitive — repr() must never print .inputs, only a count.
+    record = "{ owner: aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px.private, amount: 5000000u128.private, _nonce: 7group.public }"
+    secret_nonce = "7scalar"
+    bound = fake_aleo.programs.get(PROGRAM).functions[FN](record, "2500000u128", "0u32", "[0field]", secret_nonce)
+    call = AleoCall(fake_aleo, bound, lambda tx_id, outs: (tx_id, outs))
+    text = repr(call)
+    assert text == f"AleoCall({PROGRAM}/{FN}, inputs=5 literals)"
+    assert record not in text and secret_nonce not in text
+    assert call.inputs == [record, "2500000u128", "0u32", "[0field]", secret_nonce]   # accessor still exposes them
+
+
 def test_prove_returns_prepared_tx_without_broadcast(fake_aleo):
     prepared = _call(fake_aleo).prove(priority_fee=5)
     assert isinstance(prepared, PreparedTx) and prepared.transaction_id == "at1built"

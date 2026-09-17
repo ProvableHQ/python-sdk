@@ -95,7 +95,9 @@ class AleoCall(Generic[R]):
         self._imports_registered = False
 
     def __repr__(self) -> str:
-        return f"AleoCall({self.program_id}/{self.function_name}, inputs={self.inputs!r})"
+        # Never print .inputs here: a record plaintext (private_burn arg 0) or a secret nonce
+        # (private_mint arg 3) can be an input literal, and repr() output tends to end up in logs.
+        return f"AleoCall({self.program_id}/{self.function_name}, inputs={len(self.inputs)} literals)"
 
     @property
     def program_id(self) -> str:
