@@ -141,7 +141,7 @@ def test_from_env_side_chain_variables(monkeypatch, tmp_path):
     for var in ("EVM_PRIVATE_KEY", "ETHEREUM_RPC_URL", "SOLANA_PRIVATE_KEY", "SOLANA_RPC_URL", "BRIDGE_CHECKPOINT_DIR"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("EVM_PRIVATE_KEY", "0x" + "11" * 32)
-    with pytest.raises(ConfigurationError, match="both or neither"):
+    with pytest.raises(ConfigurationError, match="both EVM_PRIVATE_KEY and ETHEREUM_RPC_URL"):
         Bridge.from_env()
     monkeypatch.setenv("ETHEREUM_RPC_URL", "https://eth.example")
     bridge = Bridge.from_env()                                   # plan 2: real Ethereum connection now constructed
@@ -187,7 +187,7 @@ def test_from_profile_uses_profile_and_wires_no_side_chains(tmp_path, monkeypatc
     assert isinstance(bridge.checkpoints, FileCheckpointStore)   # plan 4 binds FileCheckpointStore(profile.checkpoint_dir)
     assert bridge.checkpoints.directory == bridge.profile.checkpoint_dir
     assert bridge.profile.checkpoint_dir.is_dir()
-    marker = object()
+    marker = Ethereum(w3=fake_web3())
     assert Bridge.from_profile(ethereum=marker).ethereum is marker
 
 

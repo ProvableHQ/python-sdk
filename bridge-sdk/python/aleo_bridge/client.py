@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from ._calls import AleoCall
 from .errors import ConfigurationError, MissingExtraError
+from .eth import Ethereum, EthModule
 from .freezelist import FreezeList
 from .hyperlane import HyperlaneModule
 from .privacy import PrivacyModule
@@ -66,16 +67,16 @@ def build_aleo(endpoint: str, network: str, private_key: str, *, api_key: str | 
 
 def ethereum_from_env() -> Any:
     """``Ethereum(ETHEREUM_RPC_URL, private_key=EVM_PRIVATE_KEY)`` or None; both variables or neither."""
-    rpc, key = os.environ.get("ETHEREUM_RPC_URL"), os.environ.get("EVM_PRIVATE_KEY")
-    if not rpc and not key:
-        return None
-    if not (rpc and key):
-        raise ConfigurationError("Set EVM_PRIVATE_KEY and ETHEREUM_RPC_URL together (both or neither)")
-    try:
-        from .eth import Ethereum  # plan 2
-    except ImportError as exc:
-        raise MissingExtraError("evm", "An Ethereum connection from EVM_PRIVATE_KEY/ETHEREUM_RPC_URL") from exc
-    return Ethereum(rpc, private_key=key)
+    return Ethereum.from_env()
+
+
+def _coerce_ethereum(value: Any) -> Ethereum | None:
+    """Accept an ``Ethereum`` or a bare ``web3.Web3`` (wrapped; signs only via ``eth.default_account``)."""
+    if value is None or isinstance(value, Ethereum):
+        return value
+    if hasattr(value, "eth") and hasattr(value, "provider"):
+        return Ethereum(w3=value)
+    raise ConfigurationError("ethereum= must be an aleo_bridge.Ethereum connection or a web3.Web3 instance")
 
 
 def solana_from_env() -> Any:
@@ -124,10 +125,10 @@ class Bridge:
         if not self.registry.chains(environment=environment):
             raise ConfigurationError(f"Registry {self.registry.version} has no chains for {environment}")
         self.checkpoints = checkpoints
-        self.ethereum = ethereum
+        self.ethereum: Ethereum | None = _coerce_ethereum(ethereum)
         self.solana = solana
         self.profile: Profile | None = None
-        self._eth_module: Any = None
+        self._eth: EthModule | None = None
         self._sol_module: Any = None
         self._programs: dict[str, Any] = {}
         self.hyperlane = HyperlaneModule(self)
@@ -138,19 +139,15 @@ class Bridge:
     def __repr__(self) -> str:
         return f"Bridge(environment={self.environment!r}, registry={self.registry.version!r})"
 
-    # ── side-chain namespaces (plans 2/3 supply the modules) ──
+    # ── side-chain namespaces (plan 3 supplies the Solana module) ──
     @property
-    def eth(self) -> Any:
+    def eth(self) -> EthModule:
+        """Ethereum-origin actions (Hyperlane transferRemote, xReserve deposit, status, recovery)."""
         if self.ethereum is None:
-            raise ConfigurationError("Ethereum is not configured: Bridge(aleo, ethereum=Ethereum(...)) or set EVM_PRIVATE_KEY + ETHEREUM_RPC_URL")
-        if self._eth_module is None:
-            try:
-                from .eth import Ethereum, EthModule  # plan 2
-            except ImportError as exc:
-                raise MissingExtraError("evm", "Ethereum-origin bridging") from exc
-            connection = self.ethereum if isinstance(self.ethereum, Ethereum) else Ethereum(w3=self.ethereum)
-            self._eth_module = EthModule(self, connection)
-        return self._eth_module
+            raise ConfigurationError("Pass ethereum=Ethereum(...) to Bridge(...) or set ETHEREUM_RPC_URL")
+        if self._eth is None:
+            self._eth = EthModule(self, self.ethereum)
+        return self._eth
 
     @property
     def sol(self) -> Any:
@@ -248,17 +245,23 @@ class Bridge:
             value = self.mapping_value(program, BALANCE_MAPPING, address)
         return parse_uint_literal(value) if value is not None else 0
 
-    def status(self) -> BridgeStatus:
-        """Read-only re-orientation: addresses and public balances of every registry asset per configured chain.
-        Plans 2/3 append EVM/Solana ChainStatus entries; plan 4 fills ``pending`` from the checkpoint store."""
+    def _aleo_chain_status(self) -> ChainStatus:
         chain = self.aleo_chain()
         account = getattr(self.aleo, "default_account", None)
         address = str(account.address) if account else None
         balances = {asset.id: (self._public_balance(asset, address) if address else 0)
                     for asset in self.registry.assets(chain=chain.id)}
+        return ChainStatus(chain.id, address, address is not None, balances)
+
+    def status(self) -> BridgeStatus:
+        """Read-only re-orientation: addresses and public balances of every registry asset per configured chain.
+        Plan 3 appends a Solana ChainStatus entry; plan 4 fills ``pending`` from the checkpoint store."""
+        chains = [self._aleo_chain_status()]
+        if self.ethereum is not None:
+            chains.append(self.eth.chain_status())
         pending: list["Progress"] = []
         return BridgeStatus(environment=self.environment, registry_version=self.registry.version,
-                            chains=[ChainStatus(chain.id, address, address is not None, balances)], pending=pending)
+                            chains=chains, pending=pending)
 
     # ── constructors ──
     @classmethod

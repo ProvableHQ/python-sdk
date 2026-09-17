@@ -19,8 +19,8 @@ from .errors import (AmbiguousRouteError, BridgeError, ChainMismatchError, Check
                      InsufficientBalanceError, InvalidAmountError, InvalidRecipientError, MissingExtraError,
                      RegistryVersionMismatchError, RouteNotFoundError, RouteUnavailableError, UnsupportedRouteError)
 from .registry import Asset, Chain, Registry, Route
-from .types import (DepositReceipt, DispatchReceipt, EvmHyperlaneQuote, EvmXReserveQuote, Fee, Plan, Receipt, Status,
-                    Step)
+from .types import (ChainStatus, DepositReceipt, DispatchReceipt, EvmHyperlaneQuote, EvmXReserveQuote, Fee, Plan,
+                    Receipt, Status, Step)
 from .units import format_decimal_amount, parse_decimal_amount, resolve_amount
 
 
@@ -1176,6 +1176,16 @@ class EthModule:
         if target.locator.kind == "evm-contract":
             return int(self._erc20(target.locator.value).functions.balanceOf(owner).call())
         raise UnsupportedRouteError(f"{target.id} is not an EVM asset")
+
+    def chain_status(self) -> ChainStatus:
+        """Address, signing ability, and atomic balances of every registry asset on this chain (empty when read-only)."""
+        address = self.conn.address
+        balances: dict[str, int] = {}
+        if address is not None:
+            for asset in self.registry.assets(chain=self.chain.id):
+                if asset.locator is not None and asset.locator.kind in ("native", "evm-contract"):
+                    balances[asset.id] = self.balance(asset, address=address)
+        return ChainStatus(chain_id=self.chain.id, address=address, can_sign=self.conn.can_sign, balances=balances)
 
 
 __all__ = ["Ethereum", "EthModule"]
