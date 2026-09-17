@@ -290,9 +290,20 @@ class _AsyncClientAdapter:
         self._loop = asyncio.new_event_loop()
         self._thread = threading.Thread(target=self._loop.run_forever, name="aleo-bridge-solana-rpc", daemon=True)
         self._thread.start()
+        self._closed = False
 
     def _run(self, coroutine: Any) -> Any:
         return asyncio.run_coroutine_threadsafe(coroutine, self._loop).result()
+
+    def close(self, timeout: float = 5.0) -> None:
+        """Stop the private event-loop thread and close the loop. Idempotent — a second call is a no-op."""
+        if self._closed:
+            return
+        self._closed = True
+        self._loop.call_soon_threadsafe(self._loop.stop)
+        self._thread.join(timeout=timeout)
+        if not self._loop.is_closed():
+            self._loop.close()
 
     def __getattr__(self, name: str) -> Any:
         attribute = getattr(self._client, name)
@@ -437,6 +448,19 @@ class Solana:
         if self._signer is None:
             raise ConfigurationError("Solana connection is read-only: pass signer= or private_key= to Solana() to sign")
         return self._signer.sign_message(bytes(message))
+
+    def close(self) -> None:
+        """Release the wrapped client's resources (idempotent). A no-op unless the client exposes its own
+        ``close()`` — e.g. the private event-loop thread behind an adapted async solana-py client."""
+        closer = getattr(self._client, "close", None)
+        if callable(closer):
+            closer()
+
+    def __enter__(self) -> "Solana":
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        self.close()
 
 
 def _confirmation_name(status: Any) -> str | None:

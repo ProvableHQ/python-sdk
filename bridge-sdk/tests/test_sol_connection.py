@@ -180,6 +180,41 @@ def test_from_env():
     assert read_only is not None and read_only.can_sign is False
 
 
+def test_async_client_adapter_close_stops_the_thread():
+    pytest.importorskip("solders")
+
+    class FakeAsyncClient:
+        async def get_balance(self, pubkey, commitment=None):
+            return sol.RpcResult(7)
+
+    adapter = sol._AsyncClientAdapter(FakeAsyncClient())
+    assert adapter._thread.is_alive()
+    adapter.close()
+    assert adapter._thread.is_alive() is False
+    adapter.close()  # idempotent: no error, no hang
+
+
+def test_solana_context_manager_closes_the_wrapped_adapter():
+    pytest.importorskip("solders")
+
+    class FakeAsyncClient:
+        async def get_balance(self, pubkey, commitment=None):
+            return sol.RpcResult(7)
+
+    fake = FakeAsyncClient()
+    with sol.Solana(client=fake) as conn:
+        adapter = conn.client
+        assert isinstance(adapter, sol._AsyncClientAdapter)
+        assert adapter._thread.is_alive()
+    assert adapter._thread.is_alive() is False
+
+
+def test_close_is_a_noop_for_a_connection_without_a_closeable_client():
+    conn = sol.Solana(client=_Reader())
+    conn.close()  # no close() on the client — must not raise
+    conn.close()
+
+
 def test_from_env_aliases():
     pytest.importorskip("solders")
     from solders.keypair import Keypair

@@ -21,7 +21,7 @@ from .types import (  # noqa: E402
     MintReceipt, Plan, PreparedTx, PrivacyReceipt, Progress, Quote, Receipt, SolanaHyperlaneQuote, Status, Step,
     to_progress,
 )
-from ._calls import AleoCall, EvmCall  # noqa: E402
+from ._calls import AleoCall, EvmCall, SolCall  # noqa: E402
 from .checkpoint import Checkpoint, CheckpointStore, FileCheckpointStore, create_checkpoint  # noqa: E402
 from .circle import CircleClient  # noqa: E402
 from .client import Bridge  # noqa: E402
@@ -30,7 +30,7 @@ from .freezelist import EMPTY_MERKLE_PROOF_PAIR, FreezeList  # noqa: E402
 from .hyperlane import HyperlaneModule  # noqa: E402
 from .privacy import PrivacyModule  # noqa: E402
 from .profile import DEFAULT_ENDPOINT, Profile  # noqa: E402
-from .sol import Solana  # noqa: E402
+from .sol import DEFAULT_SOLANA_RPC_URL, Solana, SolModule  # noqa: E402
 from .xreserve import XReserveModule  # noqa: E402
 
 __all__ = [
@@ -48,5 +48,5 @@ __all__ = [
     "HyperlaneModule", "PrivacyModule", "Profile", "XReserveModule",
     "Checkpoint", "CheckpointStore", "FileCheckpointStore", "create_checkpoint",
     "EthModule", "Ethereum", "EvmCall",
-    "Solana",
+    "DEFAULT_SOLANA_RPC_URL", "Solana", "SolCall", "SolModule",
 ]

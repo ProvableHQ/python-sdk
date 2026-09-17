@@ -15,13 +15,14 @@ import re
 from typing import TYPE_CHECKING, Any, Callable
 
 from ._calls import AleoCall
-from .errors import ConfigurationError, MissingExtraError
+from .errors import ConfigurationError
 from .eth import Ethereum, EthModule
 from .freezelist import FreezeList
 from .hyperlane import HyperlaneModule
 from .privacy import PrivacyModule
 from .profile import DEFAULT_ENDPOINT, Profile
 from .registry import DEFAULT_REGISTRY, Asset, Chain, Registry, validate_registry
+from .sol import Solana, SolModule
 from .types import BridgeStatus, ChainStatus, PrivacyReceipt
 from .units import format_decimal_amount, parse_decimal_amount
 from .xreserve import XReserveModule
@@ -80,15 +81,9 @@ def _coerce_ethereum(value: Any) -> Ethereum | None:
 
 
 def solana_from_env() -> Any:
-    """``Solana(SOLANA_RPC_URL, private_key=SOLANA_PRIVATE_KEY)`` or None (RPC optional)."""
-    key = os.environ.get("SOLANA_PRIVATE_KEY")
-    if not key:
-        return None
-    try:
-        from .sol import Solana  # plan 3
-    except ImportError as exc:
-        raise MissingExtraError("solana", "A Solana connection from SOLANA_PRIVATE_KEY") from exc
-    return Solana(os.environ.get("SOLANA_RPC_URL"), private_key=key)
+    """``Solana.from_env()``: SOLANA_PRIVATE_KEY/BRIDGE_SOLANA_PRIVATE_KEY (+ SOLANA_RPC_URL/
+    BRIDGE_LIVE_SOLANA_RPC_URL) or None; a key alone signs, a URL alone is read-only, neither → None."""
+    return Solana.from_env()
 
 
 def checkpoints_from_env() -> Any:
@@ -126,10 +121,12 @@ class Bridge:
             raise ConfigurationError(f"Registry {self.registry.version} has no chains for {environment}")
         self.checkpoints = checkpoints
         self.ethereum: Ethereum | None = _coerce_ethereum(ethereum)
-        self.solana = solana
+        if solana is not None and not isinstance(solana, Solana):
+            solana = Solana(client=solana)            # bare solana-py Client → read-only connection (spec §3)
+        self.solana: Solana | None = solana
+        self._sol: SolModule | None = SolModule(self, solana) if solana is not None else None
         self.profile: Profile | None = None
         self._eth: EthModule | None = None
-        self._sol_module: Any = None
         self._programs: dict[str, Any] = {}
         self.hyperlane = HyperlaneModule(self)
         self.xreserve = XReserveModule(self)
@@ -151,17 +148,13 @@ class Bridge:
         return self._eth
 
     @property
-    def sol(self) -> Any:
-        if self.solana is None:
-            raise ConfigurationError("Solana is not configured: Bridge(aleo, solana=Solana(...)) or set SOLANA_PRIVATE_KEY")
-        if self._sol_module is None:
-            try:
-                from .sol import Solana, SolModule  # plan 3
-            except ImportError as exc:
-                raise MissingExtraError("solana", "Solana-origin bridging") from exc
-            connection = self.solana if isinstance(self.solana, Solana) else Solana(client=self.solana)
-            self._sol_module = SolModule(self, connection)
-        return self._sol_module
+    def sol(self) -> SolModule:
+        """Solana-origin module (spec §6). Requires a Solana connection."""
+        if self._sol is None:
+            raise ConfigurationError(
+                "Solana is not configured: pass solana=Solana(rpc_url, private_key=...) or a solana-py Client to Bridge(), "
+                "or set SOLANA_PRIVATE_KEY (and optionally SOLANA_RPC_URL) for Bridge.from_env()")
+        return self._sol
 
     # ── identity / registry helpers ──
     def aleo_chain(self) -> Chain:
@@ -256,10 +249,14 @@ class Bridge:
 
     def status(self) -> BridgeStatus:
         """Read-only re-orientation: addresses and public balances of every registry asset per configured chain.
-        Plan 3 appends a Solana ChainStatus entry; plan 4 fills ``pending`` from the checkpoint store."""
+        Plan 4 fills ``pending`` from the checkpoint store."""
         chains = [self._aleo_chain_status()]
         if self.ethereum is not None:
             chains.append(self.eth.chain_status())
+        if self.solana is not None:
+            balances = {"solana/sol": self.sol.balance()} if self.solana.address is not None else {}
+            chains.append(ChainStatus(chain_id="solana", address=self.solana.address,
+                                      can_sign=self.solana.can_sign, balances=balances))
         pending: list["Progress"] = []
         return BridgeStatus(environment=self.environment, registry_version=self.registry.version,
                             chains=chains, pending=pending)
