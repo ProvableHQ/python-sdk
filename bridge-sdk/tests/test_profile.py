@@ -46,3 +46,31 @@ def test_default_home_and_tilde_expansion(tmp_path, monkeypatch):
 def test_profile_rejects_unknown_network(tmp_path):
     with pytest.raises(ConfigurationError, match="network"):
         Profile.load_or_create(tmp_path / "bad", network="devnet")
+
+
+def test_profile_creation_is_exclusive_loser_adopts_winner_key(tmp_path, monkeypatch):
+    """Two processes racing Profile.load_or_create() on a fresh home must not clobber each other:
+    the exclusive create (O_EXCL) means the loser adopts the winner's already-written key."""
+    from aleo import mainnet as net
+
+    monkeypatch.delenv("BRIDGE_PRIVATE_KEY", raising=False)
+    monkeypatch.delenv("BRIDGE_PRIVATE_KEY_FILE", raising=False)
+    home = tmp_path / "home"
+    winner_key = net.PrivateKey.random()
+    winner_address = str(winner_key.address)
+
+    def racing_initial_key(network):
+        # Simulate another process winning the race: it creates the home dir and profile.json
+        # before this process gets to its own exclusive-open attempt.
+        home.mkdir(parents=True, exist_ok=True, mode=0o700)
+        (home / "profile.json").write_text(json.dumps({
+            "address": winner_address, "private_key": str(winner_key), "network": network, "endpoint": DEFAULT_ENDPOINT,
+        }))
+        loser_key = net.PrivateKey.random()   # must NOT end up written or returned
+        return str(loser_key), str(loser_key.address)
+
+    monkeypatch.setattr("aleo_bridge.profile._initial_key", racing_initial_key)
+    profile = Profile.load_or_create(home)
+    assert profile.address == winner_address
+    assert json.loads((home / "profile.json").read_text())["address"] == winner_address
+    assert stat.S_IMODE(os.stat(home).st_mode) == 0o700

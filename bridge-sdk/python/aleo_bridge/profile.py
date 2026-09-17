@@ -18,15 +18,6 @@ _PROFILE = "profile.json"
 _CHECKPOINTS = "checkpoints"
 
 
-def _write_private(path: Path, payload: dict[str, Any]) -> None:
-    """Owner-only file written atomically (no umask window, no torn reads)."""
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as handle:
-        handle.write(json.dumps(payload, indent=1))
-    os.replace(tmp, path)
-
-
 def _initial_key(network: str) -> tuple[str, str]:
     """(private_key, address): imported from BRIDGE_PRIVATE_KEY / BRIDGE_PRIVATE_KEY_FILE, else freshly random."""
     import aleo
@@ -69,10 +60,23 @@ class Profile:
             path.chmod(0o600)                       # heal a loose mode on load
             profile = cls(home_path, json.loads(path.read_text()))
         else:
-            home_path.mkdir(parents=True, exist_ok=True)
+            if home_path.is_dir():
+                home_path.chmod(0o700)              # heal a loose mode on an existing dir
+            else:
+                home_path.mkdir(parents=True, exist_ok=True, mode=0o700)
+                home_path.chmod(0o700)              # mkdir's mode is subject to umask; make it exact
             private_key, address = _initial_key(network)
             data = {"address": address, "private_key": private_key, "network": network, "endpoint": endpoint}
-            _write_private(path, data)
+            try:
+                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            except FileExistsError:
+                # Lost the creation race to another process — adopt the winner's key rather than
+                # clobbering its (already in-use) profile.
+                path.chmod(0o600)
+                data = json.loads(path.read_text())
+            else:
+                with os.fdopen(fd, "w") as handle:
+                    handle.write(json.dumps(data, indent=1))
             profile = cls(home_path, data)
         profile.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         return profile
