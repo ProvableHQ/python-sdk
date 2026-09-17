@@ -114,6 +114,69 @@ def test_hyperlane_scan_ignores_other_senders_and_amounts():
     assert eth.recover_source(WBTC_PLAN, hyperlane_checkpoint()).status == Status.SOURCE_SUBMISSION_PENDING
 
 
+def test_hyperlane_scan_skips_a_candidate_sent_to_another_contract():
+    """A matching ``SentTransferRemote`` log whose transaction went somewhere other than the router
+    belongs to another call path (a batcher, a router of a different route) — never adopt it."""
+    eth, w3 = mainnet_read_only()
+    w3.provider.add_receipt(APPROVAL, block_number=0x65)
+    w3.provider.history_logs.append(sent_transfer_remote_log(WBTC_ROUTER, destination=1634493807, recipient32=ALEO32,
+                                                             amount=100_000, tx_hash=RECOVERED, block_number=0x66))
+    w3.provider.add_transaction(RECOVERED, sender=ACCT.address, to=OTHER, block_number=0x66)
+    w3.provider.add_receipt(RECOVERED, logs=[dispatch_id_log(MAILBOX, RECOVERED_MESSAGE_ID, tx_hash=RECOVERED)],
+                            sender=ACCT.address, to=OTHER, block_number=0x66)
+    receipt = eth.recover_source(WBTC_PLAN, hyperlane_checkpoint())
+    assert receipt.status == Status.SOURCE_SUBMISSION_PENDING and receipt.source_tx_id is None
+
+
+def test_recovery_log_scan_is_bounded_and_chunked():
+    """Every eth_getLogs carries an explicit fromBlock/toBlock; the chunks tile the range exactly
+    once and stop at the head read at the start of the scan."""
+    eth, w3 = mainnet_read_only()
+    eth.log_scan_chunk_blocks = 10
+    w3.provider.add_receipt(APPROVAL, block_number=101)
+    w3.provider.block_number = 126                                   # the approval is 25 blocks behind the head
+    assert eth.recover_source(WBTC_PLAN, hyperlane_checkpoint()).status == Status.SOURCE_SUBMISSION_PENDING
+    assert [(f["fromBlock"], f["toBlock"]) for f in w3.provider.log_filters] == [
+        (hex(101), hex(110)), (hex(111), hex(120)), (hex(121), hex(126))]
+    assert all(f["address"] == [Web3.to_checksum_address(WBTC_ROUTER)] for f in w3.provider.log_filters)
+
+
+def test_a_dispatch_in_the_last_chunk_is_still_found():
+    eth, w3 = mainnet_read_only()
+    eth.log_scan_chunk_blocks = 10
+    w3.provider.add_receipt(APPROVAL, block_number=101)
+    dispatch_history(w3, RECOVERED, block_number=126)
+    receipt = eth.recover_source(WBTC_PLAN, hyperlane_checkpoint())
+    assert receipt.status == Status.DELIVERY_PENDING and receipt.source_tx_id == RECOVERED
+    assert len(w3.provider.log_filters) == 3
+
+
+def test_a_failing_log_chunk_names_the_span_it_could_not_read():
+    eth, w3 = mainnet_read_only()
+    eth.log_scan_chunk_blocks = 10
+    w3.provider.add_receipt(APPROVAL, block_number=101)
+    w3.provider.block_number = 126
+    w3.provider.log_scan_errors[2] = "query returned more than 10000 results"
+    with pytest.raises(BridgeError, match="blocks 111-120 of 101-126") as exc:
+        eth.recover_source(WBTC_PLAN, hyperlane_checkpoint())
+    assert "10000 results" in str(exc.value) and "smaller" in str(exc.value)
+    assert len(w3.provider.log_filters) == 2                         # stopped at the failing chunk
+
+
+def test_xreserve_scan_is_chunked_too():
+    w3 = fake_web3(chain_id=11155111)
+    eth = make_bridge(environment="testnet", ethereum=Ethereum(w3=w3)).eth
+    eth.log_scan_chunk_blocks = 10
+    plan = _plan_for(DEFAULT_REGISTRY, USDC_ROUTE, amount_atomic=2_000_000, recipient=ALEO, sender=ACCT.address)
+    cp = xreserve_checkpoint(plan, bytes(65))
+    w3.provider.add_receipt(APPROVAL, block_number=101)
+    w3.provider.block_number = 126
+    assert eth.recover_source(plan, cp).status == Status.SOURCE_SUBMISSION_PENDING
+    assert [(f["fromBlock"], f["toBlock"]) for f in w3.provider.log_filters] == [
+        (hex(101), hex(110)), (hex(111), hex(120)), (hex(121), hex(126))]
+    assert all(f["address"] == [Web3.to_checksum_address(SEPOLIA_XRESERVE)] for f in w3.provider.log_filters)
+
+
 def test_hyperlane_multiple_matches_refuse_to_choose():
     eth, w3 = mainnet_read_only()
     w3.provider.add_receipt(APPROVAL, block_number=0x65)

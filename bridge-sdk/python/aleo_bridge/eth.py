@@ -34,6 +34,29 @@ def _web3():
 
 _HASH_RE = re.compile(r"^0x[0-9a-fA-F]{64}$")
 
+LOG_SCAN_CHUNK_BLOCKS = 5_000
+"""Default block span per ``eth_getLogs`` request during recovery scans.
+
+Public RPC endpoints cap the range (and the result size) of a single ``eth_getLogs``; an
+unbounded ``{"fromBlock": n}`` filter is refused outright by most of them once ``n`` is far
+enough behind the head. Recovery therefore walks the range in chunks of this many blocks.
+"""
+
+
+def _provider_errors() -> tuple[type[BaseException], ...]:
+    """Everything a JSON-RPC provider can throw for one ``eth_getLogs``: web3's own errors, the
+    ``ValueError`` older/raw providers raise for a JSON-RPC error response, and transport errors."""
+    from web3.exceptions import Web3Exception
+
+    errors: list[type[BaseException]] = [Web3Exception, ValueError]
+    try:
+        import requests
+    except ImportError:  # pragma: no cover - requests ships with web3's HTTP provider
+        pass
+    else:
+        errors.append(requests.RequestException)
+    return tuple(errors)
+
 
 def _eth_account():
     try:
@@ -300,12 +323,15 @@ class _XReserveQuote:
 class EthModule:
     """``bridge.eth`` — Ethereum-origin Hyperlane and xReserve actions (reads return values, writes return ``EvmCall``)."""
 
-    def __init__(self, bridge: Any, conn: Ethereum) -> None:
+    def __init__(self, bridge: Any, conn: Ethereum, *, log_scan_chunk_blocks: int = LOG_SCAN_CHUNK_BLOCKS) -> None:
         self.bridge = bridge
         self.conn = conn
         self.registry: Registry = bridge.registry
         self.network: str = bridge.network            # "mainnet" | "testnet" → aleo.<network> for encoders
         self.chain: Chain = self.registry.chain(EVM_CHAIN_BY_ENVIRONMENT[bridge.environment])
+        if int(log_scan_chunk_blocks) < 1:
+            raise ConfigurationError("log_scan_chunk_blocks must be at least 1")
+        self.log_scan_chunk_blocks = int(log_scan_chunk_blocks)   # recovery eth_getLogs span; lower it for strict RPCs
 
     # -- resolution ---------------------------------------------------------------------------
 
@@ -1084,6 +1110,33 @@ class EthModule:
             block = number if block is None or number > block else block
         return block
 
+    def _scan_logs(self, address: str, from_block: int) -> list[Any]:
+        """Every log of *address* from *from_block* to the head, read in bounded ascending chunks.
+
+        The head is read once so the scan terminates on a fixed range, and every request carries an
+        explicit ``fromBlock``/``toBlock``: an unbounded filter is what public RPCs reject or truncate,
+        and a truncated answer would silently read as "no dispatch/deposit was ever submitted".
+        """
+        errors = _provider_errors()
+        chunk = self.log_scan_chunk_blocks
+        try:
+            latest = int(self.conn.w3.eth.block_number)
+        except errors as exc:
+            raise BridgeError(f"Could not read the current block number to bound a log scan of {address}: {exc}") from exc
+        logs: list[Any] = []
+        start = from_block
+        while start <= latest:
+            end = min(start + chunk - 1, latest)
+            try:
+                logs.extend(self.conn.w3.eth.get_logs({"address": address, "fromBlock": start, "toBlock": end}))
+            except errors as exc:
+                raise BridgeError(
+                    f"eth_getLogs failed for blocks {start}-{end} of {from_block}-{latest} on {address}: {exc}. "
+                    f"Use a dedicated RPC endpoint, or a smaller EthModule(log_scan_chunk_blocks=...) "
+                    f"than the current {chunk}.") from exc
+            start = end + 1
+        return logs
+
     def _recover_hyperlane_from_history(self, route: Route, recipient32: bytes, receipt: Receipt, approvals: list[str],
                                         *, required: bool) -> Receipt | None:
         """Scan router ``SentTransferRemote`` logs after the last confirmed approval; sender and router must match."""
@@ -1108,7 +1161,7 @@ class EthModule:
         warp = self._contract(router, WARP_ROUTE_ABI)
         topic = Web3.keccak(text="SentTransferRemote(uint32,bytes32,uint256)")
         candidates: list[str] = []
-        for log in self.conn.w3.eth.get_logs({"address": router, "fromBlock": from_block}):
+        for log in self._scan_logs(router, from_block):
             if not log["topics"] or bytes(log["topics"][0]) != bytes(topic):
                 continue
             args = warp.events.SentTransferRemote().process_log(log)["args"]
@@ -1183,7 +1236,7 @@ class EthModule:
                                   "for source history verification")
             return None
         hashes: list[str] = []
-        for log in self.conn.w3.eth.get_logs({"address": q.xreserve_contract, "fromBlock": from_block}):
+        for log in self._scan_logs(q.xreserve_contract, from_block):
             tx_hash = Web3.to_hex(log["transactionHash"])
             if tx_hash not in hashes:
                 hashes.append(tx_hash)

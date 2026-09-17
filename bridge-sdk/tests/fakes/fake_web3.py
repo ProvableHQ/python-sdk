@@ -124,7 +124,9 @@ class FakeRpcProvider(BaseProvider):
         self.receipt_delay: dict[str, int] = {}          # hash -> remaining polls that return None before mined
         self.receipt_poll_counts: dict[str, int] = {}     # hash -> eth_getTransactionReceipt calls seen for it
         self.receipt_logs: Callable[[dict], list[dict]] = lambda tx: []   # logs for a sent tx's receipt
-        self.history_logs: list[dict] = []               # served by eth_getLogs (filtered by address/fromBlock)
+        self.history_logs: list[dict] = []               # served by eth_getLogs (filtered by address/from/toBlock)
+        self.log_filters: list[dict] = []                # raw eth_getLogs filter params, in call order
+        self.log_scan_errors: dict[int, str] = {}        # 1-based eth_getLogs call -> JSON-RPC error message
         self.transactions: dict[str, dict] = {}          # extra eth_getTransactionByHash answers
         self.receipts: dict[str, dict] = {}              # extra eth_getTransactionReceipt answers
         self.block_number = 0x10
@@ -133,9 +135,21 @@ class FakeRpcProvider(BaseProvider):
     def _ok(self, result: Any) -> dict:
         return {"jsonrpc": "2.0", "id": 1, "result": result}
 
+    def _block_tag(self, value: Any, default: int) -> int:
+        """A JSON-RPC block tag as an int; ``None``/``"latest"`` fall back to *default*."""
+        if value is None or value in ("latest", "pending", "safe", "finalized"):
+            return default
+        return int(value, 16) if isinstance(value, str) else int(value)
+
+    def _observe_block(self, block_number: int) -> None:
+        """Keep the head at least as high as any block the test has placed a receipt or tx in, so a
+        bounded (``fromBlock``..``eth_blockNumber``) log scan can actually reach that history."""
+        self.block_number = max(self.block_number, block_number)
+
     def add_receipt(self, tx_hash: str, *, status: int = 1, logs: list[dict] | None = None, block_number: int = 0x65,
                     sender: str = ZERO_ADDRESS, to: str = ZERO_ADDRESS) -> None:
         """Serve a receipt for a hash the fake never accepted itself (recovery / status tests)."""
+        self._observe_block(block_number)
         self.receipts[tx_hash] = {
             "transactionHash": tx_hash, "status": _hex(status), "blockNumber": _hex(block_number), "blockHash": BLOCK_HASH,
             "transactionIndex": "0x0", "from": to_checksum_address(sender), "to": to_checksum_address(to),
@@ -144,6 +158,7 @@ class FakeRpcProvider(BaseProvider):
 
     def add_transaction(self, tx_hash: str, *, sender: str, to: str, block_number: int = 0x65) -> None:
         """Serve eth_getTransactionByHash for a hash the fake never accepted itself."""
+        self._observe_block(block_number)
         self.transactions[tx_hash] = {
             "hash": tx_hash, "from": to_checksum_address(sender), "to": to_checksum_address(to), "input": "0x", "value": "0x0",
             "blockNumber": _hex(block_number), "blockHash": BLOCK_HASH, "nonce": "0x0", "gas": "0x1", "gasPrice": "0x1",
@@ -195,12 +210,17 @@ class FakeRpcProvider(BaseProvider):
             return self._ok(self._receipt(h))
         if method == "eth_getLogs":
             f = params[0]
+            self.log_filters.append(f)
+            message = self.log_scan_errors.get(len(self.log_filters))
+            if message is not None:
+                return {"jsonrpc": "2.0", "id": 1, "error": {"code": -32000, "message": message}}
             addr = f.get("address")
             addrs = {to_checksum_address(a) for a in (addr if isinstance(addr, list) else [addr])} if addr else None
-            raw_from = f.get("fromBlock", 0)
-            from_block = int(raw_from, 16) if isinstance(raw_from, str) else int(raw_from)
+            from_block = self._block_tag(f.get("fromBlock"), 0)
+            to_block = self._block_tag(f.get("toBlock"), self.block_number)
             return self._ok([log for log in self.history_logs
-                             if (addrs is None or log["address"] in addrs) and int(log["blockNumber"], 16) >= from_block])
+                             if (addrs is None or log["address"] in addrs)
+                             and from_block <= int(log["blockNumber"], 16) <= to_block])
         if method == "eth_getTransactionByHash":
             h = params[0]
             if h in self.transactions:
