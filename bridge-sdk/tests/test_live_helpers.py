@@ -405,3 +405,447 @@ def test_underfunded_carries_the_shortfall():
     error = live_helpers.Underfunded(asset_id="ethereum/usdc", needed=2_000_000, have=1_500_000)
     assert error.shortfall == 500_000
     assert "ethereum/usdc" in str(error) and "500000" in str(error)
+
+
+# ══ cases.py ══════════════════════════════════════════════════════════════════
+
+from pathlib import Path                                                 # noqa: E402
+
+from aleo_bridge import lifecycle                                        # noqa: E402
+from aleo_bridge.registry import DEFAULT_REGISTRY                        # noqa: E402
+from aleo_bridge.types import Progress, Receipt, Status                  # noqa: E402
+from tests.fakes.fake_bridge import ALEO_RECIPIENT, EVM_ADDRESS, FakeBridge   # noqa: E402
+from tests.live import cases as live_cases                               # noqa: E402
+
+ETH_ROUTE = "hyperlane:ethereum/eth->aleo/eth"
+USDC_ROUTE = "xreserve:ethereum/usdc->aleo/usdcx"
+
+
+class LiveFakeBridge(FakeBridge):
+    """``FakeBridge`` plus the public lifecycle verbs — the surface ``cases.py`` is allowed to use.
+
+    The real ``Bridge`` methods are thin wrappers over ``lifecycle``; wiring the same functions onto
+    the fake keeps the harness honest (it may only call verbs that exist) without a second fake.
+    """
+
+    def quote(self, source, destination, **kwargs):
+        return lifecycle.quote(self, source=source, destination=destination, **kwargs)
+
+    def execute(self, plan, **kwargs):
+        return lifecycle.execute(self, plan, **kwargs)
+
+    def wait(self, progress, **kwargs):
+        return lifecycle.wait(self, progress, **kwargs)
+
+    def recover(self, checkpoint):
+        return lifecycle.recover(self, checkpoint)
+
+    def resume(self, progress, **kwargs):
+        return lifecycle.resume(self, progress, **kwargs)
+
+    def complete(self, progress, **kwargs):
+        return lifecycle.complete(self, progress, **kwargs)
+
+    def pending(self):
+        if self.checkpoints is None:
+            return []
+        return [lifecycle.progress_from_checkpoint(self.registry, cp) for cp in self.checkpoints.list()]
+
+
+@pytest.fixture
+def fake():
+    return LiveFakeBridge()
+
+
+def test_cases_are_veils_five_mainnet_cases_with_their_literals():
+    assert live_cases.CASE_NAMES == live_config.CASE_NAMES
+    assert live_cases.CASES["evm-xreserve"].amount == "2"                 # veil evm-xreserve:57
+    assert live_cases.CASES["evm-xreserve"].mint_mode == "private"        # veil evm-xreserve:60
+    assert live_cases.CASES["aleo-xreserve"].amount == "2.000001"         # veil aleo-xreserve:97
+    assert live_cases.CASES["aleo-xreserve"].mode == "private"
+    assert live_cases.CASES["aleo-hyperlane"].mode == "signer"            # veil aleo-hyperlane:135
+    assert live_cases.CASES["evm-hyperlane"].amount is None               # one atomic unit
+    assert all(spec.veil_source for spec in live_cases.CASES.values())
+
+
+def test_every_mainnet_route_is_covered_by_exactly_one_case():
+    """'All the routes back and forth': no mainnet route may be left without a case."""
+    routes = DEFAULT_REGISTRY.routes(environment="mainnet")
+    covered = {route.id: live_cases.case_for_route(DEFAULT_REGISTRY, route) for route in routes}
+    assert all(case is not None for case in covered.values()), \
+        [rid for rid, case in covered.items() if case is None]
+
+    by_case = {case: {route.id for route in live_cases.routes_for_case(DEFAULT_REGISTRY, case)}
+               for case in live_cases.CASE_NAMES}
+    assert set().union(*by_case.values()) == set(covered)
+    for left in live_cases.CASE_NAMES:
+        for right in live_cases.CASE_NAMES:
+            if left != right:
+                assert not by_case[left] & by_case[right]
+
+    active = {route.id for route in routes if route.active}
+    assert ETH_ROUTE in by_case["evm-hyperlane"] and "hyperlane:ethereum/wbtc->aleo/wbtc" in by_case["evm-hyperlane"]
+    assert "hyperlane:aleo/sol->solana/sol" in by_case["aleo-hyperlane"]
+    assert by_case["solana-hyperlane"] & active == {"hyperlane:solana/sol->aleo/sol"}
+    assert by_case["evm-xreserve"] & active == {USDC_ROUTE}
+    assert by_case["aleo-xreserve"] & active == {"xreserve:aleo/usdcx->ethereum/usdc"}
+
+
+def test_default_amount_is_one_atomic_unit_or_veils_literal():
+    route = DEFAULT_REGISTRY.route(ETH_ROUTE)
+    assert live_cases.default_amount(DEFAULT_REGISTRY, "evm-hyperlane", route) == "0.000000000000000001"
+    usdc = DEFAULT_REGISTRY.route(USDC_ROUTE)
+    assert live_cases.default_amount(DEFAULT_REGISTRY, "evm-xreserve", usdc) == "2"
+
+
+def test_state_names_are_route_qualified():
+    assert live_cases.state_name("evm-hyperlane", ETH_ROUTE) == "evm-hyperlane-hyperlane-ethereum-eth-aleo-eth"
+    assert live_cases.state_name("evm-hyperlane", "hyperlane:ethereum/wbtc->aleo/wbtc") \
+        != live_cases.state_name("evm-hyperlane", ETH_ROUTE)
+
+
+def test_quote_only_prints_the_table_and_submits_nothing(fake, tmp_path):
+    lines: list[str] = []
+    state_path = tmp_path / "evm-hyperlane.json"
+    state = live_cases.run_case(fake, "evm-hyperlane", ETH_ROUTE, state_path=state_path,
+                                execute=False, log=lines.append)
+
+    assert state.completed is False and state.checkpoint is None
+    assert not state_path.exists()                      # a rehearsal leaves no state behind
+    assert not any(event[0] in {"evm_send", "submit", "prove"} for event in fake.events)
+    printed = "\n".join(lines)
+    assert ETH_ROUTE in printed and "evm-hyperlane" in printed and "quote only" in printed
+
+
+def test_quote_only_never_creates_the_private_mint_secret(fake, tmp_path):
+    state_path = tmp_path / "evm-xreserve.json"
+    live_cases.run_case(fake, "evm-xreserve", USDC_ROUTE, state_path=state_path, execute=False,
+                        log=lambda _: None)
+    assert not live_helpers.secret_path(state_path).exists()
+
+
+def test_underfunded_names_the_asset_and_the_shortfall(fake, tmp_path):
+    fake.eth.balances = {"ethereum/eth": 5}
+    with pytest.raises(live_helpers.Underfunded) as excinfo:
+        live_cases.run_case(fake, "evm-hyperlane", ETH_ROUTE, state_path=tmp_path / "s.json",
+                            execute=False, log=lambda _: None)
+    assert excinfo.value.asset_id == "ethereum/eth" and excinfo.value.shortfall > 0
+
+
+def test_a_completed_case_is_a_no_op_that_re_asserts_its_record(fake, tmp_path):
+    state_path = tmp_path / "done.json"
+    live_helpers.save_live_state(state_path, live_helpers.LiveState(
+        route_id=ETH_ROUTE, source_tx_id="0xsource", message_id="0xmessage",
+        destination_tx_id="at1destination", completed=True))
+
+    state = live_cases.run_case(fake, "evm-hyperlane", ETH_ROUTE, state_path=state_path,
+                                execute=True, log=lambda _: None)
+    assert state.completed and state.source_tx_id == "0xsource"
+    assert fake.calls == [] and fake.events == []       # nothing was quoted, nothing was submitted
+
+
+def test_a_completed_state_without_a_source_transaction_fails_closed(fake, tmp_path):
+    state_path = tmp_path / "bad.json"
+    live_helpers.save_live_state(state_path, live_helpers.LiveState(route_id=ETH_ROUTE, completed=True))
+    with pytest.raises(live_helpers.LiveCaseError):
+        live_cases.run_case(fake, "evm-hyperlane", ETH_ROUTE, state_path=state_path, execute=True,
+                            log=lambda _: None)
+
+
+def test_an_inactive_route_is_refused_before_anything_is_read(fake, tmp_path):
+    with pytest.raises(live_helpers.LiveCaseError, match="metadata-required"):
+        live_cases.run_case(fake, "evm-hyperlane", "hyperlane:ethereum/usad->aleo/usad",
+                            state_path=tmp_path / "s.json", execute=False, log=lambda _: None)
+
+
+def test_recipient_and_sender_default_to_our_own_addresses(fake):
+    route = DEFAULT_REGISTRY.route(ETH_ROUTE)
+    assert live_cases.default_recipient(fake, route) == ALEO_RECIPIENT
+    assert live_cases.sender_for(fake, route) == EVM_ADDRESS
+
+    outbound = DEFAULT_REGISTRY.route("hyperlane:aleo/eth->ethereum/eth")
+    assert live_cases.default_recipient(fake, outbound) == EVM_ADDRESS
+    assert live_cases.sender_for(fake, outbound) == ALEO_RECIPIENT
+
+
+def test_an_unconfigured_destination_chain_is_reported_not_an_attribute_error():
+    """Ruling: probe ``bridge.solana``/``bridge.ethereum``; ``bridge.sol``/``bridge.eth`` RAISE."""
+    aleo_only = LiveFakeBridge(ethereum=False, solana=False)
+    assert aleo_only.ethereum is None and aleo_only.solana is None
+    route = DEFAULT_REGISTRY.route("hyperlane:aleo/sol->solana/sol")
+    with pytest.raises(live_helpers.LiveCaseError, match="solana"):
+        live_cases.default_recipient(aleo_only, route)
+    aleo_only.public_balances = {"aleo/sol": 7}
+    assert live_cases.read_balances(aleo_only) == {"aleo/sol": 7}        # the Aleo row still reads
+
+
+def _xreserve_quote(**extra):
+    from aleo_bridge.types import EvmXReserveQuote
+
+    plan = lifecycle.prepare(DEFAULT_REGISTRY, source="ethereum/usdc", destination="aleo/usdcx",
+                             amount="2", recipient=ALEO_RECIPIENT, mint_mode="private")
+    return EvmXReserveQuote(kind="evm-xreserve", plan=plan, fees=(), amount_out="2", hook_data=b"",
+                            remote_recipient_bytes32=b"\x00" * 32, balance_atomic=5_000_000,
+                            allowance_atomic=0, approval_required=True, **extra)
+
+
+def test_print_quote_renders_the_xreserve_max_fee_as_the_protocol_fee_line(fake):
+    """``EvmXReserveQuote.fees`` is empty: its max fee is the protocol cost a human has to see."""
+    lines: list[str] = []
+    live_cases.print_quote(fake, _xreserve_quote(max_fee_atomic=100_000),
+                           case="evm-xreserve", route_id=USDC_ROUTE, log=lines.append)
+    printed = "\n".join(lines)
+    assert "0.1 USDC [xReserve max fee]" in printed
+    assert "max_fee_atomic" in printed and ALEO_RECIPIENT in printed
+    assert "scalar" not in printed
+
+
+# ── the drive loop: wait → resume → complete → done, and never execute twice ──
+
+class _ScriptedBridge:
+    """A bridge whose lifecycle verbs return a scripted sequence, to test ``_drive`` in isolation."""
+
+    def __init__(self, steps):
+        self.steps, self.calls = list(steps), []
+        self.plan = lifecycle.prepare(DEFAULT_REGISTRY, source="ethereum/usdc", destination="aleo/usdcx",
+                                      amount="2", recipient=ALEO_RECIPIENT, mint_mode="private")
+
+    def _next(self, verb):
+        self.calls.append(verb)
+        state = self.steps.pop(0)
+        receipt = Receipt(id="r1", protocol="xreserve", status=Status.SOURCE_CONFIRMING,
+                          source_tx_id="0xsource",
+                          protocol_state={"routeId": USDC_ROUTE, "messageId": "0xmessage"})
+        return Progress(state, self.plan, receipt, error="scripted failure" if state == "failed" else None)
+
+    def wait(self, progress, **kwargs):
+        return self._next("wait")
+
+    def resume(self, progress, **kwargs):
+        return self._next("resume")
+
+    def complete(self, progress, **kwargs):
+        return self._next("complete")
+
+    def execute(self, *args, **kwargs):
+        raise AssertionError("execute must never be called from the drive loop")
+
+
+def _drive(bridge, first, **kwargs):
+    benchmark = live_helpers.LiveBenchmark("t", log=lambda _: None)
+    progress = Progress(first, bridge.plan,
+                        Receipt(id="r1", protocol="xreserve", status=Status.SOURCE_CONFIRMING,
+                                protocol_state={"routeId": USDC_ROUTE}))
+    return live_cases._drive(bridge, progress, live_helpers.LiveState(route_id=USDC_ROUTE),
+                             Path("/nonexistent/state.json"), spec=live_cases.CASES["evm-xreserve"],
+                             benchmark=benchmark, save=lambda _: None, wait_timeout_seconds=1,
+                             wait_poll_seconds=0, log=lambda _: None, **kwargs)
+
+
+def test_drive_runs_wait_resume_complete_until_done():
+    bridge = _ScriptedBridge(["resume", "wait", "complete", "wait", "done"])
+    progress = _drive(bridge, "wait", secret_nonce="7scalar")
+    assert progress.next == "done"
+    assert bridge.calls == ["wait", "resume", "wait", "complete", "wait"]
+
+
+def test_drive_raises_the_reported_error_on_failure():
+    bridge = _ScriptedBridge(["failed"])
+    with pytest.raises(live_helpers.LiveCaseError, match="scripted failure"):
+        _drive(bridge, "wait", secret_nonce="7scalar")
+
+
+def test_drive_refuses_a_private_mint_without_the_kept_nonce():
+    bridge = _ScriptedBridge(["complete"])
+    with pytest.raises(live_helpers.LiveCaseError, match="secret nonce"):
+        _drive(bridge, "wait", secret_nonce=None)
+
+
+def test_drive_gives_up_rather_than_looping_forever():
+    bridge = _ScriptedBridge(["wait"] * 40)
+    with pytest.raises(live_helpers.LiveCaseError, match="did not settle"):
+        _drive(bridge, "wait", secret_nonce="7scalar")
+
+
+# ══ scripts/rehearse.py ═══════════════════════════════════════════════════════
+
+import importlib.util                                                    # noqa: E402
+
+from aleo_bridge.errors import PollingTimeoutError                       # noqa: E402
+
+SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "rehearse.py"
+
+
+@pytest.fixture(scope="module")
+def rehearse():
+    spec = importlib.util.spec_from_file_location("rehearse", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture
+def state_dir(monkeypatch, tmp_path):
+    monkeypatch.setenv(STATE_DIR, str(tmp_path))
+    return tmp_path
+
+
+def _report(path):
+    return json.loads(Path(path).read_text())
+
+
+def test_cli_parses_the_documented_flags(rehearse):
+    args = rehearse.parse_args(["--case", "evm-hyperlane"])
+    assert args.case == "evm-hyperlane" and args.route is None
+    assert args.quote_only is False and args.recover is None and args.report is None
+
+    args = rehearse.parse_args(["--case", "aleo-xreserve", "--route", "xreserve:aleo/usdcx->ethereum/usdc",
+                                "--quote-only", "--report", "/tmp/r.json"])
+    assert args.route == "xreserve:aleo/usdcx->ethereum/usdc" and args.quote_only and args.report == "/tmp/r.json"
+
+    args = rehearse.parse_args(["--recover", "/tmp/state.json"])
+    assert args.recover == "/tmp/state.json" and args.case is None
+
+    for bad in ([], ["--case", "not-a-case"]):
+        with pytest.raises(SystemExit):
+            rehearse.parse_args(bad)
+
+
+def test_cli_has_no_reset_flag(rehearse):
+    """veil's solana-deposit.ts --reset deletes a checkpoint without checking the chain; not ported."""
+    with pytest.raises(SystemExit):
+        rehearse.parse_args(["--case", "evm-hyperlane", "--reset"])
+
+
+def test_quote_only_run_reports_every_route_of_the_case(rehearse, fake, state_dir, tmp_path):
+    lines: list[str] = []
+    report = tmp_path / "report.json"
+    code = rehearse.run(["--case", "evm-hyperlane", "--quote-only", "--report", str(report)],
+                        bridge_factory=lambda: fake, log=lines.append)
+
+    assert code == rehearse.EXIT_OK
+    payload = _report(report)
+    rows = {row["route_id"]: row for row in payload["results"]}
+    assert set(rows) == {route.id for route in live_cases.routes_for_case(DEFAULT_REGISTRY, "evm-hyperlane")}
+    assert rows[ETH_ROUTE]["status"] == "quote-only"
+    assert rows["hyperlane:ethereum/usad->aleo/usad"]["status"] == "skipped"
+    assert "metadata-required" in rows["hyperlane:ethereum/usad->aleo/usad"]["reason"]
+    assert payload["execute"] is False and payload["case"] == "evm-hyperlane"
+
+    printed = "\n".join(lines)
+    assert ETH_ROUTE in printed and "quote-only" in printed
+    assert not any(event[0] in {"evm_send", "submit"} for event in fake.events)
+
+
+def test_a_single_route_can_be_selected(rehearse, fake, state_dir, tmp_path):
+    report = tmp_path / "report.json"
+    rehearse.run(["--case", "evm-hyperlane", "--route", ETH_ROUTE, "--quote-only", "--report", str(report)],
+                 bridge_factory=lambda: fake, log=lambda _: None)
+    assert [row["route_id"] for row in _report(report)["results"]] == [ETH_ROUTE]
+
+
+def test_without_the_acknowledgements_the_run_quotes_and_names_the_variable(rehearse, fake, state_dir,
+                                                                            monkeypatch, tmp_path):
+    """The gate is READ here; nothing prints a line that would set it in a subshell."""
+    monkeypatch.setenv(FUNDS, "1")
+    monkeypatch.setenv(ACK, "I_ACKNOWLEDGE_BRIDGE_MAINNET_FUNDS")
+    monkeypatch.setenv(CASES, "evm-hyperlane")          # the case is acknowledged, submission is not
+    lines: list[str] = []
+    report = tmp_path / "report.json"
+    code = rehearse.run(["--case", "evm-hyperlane", "--route", ETH_ROUTE, "--report", str(report)],
+                        bridge_factory=lambda: fake, log=lines.append)
+
+    payload = _report(report)
+    assert code == rehearse.EXIT_OK and payload["execute"] is False
+    assert "BRIDGE_LIVE_MAINNET_EXECUTE" in payload["reason"]
+    printed = "\n".join(lines)
+    assert "export " not in printed and "I_ACKNOWLEDGE" not in printed
+    assert "BRIDGE_LIVE_MAINNET_EXECUTE" in printed
+
+
+def test_acknowledged_runs_ask_the_case_to_execute(rehearse, fake, state_dir, monkeypatch, tmp_path):
+    monkeypatch.setenv(FUNDS, "1")
+    monkeypatch.setenv(ACK, "I_ACKNOWLEDGE_BRIDGE_MAINNET_FUNDS")
+    monkeypatch.setenv(CASES, "evm-hyperlane")
+    monkeypatch.setenv(EXECUTE, "I_ACKNOWLEDGE_THIS_SUBMITS_MAINNET_TRANSACTIONS")
+    seen = {}
+
+    def runner(bridge, route_id, **kwargs):
+        seen.update(route_id=route_id, execute=kwargs["execute"], state_path=kwargs["state_path"])
+        return live_helpers.LiveState(route_id=route_id, source_tx_id="0xsource", message_id="0xm",
+                                      destination_tx_id="at1d", completed=True)
+
+    monkeypatch.setitem(live_cases.RUNNERS, "evm-hyperlane", runner)
+    report = tmp_path / "report.json"
+    code = rehearse.run(["--case", "evm-hyperlane", "--route", ETH_ROUTE, "--report", str(report)],
+                        bridge_factory=lambda: fake, log=lambda _: None)
+
+    assert code == rehearse.EXIT_OK and seen["execute"] is True
+    assert Path(seen["state_path"]) == state_dir / "mainnet" / f"{live_cases.state_name('evm-hyperlane', ETH_ROUTE)}.json"
+    row = _report(report)["results"][0]
+    assert row["status"] == "completed" and row["source_tx_id"] == "0xsource" and row["message_id"] == "0xm"
+
+
+def test_an_underfunded_case_is_skipped_with_its_shortfall(rehearse, fake, state_dir, monkeypatch, tmp_path):
+    def runner(bridge, route_id, **kwargs):
+        raise live_helpers.Underfunded(asset_id="ethereum/eth", needed=1000, have=1)
+
+    monkeypatch.setitem(live_cases.RUNNERS, "evm-hyperlane", runner)
+    report = tmp_path / "report.json"
+    code = rehearse.run(["--case", "evm-hyperlane", "--route", ETH_ROUTE, "--quote-only", "--report", str(report)],
+                        bridge_factory=lambda: fake, log=lambda _: None)
+    row = _report(report)["results"][0]
+    assert code == rehearse.EXIT_OK and row["status"] == "skipped" and "999" in row["reason"]
+
+
+def test_a_timeout_is_pending_with_the_resume_command_not_a_failure(rehearse, fake, state_dir, monkeypatch, tmp_path):
+    def runner(bridge, route_id, **kwargs):
+        raise PollingTimeoutError("still in flight", status=Status.DELIVERY_PENDING)
+
+    monkeypatch.setitem(live_cases.RUNNERS, "evm-hyperlane", runner)
+    report = tmp_path / "report.json"
+    lines: list[str] = []
+    code = rehearse.run(["--case", "evm-hyperlane", "--route", ETH_ROUTE, "--quote-only", "--report", str(report)],
+                        bridge_factory=lambda: fake, log=lines.append)
+    row = _report(report)["results"][0]
+    assert code == rehearse.EXIT_PENDING and row["status"] == "pending"
+    assert "--recover" in row["resume"] and row["resume"] in "\n".join(lines)
+
+
+def test_a_failed_case_exits_one(rehearse, fake, state_dir, monkeypatch, tmp_path):
+    def runner(bridge, route_id, **kwargs):
+        raise live_helpers.LiveCaseError("the destination rejected it")
+
+    monkeypatch.setitem(live_cases.RUNNERS, "evm-hyperlane", runner)
+    report = tmp_path / "report.json"
+    code = rehearse.run(["--case", "evm-hyperlane", "--route", ETH_ROUTE, "--quote-only", "--report", str(report)],
+                        bridge_factory=lambda: fake, log=lambda _: None)
+    row = _report(report)["results"][0]
+    assert code == rehearse.EXIT_FAILED and row["status"] == "failed" and "rejected" in row["reason"]
+
+
+def test_recover_resolves_the_case_from_the_state_file(rehearse, fake, state_dir, monkeypatch, tmp_path):
+    state_path = state_dir / "mainnet" / "evm-hyperlane-resume.json"
+    live_helpers.save_live_state(state_path, live_helpers.LiveState(route_id=ETH_ROUTE, source_tx_id="0xs"))
+    seen = {}
+
+    def runner(bridge, route_id, **kwargs):
+        seen.update(route_id=route_id, state_path=kwargs["state_path"])
+        return live_helpers.LiveState(route_id=route_id, source_tx_id="0xs", completed=True)
+
+    monkeypatch.setitem(live_cases.RUNNERS, "evm-hyperlane", runner)
+    code = rehearse.run(["--recover", str(state_path), "--quote-only"],
+                        bridge_factory=lambda: fake, log=lambda _: None)
+    assert code == rehearse.EXIT_OK
+    assert seen["route_id"] == ETH_ROUTE and Path(seen["state_path"]) == state_path
+
+
+def test_the_table_renders_one_line_per_route(rehearse):
+    rows = [{"case": "evm-hyperlane", "route_id": ETH_ROUTE, "status": "quote-only", "reason": "",
+             "source_tx_id": None, "message_id": None, "destination_tx_id": None, "resume": ""},
+            {"case": "evm-hyperlane", "route_id": "hyperlane:ethereum/wbtc->aleo/wbtc", "status": "skipped",
+             "reason": "registry availability: metadata-required", "source_tx_id": None,
+             "message_id": None, "destination_tx_id": None, "resume": ""}]
+    table = rehearse.render_table(rows)
+    assert ETH_ROUTE in table and "quote-only" in table and "metadata-required" in table
+    assert len(table.strip().splitlines()) >= 3        # header + two rows
