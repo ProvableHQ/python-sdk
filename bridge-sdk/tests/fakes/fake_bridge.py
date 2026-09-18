@@ -33,6 +33,13 @@ from tests.conftest import FakeAleo as _ConftestFakeAleo
 from tests.conftest import default_mappings
 
 ALEO_RECIPIENT = "aleo1kypwp5m7qtk9mwazgcpg0tq8aal23mnrvwfvug65qgcg9xvsrqgspyjm6n"
+#: What ``PrivacyModule.unshield`` really puts into ``call.inputs``: the selected record's
+#: PLAINTEXT (see ``privacy.py`` — ``select_record`` returns the plaintext string). Anything that
+#: renders a built call for a human or a model has to redact it.
+RECORD_PLAINTEXT = (
+    "{ owner: aleo1kypwp5m7qtk9mwazgcpg0tq8aal23mnrvwfvug65qgcg9xvsrqgspyjm6n.private, "
+    "amount: 100000000u128.private, "
+    "_nonce: 5749463759923163832671233077408835222301563867853163045949890371815825289938group.public }")
 EVM_ADDRESS = "0x0000000000000000000000000000000000000001"
 SOL_ADDRESS = "11111111111111111111111111111111"
 OUTBOUND = {"aleo/eth": "ethereum/eth", "aleo/wbtc": "ethereum/wbtc",
@@ -63,6 +70,9 @@ class FakeAleoCall:
 
     def submit_prepared(self, prepared: PreparedTx, *, wait=True, wait_timeout=180.0):
         self.fake.events.append(("submit", prepared.transaction_id, wait))
+        if self.fake.submit_error is not None:
+            # The bytes are already checkpointed and may be on the wire: an ambiguous broadcast.
+            raise self.fake.submit_error
         self.fake.submitted.append(prepared.serialized)
         return self._make(prepared.transaction_id)
 
@@ -452,6 +462,7 @@ class FakeBridge:
         self.events: list[tuple] = []        # ordered side effects (prove/submit/checkpoint...)
         self.calls: list[tuple] = []         # module method calls with kwargs
         self.submitted: list[str] = []
+        self.submit_error: Exception | None = None   # raised by submit_prepared, after the checkpoint
         self._tx = 0
         self.aleo = _ConftestFakeAleo(mappings=default_mappings(), network_name=environment)
         self.hyperlane = FakeHyperlane(self)
@@ -493,7 +504,7 @@ class FakeBridge:
 
     def unshield(self, asset, *, amount=None, amount_atomic=None, record=None, merkle_proof=None, recipient=None):
         self.calls.append(("unshield", dict(asset=asset, amount=amount, amount_atomic=amount_atomic)))
-        return FakeAleoCall(self, "arc20_eth.aleo", "unshield", ["<record>", f"{amount_atomic}u128"], self.next_tx_id(),
+        return FakeAleoCall(self, "arc20_eth.aleo", "unshield", [RECORD_PLAINTEXT, f"{amount_atomic}u128"], self.next_tx_id(),
                             lambda tx: PrivacyReceipt(tx, asset, str(amount or amount_atomic), amount_atomic or 0, "unshield"))
 
     def status(self) -> BridgeStatus:

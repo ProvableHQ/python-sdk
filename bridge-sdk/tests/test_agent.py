@@ -9,12 +9,12 @@ import json
 
 import pytest
 
-from aleo_bridge.agent import _serialize, bridge_tools, dispatch_tool
-from aleo_bridge.checkpoint import FileCheckpointStore
+from aleo_bridge.agent import _serialize, _summarize_input, bridge_tools, dispatch_tool
+from aleo_bridge.checkpoint import Checkpoint, FileCheckpointStore, create_checkpoint
 from aleo_bridge.errors import BridgeError
 from aleo_bridge.lifecycle import prepare
 from aleo_bridge.types import Fee, Receipt, Status
-from tests.fakes.fake_bridge import ALEO_RECIPIENT, EVM_ADDRESS, FakeBridge
+from tests.fakes.fake_bridge import ALEO_RECIPIENT, EVM_ADDRESS, RECORD_PLAINTEXT, FakeBridge
 
 READS = {"bridge_status", "bridge_list_assets", "bridge_list_routes", "bridge_quote", "bridge_get_progress",
          "bridge_pending"}
@@ -161,11 +161,75 @@ def test_get_progress_and_pending(tmp_path):
                                               "amount": "0.000000000000000001", "recipient": EVM_ADDRESS,
                                               "gas_payment_microcredits": 1, "confirm": True})
     assert out["progress"]["receipt"]["status"] == "SOURCE_CONFIRMING"
-    progress = dispatch_tool(b, "bridge_get_progress", {"checkpoint": out["checkpoint"]})
-    assert progress["next"] == "wait" and progress["receipt"]["source_tx_id"] == "at1fake1"
+    recovered = dispatch_tool(b, "bridge_get_progress", {"checkpoint": out["checkpoint"]})
+    assert recovered["progress"]["next"] == "wait"
+    assert recovered["progress"]["receipt"]["source_tx_id"] == "at1fake1"
+    # a read hands back a checkpoint too: the model never has to keep the one execute returned
+    assert recovered["checkpoint"]["receiptId"] == "at1fake1"
+    assert recovered["checkpoint"]["route"]["id"] == out["checkpoint"]["route"]["id"]
     assert b.submitted.count(b.submitted[0]) == 1                            # recover never rebroadcasts
     pending = dispatch_tool(b, "bridge_pending", {})
-    assert [p["receipt"]["id"] for p in pending] == ["at1fake1"]
+    assert [p["progress"]["receipt"]["id"] for p in pending] == ["at1fake1"]
+    assert [p["checkpoint"] for p in pending] == [cp.to_dict() for cp in store.list()]
+    json.dumps(pending)
+
+
+def test_pending_hands_back_the_stored_checkpoint_that_restarts_the_flow(tmp_path):
+    """The restart path: a fresh process lists pending transfers and resumes one from the
+    checkpoint the listing echoed — never a checkpoint re-derived from a recovered receipt."""
+    store = FileCheckpointStore(tmp_path)
+    b = FakeBridge(ethereum=False, checkpoints=store)
+    cp, serialized = _aleo_out_checkpoint(b)
+    store.save(Checkpoint.from_dict(cp))
+
+    entries = dispatch_tool(b, "bridge_pending", {})
+    assert len(entries) == 1 and entries[0]["progress"]["next"] == "resume"
+    assert entries[0]["checkpoint"] == Checkpoint.from_dict(cp).to_dict()     # stored form, verbatim
+    out = dispatch_tool(b, "bridge_resume", {"checkpoint": entries[0]["checkpoint"], "confirm": True})
+    assert out["progress"]["receipt"]["status"] == "SOURCE_CONFIRMING" and b.aleo.submitted == [serialized]
+
+
+def test_pending_checkpoint_completes_a_mint_whose_offline_progress_still_says_wait(tmp_path):
+    """``bridge_pending`` is offline, so its progress can lag the chain (here: 'wait' while Circle
+    has in fact attested). The echoed checkpoint is still exactly what ``bridge_complete`` takes."""
+    store = FileCheckpointStore(tmp_path)
+    b = FakeBridge(environment="testnet", checkpoints=store)
+    cp = _inbound_private_checkpoint(b)
+    store.save(Checkpoint.from_dict(cp))
+
+    entries = dispatch_tool(b, "bridge_pending", {})
+    assert len(entries) == 1 and entries[0]["progress"]["next"] == "wait"     # offline view
+    out = dispatch_tool(b, "bridge_complete", {"checkpoint": entries[0]["checkpoint"],
+                                               "secret_nonce": NONCE, "confirm": True})
+    assert out["progress"]["receipt"]["status"] == "DESTINATION_CONFIRMING"
+    assert NONCE not in json.dumps(out)
+
+
+def test_pending_reports_a_malformed_record_instead_of_collapsing_the_list(tmp_path):
+    store = FileCheckpointStore(tmp_path)
+    b = FakeBridge(ethereum=False, checkpoints=store)
+    cp, _ = _aleo_out_checkpoint(b)
+    store.save(Checkpoint.from_dict(cp))
+    (tmp_path / "at1broken.json").write_text(json.dumps(
+        {"version": 1, "receiptId": "at1broken", "intent": {}, "route": {"id": "x", "registryVersion": "y"}}),
+        encoding="utf-8")
+
+    entries = dispatch_tool(b, "bridge_pending", {})
+    assert len(entries) == 2
+    healthy = [e for e in entries if "progress" in e]
+    broken = [e for e in entries if "error" in e]
+    assert len(healthy) == 1 and healthy[0]["checkpoint"] == Checkpoint.from_dict(cp).to_dict()
+    assert len(broken) == 1 and broken[0]["checkpoint_id"] == "at1broken"
+    assert broken[0]["error_type"] == "CheckpointInvalidError" and broken[0]["error"]
+    assert "progress" not in broken[0]
+    json.dumps(entries)
+
+
+def test_checkpoint_property_names_exactly_the_tools_that_return_one():
+    tools = {t["name"]: t for t in bridge_tools()}
+    description = tools["bridge_get_progress"]["input_schema"]["properties"]["checkpoint"]["description"]
+    returns_one = {"bridge_execute", "bridge_resume", "bridge_complete", "bridge_get_progress", "bridge_pending"}
+    assert {name for name in tools if name in description} == returns_one
 
 
 def test_resume_and_complete_gates():
@@ -194,6 +258,53 @@ def test_shield_unshield_gates():
     assert out["direction"] == "shield" and b.events[-1][0] == "delegate"
     out = dispatch_tool(b, "bridge_unshield", {"asset": "aleo/eth", "amount_atomic": 1, "confirm": True})
     assert out["direction"] == "unshield" and out["amount_atomic"] == 1
+
+
+def test_privacy_previews_never_echo_a_record(tmp_path):
+    """An unshield call's inputs carry the selected record's PLAINTEXT — the private balance
+    itself. The preview an agent shows a user must summarize it, never echo it."""
+    b = FakeBridge()
+    out = dispatch_tool(b, "bridge_unshield", {"asset": "aleo/eth", "amount_atomic": 1})
+    blob = json.dumps(out)
+    assert out["confirmation_required"] is True
+    assert out["call"] == {"program": "arc20_eth.aleo", "function": "unshield",
+                           "inputs": ["<record>", "1u128"]}                  # amount literal kept
+    assert RECORD_PLAINTEXT not in blob and "_nonce" not in blob and "owner:" not in blob
+    # shielding has no record to leak: its literals pass through untouched
+    shield = dispatch_tool(b, "bridge_shield", {"asset": "aleo/eth", "amount_atomic": 1})
+    assert shield["call"]["inputs"] == ["1u128"]
+
+
+@pytest.mark.parametrize("value", [
+    RECORD_PLAINTEXT,
+    "{ owner: aleo1abc.private, microcredits: 1500000u64.private }",
+    "record1qyqsqpe2szk2wwwq56akkwx586hkndl3r8vzdwve32lm7elvphh37rsyqyxx66trwfhkxun9v35hguerqqpqzq"
+    "8tc0y3cc45vqs0vzcqmqxqwqsy3y6qw6w4vdkvq3qsqrqwqsyq",
+    "at1abcdefghijklmnop.record",
+])
+def test_summarizer_redacts_record_shaped_inputs(value):
+    assert _summarize_input(value) == "<record>"
+
+
+@pytest.mark.parametrize("value", ["1u128", ALEO_RECIPIENT, "arc20_eth.aleo", "transfer_private_to_public",
+                                   "{ siblings: [ 0field ], leaf_index: 0u32 }", "true", "0u64"])
+def test_summarizer_keeps_public_literals(value):
+    assert _summarize_input(value) == value
+
+
+def test_bridge_tools_returns_deep_copies():
+    first = bridge_tools()
+    first[0]["description"] = "mutated"
+    first[0]["input_schema"]["properties"]["injected"] = {"type": "string"}
+    quote = next(t for t in first if t["name"] == "bridge_quote")
+    quote["input_schema"]["required"].append("injected")
+
+    second = bridge_tools()
+    assert second[0]["description"] != "mutated"
+    assert "injected" not in second[0]["input_schema"]["properties"]
+    fresh_quote = next(t for t in second if t["name"] == "bridge_quote")
+    assert fresh_quote["input_schema"]["required"] == ["source", "destination", "amount", "recipient"]
+    assert fresh_quote["input_schema"]["properties"] is not quote["input_schema"]["properties"]
 
 
 def test_unknown_tool():
@@ -289,3 +400,37 @@ def test_ambiguous_send_surfaces_recover_guidance_and_the_checkpoint():
     assert out["checkpoint"]["receiptId"] == "0x" + "11" * 32
     assert out["checkpoint"]["route"]["id"] == route_id
     json.dumps(out)
+
+
+def test_resume_write_error_surfaces_recover_guidance_and_the_checkpoint():
+    b = FakeBridge()
+    plan = prepare(b.registry, source="ethereum/usdc", destination="aleo/usdcx", amount="2",
+                   recipient=ALEO_RECIPIENT, sender=EVM_ADDRESS, mint_mode="private")
+    approval = "0x" + "11" * 32
+    receipt = Receipt(id=approval, protocol="xreserve", status=Status.SOURCE_SUBMISSION_PENDING,
+                      protocol_state={"routeId": plan.route_id, "approvalTxIds": [approval],
+                                      "sourceSender": EVM_ADDRESS,
+                                      "hookData": "0x" + b.eth.hook_data.hex()})
+    b.eth.recover_result = receipt                      # history still has no deposit
+    b.eth.intermediates = [receipt]                     # re-checkpointed before the deposit goes out
+    b.eth.send_error = BridgeError("Ethereum deposit may already be broadcast: the RPC response was lost")
+    cp = create_checkpoint(plan, receipt, b.registry).to_dict()
+
+    out = dispatch_tool(b, "bridge_resume", {"checkpoint": cp, "secret_nonce": NONCE, "confirm": True})
+    assert out["error_type"] == "BridgeError" and "may already be broadcast" in out["error"]
+    assert out["next"] == "recover" and "bridge_get_progress" in out["how_to_fix"]
+    assert out["checkpoint"]["receiptId"] == approval and out["checkpoint"]["route"]["id"] == plan.route_id
+    assert NONCE not in json.dumps(out)
+
+
+def test_complete_write_error_surfaces_recover_guidance_and_the_prepared_checkpoint():
+    b = FakeBridge(environment="testnet")
+    cp = _inbound_private_checkpoint(b)
+    b.submit_error = BridgeError("Aleo mint at1fake1 may already be broadcast: the node answer was lost")
+
+    out = dispatch_tool(b, "bridge_complete", {"checkpoint": cp, "secret_nonce": NONCE, "confirm": True})
+    assert out["error_type"] == "BridgeError" and out["next"] == "recover"
+    assert "bridge_get_progress" in out["how_to_fix"]
+    # the pre-broadcast checkpoint made it out: the proved mint can be rebroadcast, never re-proved
+    assert out["checkpoint"]["destination"]["preparedTransaction"]["transactionId"] == "at1fake1"
+    assert NONCE not in json.dumps(out)

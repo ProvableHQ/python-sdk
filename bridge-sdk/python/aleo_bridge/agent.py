@@ -13,7 +13,8 @@ Three rules keep a model from doing damage with this surface:
 
 * **Secrets never leave the process.**  ``_serialize`` drops the private-mint
   secret, the Circle attestation body and the proved transaction bytes from any
-  receipt it renders, and no tool ever echoes its own arguments back.  (The
+  receipt it renders, a previewed program call renders record-shaped inputs as
+  ``"<record>"``, and no tool ever echoes its own arguments back.  (The
   xReserve *hook data* — a public commitment, not the secret that opens it —
   stays on the quote and inside the checkpoint, because ``lifecycle.resume``
   refuses to resume a deposit whose checkpoint has lost it.)
@@ -29,8 +30,10 @@ Three rules keep a model from doing damage with this surface:
 """
 from __future__ import annotations
 
+import copy
 import dataclasses
 import enum
+import re
 from typing import Any, Callable
 
 from . import lifecycle
@@ -119,6 +122,29 @@ def _serialize(value: Any, registry: Registry | None = None) -> Any:
     return str(value)
 
 
+#: A record, in any form an Aleo call input can carry it: the plaintext ``{ owner: … }`` a record
+#: selection returns (``privacy.py``'s ``select_record``), the ``record1…`` ciphertext, a
+#: ``x.record`` locator, or any plaintext carrying a nonce / a credits amount.  A record IS the
+#: private balance — showing one to a model (or writing it into a transcript) spends its privacy.
+_RECORD_SHAPED = re.compile(r"""
+    (^record1[a-z0-9]{8,})       # record ciphertext
+  | (\.record\b)                 # a record locator
+  | (^\{\s*owner\s*:)            # record plaintext, as select_record returns it
+  | (\b_nonce\s*:)               # …or anything else carrying a record's nonce
+  | (\bmicrocredits\s*:)         # …or a credits record's amount
+""", re.IGNORECASE | re.VERBOSE)
+
+
+def _summarize_input(value: Any) -> str:
+    """One program-call input, rendered for a human or a model: record-shaped → ``"<record>"``.
+
+    Everything public — the amount literal, the recipient address, a Merkle path — passes through,
+    so the preview still says what the call does.
+    """
+    text = value if isinstance(value, str) else str(value)
+    return "<record>" if _RECORD_SHAPED.search(text.strip()) else text
+
+
 def _redacted_state(state: Any) -> Any:
     if not isinstance(state, dict):
         return _serialize(state)
@@ -191,7 +217,9 @@ _QUOTE_PROPS = {
 _QUOTE_REQUIRED = ["source", "destination", "amount", "recipient"]
 _CONFIRM = {"confirm": {**_B, "description": "Set true to move funds. Without it the quote is returned and nothing is submitted."}}
 _CHECKPOINT = {"checkpoint": {"type": "object",
-                              "description": "The checkpoint dict returned by bridge_execute / bridge_pending / bridge_get_progress."}}
+                              "description": "The checkpoint dict returned by bridge_get_progress, by an entry of "
+                                             "bridge_pending, or by bridge_execute / bridge_resume / bridge_complete "
+                                             "(including the one an interrupted write hands back with next='recover')."}}
 
 
 def _quote_kwargs(args: dict[str, Any]) -> dict[str, Any]:
@@ -220,6 +248,26 @@ def _confirmation(**payload: Any) -> dict[str, Any]:
     return {"confirmation_required": True, **payload, "how_to_confirm": HOW_TO_CONFIRM}
 
 
+def _write(b: Any, call: Callable[[list[Any]], Any]) -> dict[str, Any]:
+    """Run one fund-moving verb, collecting its checkpoints, and render either outcome.
+
+    Success is ``{"progress", "checkpoint"}``.  A failure is never a retry cue: every write here is
+    single-use and a lost RPC answer is ambiguous, so the error comes back with ``next: "recover"``,
+    how-to-fix pointing at ``bridge_get_progress``, and the last checkpoint that made it out —
+    which, for a write interrupted after proving, is the only copy of those bytes.
+    """
+    seen: list[Any] = []
+    try:
+        progress = call(seen)
+    except BridgeError as exc:
+        payload = _error_payload(exc, next="recover")
+        payload["how_to_fix"] = RECOVER_HOW_TO_FIX
+        if seen:
+            payload["checkpoint"] = _serialize(seen[-1], b.registry)
+        return payload
+    return _with_checkpoint(b, progress)
+
+
 # ── reads ─────────────────────────────────────────────────────────────────────
 
 def _h_status(b, a):
@@ -246,12 +294,35 @@ def _h_quote(b, a):
 
 
 def _h_get_progress(b, a):
-    return _serialize(lifecycle.recover(b, a["checkpoint"]), b.registry)
+    # A checkpoint comes back with the progress: an agent that started from a stale one (or from
+    # bridge_pending) can hand this one straight to bridge_resume / bridge_complete.
+    return _with_checkpoint(b, lifecycle.recover(b, a["checkpoint"]))
 
 
 def _h_pending(b, a):
+    """Every stored checkpoint with the ``Progress`` reconstructed for it — offline, one entry each.
+
+    Reconstruction is :func:`lifecycle.progress_from_checkpoint`, exactly what ``Bridge.pending()``
+    runs per record (no network read, so one unreachable chain can never hide the others). It is
+    called here rather than through ``Bridge.pending()`` because that verb returns bare ``Progress``
+    objects: it neither pairs each one with the checkpoint that produced it — which is what the
+    recovery tools take back, and must be the STORED record, not one re-derived from a receipt an
+    offline reconstruction may have flattened — nor reports the records it could not interpret at
+    all (it drops them). Here such a record becomes one error entry naming its checkpoint id, and
+    the healthy entries still come back.
+    """
     store = getattr(b, "checkpoints", None)
-    return [_serialize(lifecycle.recover(b, cp), b.registry) for cp in store.list()] if store is not None else []
+    if store is None:
+        return []
+    out: list[dict[str, Any]] = []
+    for cp in store.list():
+        try:
+            progress = lifecycle.progress_from_checkpoint(b.registry, cp)
+        except BridgeError as exc:
+            out.append(_error_payload(exc, checkpoint_id=cp.id))
+            continue
+        out.append({"progress": _serialize(progress, b.registry), "checkpoint": cp.to_dict()})
+    return out
 
 
 # ── writes (confirm-gated) ────────────────────────────────────────────────────
@@ -263,27 +334,17 @@ def _h_execute(b, a):
     quote = lifecycle.quote(b, **_quote_kwargs(a))
     if not a.get("confirm"):
         return _confirmation(quote=_serialize(quote, b.registry))
-    seen: list[Checkpoint] = []
-    try:
-        progress = lifecycle.execute(
-            b, quote.plan, on_checkpoint=seen.append, mode=a.get("mode"), proving=a.get("proving", "delegate"),
-            gas_payment_microcredits=a.get("gas_payment_microcredits"), secret_nonce=a.get("secret_nonce"))
-    except BridgeError as exc:
-        # A source call is single-use and a lost RPC response is ambiguous: never retry execute,
-        # hand back whatever checkpoint made it out so the model can recover from it.
-        payload = _error_payload(exc, next="recover")
-        payload["how_to_fix"] = RECOVER_HOW_TO_FIX
-        if seen:
-            payload["checkpoint"] = seen[-1].to_dict()
-        return payload
-    return _with_checkpoint(b, progress)
+    return _write(b, lambda seen: lifecycle.execute(
+        b, quote.plan, on_checkpoint=seen.append, mode=a.get("mode"), proving=a.get("proving", "delegate"),
+        gas_payment_microcredits=a.get("gas_payment_microcredits"), secret_nonce=a.get("secret_nonce")))
 
 
 def _h_resume(b, a):
-    progress = lifecycle.recover(b, a["checkpoint"])
+    progress = lifecycle.recover(b, a["checkpoint"])                 # reads only
     if not a.get("confirm"):
         return _confirmation(progress=_serialize(progress, b.registry))
-    return _with_checkpoint(b, lifecycle.resume(b, progress, secret_nonce=a.get("secret_nonce")))
+    return _write(b, lambda seen: lifecycle.resume(b, progress, on_checkpoint=seen.append,
+                                                   secret_nonce=a.get("secret_nonce")))
 
 
 def _has_prepared_destination(progress: Any) -> bool:
@@ -299,15 +360,17 @@ def _h_complete(b, a):
         return _missing_nonce("the deposit this mint finishes")
     if not a.get("confirm"):
         return _confirmation(progress=_serialize(progress, b.registry))
-    return _with_checkpoint(b, lifecycle.complete(b, progress, secret_nonce=secret_nonce))
+    return _write(b, lambda seen: lifecycle.complete(b, progress, on_checkpoint=seen.append,
+                                                     secret_nonce=secret_nonce))
 
 
 def _privacy(b, a, direction: str):
     kwargs = dict(asset=a["asset"], amount=a.get("amount"), amount_atomic=a.get("amount_atomic"))
     call = b.shield(**kwargs) if direction == "shield" else b.unshield(**kwargs)
     if not a.get("confirm"):
+        # An unshield's inputs carry the selected record's plaintext — the private balance itself.
         return _confirmation(call={"program": call.program_id, "function": call.function_name,
-                                   "inputs": list(call.inputs)})
+                                   "inputs": [_summarize_input(i) for i in call.inputs]})
     return _serialize(call.delegate(), b.registry)
 
 
@@ -341,11 +404,14 @@ _READ_TOOLS: list[tuple[str, str, dict[str, Any], Callable[[Any, dict[str, Any]]
      "(mint_mode='private') must carry the user's own secret_nonce — there is no default.",
      _schema(_QUOTE_PROPS, _QUOTE_REQUIRED), _h_quote),
     ("bridge_get_progress",
-     "Recover a transfer's state from a checkpoint (reads only). progress.next tells what to do: wait (call again "
-     "later), resume (bridge_resume), complete (bridge_complete), done, failed.",
+     "Recover a transfer's state from a checkpoint (reads only). Returns {progress, checkpoint}: progress.next tells "
+     "what to do — wait (call again later), resume (bridge_resume), complete (bridge_complete), done, failed — and "
+     "the checkpoint is the fresh one to pass to whichever of those you call.",
      _schema(_CHECKPOINT, ["checkpoint"]), _h_get_progress),
     ("bridge_pending",
-     "Every in-flight transfer in this profile's checkpoint store, recovered to current progress.",
+     "Every in-flight transfer in this profile's checkpoint store, one {progress, checkpoint} entry each, "
+     "reconstructed offline (no chain read, so its progress can lag: bridge_get_progress refreshes one against live "
+     "state). A record too damaged to interpret comes back as {error, checkpoint_id} in its place.",
      _schema({}, []), _h_pending),
 ]
 
@@ -389,9 +455,14 @@ _HANDLERS: dict[str, Callable[[Any, dict[str, Any]], Any]] = {
 
 
 def bridge_tools(include_writes: bool = True) -> list[dict[str, Any]]:
-    """Tool definitions (Claude API ``tools=`` shape); ``include_writes=False`` keeps only reads."""
+    """Tool definitions (Claude API ``tools=`` shape); ``include_writes=False`` keeps only reads.
+
+    Every call returns a fresh deep copy: a caller that tailors a schema (or a framework that
+    annotates one in place) can never edit the module's own table out from under everyone else.
+    """
     tools = _READ_TOOLS + (_WRITE_TOOLS if include_writes else [])
-    return [{"name": name, "description": desc, "input_schema": schema} for name, desc, schema, _ in tools]
+    return [{"name": name, "description": desc, "input_schema": copy.deepcopy(schema)}
+            for name, desc, schema, _ in tools]
 
 
 def dispatch_tool(bridge: Any, name: str, args: dict[str, Any] | None = None) -> Any:
