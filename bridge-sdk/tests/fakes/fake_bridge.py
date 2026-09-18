@@ -83,9 +83,10 @@ class FakeEvmCall:
     """
 
     def __init__(self, fake: "FakeBridge", intermediates: list[Receipt], final: Any, *,
-                 plan: Any = None, store: Any = None) -> None:
+                 plan: Any = None, store: Any = None, send_error: Exception | None = None) -> None:
         self.fake, self.intermediates, self.final = fake, intermediates, final
         self.plan, self.store = plan, store
+        self.send_error = send_error        # raised after the intermediates: an ambiguous broadcast
 
     def build(self) -> list[dict]:
         return [{"to": "0xrouter", "data": "0x", "value": 0}]
@@ -101,6 +102,10 @@ class FakeEvmCall:
         self.fake.events.append(("evm_send", timeout_seconds, poll_seconds))
         for receipt in self.intermediates:
             self._emit(receipt, on_checkpoint)
+        if self.send_error is not None:
+            # Mirrors the real call: the transaction is armed (approvals are already checkpointed)
+            # but its own outcome is unknown — a single-use call that must never be retried.
+            raise self.send_error
         self._emit(self.final.receipt, on_checkpoint)
         return self.final
 
@@ -235,6 +240,7 @@ class FakeEth:
         self.source_status_result: Receipt | None = None
         self.recover_result: Receipt | None = None
         self.intermediates: list[Receipt] = []
+        self.send_error: Exception | None = None     # raised by send() after the intermediates
 
     def quote_transfer_remote(self, asset=None, recipient=None, *, amount=None, amount_atomic=None,
                               route=None, sender=None, plan=None):
@@ -284,7 +290,7 @@ class FakeEth:
                                           "amountAtomic": str(amount_atomic or 0)})
         return FakeEvmCall(self.fake, self.intermediates,
                            DispatchReceipt(tx, route_id, None, amount_atomic or 0, receipt),
-                           plan=plan, store=self.fake.checkpoints)
+                           plan=plan, store=self.fake.checkpoints, send_error=self.send_error)
 
     def quote_deposit_usdc(self, recipient=None, *, amount=None, amount_atomic=None, mint_mode=None,
                            secret_nonce="0scalar", sender=None, route=None, plan=None):
@@ -334,7 +340,7 @@ class FakeEth:
                                           "bridgeProgram": "usdcx_bridge_v2.aleo"})
         return FakeEvmCall(self.fake, self.intermediates,
                            DepositReceipt(tx, route_id, message_hash, "0x" + "dd" * 32, receipt),
-                           plan=plan, store=self.fake.checkpoints)
+                           plan=plan, store=self.fake.checkpoints, send_error=self.send_error)
 
     def balance(self, asset) -> int:
         self.fake.calls.append(("eth.balance", asset))

@@ -5,11 +5,14 @@ Deviation from the task-9 brief (recorded in task-9-report.md): the brief's Step
 ``__init__.py`` import ``bridge_tools``/``dispatch_tool`` from a new ``.agent`` module and add
 ``agent_guide()`` (reading a packaged ``AGENTS.md``), and has ``__main__.py`` print that guide.
 The task-9 controller notes (ruling 5) explicitly forbid creating ``agent.py``/``AGENTS.md`` in
-this task — those are Task 10/12's files — so this test file does not exercise them, and
-``__main__.py`` is left untouched.
+that task — those are Task 10/12's files.  Task 10 landed ``agent.py`` and those three exports,
+so the export pin below now covers them; ``AGENTS.md`` is still Task 12's, and ``__main__.py``
+is left untouched.
 """
+from pathlib import Path
+
 import aleo_bridge
-from aleo_bridge import lifecycle
+from aleo_bridge import agent, lifecycle
 from aleo_bridge.checkpoint import FileCheckpointStore, create_checkpoint
 from aleo_bridge.client import Bridge
 from aleo_bridge.types import Receipt, Status
@@ -35,8 +38,9 @@ PRE_EXISTING_EXPORTS = [
     "DEFAULT_SOLANA_RPC_URL", "Solana", "SolCall", "SolModule",
 ]
 
-# This task's own additions (lifecycle module + the pure prepare() convenience import).
-NEW_EXPORTS = ["lifecycle", "prepare"]
+# This task's own additions (lifecycle module + the pure prepare() convenience import), then the
+# agent surface Task 9 deferred to Task 10 (bridge_tools/dispatch_tool + the packaged guide).
+NEW_EXPORTS = ["lifecycle", "prepare", "agent_guide", "bridge_tools", "dispatch_tool"]
 
 
 def _spy(monkeypatch, name):
@@ -109,3 +113,10 @@ def test_public_exports_pin_pre_existing_set_and_add_lifecycle_names():
     assert aleo_bridge.__version__ == "0.1.0"
     assert aleo_bridge.lifecycle is lifecycle
     assert aleo_bridge.prepare is lifecycle.prepare
+    assert aleo_bridge.bridge_tools is agent.bridge_tools
+    assert aleo_bridge.dispatch_tool is agent.dispatch_tool
+    # AGENTS.md is Task 12's generated file: until it ships, the guide is a pointer, never an error
+    guide = aleo_bridge.agent_guide()
+    assert isinstance(guide, str) and guide
+    if not (Path(aleo_bridge.__file__).with_name("AGENTS.md")).exists():
+        assert "codegen/gen_context.py" in guide
