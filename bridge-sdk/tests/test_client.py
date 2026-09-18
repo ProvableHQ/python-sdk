@@ -220,3 +220,12 @@ def test_cli_lists_routes_and_assets(capsys):
     assert cli.main(["assets"]) == 0
     assert len(json.loads(capsys.readouterr().out)) == 19
     assert cli.main(["bogus"]) == 2
+
+
+def test_cli_prints_agent_guide_by_default(capsys):
+    import aleo_bridge
+
+    assert cli.main([]) == 0
+    out = capsys.readouterr().out
+    assert out == aleo_bridge.agent_guide()
+    assert "# aleo-bridge — agent guide" in out

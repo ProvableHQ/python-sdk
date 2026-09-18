@@ -1,4 +1,5 @@
-"""``python -m aleo_bridge [status|routes|assets]`` — status needs BRIDGE_PRIVATE_KEY (read-only)."""
+"""``python -m aleo_bridge`` prints the agent guide; ``[status|routes|assets]`` run those checks
+(``status`` needs BRIDGE_PRIVATE_KEY, read-only)."""
 from __future__ import annotations
 
 import dataclasses
@@ -12,7 +13,11 @@ USAGE = "usage: python -m aleo_bridge [status|routes|assets]"
 
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
-    command = args[0] if args else "status"
+    if not args:
+        from . import agent_guide
+        print(agent_guide(), end="")
+        return 0
+    command = args[0]
     if command == "routes":
         print(json.dumps([r.id for r in DEFAULT_REGISTRY.routes(include_unavailable=True)], indent=1))
         return 0
