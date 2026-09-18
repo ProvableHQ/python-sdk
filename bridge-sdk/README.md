@@ -119,3 +119,64 @@ Profiles live at `$ALEO_BRIDGE_HOME` or `~/.aleo-bridge` and hold only the Aleo 
     BRIDGE_LIVE_READS=1 BRIDGE_LIVE_SIMULATE=1 .venv/bin/python -m pytest -m live tests/live -q
 
 Literals and vectors: `docs/veil-brief.md`.
+
+## Live tests
+
+The funded suite (`tests/live/`, ported from veil's `test/integration/live/`) moves real money. It
+is off unless you turn it on, in your own shell, one command at a time.
+
+**Gates** (read only — nothing in this repository sets them; the exact acknowledgement strings are
+the constants in `tests/live/config.py`):
+
+| Variable | Effect |
+| --- | --- |
+| `BRIDGE_LIVE_FUNDS=1` + `BRIDGE_LIVE_STATE_DIR=<dir outside the repo>` | funded cases exist at all |
+| `BRIDGE_LIVE_MAINNET_ACK=…` + `BRIDGE_LIVE_MAINNET_CASES=<comma list>` | the named mainnet cases may run |
+| `BRIDGE_LIVE_MAINNET_EXECUTE=…` | the wallet may actually submit |
+
+Without the last one every case runs to the quote, prints the route/amount/fee table and returns —
+that is the default, and it is how you rehearse. Keys and endpoints come from `Bridge.from_env()`
+(`BRIDGE_PRIVATE_KEY`, `EVM_PRIVATE_KEY`/`BRIDGE_EVM_PRIVATE_KEY`, `SOLANA_PRIVATE_KEY`/
+`BRIDGE_SOLANA_PRIVATE_KEY`, `ETHEREUM_RPC_URL`/`BRIDGE_LIVE_ETHEREUM_RPC_URL`,
+`SOLANA_RPC_URL`/`BRIDGE_LIVE_SOLANA_RPC_URL`); recipients default to your own addresses and can be
+overridden with `BRIDGE_LIVE_ALEO_MAINNET_RECIPIENT` / `BRIDGE_LIVE_EVM_RECIPIENT` /
+`BRIDGE_LIVE_SOLANA_RECIPIENT`.
+
+**State.** Each case keeps one file at `$BRIDGE_LIVE_STATE_DIR/<environment>/<case>-<route>.json`
+(mode 600) holding the checkpoint, the source/destination transaction ids and the message id; the
+private-mint secret nonce lives beside it in `<state>.secret` (mode 600, created exclusively) and
+never in the state, a log or a checkpoint. Re-running a case resumes from that file — recover
+first, then `wait`/`resume`/`complete`; a completed case re-asserts what it recorded and exits.
+A timeout is *pending*, not a failure: the checkpoint stays on disk and the run prints the
+`--recover` command.
+
+**Cases and routes.** Five cases, each parametrized over every registry route it covers — both
+directions are separate cases, and a route with `availability != "active"` is reported as
+skipped-by-registry rather than dropped:
+
+| Case | Routes | Amount |
+| --- | --- | --- |
+| `evm-hyperlane` | ethereum → aleo (ETH, WBTC, USDT) | one atomic unit |
+| `aleo-hyperlane` | aleo → ethereum (ETH, WBTC, USDT), aleo → solana (SOL) | one atomic unit, `mode="signer"` |
+| `solana-hyperlane` | solana → aleo (SOL) | 1 lamport |
+| `evm-xreserve` | ethereum USDC → aleo USDCx | `2` USDC, private mint (needs `complete`) |
+| `aleo-xreserve` | aleo USDCx → ethereum USDC | `2.000001` USDCx private burn, delivers 1 atomic unit |
+
+**Funding per run** (from the 2026-09-17 read-only mainnet quote sweep): ETH/WBTC/USDT Hyperlane
+deposits cost ≈0.0000838 ETH each in native Hyperlane fees plus L1 gas (USDT also needs one
+approval); the Aleo-origin legs cost 8.174147 (ETH), 9.138947 (WBTC), 9.138947 (USDT) and 7.661056
+(SOL) credits in IGP payment plus the Aleo transaction fee, and need the asset's public balance on
+Aleo; solana → aleo costs 5,647,521 lamports all-in; the xReserve deposit needs 2 USDC plus gas,
+and the burn needs an unspent private USDCx record of at least 2.000001. Return legs spend what
+the matching inbound leg minted, so run inbound first — an unfunded return leg skips with its
+shortfall printed rather than failing.
+
+**Running it.**
+
+    python scripts/rehearse.py --case evm-hyperlane --quote-only          # price every route, submit nothing
+    python scripts/rehearse.py --case evm-xreserve --report run.json      # submits only if acknowledged
+    python scripts/rehearse.py --recover "$BRIDGE_LIVE_STATE_DIR/mainnet/<case>-<route>.json"
+
+Exit codes: `0` ok, `1` a case failed, `2` something is still pending. The same case functions back
+the pytest suite (`-m live`), so the CLI and the tests cannot drift. The harness itself is covered
+hermetically by `tests/test_live_helpers.py`.
