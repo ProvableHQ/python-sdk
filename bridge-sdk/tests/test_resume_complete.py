@@ -194,6 +194,23 @@ def test_resume_refuses_when_the_re_quoted_hook_data_does_not_match_the_checkpoi
     assert "eth.deposit_usdc" not in [c[0] for c in b.calls]
 
 
+@pytest.mark.parametrize("hook", [None, "not-hex", "0x", "0x" + "11" * 64, "0x" + "11" * 66, 65])
+def test_resume_refuses_an_xreserve_checkpoint_without_usable_hook_data(hook):
+    """Fix round 1 (R1): with no checkpointed hook there is nothing to compare the re-quote
+    against, so the equality guard below would pass vacuously and the deposit could be re-hooked to
+    a different commitment. Missing, malformed or wrong-width hook data is refused before any RPC —
+    including the history scan, so nothing is read on a transfer resume() will not finish."""
+    b = FakeBridge()
+    plan, receipt = _xreserve_progress(b, mint_mode="private")
+    state = {k: v for k, v in receipt.protocol_state.items() if k != "hookData"}
+    if hook is not None:
+        state["hookData"] = hook
+    b.eth.recover_result = receipt
+    with pytest.raises(NotResumableError, match="hook data"):
+        resume(b, to_progress(plan, receipt.replace(protocol_state=state)), secret_nonce="7scalar")
+    assert b.calls == []
+
+
 def test_resume_refuses_when_the_recovered_allowance_is_gone():
     """veil guard 2: the approval this checkpoint recorded no longer covers the deposit — something
     else spent it. Re-approving here would be a second irreversible step resume never owns."""
@@ -286,6 +303,32 @@ def test_complete_proves_checkpoints_then_submits_one_private_mint():
         assert "7scalar" not in text and SIG not in text and "attestation" not in text
     assert "7scalar" not in json.dumps(out.receipt.protocol_state)
     assert "secretNonce" not in json.dumps(out.receipt.protocol_state)
+
+
+def test_complete_never_writes_a_secret_to_the_bound_checkpoint_store(tmp_path):
+    """Fix round 1 (R2): the same claim as above, but proved against what actually reaches disk —
+    every byte the store wrote, not just the Checkpoint objects handed to the callback. The secret
+    nonce, Circle's attestation and the hook the deposit committed to must appear in none of it."""
+    store = FileCheckpointStore(tmp_path)
+    b = FakeBridge(environment="testnet", checkpoints=store)
+    plan, payload, message_hash, ready = _ready(b)
+    b.xreserve.expected_secret_nonce = "7scalar"
+    written = []
+    real_save = store.save
+    store.save = lambda cp: (written.append(cp.to_json()), real_save(cp))[1]
+
+    complete(b, to_progress(plan, ready), secret_nonce="7scalar")
+
+    hook_hex = payload[-65:].hex()                        # the commitment the deposit was hooked to
+    secrets = ["7scalar", "secretNonce", SIG, SIG[2:], hook_hex, payload.hex(), "attestation"]
+    on_disk = [p.read_text(encoding="utf-8") for p in tmp_path.glob("*.json")]
+    assert written and on_disk                            # the store really was exercised
+    for text in written + on_disk:
+        for secret in secrets:
+            assert secret not in text, f"{secret!r} leaked into a checkpoint"
+    # ...and what IS kept is enough to recover the mint
+    assert [c.id for c in store.list()] == [message_hash]
+    assert store.list()[0].destination == {"transactionId": "at1fake1"}
 
 
 def test_complete_never_reaches_proving_with_a_nonce_that_opens_no_commitment():

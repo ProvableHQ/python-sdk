@@ -21,6 +21,7 @@ from typing import Any, Callable
 
 from . import _sealevel
 from ._calls import is_duplicate_submission
+from .encoding import HOOK_DATA_BYTES
 from ._plan import build_plan
 from .checkpoint import Checkpoint, create_checkpoint
 from .errors import (
@@ -1079,7 +1080,9 @@ def resume(bridge, progress: Progress, *, on_checkpoint: Callable | None = None,
     """Finish the source leg an interruption left unsubmitted — never repeats an irreversible step.
 
     Requires ``progress.next == "resume"`` (status ``SOURCE_SUBMISSION_PENDING``); anything else is
-    a :class:`~aleo_bridge.errors.NotResumableError` pointing at ``wait``/``recover``.
+    a :class:`~aleo_bridge.errors.NotResumableError` pointing at ``wait``/``recover``. In particular
+    a ``SOURCE_APPROVAL_PENDING`` receipt is NOT resumable directly: call ``recover`` first, which
+    observes the approval and yields the ``SOURCE_SUBMISSION_PENDING`` progress this verb takes.
 
     Aleo source: rebroadcasts the checkpointed transaction byte-for-byte, after checking that the
     serialized payload's own id matches the saved one — a duplicate-transaction answer means the
@@ -1149,6 +1152,15 @@ def resume(bridge, progress: Progress, *, on_checkpoint: Callable | None = None,
     _assert_sender(plan, bridge.ethereum.address, family="evm")
     is_xreserve = resolved.route.protocol == "xreserve"
     nonce = _mint_secret(plan, secret_nonce) if is_xreserve else None      # before any RPC
+    saved_hook = state.get("hookData")
+    if is_xreserve and _hex_bytes(saved_hook, length=HOOK_DATA_BYTES) is None:
+        # Without the hook the approval committed to there is nothing to compare the re-quote
+        # against, so the guard below would silently pass and the deposit could be re-hooked to a
+        # different commitment. Refuse here, before any RPC, rather than resume half-blind.
+        raise NotResumableError(
+            "This transfer's checkpoint carries no xReserve hook data (a 65-byte 0x hex string); "
+            "recover() and re-quote instead of resuming — resume() will not re-derive the hook the "
+            "approval committed to")
 
     recovered = eth.recover_source(plan, create_checkpoint(plan, receipt, bridge.registry), required=True)
     if recovered.status is not Status.SOURCE_SUBMISSION_PENDING:
@@ -1158,8 +1170,7 @@ def resume(bridge, progress: Progress, *, on_checkpoint: Callable | None = None,
 
     if is_xreserve:
         quoted = eth.quote_deposit_usdc(plan=plan, secret_nonce=nonce)
-        saved_hook = state.get("hookData")
-        if isinstance(saved_hook, str) and saved_hook.lower() != ("0x" + quoted.hook_data.hex()).lower():
+        if saved_hook.lower() != ("0x" + quoted.hook_data.hex()).lower():     # always runs: validated above
             raise NotResumableError(
                 "The re-quoted hook data does not match the hook this transfer's approval committed "
                 "to: the secret nonce differs from the one used at execute(). Pass that same "
