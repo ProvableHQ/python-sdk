@@ -14,6 +14,7 @@ only adds ``prepare`` and the ``resolve_route`` helper every later verb shares.
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass, replace
 from typing import Any, Callable
 
@@ -21,18 +22,20 @@ from . import _sealevel
 from ._plan import build_plan
 from .checkpoint import Checkpoint, create_checkpoint
 from .errors import (
+    BridgeError,
     CheckpointInvalidError,
     ConfigurationError,
     DeliveryUnknownError,
     InvalidAmountError,
     InvalidRecipientError,
+    PollingTimeoutError,
     RegistryVersionMismatchError,
     RouteUnavailableError,
     UnsupportedRouteError,
 )
 from .registry import Asset, Chain, Registry, Route
-from .types import (TERMINAL, AleoHyperlaneQuote, AleoXReserveQuote, Fee, Plan, Progress, Quote,
-                    Receipt, Status, to_progress)
+from .types import (CALLER_BOUNDARIES, TERMINAL, AleoHyperlaneQuote, AleoXReserveQuote, Fee, Plan,
+                    Progress, Quote, Receipt, Status, to_progress)
 from .units import format_decimal_amount, parse_decimal_amount, resolve_amount
 
 MINT_MODES = ("public", "record", "private")
@@ -719,5 +722,130 @@ def get_status(bridge, plan: Plan, receipt: Receipt) -> Receipt:
     return receipt
 
 
+# ── wait ──────────────────────────────────────────────────────────────────────
+
+def _track(bridge, plan: Plan, previous: Receipt, current: Receipt) -> None:
+    """Mirror an observed status change into the bound store (no caller callback)."""
+    if getattr(bridge, "checkpoints", None) is None:
+        return
+    _persist(bridge, create_checkpoint(plan, current, bridge.registry), current, previous_id=previous.id)
+
+
+def _status_set(values) -> set[Status]:
+    try:
+        return {v if isinstance(v, Status) else Status(v) for v in values}
+    except ValueError as exc:
+        raise ConfigurationError(f"wait(until=...) contains an unknown status: {exc}") from exc
+
+
+_TRANSIENT_BRIDGE_ERROR_RE = re.compile(r"HTTP status (429|5\d\d)|request failed:")
+
+
+def _is_transient_error(exc: Exception) -> bool:
+    """``wait``'s retry classifier: a network/RPC hiccup vs. a real problem that must propagate.
+
+    Transient: ``requests.RequestException`` (any ``requests``-based transport), ``aleo.facade.
+    errors.AleoNetworkError`` (the Aleo facade), a ``BridgeError`` whose message matches an HTTP
+    429/5xx or a wrapped "request failed:" transport error (``SolanaRpcClient``), or a web3
+    provider/connection error. Everything else — including programming errors, ``BridgeError``s
+    about an actual on-chain failure, ``CheckpointInvalidError``, ``RouteUnavailableError`` —
+    propagates immediately.
+    """
+    try:
+        import requests
+        if isinstance(exc, requests.RequestException):
+            return True
+    except ImportError:
+        pass
+    try:
+        from aleo.facade.errors import AleoNetworkError
+        if isinstance(exc, AleoNetworkError):
+            return True
+    except ImportError:
+        pass
+    try:
+        from web3.exceptions import ProviderConnectionError
+        if isinstance(exc, ProviderConnectionError):
+            return True
+    except ImportError:
+        if type(exc).__name__ == "ProviderConnectionError":     # web3 extra not installed here
+            return True
+    if isinstance(exc, BridgeError) and _TRANSIENT_BRIDGE_ERROR_RE.search(str(exc)):
+        return True
+    return False
+
+
+def wait(bridge, progress: Progress, *, until=None, poll_seconds: float = 15.0,
+         timeout_seconds: float = 1200.0, on_update: Callable[[Progress], Any] | None = None,
+         on_error: Callable[[Exception], Any] | None = None, max_consecutive_errors: int = 5) -> Progress:
+    """Poll ``get_status`` until the transfer needs the caller or finishes.
+
+    Always stops at the caller boundaries — ``SOURCE_SUBMISSION_PENDING`` (→ ``resume``),
+    ``DESTINATION_ACTION_REQUIRED`` (→ ``complete``), ``COMPLETED``, ``FAILED``, ``EXPIRED`` — plus
+    any statuses in ``until`` (a ``Status`` or its name; ``until=[]`` is a ``ConfigurationError``,
+    an unknown name too). Returns immediately when ``progress.next != "wait"`` or the receipt is
+    already at a stop. ``on_update`` fires only when the receipt changed, never on a retry.
+    ``poll_seconds`` is floored at 0.1 unless exactly 0; negative ``poll_seconds``/``timeout_seconds``
+    is a ``ConfigurationError``.
+
+    A ``get_status`` call that raises a transient error (flaky RPC/HTTP transport — see
+    :func:`_is_transient_error`) is retried with the normal poll interval, up to
+    ``max_consecutive_errors`` (default 5) consecutive failures before the last one is re-raised;
+    ``on_error`` fires on each tolerated retry so callers can log them. A non-transient error
+    propagates immediately, on the first attempt.
+
+    Hitting ``timeout_seconds`` raises ``PollingTimeoutError`` carrying the last ``status`` and
+    ``progress`` — a timeout is NOT a failure (invariant 5): the transfer is still in flight; call
+    ``wait`` again or ``recover`` later.
+    """
+    if until is not None and len(until) == 0:
+        raise ConfigurationError("wait(until=[]) has nothing to stop at: pass at least one Status or omit until")
+    plan, receipt = progress.plan, progress.receipt
+    resolve_route(bridge.registry, plan)
+    _check_receipt(plan, receipt)
+    stops = set(CALLER_BOUNDARIES) | _status_set(until or ())
+    current = to_progress(plan, receipt)
+    if current.next != "wait" or receipt.status in stops:
+        return current
+    if poll_seconds < 0 or timeout_seconds < 0:
+        raise ConfigurationError("poll_seconds and timeout_seconds must be non-negative")
+    interval = 0.0 if poll_seconds == 0 else max(0.1, float(poll_seconds))
+    deadline = time.monotonic() + timeout_seconds
+    updated = receipt
+    consecutive_errors = 0
+    while True:
+        try:
+            nxt = get_status(bridge, plan, updated)
+        except Exception as exc:
+            if not _is_transient_error(exc):
+                raise
+            consecutive_errors += 1
+            if consecutive_errors > max_consecutive_errors:
+                raise
+            if on_error is not None:
+                on_error(exc)
+            if time.monotonic() >= deadline:
+                raise PollingTimeoutError(
+                    f"Bridge status polling timed out in state {updated.status.value}; the transfer is "
+                    "still in flight — call wait() again or recover() from the last checkpoint. This is "
+                    "not a failure.", status=updated.status, progress=to_progress(plan, updated)) from exc
+            time.sleep(interval)
+            continue
+        consecutive_errors = 0
+        if nxt != updated:
+            _track(bridge, plan, updated, nxt)
+            if on_update is not None:
+                on_update(to_progress(plan, nxt))
+        updated = nxt
+        if updated.status in stops:
+            return to_progress(plan, updated)
+        if time.monotonic() >= deadline:
+            raise PollingTimeoutError(
+                f"Bridge status polling timed out in state {updated.status.value}; the transfer is still "
+                "in flight — call wait() again or recover() from the last checkpoint. This is not a failure.",
+                status=updated.status, progress=to_progress(plan, updated))
+        time.sleep(interval)
+
+
 __all__ = ["MINT_MODES", "ResolvedRoute", "aleo_transaction_status", "execute", "get_status", "prepare",
-           "quote", "resolve_route"]
+           "quote", "resolve_route", "wait"]
