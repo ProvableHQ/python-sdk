@@ -34,8 +34,11 @@ from aleo_bridge.units import format_decimal_amount
 
 from .config import one_atomic_unit
 from .helpers import (LiveBenchmark, LiveCaseError, LiveState, Underfunded, ensure_secret_nonce,
-                      load_live_state, load_secret_nonce, redacted, save_live_state,
+                      load_live_state, load_secret_nonce, redacted, save_live_state, wait_for,
                       wait_for_aleo_transaction, wait_for_hyperlane_delivery)
+
+#: ERC-20 ``Transfer(address,address,uint256)``.
+_TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 
 #: veil's per-test budget (`30 * 60_000`).
 CASE_TIMEOUT_SECONDS = 30 * 60.0
@@ -329,11 +332,73 @@ def _select_private_record(bridge: Any, route: Route, amount_atomic: int,
     return record
 
 
+def delivery_is_a_balance_rise(route: Route, registry: Registry) -> bool:
+    """True for the Aleo→EVM xReserve withdrawal, the one leg with no delivery query anywhere.
+
+    ``lifecycle.py`` says it in as many words ("xReserve Aleo→EVM: Circle exposes no canonical
+    delivery query") and simply returns the receipt unchanged, so its status stays
+    ``DELIVERY_PENDING`` for ever and ``wait`` can only ever time out.  veil does not drive this
+    case to ``done`` either — ``aleo-xreserve.live.test.ts:146-155`` polls the recipient's ERC-20
+    balance until it rises above what it was before the burn, and that is what delivery means here.
+    """
+    if route.protocol != "xreserve":
+        return False
+    source = registry.chain(registry.asset(route.source_asset_id).chain_id).family
+    destination = registry.chain(registry.asset(route.destination_asset_id).chain_id).family
+    return source == "aleo" and destination == "evm"
+
+
+def _wait_for_balance_rise(bridge: Any, asset_id: str, before: int, *, timeout_seconds: float,
+                           poll_seconds: float, log: Callable[[str], None]) -> int:
+    """veil ``waitFor(... balanceOf > destinationBalanceBefore)``: the recipient's balance, once it rises."""
+    def read() -> Any:
+        after = read_balances(bridge).get(asset_id)
+        return after if after is not None and after > before else None
+
+    log(f"  awaiting   {asset_id} to rise above {before} atomic (no delivery query exists for this leg)")
+    return wait_for(read, timeout_seconds=timeout_seconds, poll_seconds=poll_seconds)
+
+
+def _evm_transfer_tx(bridge: Any, asset: Asset, recipient: str, amount_atomic: int,
+                     lookback_blocks: int = 5_000) -> str | None:
+    """The transaction that moved *amount_atomic* of *asset* to *recipient*, or None.
+
+    Best effort only: this is a convenience id for the report, so a public RPC that refuses the
+    log range (or returns nothing) leaves ``destinationTxId`` unset rather than failing a leg whose
+    funds have demonstrably arrived.
+    """
+    connection = getattr(bridge, "ethereum", None)
+    if connection is None or asset.locator.kind != "evm-contract":
+        return None
+    try:
+        w3 = connection.w3
+        head = w3.eth.block_number
+        entries = w3.eth.get_logs({
+            "fromBlock": max(head - lookback_blocks, 0), "toBlock": head,
+            "address": w3.to_checksum_address(asset.locator.value),
+            "topics": [_TRANSFER_TOPIC, None, "0x" + "00" * 12 + recipient[2:].lower()]})
+    except Exception:                                  # noqa: BLE001 — a missing id is not a failure
+        return None
+    for entry in reversed(list(entries)):
+        raw = entry["data"]
+        value = int(raw.hex() if hasattr(raw, "hex") else raw, 16)
+        if value == amount_atomic:
+            digest = entry["transactionHash"]
+            return "0x" + (digest.hex() if hasattr(digest, "hex") else str(digest)).removeprefix("0x")
+    return None
+
+
 def run_case(bridge: Any, case: str, route_id: str, *, state_path: Path | str, recipient: str | None = None,
              amount: str | None = None, execute: bool, benchmark: LiveBenchmark | None = None,
              wait_timeout_seconds: float = WAIT_TIMEOUT_SECONDS, wait_poll_seconds: float = WAIT_POLL_SECONDS,
-             log: Callable[[str], None] = print) -> LiveState:
-    """Run one case over one route, resuming from ``state_path``. See the module docstring for the flow."""
+             stop_after_execute: bool = False, log: Callable[[str], None] = print) -> LiveState:
+    """Run one case over one route, resuming from ``state_path``. See the module docstring for the flow.
+
+    ``stop_after_execute=True`` returns as soon as the source transaction is on chain and its
+    checkpoint is on disk, so the caller can throw the whole client away and prove that a *new*
+    ``Bridge`` finishes the transfer from the state file alone.  Calling ``run_case`` again with the
+    same ``state_path`` takes the resume branch; ``execute`` is never called twice for one transfer.
+    """
     spec = CASES[case]
     state_path = Path(state_path)
     benchmark = benchmark if benchmark is not None else LiveBenchmark(case, log=log)
@@ -394,6 +459,10 @@ def run_case(bridge: Any, case: str, route_id: str, *, state_path: Path | str, r
             # recovering, so a rejected execution is reported as itself rather than as a timeout.
             wait_for_aleo_transaction(bridge, state.source_tx_id)
             benchmark.mark("source-confirmed")
+        if stop_after_execute:
+            log(f"  handover   source={state.source_tx_id} checkpoint on disk at {state_path}; "
+                "a new client will recover it")
+            return state
     else:
         log(f"  resuming {case} {route_id} from the saved checkpoint")
 
@@ -404,6 +473,23 @@ def run_case(bridge: Any, case: str, route_id: str, *, state_path: Path | str, r
         return state
 
     progress = _recover_from_state(bridge, state, benchmark=benchmark, log=log)
+
+    if delivery_is_a_balance_rise(route, bridge.registry):
+        # No drive loop: `wait` on this leg can only time out (see delivery_is_a_balance_rise).
+        before = int(state.destination_balance_before or 0)
+        after = _wait_for_balance_rise(bridge, destination.id, before, timeout_seconds=wait_timeout_seconds,
+                                       poll_seconds=wait_poll_seconds, log=log)
+        benchmark.mark("destination-delivered")
+        state.destination_tx_id = state.destination_tx_id or _evm_transfer_tx(
+            bridge, destination, recipient, after - before)
+        log(f"  delivered  {destination.id} +{after - before} atomic (before {before}, after {after}) "
+            f"tx={state.destination_tx_id}")
+        state.completed = True
+        save_live_state(state_path, state)
+        log(f"  done       source={state.source_tx_id} destination={state.destination_tx_id}")
+        log(f"  {benchmark.summary()}")
+        return state
+
     progress = _drive(bridge, progress, state, state_path, spec=spec, secret_nonce=secret_nonce,
                       benchmark=benchmark, save=save, wait_timeout_seconds=wait_timeout_seconds,
                       wait_poll_seconds=wait_poll_seconds, log=log)
@@ -462,8 +548,8 @@ RUNNERS: dict[str, Callable[..., LiveState]] = {
 
 __all__ = [
     "CASES", "CASE_NAMES", "CASE_TIMEOUT_SECONDS", "CaseSpec", "LiveCaseError", "RUNNERS", "Underfunded",
-    "asset_ref", "case_for_route", "default_amount", "default_recipient", "precheck", "print_quote",
-    "read_balances", "route_slug", "routes_for_case", "run_aleo_hyperlane", "run_aleo_xreserve",
-    "run_case", "run_evm_hyperlane", "run_evm_xreserve", "run_solana_hyperlane", "sender_for",
-    "state_name",
+    "asset_ref", "case_for_route", "default_amount", "default_recipient", "delivery_is_a_balance_rise",
+    "precheck", "print_quote", "read_balances", "route_slug", "routes_for_case", "run_aleo_hyperlane",
+    "run_aleo_xreserve", "run_case", "run_evm_hyperlane", "run_evm_xreserve", "run_solana_hyperlane",
+    "sender_for", "state_name",
 ]

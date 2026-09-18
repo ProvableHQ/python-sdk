@@ -36,6 +36,31 @@ MAINNET_EXECUTE_ACK = "I_ACKNOWLEDGE_THIS_SUBMITS_MAINNET_TRANSACTIONS"
 
 ENVIRONMENTS = ("mainnet", "testnet")
 
+#: Endpoints used when the operator's shell names none. Public, read-mostly, no credentials.
+DEFAULT_ALEO_ENDPOINT = "https://edge.provable.com/api"
+DEFAULT_ETHEREUM_RPC_URL = "https://ethereum-rpc.publicnode.com"
+DEFAULT_SEPOLIA_RPC_URL = "https://ethereum-sepolia-rpc.publicnode.com"
+
+#: Key and RPC variables per environment, most specific first.  The live suite resolves connection
+#: material ONLY through these lists, so a testnet run can never pick up the mainnet Aleo key.
+ALEO_KEY_VARS = {
+    "mainnet": ("BRIDGE_PRIVATE_KEY",),
+    "testnet": ("BRIDGE_LIVE_ALEO_TESTNET_PRIVATE_KEY", "ALEO_E2E_PRIVATE_KEY"),
+}
+EVM_KEY_VARS = {
+    "mainnet": ("EVM_PRIVATE_KEY", "BRIDGE_EVM_PRIVATE_KEY"),
+    "testnet": ("BRIDGE_LIVE_EVM_TESTNET_PRIVATE_KEY", "EVM_PRIVATE_KEY", "BRIDGE_EVM_PRIVATE_KEY"),
+}
+EVM_RPC_VARS = {
+    "mainnet": ("ETHEREUM_RPC_URL", "BRIDGE_LIVE_ETHEREUM_RPC_URL"),
+    "testnet": ("SEPOLIA_RPC_URL", "BRIDGE_LIVE_SEPOLIA_RPC_URL"),
+}
+DEFAULT_EVM_RPC_URL = {"mainnet": DEFAULT_ETHEREUM_RPC_URL, "testnet": DEFAULT_SEPOLIA_RPC_URL}
+ALEO_ENDPOINT_VARS = ("BRIDGE_LIVE_ALEO_ENDPOINT", "ALEO_ENDPOINT")
+
+#: The Aleo network name each bridge environment runs on.
+ALEO_NETWORKS = {"mainnet": "mainnet", "testnet": "testnet"}
+
 #: Recipient overrides per destination-chain family; the default is our own address on that chain.
 RECIPIENT_VARS = {
     "aleo": "BRIDGE_LIVE_ALEO_MAINNET_RECIPIENT",
@@ -123,6 +148,60 @@ def case_route_override(case: str, env: Mapping[str, str] | None = None) -> str 
     return value(f"BRIDGE_LIVE_{case.replace('-', '_').upper()}_ROUTE_ID", env)
 
 
+def case_amount_override(case: str, env: Mapping[str, str] | None = None) -> str | None:
+    """``BRIDGE_LIVE_<CASE>_AMOUNT``, or ``BRIDGE_LIVE_XRESERVE_AMOUNT`` for either xReserve case."""
+    specific = value(f"BRIDGE_LIVE_{case.replace('-', '_').upper()}_AMOUNT", env)
+    if specific:
+        return specific
+    return value("BRIDGE_LIVE_XRESERVE_AMOUNT", env) if case.endswith("xreserve") else None
+
+
+def _environment(environment: str) -> str:
+    if environment not in ENVIRONMENTS:
+        raise LiveConfigError(f"environment must be one of {ENVIRONMENTS}, got {environment!r}")
+    return environment
+
+
+def first_value(names: tuple[str, ...], env: Mapping[str, str] | None = None) -> tuple[str, str] | None:
+    """The first of *names* that is set, as ``(variable, value)`` — or None. Never logs the value."""
+    for name in names:
+        found = value(name, env)
+        if found:
+            return name, found
+    return None
+
+
+def aleo_private_key(environment: str, env: Mapping[str, str] | None = None) -> str:
+    """The Aleo key for *environment* (``BRIDGE_PRIVATE_KEY`` on mainnet, ``ALEO_E2E_PRIVATE_KEY``
+    — or its ``BRIDGE_LIVE_ALEO_TESTNET_PRIVATE_KEY`` alias — on testnet)."""
+    names = ALEO_KEY_VARS[_environment(environment)]
+    found = first_value(names, env)
+    if found is None:
+        raise LiveConfigError(f"Missing {' / '.join(names)}; the {environment} live case needs an Aleo key")
+    return found[1]
+
+
+def evm_private_key(environment: str, env: Mapping[str, str] | None = None) -> str:
+    """The EVM key for *environment*, normalised to ``0x…`` (the value never appears in an error)."""
+    names = EVM_KEY_VARS[_environment(environment)]
+    found = first_value(names, env)
+    if found is None:
+        raise LiveConfigError(f"Missing {' / '.join(names)}; the {environment} live case needs an EVM key")
+    return required_evm_private_key(found[0], env)
+
+
+def evm_rpc_url(environment: str, env: Mapping[str, str] | None = None) -> str:
+    """The Ethereum (mainnet) or Sepolia (testnet) RPC url, falling back to the public default."""
+    found = first_value(EVM_RPC_VARS[_environment(environment)], env)
+    return found[1] if found else DEFAULT_EVM_RPC_URL[environment]
+
+
+def aleo_endpoint(env: Mapping[str, str] | None = None) -> str:
+    """The Aleo API root, falling back to the open, credential-free edge host."""
+    found = first_value(ALEO_ENDPOINT_VARS, env)
+    return found[1] if found else DEFAULT_ALEO_ENDPOINT
+
+
 def recipient_override(family: str, env: Mapping[str, str] | None = None) -> str | None:
     """The operator's recipient override for a destination-chain *family*, or None (use our own address)."""
     try:
@@ -133,9 +212,12 @@ def recipient_override(family: str, env: Mapping[str, str] | None = None) -> str
 
 
 __all__ = [
-    "CASE_NAMES", "ENVIRONMENTS", "FUNDS_VAR", "LiveConfigError", "MAINNET_ACK", "MAINNET_ACK_VAR",
+    "ALEO_ENDPOINT_VARS", "ALEO_KEY_VARS", "ALEO_NETWORKS", "CASE_NAMES", "DEFAULT_ALEO_ENDPOINT",
+    "DEFAULT_ETHEREUM_RPC_URL", "DEFAULT_EVM_RPC_URL", "DEFAULT_SEPOLIA_RPC_URL", "ENVIRONMENTS",
+    "EVM_KEY_VARS", "EVM_RPC_VARS", "FUNDS_VAR", "LiveConfigError", "MAINNET_ACK", "MAINNET_ACK_VAR",
     "MAINNET_CASES_VAR", "MAINNET_EXECUTE_ACK", "MAINNET_EXECUTE_VAR", "RECIPIENT_VARS", "STATE_DIR_VAR",
-    "case_route_override", "live_funds_enabled", "live_state_path", "mainnet_case_enabled",
+    "aleo_endpoint", "aleo_private_key", "case_amount_override", "case_route_override", "evm_private_key",
+    "evm_rpc_url", "first_value", "live_funds_enabled", "live_state_path", "mainnet_case_enabled",
     "mainnet_execution_enabled", "one_atomic_unit", "recipient_override", "required",
     "required_evm_private_key", "state_dir", "value",
 ]

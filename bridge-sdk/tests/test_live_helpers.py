@@ -856,3 +856,124 @@ def test_the_table_renders_one_line_per_route(rehearse):
     table = rehearse.render_table(rows)
     assert ETH_ROUTE in table and "quote-only" in table and "metadata-required" in table
     assert len(table.strip().splitlines()) >= 3        # header + two rows
+
+
+# ══ 13b: environment aliases, the execute handover, the suite's parametrization ══
+
+def test_key_and_rpc_variables_resolve_per_environment(monkeypatch):
+    """A testnet run may never reach for the mainnet Aleo key, and an unset RPC has a default."""
+    monkeypatch.setenv("BRIDGE_PRIVATE_KEY", "APrivateKey1zkpMainnet")
+    monkeypatch.setenv("ALEO_E2E_PRIVATE_KEY", "APrivateKey1zkpTestnet")
+    assert live_config.aleo_private_key("mainnet") == "APrivateKey1zkpMainnet"
+    assert live_config.aleo_private_key("testnet") == "APrivateKey1zkpTestnet"
+
+    monkeypatch.setenv("BRIDGE_LIVE_ALEO_TESTNET_PRIVATE_KEY", "APrivateKey1zkpAlias")
+    assert live_config.aleo_private_key("testnet") == "APrivateKey1zkpAlias"      # the alias wins
+    assert live_config.aleo_private_key("mainnet") == "APrivateKey1zkpMainnet"
+
+    monkeypatch.delenv("BRIDGE_PRIVATE_KEY")
+    with pytest.raises(live_config.LiveConfigError, match="BRIDGE_PRIVATE_KEY"):
+        live_config.aleo_private_key("mainnet")
+    with pytest.raises(live_config.LiveConfigError, match="environment"):
+        live_config.aleo_private_key("devnet")
+
+
+def test_evm_key_is_normalised_and_the_value_never_appears(monkeypatch):
+    monkeypatch.setenv("BRIDGE_EVM_PRIVATE_KEY", "0x" + "AB" * 32)
+    assert live_config.evm_private_key("mainnet") == "0x" + "ab" * 32
+    assert live_config.evm_private_key("testnet") == "0x" + "ab" * 32
+
+    monkeypatch.setenv("BRIDGE_LIVE_EVM_TESTNET_PRIVATE_KEY", "0x" + "cd" * 32)
+    assert live_config.evm_private_key("testnet") == "0x" + "cd" * 32
+    assert live_config.evm_private_key("mainnet") == "0x" + "ab" * 32
+
+    monkeypatch.setenv("BRIDGE_LIVE_EVM_TESTNET_PRIVATE_KEY", "not-a-key")
+    with pytest.raises(live_config.LiveConfigError) as excinfo:
+        live_config.evm_private_key("testnet")
+    assert "not-a-key" not in str(excinfo.value)
+
+
+def test_rpc_urls_fall_back_to_the_public_defaults(monkeypatch):
+    for name in ("SEPOLIA_RPC_URL", "BRIDGE_LIVE_SEPOLIA_RPC_URL", "ETHEREUM_RPC_URL",
+                 "BRIDGE_LIVE_ETHEREUM_RPC_URL", "ALEO_ENDPOINT", "BRIDGE_LIVE_ALEO_ENDPOINT"):
+        monkeypatch.delenv(name, raising=False)
+    assert live_config.evm_rpc_url("mainnet") == live_config.DEFAULT_ETHEREUM_RPC_URL
+    assert live_config.evm_rpc_url("testnet") == live_config.DEFAULT_SEPOLIA_RPC_URL
+    assert live_config.aleo_endpoint() == live_config.DEFAULT_ALEO_ENDPOINT
+
+    monkeypatch.setenv("SEPOLIA_RPC_URL", "https://sepolia.example")
+    monkeypatch.setenv("BRIDGE_LIVE_ETHEREUM_RPC_URL", "https://eth.example")
+    monkeypatch.setenv("ALEO_ENDPOINT", "https://aleo.example/api")
+    assert live_config.evm_rpc_url("testnet") == "https://sepolia.example"
+    assert live_config.evm_rpc_url("mainnet") == "https://eth.example"
+    assert live_config.aleo_endpoint() == "https://aleo.example/api"
+    assert live_config.first_value(("ABSENT_A", "SEPOLIA_RPC_URL")) == ("SEPOLIA_RPC_URL", "https://sepolia.example")
+    assert live_config.first_value(("ABSENT_A", "ABSENT_B")) is None
+
+
+def test_amount_overrides_are_per_case_with_an_xreserve_shorthand(monkeypatch):
+    monkeypatch.delenv("BRIDGE_LIVE_XRESERVE_AMOUNT", raising=False)
+    assert live_config.case_amount_override("evm-xreserve") is None
+    monkeypatch.setenv("BRIDGE_LIVE_XRESERVE_AMOUNT", "3")
+    assert live_config.case_amount_override("evm-xreserve") == "3"
+    assert live_config.case_amount_override("aleo-xreserve") == "3"
+    assert live_config.case_amount_override("evm-hyperlane") is None       # never a Hyperlane amount
+    monkeypatch.setenv("BRIDGE_LIVE_EVM_XRESERVE_AMOUNT", "5")
+    assert live_config.case_amount_override("evm-xreserve") == "5"
+
+
+def _refuse_execute(*args, **kwargs):
+    raise AssertionError("execute must never be called for a transfer that already has a checkpoint")
+
+
+def test_stop_after_execute_hands_the_transfer_over_through_the_state_file(fake, tmp_path):
+    """Phase one executes and returns; phase two must reach done without executing again."""
+    state_path = tmp_path / "handover.json"
+    first = live_cases.run_case(fake, "evm-hyperlane", ETH_ROUTE, state_path=state_path, execute=True,
+                                stop_after_execute=True, wait_timeout_seconds=1, wait_poll_seconds=0,
+                                log=lambda _: None)
+    assert first.checkpoint is not None and first.completed is False and first.source_tx_id
+    assert state_path.exists()
+
+    submitted = [event for event in fake.events if event[0] in {"evm_send", "submit"}]
+    fake.execute = _refuse_execute                       # the handover may only use the recovery verbs
+    fake.eth.recover_result = Receipt(
+        id=first.checkpoint["receiptId"], protocol="hyperlane", status=Status.COMPLETED,
+        source_tx_id=first.source_tx_id, destination_tx_id="at1delivered",
+        protocol_state={"routeId": ETH_ROUTE, "messageId": "0x" + "ee" * 32})
+    second = live_cases.run_case(fake, "evm-hyperlane", ETH_ROUTE, state_path=state_path, execute=True,
+                                 wait_timeout_seconds=1, wait_poll_seconds=0, log=lambda _: None)
+    assert second.completed and second.source_tx_id == first.source_tx_id
+    assert [event for event in fake.events if event[0] in {"evm_send", "submit"}] == submitted
+
+
+def test_the_suite_parametrizes_every_route_in_both_environments():
+    from tests.live import test_lifecycle_live as suite
+
+    for environment, buckets in (("mainnet", suite.MAINNET_ROUTES), ("testnet", suite.TESTNET_ROUTES)):
+        listed = {route.id for routes in buckets.values() for route in routes}
+        assert listed == {route.id for route in DEFAULT_REGISTRY.routes(environment=environment)}
+
+    mainnet = {route.id: route for routes in suite.MAINNET_ROUTES.values() for route in routes}
+    assert "hyperlane:ethereum/usad->aleo/usad" in mainnet                 # metadata-required, parametrized
+    assert not mainnet["hyperlane:ethereum/usad->aleo/usad"].active
+    assert suite.TESTNET_DEPOSIT_ROUTE in {r.id for r in suite.TESTNET_ROUTES["evm-xreserve"]}
+    assert suite.TESTNET_RETURN_ROUTE in {r.id for r in suite.TESTNET_ROUTES["aleo-xreserve"]}
+    assert suite.TESTNET_DEPOSIT_AMOUNT == "3" and suite.TESTNET_RETURN_AMOUNT == "2.000001"
+    assert "--recover" in suite.resume_command("/tmp/state.json")
+
+
+def test_only_the_aleo_to_evm_withdrawal_measures_delivery_by_balance():
+    """The one leg with no delivery query anywhere: `wait` on it could only ever time out."""
+    rise = {route.id for route in DEFAULT_REGISTRY.routes()
+            if live_cases.delivery_is_a_balance_rise(route, DEFAULT_REGISTRY)}
+    assert rise == {"xreserve:aleo/usdcx->ethereum/usdc", "xreserve:aleo-testnet/usdcx->sepolia/usdc"}
+    assert not live_cases.delivery_is_a_balance_rise(DEFAULT_REGISTRY.route(USDC_ROUTE), DEFAULT_REGISTRY)
+    assert not live_cases.delivery_is_a_balance_rise(DEFAULT_REGISTRY.route(ETH_ROUTE), DEFAULT_REGISTRY)
+
+
+def test_the_suite_sets_no_acknowledgement_and_prints_no_settable_form():
+    source = (SCRIPT.parent.parent / "tests" / "live" / "test_lifecycle_live.py").read_text(encoding="utf-8")
+    assert "export " not in source
+    assert live_config.MAINNET_ACK not in source and live_config.MAINNET_EXECUTE_ACK not in source
+    assert "setenv" not in source and "os.environ[" not in source
