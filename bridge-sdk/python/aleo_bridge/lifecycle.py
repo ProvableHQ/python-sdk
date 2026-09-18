@@ -13,6 +13,7 @@ only adds ``prepare`` and the ``resolve_route`` helper every later verb shares.
 """
 from __future__ import annotations
 
+import json
 import re
 import time
 from dataclasses import dataclass, replace
@@ -853,4 +854,168 @@ def wait(bridge, progress: Progress, *, until=None, poll_seconds: float = 15.0,
 
 
 __all__ = ["MINT_MODES", "ResolvedRoute", "aleo_transaction_status", "execute", "get_status", "prepare",
-           "quote", "resolve_route", "wait"]
+           "quote", "recover", "resolve_route", "wait"]
+
+
+# ── recover ───────────────────────────────────────────────────────────────────
+
+def _coerce_checkpoint(value):
+    if isinstance(value, Checkpoint):
+        return value
+    if isinstance(value, str):
+        return Checkpoint.from_json(value)
+    if isinstance(value, dict):
+        return Checkpoint.from_dict(value)
+    raise CheckpointInvalidError(f"recover() takes a Checkpoint, its dict, or its JSON; got {type(value).__name__}")
+
+
+def _plan_from_intent(registry: Registry, intent: dict[str, Any]) -> Plan:
+    """Rebuild the ``Plan`` behind a checkpoint by re-running ``prepare`` on its intent.
+
+    ``prepare`` is only ever a thin validating wrapper around ``_plan.build_plan``
+    (proven field-identical for every active route — see
+    ``tests/test_prepare.py::test_prepare_equals_build_plan_for_every_active_route``), so a
+    recovered plan is exactly what the original ``prepare()``/``quote()`` call produced and
+    passes ``EthModule``/``SolModule``'s field-by-field ``plan=`` checks.
+    """
+    try:
+        return prepare(registry,
+                       source=(intent["source"]["chain"], intent["source"]["asset"]),
+                       destination=(intent["destination"]["chain"], intent["destination"]["asset"]),
+                       amount=intent["amount"], recipient=intent["recipient"], sender=intent.get("sender"),
+                       protocol=intent.get("bridgeProtocol"), mint_mode=intent.get("mintMode", "public"))
+    except (KeyError, TypeError) as exc:
+        raise CheckpointInvalidError(f"Bridge checkpoint intent is incomplete: missing {exc}") from exc
+
+
+def _assert_prepared_id(serialized: Any, expected_id: str, what: str = "prepared Aleo transaction") -> str:
+    """The serialized transaction's ``id`` must equal the saved id — never substitute bytes."""
+    if not isinstance(serialized, str) or not serialized:
+        raise CheckpointInvalidError(f"Bridge checkpoint contains an invalid {what} (empty)")
+    try:
+        decoded = json.loads(serialized)
+    except json.JSONDecodeError as exc:
+        raise CheckpointInvalidError(f"Bridge checkpoint contains an invalid {what}: not JSON") from exc
+    tx_id = decoded.get("id") if isinstance(decoded, dict) else None
+    if not isinstance(tx_id, str) or tx_id != expected_id:
+        raise CheckpointInvalidError(f"Bridge checkpoint {what} id does not match its payload "
+                                     f"({tx_id!r} != {expected_id!r})")
+    return tx_id
+
+
+def _finish(bridge, plan: Plan, receipt: Receipt, checkpoint_id: str) -> Progress:
+    """Reduce *receipt* to ``Progress``, dropping the checkpoint (keyed on ``checkpoint_id`` —
+    the checkpoint's OWN id, never ``receipt.id``: for Solana and EVM Hyperlane the checkpoint's
+    id is the source transaction id while the receipt's own id flips to the message id once
+    confirmed) from the bound store once the transfer reaches a terminal status.
+    """
+    store = getattr(bridge, "checkpoints", None)
+    if store is not None and receipt.status in TERMINAL:
+        store.delete(checkpoint_id)
+    return to_progress(plan, receipt)
+
+
+def recover(bridge, checkpoint) -> Progress:
+    """Rebuild a transfer's ``Progress`` from a saved checkpoint — reads only, never signs.
+
+    Accepts a ``Checkpoint``, its dict, or its JSON.  Re-runs ``prepare`` on the
+    saved intent against the LIVE registry, then checks the route id and registry
+    version (``CheckpointInvalidError`` / ``RegistryVersionMismatchError``).
+    Aleo source: a proved-but-unbroadcast transaction yields ``next == "resume"``
+    with no network read; a submitted one gets exactly one ``get_status`` from
+    ``SOURCE_CONFIRMING``.  Solana: validates the blockhash pair and reads the
+    signature status.  EVM: delegates to ``bridge.eth.recover_source`` (log
+    scan); inbound xReserve additionally restores a submitted or prepared
+    private mint.  The result's ``next`` tells the caller what to do.
+    """
+    cp = _coerce_checkpoint(checkpoint)
+    if cp.version != 1 or not cp.intent or not cp.route:
+        raise CheckpointInvalidError("Bridge checkpoint format is invalid or unsupported (version 1 required)")
+    plan = _plan_from_intent(bridge.registry, cp.intent)
+    if cp.route.get("registryVersion") != plan.registry_version:
+        raise RegistryVersionMismatchError(
+            f"Checkpoint was written against registry {cp.route.get('registryVersion')}; this client has "
+            f"{plan.registry_version}. Upgrade/downgrade aleo-bridge-sdk to the version that wrote it.")
+    if cp.route.get("id") != plan.route_id:
+        raise CheckpointInvalidError(
+            f"Bridge checkpoint route {cp.route.get('id')} does not match the prepared route {plan.route_id}")
+    resolved = resolve_route(bridge.registry, plan)
+    src, dst = resolved.source_chain, resolved.destination_chain
+    source = cp.source or {}
+    dv = cp.delivery_verification or {}
+    verification = ({"destinationBalanceBeforeAtomic": dv["balanceBeforeAtomic"],
+                     "expectedDestinationIncreaseAtomic": dv["expectedIncreaseAtomic"]} if dv else {})
+    approvals = source.get("approvalTransactionIds") or []
+
+    if src.family == "aleo":
+        prepared = source.get("preparedTransaction")
+        if prepared and not source.get("transactionId"):
+            if cp.destination or approvals:
+                raise CheckpointInvalidError(
+                    "Bridge checkpoint contains transactions that are invalid for a prepared Aleo source route")
+            tx_id = _assert_prepared_id(prepared.get("serializedTransaction"), str(prepared.get("transactionId")))
+            return to_progress(plan, Receipt(
+                id=tx_id, protocol=plan.protocol, status=Status.SOURCE_SUBMISSION_PENDING,
+                protocol_state={"routeId": plan.route_id, "preparedTransaction": prepared["serializedTransaction"],
+                                **verification}))
+        tx_id = source.get("transactionId")
+        if not tx_id:
+            raise CheckpointInvalidError("Bridge checkpoint contains no submitted source transaction")
+        if cp.destination or approvals:
+            raise CheckpointInvalidError(
+                "Bridge checkpoint contains transactions that are invalid for an Aleo source route")
+        receipt = get_status(bridge, plan, Receipt(
+            id=tx_id, protocol=plan.protocol, status=Status.SOURCE_CONFIRMING, source_tx_id=tx_id,
+            protocol_state={"routeId": plan.route_id, **verification}))
+        return _finish(bridge, plan, receipt, cp.id)
+
+    if src.family == "solana":
+        tx_id = source.get("transactionId")
+        if not tx_id:
+            raise CheckpointInvalidError("Bridge checkpoint contains no submitted source transaction")
+        if cp.destination or approvals:
+            raise CheckpointInvalidError(
+                "Bridge checkpoint contains transactions that are invalid for a Solana source route")
+        blockhash, last_valid = source.get("blockhash"), source.get("lastValidBlockHeight")
+        if (blockhash is not None or last_valid is not None) and (
+                not isinstance(blockhash, str) or not blockhash
+                or not isinstance(last_valid, str) or not last_valid.isdigit()):
+            raise CheckpointInvalidError("Bridge checkpoint contains an invalid Solana blockhash lifetime")
+        state: dict[str, Any] = {"routeId": plan.route_id}
+        if isinstance(blockhash, str) and isinstance(last_valid, str):
+            state.update(blockhash=blockhash, lastValidBlockHeight=last_valid)
+        receipt = get_status(bridge, plan, Receipt(id=tx_id, protocol=plan.protocol, status=Status.SOURCE_CONFIRMING,
+                                                   source_tx_id=tx_id, protocol_state=state))
+        return _finish(bridge, plan, receipt, cp.id)
+
+    if resolved.route.protocol == "hyperlane" and src.family == "evm":
+        if cp.destination:
+            raise CheckpointInvalidError(
+                "Bridge checkpoint contains a destination transaction that is invalid for this Hyperlane route")
+        receipt = _module(bridge, "eth").recover_source(plan, cp, required=False)
+        return _finish(bridge, plan, receipt, cp.id)
+
+    if resolved.route.protocol != "xreserve" or src.family != "evm" or dst.family != "aleo":
+        raise UnsupportedRouteError("Bridge checkpoint recovery is not implemented for this route")
+
+    receipt = _module(bridge, "eth").recover_source(plan, cp, required=False)
+    destination = cp.destination or {}
+    prepared_dest = destination.get("preparedTransaction")
+    if prepared_dest and destination.get("transactionId"):
+        raise CheckpointInvalidError(
+            "Bridge checkpoint cannot contain both prepared and submitted destination transactions")
+    if prepared_dest:
+        _assert_prepared_id(prepared_dest.get("serializedTransaction"), str(prepared_dest.get("transactionId")),
+                            "prepared Aleo destination transaction")
+    if destination.get("transactionId"):
+        receipt = receipt.replace(status=Status.DESTINATION_CONFIRMING, destination_tx_id=destination["transactionId"])
+    if receipt.status in (Status.ATTESTATION_PENDING, Status.DESTINATION_CONFIRMING):
+        receipt = get_status(bridge, plan, receipt)
+    if prepared_dest:
+        if receipt.status is not Status.DESTINATION_ACTION_REQUIRED:
+            raise CheckpointInvalidError(
+                "Prepared destination transaction is no longer valid for the recovered bridge state")
+        receipt = receipt.replace(id=str(prepared_dest["transactionId"]),
+                                  protocol_state={**receipt.protocol_state,
+                                                  "preparedDestinationTransaction": prepared_dest["serializedTransaction"]})
+    return _finish(bridge, plan, receipt, cp.id)
