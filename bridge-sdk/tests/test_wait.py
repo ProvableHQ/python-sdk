@@ -155,6 +155,27 @@ def test_six_consecutive_transient_errors_reraise_the_sixth(monkeypatch):
     assert calls["n"] == 6                          # five tolerated, the sixth re-raises
 
 
+def test_a_flaky_destination_balance_reader_is_retried_not_swallowed(monkeypatch):
+    """Task 6 review item 8, end to end: the branch-6 balance read raises a 429-shaped transport
+    error through the REAL ``get_status``, and ``wait`` retries it until the delivery is visible."""
+    b = FakeBridge(solana=True)
+    plan, progress = _sol_progress(b)
+    monkeypatch.setattr("aleo_bridge.lifecycle.time.sleep", lambda s: None)
+    calls = {"n": 0}
+
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            raise BridgeError("Solana RPC request failed with HTTP status 429")
+        return 101
+
+    b.sol.balance = flaky
+    errors = []
+    out = wait(b, progress, poll_seconds=0, timeout_seconds=10, on_error=errors.append)
+    assert calls["n"] == 3 and len(errors) == 2
+    assert out.next == "done" and out.receipt.status is Status.COMPLETED
+
+
 def test_a_non_transient_error_propagates_on_the_first_attempt(monkeypatch):
     b = FakeBridge(solana=True)
     plan, progress = _sol_progress(b)

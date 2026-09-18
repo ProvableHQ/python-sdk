@@ -330,13 +330,16 @@ def _connected_aleo_address(bridge) -> str | None:
 
 
 def _read_destination_balance(bridge, plan: Plan, resolved: ResolvedRoute) -> int | None:
-    """The recipient's destination balance, or None when we cannot read it.
+    """The recipient's destination balance, or None when there is no reader for it.
 
     Only read when the destination connection IS the recipient (there is no per-address balance
-    read in the module contracts); otherwise omit the delivery-verification pair rather than
-    baseline the wrong account. The RPC read itself is best-effort (review item 8): a transient
-    failure here is only ever used as an advisory baseline (``execute``'s pre-broadcast checkpoint)
-    or re-attempted by ``get_status``/``wait`` — it must never raise and block funds movement.
+    read in the module contracts); otherwise return None rather than baseline the wrong account.
+
+    A transport failure is NOT swallowed here (Task 6 review item 8): ``get_status`` branch 6 uses
+    this balance as the delivery SIGNAL, and a swallowed RPC error would read as "not delivered
+    yet" forever instead of being retried by ``wait``'s transient classifier. The one caller that
+    genuinely cannot afford to raise — ``execute``'s advisory pre-broadcast baseline — does the
+    swallowing itself, in :func:`_delivery_verification`.
     """
     chain, asset = resolved.destination_chain, resolved.destination_asset
     if chain.family == "evm":
@@ -345,24 +348,28 @@ def _read_destination_balance(bridge, plan: Plan, resolved: ResolvedRoute) -> in
                 or conn.address.lower() != plan.recipient.lower()
                 or asset.locator is None or asset.locator.kind not in ("native", "evm-contract")):
             return None
-        try:
-            return int(bridge.eth.balance(asset.id))
-        except Exception:                                              # noqa: BLE001 — advisory read only
-            return None
+        return int(bridge.eth.balance(asset.id))
     if chain.family == "solana":
         conn = getattr(bridge, "solana", None)
         if (conn is None or conn.address != plan.recipient
                 or asset.locator is None or asset.locator.kind != "native"):
             return None
-        try:
-            return int(bridge.sol.balance())
-        except Exception:                                              # noqa: BLE001 — advisory read only
-            return None
+        return int(bridge.sol.balance())
     return None            # Aleo private records / token mappings: protocol signal instead
 
 
 def _delivery_verification(bridge, plan: Plan, resolved: ResolvedRoute) -> dict[str, str]:
-    before = _read_destination_balance(bridge, plan, resolved)
+    """``execute``'s advisory delivery baseline — an unreadable balance is simply omitted.
+
+    The best-effort swallow lives at THIS call site and not inside ``_read_destination_balance``
+    (Task 6 review item 8): here the balance is a nice-to-have baseline written into a checkpoint
+    before broadcast, so a flaky RPC must never block funds movement; in ``get_status`` branch 6
+    the same read is the delivery signal and must raise.
+    """
+    try:
+        before = _read_destination_balance(bridge, plan, resolved)
+    except Exception:                                              # noqa: BLE001 — advisory read only
+        return {}
     if before is None:
         return {}
     expected = parse_decimal_amount(plan.amount, resolved.destination_asset.decimals)

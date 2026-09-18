@@ -2,8 +2,8 @@ import pytest
 
 from aleo_bridge.encoding import (xreserve_deposit_payload, xreserve_hook_data, xreserve_message_hash,
                                   xreserve_nonce_from_payload)
-from aleo_bridge.errors import (CheckpointInvalidError, ConfigurationError, DeliveryUnknownError,
-                                 UnsupportedRouteError)
+from aleo_bridge.errors import (BridgeError, CheckpointInvalidError, ConfigurationError,
+                                 DeliveryUnknownError, UnsupportedRouteError)
 from aleo_bridge.lifecycle import aleo_transaction_status, get_status, prepare
 from aleo_bridge.types import Attestation, Receipt, Status
 from tests.fakes.fake_bridge import ALEO_RECIPIENT, EVM_ADDRESS, SOL_ADDRESS, FakeBridge
@@ -160,6 +160,26 @@ def test_branch6_aleo_origin_balance_diff_fallback():
     b2 = FakeBridge(ethereum=False)
     with pytest.raises(DeliveryUnknownError, match="destination balance"):
         get_status(b2, plan, receipt)
+
+
+def test_branch6_a_failing_destination_balance_read_propagates():
+    """Carried from the Task 6 review (item 8): in branch 6 the destination balance is the DELIVERY
+    SIGNAL, not an advisory baseline. A transport failure must surface here so ``wait``'s transient
+    classifier can retry it — swallowing it would read as "not delivered yet" forever."""
+    b = FakeBridge(solana=True)
+    plan = prepare(b.registry, source="aleo/sol", destination="solana/sol", amount="0.000000001",
+                   recipient=SOL_ADDRESS)
+    receipt = Receipt(id="at1source", protocol="hyperlane", status=Status.DELIVERY_PENDING,
+                      source_tx_id="at1source",
+                      protocol_state={"routeId": plan.route_id, "destinationBalanceBeforeAtomic": "100",
+                                      "expectedDestinationIncreaseAtomic": "1"})
+
+    def boom():
+        raise BridgeError("Solana RPC request failed with HTTP status 429")
+
+    b.sol.balance = boom
+    with pytest.raises(BridgeError, match="429"):
+        get_status(b, plan, receipt)
 
 
 def test_branch8_and_9_xreserve_outbound_and_not_implemented():
