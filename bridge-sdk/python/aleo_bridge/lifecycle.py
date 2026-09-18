@@ -567,13 +567,17 @@ def _message_id(receipt: Receipt) -> str | None:
     Solana and EVM Hyperlane receipts carry the id in ``protocol_state["messageId"]`` once
     known; a receipt that instead carries the message id AS its own ``id`` (some Aleo-origin
     shapes) falls back to that, but only when it is an exact 32-byte ``0x`` hex string — never a
-    signature or an unrelated transaction hash of a different width.
+    signature or an unrelated transaction hash of a different width. Never falls back when
+    ``receipt.id == receipt.source_tx_id``: an EVM Hyperlane receipt whose DispatchId log was
+    unreadable carries the source transaction hash as its id, which is a same-shaped ``0x`` hex
+    string but is NOT a message id.
     """
     state = receipt.protocol_state
     message_id = state.get("messageId")
     if isinstance(message_id, str) and message_id:
         return message_id
-    if isinstance(receipt.id, str) and _MESSAGE_ID_RE.fullmatch(receipt.id):
+    if (isinstance(receipt.id, str) and receipt.id != receipt.source_tx_id
+            and _MESSAGE_ID_RE.fullmatch(receipt.id)):
         return receipt.id
     return None
 
@@ -633,8 +637,9 @@ def get_status(bridge, plan: Plan, receipt: Receipt) -> Receipt:
     message_id = _message_id(receipt)
     if (message_id is None and receipt.status is Status.DELIVERY_PENDING and route.protocol == "hyperlane"
             and src.family == "solana" and state.get("messageIdUnavailable") and receipt.source_tx_id):
+        sol = _module(bridge, "sol")                                  # missing connection must raise, not be swallowed
         try:
-            logs = _module(bridge, "sol")._transaction_logs(receipt.source_tx_id)
+            logs = sol._transaction_logs(receipt.source_tx_id)
         except Exception:                                             # noqa: BLE001 — advisory fill-in only
             logs = None
         filled = None if logs is None else _sealevel.extract_hyperlane_message_id(logs)

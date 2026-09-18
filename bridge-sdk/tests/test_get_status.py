@@ -2,7 +2,8 @@ import pytest
 
 from aleo_bridge.encoding import (xreserve_deposit_payload, xreserve_hook_data, xreserve_message_hash,
                                   xreserve_nonce_from_payload)
-from aleo_bridge.errors import (CheckpointInvalidError, DeliveryUnknownError, UnsupportedRouteError)
+from aleo_bridge.errors import (CheckpointInvalidError, ConfigurationError, DeliveryUnknownError,
+                                 UnsupportedRouteError)
 from aleo_bridge.lifecycle import aleo_transaction_status, get_status, prepare
 from aleo_bridge.types import Attestation, Receipt, Status
 from tests.fakes.fake_bridge import ALEO_RECIPIENT, EVM_ADDRESS, SOL_ADDRESS, FakeBridge
@@ -223,3 +224,48 @@ def test_branch10_source_confirming_and_destination_confirming():
     assert out.status is Status.FAILED and "at1private" in out.protocol_state["destinationError"]
     with pytest.raises(CheckpointInvalidError, match="destination transaction id"):
         get_status(b, plan, minting.replace(destination_tx_id=None))
+
+
+def test_branch10_delivered_wins_over_attestation_pending():
+    # Carried from the Task 5 review (item 7): the destination nullifier check (invariant 6) must
+    # run BEFORE the attestation read for EVERY inbound-pending status, including
+    # ATTESTATION_PENDING itself, not just DESTINATION_ACTION_REQUIRED/DELIVERY_PENDING — so a
+    # nonce that is already delivered short-circuits straight to COMPLETED even when a complete
+    # attestation is also scripted, and xreserve.get_attestation is never called.
+    b = FakeBridge(environment="testnet")
+    plan, payload, message_hash, receipt = _inbound_private(b)
+    nonce = "0x" + xreserve_nonce_from_payload(payload).hex()
+    b.xreserve.delivered_nonces.add(nonce)
+    b.xreserve.attestations[message_hash] = Attestation(payload=payload, message_hash=bytes.fromhex(message_hash[2:]),
+                                                         attestation=bytes.fromhex(SIG[2:]), status="complete")
+    out = get_status(b, plan, receipt)
+    assert out.status is Status.COMPLETED
+    assert not any(call[0] == "xreserve.get_attestation" for call in b.calls)
+
+
+def test_message_id_never_falls_back_to_source_tx_id():
+    # Carried from the Task 5 review (item 8): a DispatchId log that could not be read leaves
+    # receipt.id == receipt.source_tx_id (the source transaction hash) — that must never be
+    # mistaken for the Hyperlane message id, even though it has the same 0x + 64-hex shape.
+    b = FakeBridge()
+    to_aleo = prepare(b.registry, source="ethereum/eth", destination="aleo/eth", amount="0.000000000000000001",
+                      recipient=ALEO_RECIPIENT)
+    tx = "0x" + "aa" * 32
+    receipt = Receipt(id=tx, protocol="hyperlane", status=Status.DELIVERY_PENDING, source_tx_id=tx,
+                      protocol_state={"routeId": to_aleo.route_id})
+    assert get_status(b, to_aleo, receipt) is receipt
+    assert not any(call[0] == "hyperlane.is_delivered" for call in b.calls)
+
+
+def test_solana_message_id_fill_in_raises_on_missing_connection():
+    # Carried from the Task 5 review (item 9): resolving the Solana connection must happen OUTSIDE
+    # the log-read try/except, so a missing connection surfaces as ConfigurationError instead of
+    # being swallowed as "still unavailable".
+    b = FakeBridge(ethereum=False, solana=False)
+    plan = prepare(b.registry, source="solana/sol", destination="aleo/sol", amount="0.000000001",
+                   recipient=ALEO_RECIPIENT, sender=SOL_ADDRESS)
+    sig = "5igNature" * 8
+    receipt = Receipt(id=sig, protocol="hyperlane", status=Status.DELIVERY_PENDING, source_tx_id=sig,
+                      protocol_state={"routeId": plan.route_id, "messageIdUnavailable": True})
+    with pytest.raises(ConfigurationError, match="Solana"):
+        get_status(b, plan, receipt)
