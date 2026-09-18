@@ -162,6 +162,23 @@ skipped-by-registry rather than dropped:
 | `evm-xreserve` | ethereum USDC → aleo USDCx | `2` USDC, private mint (needs `complete`) |
 | `aleo-xreserve` | aleo USDCx → ethereum USDC | `2.000001` USDCx private burn, delivers 1 atomic unit |
 
+The `metadata-required` mainnet routes (ALEO on ethereum/solana/base/hyperevm, USAD) are
+parametrized too and skip with `registry:metadata-required` — `tests/live/test_lifecycle_live.py`
+builds its parameters by enumerating `DEFAULT_REGISTRY.routes(...)`, so a route that no case covers
+raises at import rather than disappearing. The same two xReserve case functions run the testnet
+pair (`xreserve:sepolia/usdc->aleo-testnet/usdcx` at `3` USDC, then
+`xreserve:aleo-testnet/usdcx->sepolia/usdc` at `2.000001`); the testnet keys and RPC are
+`BRIDGE_LIVE_ALEO_TESTNET_PRIVATE_KEY`/`ALEO_E2E_PRIVATE_KEY`,
+`BRIDGE_LIVE_EVM_TESTNET_PRIVATE_KEY`/`EVM_PRIVATE_KEY`/`BRIDGE_EVM_PRIVATE_KEY` and
+`SEPOLIA_RPC_URL`/`BRIDGE_LIVE_SEPOLIA_RPC_URL` (public default when unset). Testnet needs no
+mainnet acknowledgement — the funds gate alone.
+
+**Recovery is not simulated.** Every funded test runs in two phases: the first quotes, prechecks
+and calls `execute` once, then returns; the client that executed is discarded, and a brand-new
+`Bridge` over the same `FileCheckpointStore` finishes the transfer from `bridge.pending()` →
+`bridge.recover(checkpoint)` → `wait`/`resume`/`complete`. `execute` is never called twice for one
+transfer, and `BRIDGE_LIVE_XRESERVE_AMOUNT` (or `BRIDGE_LIVE_<CASE>_AMOUNT`) overrides an amount.
+
 **Funding per run** (from the 2026-09-17 read-only mainnet quote sweep): ETH/WBTC/USDT Hyperlane
 deposits cost ≈0.0000838 ETH each in native Hyperlane fees plus L1 gas (USDT also needs one
 approval); the Aleo-origin legs cost 8.174147 (ETH), 9.138947 (WBTC), 9.138947 (USDT) and 7.661056
@@ -171,10 +188,39 @@ and the burn needs an unspent private USDCx record of at least 2.000001. Return 
 the matching inbound leg minted, so run inbound first — an unfunded return leg skips with its
 shortfall printed rather than failing.
 
-**Running it.**
+**Running it.** *Quote only* — prices and prechecks every route and submits nothing, whatever is
+acknowledged:
 
-    python scripts/rehearse.py --case evm-hyperlane --quote-only          # price every route, submit nothing
+    python scripts/rehearse.py --case evm-hyperlane --quote-only
     python scripts/rehearse.py --case evm-xreserve --report run.json      # submits only if acknowledged
+
+*Testnet* (Sepolia ⇄ aleo-testnet, the funds gate only — no mainnet acknowledgement):
+
+    BRIDGE_LIVE_FUNDS=1 BRIDGE_LIVE_STATE_DIR="$HOME/.bridge-live" \
+      pytest -m live -s tests/live/test_lifecycle_live.py::test_testnet_evm_xreserve_deposit
+    BRIDGE_LIVE_FUNDS=1 BRIDGE_LIVE_STATE_DIR="$HOME/.bridge-live" \
+      pytest -m live -s tests/live/test_lifecycle_live.py::test_testnet_aleo_xreserve_return
+
+*Mainnet, quote only* — the acknowledgement that names the cases, and deliberately no execute
+variable, so each route is priced and prechecked and nothing is signed:
+
+    BRIDGE_LIVE_FUNDS=1 BRIDGE_LIVE_STATE_DIR="$HOME/.bridge-live" \
+      BRIDGE_LIVE_MAINNET_ACK=<see tests/live/config.py> \
+      BRIDGE_LIVE_MAINNET_CASES=evm-hyperlane,evm-xreserve,aleo-hyperlane,aleo-xreserve,solana-hyperlane \
+      pytest -m live -s tests/live/test_lifecycle_live.py
+
+*Mainnet, for real* — **you** type this, in your own shell, for one command; both acknowledgement
+values are the constants in `tests/live/config.py` and appear nowhere in this repository in a
+copy-pasteable form. Nothing in the suite or the CLI ever sets them:
+
+    BRIDGE_LIVE_FUNDS=1 BRIDGE_LIVE_STATE_DIR="$HOME/.bridge-live" \
+      BRIDGE_LIVE_MAINNET_ACK=<see tests/live/config.py> \
+      BRIDGE_LIVE_MAINNET_CASES=<the one case you mean> \
+      BRIDGE_LIVE_MAINNET_EXECUTE=<see tests/live/config.py> \
+      pytest -m live -s "tests/live/test_lifecycle_live.py::test_evm_xreserve"
+
+*Resuming* an interrupted transfer (the run prints this line itself):
+
     python scripts/rehearse.py --recover "$BRIDGE_LIVE_STATE_DIR/mainnet/<case>-<route>.json"
 
 Exit codes: `0` ok, `1` a case failed, `2` something is still pending. The same case functions back
