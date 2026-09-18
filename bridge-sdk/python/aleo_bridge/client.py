@@ -14,6 +14,7 @@ import os
 import re
 from typing import TYPE_CHECKING, Any, Callable
 
+from . import lifecycle as _lifecycle
 from ._calls import AleoCall
 from .errors import ConfigurationError
 from .eth import Ethereum, EthModule
@@ -286,6 +287,104 @@ class Bridge:
         pending: list["Progress"] = []
         return BridgeStatus(environment=self.environment, registry_version=self.registry.version,
                             chains=chains, pending=pending)
+
+    # ── Tier 1: the lifecycle ──────────────────────────────────────────────
+
+    def quote(self, source, destination, *, amount=None, amount_atomic=None, recipient: str,
+              sender: str | None = None, protocol: str | None = None, mint_mode: str = "public",
+              secret_nonce: str = "0scalar"):
+        """Price a transfer and get the plan that ``execute`` takes. Nothing is signed.
+
+        ``source`` / ``destination`` are ``"chain/key"`` strings or ``(chain, key)``
+        tuples (``"ethereum/usdc"``, ``"aleo/usdcx"``); give exactly one of
+        ``amount`` (human units, str) or ``amount_atomic`` (int).  ``recipient`` is
+        the destination-chain address.  ``mint_mode`` (xReserve into Aleo only):
+        ``"public"`` balance, ``"record"`` minted by the relayer, or ``"private"``
+        — you finish it yourself with ``complete`` and must keep ``secret_nonce``.
+        Returns a kind-specific ``Quote`` (``quote.kind`` in evm-hyperlane /
+        solana-hyperlane / aleo-hyperlane / evm-xreserve / aleo-xreserve) with
+        ``fees`` and ``amount_out`` in human units and ``quote.plan``.  Show the
+        user fees + amount before ``execute``.
+        """
+        return _lifecycle.quote(self, source=source, destination=destination, amount=amount,
+                                amount_atomic=amount_atomic, recipient=recipient, sender=sender,
+                                protocol=protocol, mint_mode=mint_mode, secret_nonce=secret_nonce)
+
+    def execute(self, plan, *, on_checkpoint=None, proving: str = "delegate", mode: str | None = None,
+                record: str | None = None, merkle_proof: str | None = None,
+                gas_payment_microcredits: int | None = None, secret_nonce: str | None = None,
+                poll_seconds: float = 1.0, timeout_seconds: float = 120.0):
+        """Commit funds on the source chain for ``quote.plan``; returns ``Progress``.
+
+        Runs approval(s) → deposit / dispatch / burn, emitting a ``Checkpoint`` to
+        ``on_checkpoint`` (and the bound store) at every boundary — including
+        AFTER proving and BEFORE broadcast for Aleo legs, so a crash there is
+        resumable without proving twice.  ``proving`` is ``"delegate"`` (DPS) or
+        ``"local"``; ``mode`` is ``"caller"|"signer"`` (Aleo Hyperlane) or
+        ``"private"|"public"|"public-as-signer"`` (Aleo xReserve burn, default
+        private; ``record``/``merkle_proof`` optional — the SDK selects a record
+        and computes the exclusion proof).  The Hyperlane hook payment is
+        re-quoted right before proving unless ``gas_payment_microcredits`` is
+        pinned.  Irreversible once the source step is broadcast: afterwards use
+        ``wait`` / ``recover``, never ``execute`` again.
+        """
+        return _lifecycle.execute(self, plan, on_checkpoint=on_checkpoint, proving=proving, mode=mode,
+                                  record=record, merkle_proof=merkle_proof,
+                                  gas_payment_microcredits=gas_payment_microcredits, secret_nonce=secret_nonce,
+                                  poll_seconds=poll_seconds, timeout_seconds=timeout_seconds)
+
+    def get_status(self, plan, receipt):
+        """One status refresh (no polling, no signing); returns the same receipt when nothing changed."""
+        return _lifecycle.get_status(self, plan, receipt)
+
+    def wait(self, progress, *, until=None, poll_seconds: float = 15.0, timeout_seconds: float = 1200.0,
+             on_update=None):
+        """Poll until the transfer finishes or needs you: stops at ``progress.next``
+        in resume / complete / done / failed, or at any status in ``until``.
+
+        A ``PollingTimeoutError`` is NOT a failure — the transfer is still in
+        flight; call ``wait`` again or ``recover`` later.  ``on_update`` receives
+        each changed ``Progress``.
+        """
+        return _lifecycle.wait(self, progress, until=until, poll_seconds=poll_seconds,
+                               timeout_seconds=timeout_seconds, on_update=on_update)
+
+    def recover(self, checkpoint):
+        """Rebuild ``Progress`` from a saved checkpoint (``Checkpoint``, dict or JSON) — reads only.
+
+        Re-resolves the route from the live registry and reads chain state once;
+        ``progress.next`` then says what to do: ``wait``, ``resume``, ``complete``,
+        ``done`` or ``failed``.
+        """
+        return _lifecycle.recover(self, checkpoint)
+
+    def resume(self, progress, *, on_checkpoint=None, secret_nonce: str | None = None,
+               poll_seconds: float = 1.0, timeout_seconds: float = 120.0, proving: str = "delegate"):
+        """Finish an interrupted source submission (``progress.next == "resume"``).
+
+        Rebroadcasts the identical proved Aleo transaction (a duplicate response is
+        success) or, on EVM, re-scans history and only then authorizes the single
+        missing deposit/dispatch.  Never repeats a confirmed step.
+        """
+        return _lifecycle.resume(self, progress, on_checkpoint=on_checkpoint, secret_nonce=secret_nonce,
+                                 poll_seconds=poll_seconds, timeout_seconds=timeout_seconds, proving=proving)
+
+    def complete(self, progress, *, secret_nonce: str, on_checkpoint=None, proving: str = "delegate"):
+        """Submit the private USDCx mint (``progress.next == "complete"``).
+
+        Requires the same ``secret_nonce`` given to ``execute``; the SDK never
+        stored it.  Submits exactly one ``private_mint`` and returns
+        ``DESTINATION_CONFIRMING`` progress to ``wait`` on.
+        """
+        return _lifecycle.complete(self, progress, secret_nonce=secret_nonce, on_checkpoint=on_checkpoint,
+                                   proving=proving)
+
+    def pending(self) -> list:
+        """``recover`` every checkpoint in the bound store — the in-flight transfers of this profile."""
+        store = self.checkpoints
+        if store is None:
+            return []
+        return [_lifecycle.recover(self, cp) for cp in store.list()]
 
     # ── constructors ──
     @classmethod

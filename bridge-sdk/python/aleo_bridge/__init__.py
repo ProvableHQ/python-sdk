@@ -28,6 +28,8 @@ from .client import Bridge  # noqa: E402
 from .eth import Ethereum, EthModule  # noqa: E402
 from .freezelist import EMPTY_MERKLE_PROOF_PAIR, FreezeList  # noqa: E402
 from .hyperlane import HyperlaneModule  # noqa: E402
+from . import lifecycle  # noqa: E402
+from .lifecycle import prepare  # noqa: E402
 from .privacy import PrivacyModule  # noqa: E402
 from .profile import DEFAULT_ENDPOINT, Profile  # noqa: E402
 from .sol import DEFAULT_SOLANA_RPC_URL, Solana, SolModule  # noqa: E402
@@ -49,4 +51,5 @@ __all__ = [
     "Checkpoint", "CheckpointStore", "FileCheckpointStore", "create_checkpoint",
     "EthModule", "Ethereum", "EvmCall",
     "DEFAULT_SOLANA_RPC_URL", "Solana", "SolCall", "SolModule",
+    "lifecycle", "prepare",
 ]
