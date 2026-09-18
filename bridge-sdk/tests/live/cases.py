@@ -35,7 +35,7 @@ from aleo_bridge.units import format_decimal_amount
 from .config import one_atomic_unit
 from .helpers import (LiveBenchmark, LiveCaseError, LiveState, Underfunded, ensure_secret_nonce,
                       load_live_state, load_secret_nonce, redacted, save_live_state,
-                      wait_for_hyperlane_delivery)
+                      wait_for_aleo_transaction, wait_for_hyperlane_delivery)
 
 #: veil's per-test budget (`30 * 60_000`).
 CASE_TIMEOUT_SECONDS = 30 * 60.0
@@ -276,10 +276,9 @@ def _recover_from_state(bridge: Any, state: LiveState, *, benchmark: LiveBenchma
     if state.checkpoint is None:
         raise LiveCaseError("No checkpoint was saved for this transfer; nothing to recover from")
     receipt_id = state.checkpoint.get("receiptId")
-    for progress in (bridge.pending() or []):
-        if receipt_id and progress.receipt.id == receipt_id:
-            log(f"  recovered  {receipt_id} from the bound checkpoint store ({len(bridge.pending())} pending)")
-            break
+    pending = bridge.pending() or []
+    if receipt_id and any(entry.receipt.id == receipt_id for entry in pending):
+        log(f"  pending    {receipt_id} is in the bound checkpoint store ({len(pending)} in flight)")
     progress = bridge.recover(state.checkpoint)
     benchmark.mark("source-recovered")
     return progress
@@ -352,6 +351,7 @@ def run_case(bridge: Any, case: str, route_id: str, *, state_path: Path | str, r
     amount = amount or default_amount(bridge.registry, case, route)
     recipient = recipient or default_recipient(bridge, route)
     sender = sender_for(bridge, route)
+    benchmark.mark("plan-prepared")
 
     # The private-mint nonce is created only when we are actually going to deposit: a quote-only
     # rehearsal leaves no secret file behind. An existing one is always reused.
@@ -389,6 +389,11 @@ def run_case(bridge: Any, case: str, route_id: str, *, state_path: Path | str, r
             raise LiveCaseError(
                 f"Solana source transaction {state.source_tx_id} expired; inspect it on chain before "
                 "clearing the checkpoint — never re-run execute")
+        if spec.source_family == "aleo" and state.source_tx_id:
+            # veil aleo-hyperlane:153 / aleo-xreserve:136: confirm the source on chain before
+            # recovering, so a rejected execution is reported as itself rather than as a timeout.
+            wait_for_aleo_transaction(bridge, state.source_tx_id)
+            benchmark.mark("source-confirmed")
     else:
         log(f"  resuming {case} {route_id} from the saved checkpoint")
 
@@ -417,6 +422,10 @@ def run_case(bridge: Any, case: str, route_id: str, *, state_path: Path | str, r
             log("  explorer   unavailable; the destination transaction id was not recorded")
     state.completed = True
     save_live_state(state_path, state)
+    after = read_balances(bridge).get(destination.id)
+    if after is not None and state.destination_balance_before is not None:
+        log(f"  delivered  {destination.id} +{after - int(state.destination_balance_before)} atomic "
+            f"(before {state.destination_balance_before}, after {after})")
     log(f"  done       source={state.source_tx_id} message={state.message_id} "
         f"destination={state.destination_tx_id}")
     log(f"  {benchmark.summary()}")

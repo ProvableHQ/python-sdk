@@ -175,7 +175,9 @@ def _default_bridge() -> Any:
 def run(argv: list[str] | None = None, *, bridge_factory: Callable[[], Any] = _default_bridge,
         log: Callable[[str], None] = print) -> int:
     args = parse_args(argv)
+    run_benchmark = LiveBenchmark("rehearse", log=log)
     bridge = bridge_factory()
+    run_benchmark.mark("clients-created")
     environment = bridge.environment
 
     if args.recover:
@@ -213,7 +215,8 @@ def run(argv: list[str] | None = None, *, bridge_factory: Callable[[], Any] = _d
 
     payload = {"generated_at": datetime.now(timezone.utc).isoformat(), "case": case,
                "environment": environment, "registry_version": bridge.registry.version,
-               "execute": execute, "reason": reason, "results": rows}
+               "execute": execute, "reason": reason, "results": rows,
+               "run_benchmark": run_benchmark.as_dict()}
     if args.report:
         report = Path(args.report).expanduser()
         report.parent.mkdir(parents=True, exist_ok=True)

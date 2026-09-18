@@ -517,6 +517,13 @@ def test_quote_only_prints_the_table_and_submits_nothing(fake, tmp_path):
     assert ETH_ROUTE in printed and "evm-hyperlane" in printed and "quote only" in printed
 
 
+def test_the_case_records_veils_benchmark_marks(fake, tmp_path):
+    benchmark = live_helpers.LiveBenchmark("evm-hyperlane", log=lambda _: None)
+    live_cases.run_case(fake, "evm-hyperlane", ETH_ROUTE, state_path=tmp_path / "s.json",
+                        execute=False, benchmark=benchmark, log=lambda _: None)
+    assert [mark.step for mark in benchmark.marks] == ["plan-prepared", "quote-returned"]
+
+
 def test_quote_only_never_creates_the_private_mint_secret(fake, tmp_path):
     state_path = tmp_path / "evm-xreserve.json"
     live_cases.run_case(fake, "evm-xreserve", USDC_ROUTE, state_path=state_path, execute=False,
