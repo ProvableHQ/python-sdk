@@ -160,6 +160,47 @@ def test_unsupported_route_and_terminal_cleanup(tmp_path):
     assert ok.next == "wait"
 
 
+def test_malformed_delivery_verification_raises_checkpoint_invalid():
+    # Item 8 (carried from Task 7 review): a hand-edited/foreign checkpoint whose
+    # deliveryVerification block is missing a key or holds a non-digit value must raise
+    # CheckpointInvalidError, never KeyError, before any network read.
+    b = FakeBridge(ethereum=False)
+    plan, cp = _aleo_eth_checkpoint(b, transactionId="at1burn")
+    with pytest.raises(CheckpointInvalidError, match="destination balance verification"):
+        recover(b, {**cp, "deliveryVerification": {"balanceBeforeAtomic": "100"}})  # missing key
+    with pytest.raises(CheckpointInvalidError, match="destination balance verification"):
+        recover(b, {**cp, "deliveryVerification": {"balanceBeforeAtomic": "100", "expectedIncreaseAtomic": "abc"}})
+    with pytest.raises(CheckpointInvalidError, match="destination balance verification"):
+        recover(b, {**cp, "deliveryVerification": {"balanceBeforeAtomic": None, "expectedIncreaseAtomic": "1"}})
+    assert b.calls == [] and b.events == []
+
+
+def test_terminal_cleanup_deletes_by_checkpoint_id_not_receipt_id(tmp_path):
+    # Item 7 (carried from Task 7 review): a Solana checkpoint whose stored id (the source
+    # signature) differs from the id the refreshed receipt ends up carrying (EXPIRED status
+    # can flip the receipt id to a message id). _finish must delete the record keyed on
+    # cp.id ("sig"), never one keyed on receipt.id ("msg-divergent").
+    store = FileCheckpointStore(tmp_path)
+    b = FakeBridge(solana=True, checkpoints=store)
+    plan = prepare(b.registry, source="solana/sol", destination="aleo/sol", amount="0.000000001",
+                   recipient=ALEO_RECIPIENT, sender=SOL_ADDRESS)
+    cp = create_checkpoint(plan, Receipt(id="sig", protocol="hyperlane", status=Status.SOURCE_CONFIRMING,
+                                         source_tx_id="sig", protocol_state={"routeId": plan.route_id,
+                                                                             "blockhash": "recent",
+                                                                             "lastValidBlockHeight": "123456789"}),
+                           b.registry)
+    assert cp.id == "sig"
+    store.save(cp)
+    b.sol.source_status_result = Receipt(id="msg-divergent", protocol="hyperlane", status=Status.EXPIRED,
+                                         source_tx_id="sig",
+                                         protocol_state={"routeId": plan.route_id,
+                                                         "sourceError": "Solana transaction expired before confirmation: sig"})
+    progress = recover(b, cp)
+    assert progress.next == "failed" and progress.receipt.id == "msg-divergent"
+    assert store.load("sig") is None
+    assert store.load("msg-divergent") is None      # nothing was ever stored under this key to begin with
+
+
 def test_recovered_plan_round_trips_through_checkpoint():
     # Controller ruling (task-7-controller-notes.md #1): _plan_from_intent rebuilds the plan via
     # prepare(), which is proven field-identical to build_plan for every active route

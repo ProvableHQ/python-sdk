@@ -954,8 +954,14 @@ def recover(bridge, checkpoint) -> Progress:
     src, dst = resolved.source_chain, resolved.destination_chain
     source = cp.source or {}
     dv = cp.delivery_verification or {}
-    verification = ({"destinationBalanceBeforeAtomic": dv["balanceBeforeAtomic"],
-                     "expectedDestinationIncreaseAtomic": dv["expectedIncreaseAtomic"]} if dv else {})
+    if dv:
+        before, expected = dv.get("balanceBeforeAtomic"), dv.get("expectedIncreaseAtomic")
+        if not (isinstance(before, str) and before.isdigit() and isinstance(expected, str) and expected.isdigit()):
+            raise CheckpointInvalidError(
+                "Bridge checkpoint contains invalid destination balance verification state")
+        verification = {"destinationBalanceBeforeAtomic": before, "expectedDestinationIncreaseAtomic": expected}
+    else:
+        verification = {}
     approvals = source.get("approvalTransactionIds") or []
 
     if src.family == "aleo":
