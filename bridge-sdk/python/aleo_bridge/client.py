@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from . import lifecycle as _lifecycle
 from ._calls import AleoCall
-from .errors import ConfigurationError
+from .errors import BridgeError, ConfigurationError
 from .eth import Ethereum, EthModule
 from .freezelist import FreezeList
 from .hyperlane import HyperlaneModule
@@ -338,16 +338,19 @@ class Bridge:
         return _lifecycle.get_status(self, plan, receipt)
 
     def wait(self, progress, *, until=None, poll_seconds: float = 15.0, timeout_seconds: float = 1200.0,
-             on_update=None):
+             on_update=None, on_error=None, max_consecutive_errors: int = 5):
         """Poll until the transfer finishes or needs you: stops at ``progress.next``
         in resume / complete / done / failed, or at any status in ``until``.
 
         A ``PollingTimeoutError`` is NOT a failure — the transfer is still in
         flight; call ``wait`` again or ``recover`` later.  ``on_update`` receives
-        each changed ``Progress``.
+        each changed ``Progress``.  A transient error (flaky RPC/HTTP transport)
+        is retried up to ``max_consecutive_errors`` times, calling ``on_error``
+        on each tolerated retry; a non-transient error propagates immediately.
         """
         return _lifecycle.wait(self, progress, until=until, poll_seconds=poll_seconds,
-                               timeout_seconds=timeout_seconds, on_update=on_update)
+                               timeout_seconds=timeout_seconds, on_update=on_update, on_error=on_error,
+                               max_consecutive_errors=max_consecutive_errors)
 
     def recover(self, checkpoint):
         """Rebuild ``Progress`` from a saved checkpoint (``Checkpoint``, dict or JSON) — reads only.
@@ -380,11 +383,22 @@ class Bridge:
                                    proving=proving)
 
     def pending(self) -> list:
-        """``recover`` every checkpoint in the bound store — the in-flight transfers of this profile."""
+        """The in-flight transfers of this profile — every checkpoint in the bound store,
+        reconstructed offline (:func:`lifecycle.progress_from_checkpoint`): no network read, so one
+        unreachable chain can never hide the others. A malformed checkpoint yields a ``Progress``
+        with ``next == "failed"`` and ``error`` set instead of raising; call ``wait()``/``recover()``
+        on any entry to refresh it against live chain state.
+        """
         store = self.checkpoints
         if store is None:
             return []
-        return [_lifecycle.recover(self, cp) for cp in store.list()]
+        out = []
+        for cp in store.list():
+            try:
+                out.append(_lifecycle.progress_from_checkpoint(self.registry, cp))
+            except BridgeError:
+                continue    # no Plan could be rebuilt at all (bad format/version/route) — nothing to report
+        return out
 
     # ── constructors ──
     @classmethod
