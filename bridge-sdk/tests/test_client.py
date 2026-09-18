@@ -102,7 +102,7 @@ def test_amount_helpers_and_privacy_delegation(fake_aleo):
 def test_status_reads_every_aleo_asset_balance(fake_aleo):
     status = Bridge(fake_aleo).status()
     assert isinstance(status, BridgeStatus) and status.environment == "mainnet" and status.registry_version == DEFAULT_REGISTRY.version
-    assert status.pending == [] and len(status.chains) == 1
+    assert status.pending == [] and len(status.chains) == 1       # no checkpoint store bound → nothing in flight
     chain = status.chains[0]
     assert (chain.chain_id, chain.address, chain.can_sign) == ("aleo", SIGNER, True)
     assert chain.balances == {"aleo/aleo": 2392443, "aleo/usdcx": 1000000, "aleo/eth": 0, "aleo/wbtc": 10000,
@@ -110,6 +110,29 @@ def test_status_reads_every_aleo_asset_balance(fake_aleo):
     assert "arc20_usdt.aleo" in fake_aleo.fetched and "usad_stablecoin.aleo" in fake_aleo.fetched
     unsigned = Bridge(FakeAleo(mappings=default_mappings(), default_account=False)).status().chains[0]
     assert (unsigned.address, unsigned.can_sign) == (None, False) and set(unsigned.balances.values()) == {0}
+
+
+def test_status_lists_the_pending_transfers_of_the_bound_store(fake_aleo, tmp_path):
+    # C1: status() is the re-orientation verb — it must show the in-flight transfers the checkpoint
+    # store holds, reconstructed offline (no chain read), not an always-empty list.
+    from aleo_bridge import lifecycle
+    from aleo_bridge.checkpoint import FileCheckpointStore, create_checkpoint
+    from aleo_bridge.types import Receipt, Status
+    from tests.fakes.fake_bridge import EVM_ADDRESS
+
+    store = FileCheckpointStore(tmp_path)
+    bridge = Bridge(fake_aleo, checkpoints=store)
+    plan = lifecycle.prepare(bridge.registry, source="aleo/eth", destination="ethereum/eth",
+                             amount="0.000000000000000001", recipient=EVM_ADDRESS)
+    store.save(create_checkpoint(plan, Receipt(id="at1pending", protocol="hyperlane",
+                                               status=Status.SOURCE_CONFIRMING, source_tx_id="at1pending",
+                                               protocol_state={"routeId": plan.route_id}), bridge.registry))
+
+    pending = bridge.status().pending
+    assert len(pending) == 1
+    only = pending[0]
+    assert only.plan.route_id == plan.route_id and only.next == "wait"
+    assert only.receipt.source_tx_id == "at1pending"
 
 
 def test_from_env_builds_aleo_only(monkeypatch, fake_aleo):

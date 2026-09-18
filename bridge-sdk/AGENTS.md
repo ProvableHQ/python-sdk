@@ -38,7 +38,12 @@ creating. Side-chain connections come from the arguments or the same env variabl
 ### `status(self) -> 'BridgeStatus'`
 
 Read-only re-orientation: addresses and public balances of every registry asset per configured chain.
-Plan 4 fills ``pending`` from the checkpoint store.
+
+``pending`` is every in-flight transfer of the bound checkpoint store, reconstructed offline by
+:meth:`pending` — no chain is read for it, and a record that cannot be interpreted comes back as a
+``Progress`` with ``next == "failed"`` instead of hiding the others. It is empty when no store is
+bound. Finish any entry with ``recover`` → ``wait`` / ``resume`` / ``complete``, never by starting
+a new transfer.
 
 ### `quote(self, source, destination, *, amount=None, amount_atomic=None, recipient: 'str', sender: 'str | None' = None, protocol: 'str | None' = None, mint_mode: 'str' = 'public', secret_nonce: 'str' = '0scalar')`
 
