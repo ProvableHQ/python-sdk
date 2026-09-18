@@ -20,23 +20,26 @@ from dataclasses import dataclass, replace
 from typing import Any, Callable
 
 from . import _sealevel
+from ._calls import is_duplicate_submission
 from ._plan import build_plan
 from .checkpoint import Checkpoint, create_checkpoint
 from .errors import (
+    AttestationError,
     BridgeError,
     CheckpointInvalidError,
     ConfigurationError,
     DeliveryUnknownError,
     InvalidAmountError,
     InvalidRecipientError,
+    NotResumableError,
     PollingTimeoutError,
     RegistryVersionMismatchError,
     RouteUnavailableError,
     UnsupportedRouteError,
 )
 from .registry import Asset, Chain, Registry, Route
-from .types import (CALLER_BOUNDARIES, TERMINAL, AleoHyperlaneQuote, AleoXReserveQuote, Fee, Plan,
-                    Progress, Quote, Receipt, Status, to_progress)
+from .types import (CALLER_BOUNDARIES, TERMINAL, AleoHyperlaneQuote, AleoXReserveQuote, Attestation,
+                    Fee, Plan, Progress, Quote, Receipt, Status, to_progress)
 from .units import format_decimal_amount, parse_decimal_amount, resolve_amount
 
 MINT_MODES = ("public", "record", "private")
@@ -860,8 +863,9 @@ def wait(bridge, progress: Progress, *, until=None, poll_seconds: float = 15.0,
         time.sleep(interval)
 
 
-__all__ = ["MINT_MODES", "ResolvedRoute", "aleo_transaction_status", "execute", "get_status", "prepare",
-           "quote", "recover", "resolve_route", "wait"]
+__all__ = ["MINT_MODES", "ResolvedRoute", "aleo_transaction_status", "complete", "execute", "get_status",
+           "is_duplicate_broadcast_error", "prepare", "quote", "recover", "resolve_route", "resume",
+           "submit_serialized", "wait"]
 
 
 # ── recover ───────────────────────────────────────────────────────────────────
@@ -1026,3 +1030,234 @@ def recover(bridge, checkpoint) -> Progress:
                                   protocol_state={**receipt.protocol_state,
                                                   "preparedDestinationTransaction": prepared_dest["serializedTransaction"]})
     return _finish(bridge, plan, receipt, cp.id)
+
+
+# ── Idempotent Aleo rebroadcast (invariant 3) ─────────────────────────────────
+
+#: Plan 1's duplicate-broadcast classifier, re-exported under the lifecycle's own name.
+#:
+#: It is deliberately NOT reimplemented here: ``AleoCall.submit_prepared`` already applies exactly
+#: this rule to every prepared broadcast, and two rules that could ever disagree about "is this a
+#: duplicate?" is one rule too many for a funds-critical path. Only the node's *"already exists"*
+#: answer (ledger or mempool) means "this exact transaction is already known"; ``duplicate serial
+#: number`` / ``duplicate output id`` mean a DIFFERENT transaction collided with this one's records
+#: and must surface as failures — and they do, because they never say "already exists".
+is_duplicate_broadcast_error = is_duplicate_submission
+
+
+def submit_serialized(bridge, serialized: str, expected_id: str) -> str:
+    """Broadcast an already-proved transaction; a duplicate answer is success, not a failure.
+
+    Returns the transaction id the node acknowledged, which must be *expected_id* — the id of the
+    exact bytes that were broadcast. A node that answers with a different id has accepted something
+    this transfer never checkpointed, so it is refused rather than recorded as its transaction.
+    """
+    try:
+        submitted = str(bridge.aleo.network.submit_transaction(serialized)).strip().strip('"')
+    except Exception as exc:  # noqa: BLE001 — the node's error type varies by transport
+        if is_duplicate_broadcast_error(exc):
+            return expected_id            # the earlier broadcast won the race: nothing left to do
+        raise
+    if submitted != expected_id:
+        raise CheckpointInvalidError(
+            f"Aleo node acknowledged transaction {submitted}; expected {expected_id}. The prepared "
+            "bytes and the node's answer disagree — do not resend; inspect both ids first.")
+    return submitted
+
+
+# ── resume ────────────────────────────────────────────────────────────────────
+
+def resume(bridge, progress: Progress, *, on_checkpoint: Callable | None = None,
+           secret_nonce: str | None = None, poll_seconds: float = 1.0, timeout_seconds: float = 120.0,
+           proving: str = "delegate") -> Progress:
+    """Finish the source leg an interruption left unsubmitted — never repeats an irreversible step.
+
+    Requires ``progress.next == "resume"`` (status ``SOURCE_SUBMISSION_PENDING``); anything else is
+    a :class:`~aleo_bridge.errors.NotResumableError` pointing at ``wait``/``recover``.
+
+    Aleo source: rebroadcasts the checkpointed transaction byte-for-byte, after checking that the
+    serialized payload's own id matches the saved one — a duplicate-transaction answer means the
+    first broadcast won the race and counts as success. The bytes are then dropped from the
+    receipt. Nothing is re-proved, so the transfer can only ever exist once on chain.
+
+    EVM source: re-scans source history from the confirmed approval
+    (``bridge.eth.recover_source(plan, checkpoint, required=True)``) and, only when that scan proves
+    no deposit/dispatch exists yet, re-quotes and authorizes the single remaining transaction
+    through the module's own ``plan=`` surface. Two guards ported from veil refuse rather than
+    guess: the re-quoted hook data must equal the hook the checkpointed approval committed to (so a
+    private mint can never be re-hooked to a commitment its recipient cannot open), and the
+    allowance must still cover the deposit (a vanished allowance means something else spent it, and
+    re-approving is a second irreversible step ``resume`` does not own). A confirmed approval is
+    never repeated; the ids already recorded are carried into the new receipt.
+
+    Solana source: ``SolCall`` has no approval step and no pre-broadcast state to continue, so there
+    is nothing to resume — ``recover``/``wait`` observe the signature instead.
+
+    ``secret_nonce`` is mandatory when ``plan.mint_mode == "private"``, and is checked before any
+    RPC: the SDK never stored it, and a silent ``"0scalar"`` fallback would commit the deposit to a
+    hook nobody can open. ``proving`` is accepted for symmetry with ``execute``/``complete`` and is
+    never used — no resume path ever proves anything: an Aleo leg rebroadcasts bytes that were
+    already proved, and an EVM leg has no proofs at all.
+    """
+    plan, receipt = progress.plan, progress.receipt
+    if progress.next != "resume" or receipt.status is not Status.SOURCE_SUBMISSION_PENDING:
+        raise NotResumableError(
+            "Bridge progress has no source submission to resume (next must be 'resume' at "
+            "SOURCE_SUBMISSION_PENDING); call wait() or recover() to refresh it")
+    resolved = resolve_route(bridge.registry, plan)
+    _require_active(resolved.route)
+    _check_receipt(plan, receipt)
+    emit = _Emitter(bridge, plan, on_checkpoint)
+    state = receipt.protocol_state
+    family = resolved.source_chain.family
+
+    if family == "aleo":
+        serialized = state.get("preparedTransaction")
+        if not isinstance(serialized, str) or not serialized:
+            raise NotResumableError(
+                "Prepared Aleo transfer is missing its serialized transaction: resume() rebroadcasts "
+                "the exact proved bytes and never re-proves. Recover from the checkpoint written "
+                "between proving and broadcast, or start the transfer over if none exists.")
+        tx_id = _assert_prepared_id(serialized, receipt.id)
+        submit_serialized(bridge, serialized, tx_id)
+        new_state: dict[str, Any] = {"routeId": plan.route_id}
+        for key in ("destinationBalanceBeforeAtomic", "expectedDestinationIncreaseAtomic"):
+            if isinstance(state.get(key), str):
+                new_state[key] = state[key]
+        submitted = Receipt(id=tx_id, protocol=plan.protocol, status=Status.SOURCE_CONFIRMING,
+                            source_tx_id=tx_id, protocol_state=new_state)
+        emit(submitted)
+        emit.finalize()
+        return to_progress(plan, submitted)
+
+    if family == "solana":
+        raise NotResumableError(
+            "Solana source legs have no resumable state: the transfer is signed and broadcast in one "
+            "step, so nothing is ever left to submit. Call recover() or wait() to observe the "
+            "signature instead.")
+
+    if family != "evm":
+        raise UnsupportedRouteError(f"Source resumption is not implemented for {resolved.source_chain.id}")
+
+    eth = _module(bridge, "eth")
+    _assert_sender(plan, bridge.ethereum.address, family="evm")
+    is_xreserve = resolved.route.protocol == "xreserve"
+    nonce = _mint_secret(plan, secret_nonce) if is_xreserve else None      # before any RPC
+
+    recovered = eth.recover_source(plan, create_checkpoint(plan, receipt, bridge.registry), required=True)
+    if recovered.status is not Status.SOURCE_SUBMISSION_PENDING:
+        emit(recovered)                       # history already holds the irreversible step
+        emit.finalize()
+        return to_progress(plan, recovered)
+
+    if is_xreserve:
+        quoted = eth.quote_deposit_usdc(plan=plan, secret_nonce=nonce)
+        saved_hook = state.get("hookData")
+        if isinstance(saved_hook, str) and saved_hook.lower() != ("0x" + quoted.hook_data.hex()).lower():
+            raise NotResumableError(
+                "The re-quoted hook data does not match the hook this transfer's approval committed "
+                "to: the secret nonce differs from the one used at execute(). Pass that same "
+                "secret_nonce — depositing under another hook mints to a commitment the recipient "
+                "can never open.")
+    else:
+        quoted = eth.quote_transfer_remote(plan=plan)
+    if quoted.approval_required:
+        raise NotResumableError(
+            "The approval recorded for this transfer no longer covers it: its allowance is gone. "
+            "Inspect Ethereum source history before starting another transfer — resume() will not "
+            "issue a second approval.")
+
+    call = eth.deposit_usdc(plan=plan, secret_nonce=nonce) if is_xreserve else eth.transfer_remote(plan=plan)
+    result = call.send(wait=True, timeout_seconds=timeout_seconds, poll_seconds=poll_seconds,
+                       on_checkpoint=emit)
+    submitted = result.receipt
+    prior = [a for a in (state.get("approvalTxIds") or []) if isinstance(a, str)]
+    approvals = prior + [a for a in (submitted.protocol_state.get("approvalTxIds") or []) if a not in prior]
+    if approvals != list(submitted.protocol_state.get("approvalTxIds") or []):
+        submitted = submitted.replace(protocol_state={**submitted.protocol_state, "approvalTxIds": approvals})
+    emit(submitted)
+    emit.finalize()
+    return to_progress(plan, submitted)
+
+
+# ── complete ──────────────────────────────────────────────────────────────────
+
+def complete(bridge, progress: Progress, *, secret_nonce: str | None = None,
+             on_checkpoint: Callable | None = None, proving: str = "delegate") -> Progress:
+    """Submit the one user-signed Aleo transaction a private USDCx mint needs.
+
+    Requires ``progress.next == "complete"`` — Circle has attested the deposit and the receipt
+    carries ``next_action == {"kind": "xreserve-private-mint", "chainId": <aleo chain>}``. The
+    persisted payload (305 bytes), message hash (32 bytes) and attestation hex are re-validated
+    first, then one of two paths runs:
+
+    * a ``preparedDestinationTransaction`` left by an earlier interrupted attempt is rebroadcast
+      byte-for-byte (a duplicate answer is success, and no ``secret_nonce`` is needed — those bytes
+      are already proved), or
+    * ``bridge.xreserve.private_mint`` builds the mint — re-verifying on the way that
+      ``(recipient, secret_nonce)`` really opens the attested hook-data commitment, so a wrong nonce
+      never reaches proving — which is then proved, checkpointed BEFORE broadcast, and broadcast.
+
+    The source deposit is never repeated, and the secret nonce, the attestation and the hook data
+    are never written to a receipt, a checkpoint or a ``Progress``. ``secret_nonce`` must be the
+    value used at ``execute``; it is required for a private plan on the proving path
+    (``ConfigurationError``, raised before any RPC).
+    """
+    if progress.next != "complete":
+        raise NotResumableError(
+            "Bridge progress has no destination action to complete (next must be 'complete'); call "
+            "wait() to refresh it — the Circle attestation may still be pending")
+    plan, receipt = progress.plan, progress.receipt
+    # Deliberately no _require_active here (unlike resume): by the time a transfer reaches
+    # DESTINATION_ACTION_REQUIRED the USDC is already deposited on Ethereum, and refusing the mint
+    # because the registry has since parked the route would strand it. The proving path still hits
+    # XReserveModule's own availability check; a rebroadcast of already-proved bytes needs none.
+    resolved = resolve_route(bridge.registry, plan)
+    _check_receipt(plan, receipt)
+    action = receipt.next_action or {}
+    if (receipt.status is not Status.DESTINATION_ACTION_REQUIRED
+            or action.get("kind") != "xreserve-private-mint"
+            or action.get("chainId") != resolved.destination_chain.id):
+        raise NotResumableError(
+            "Bridge receipt carries no supported destination action: complete() only finishes an "
+            "xReserve private mint, on this transfer's own destination chain")
+    if (resolved.route.protocol != "xreserve" or resolved.source_chain.family != "evm"
+            or resolved.destination_chain.family != "aleo"):
+        raise UnsupportedRouteError("Destination completion is not implemented for this bridge route")
+
+    state = receipt.protocol_state
+    payload = _hex_bytes(state.get("payload"), length=305)
+    message_hash = _hex_bytes(state.get("messageHash"), length=32)
+    attestation = _hex_bytes(state.get("attestation"))
+    if payload is None or message_hash is None or not attestation:
+        raise AttestationError(
+            "Ready xReserve receipt is missing its validated Circle attestation (a 305-byte payload, "
+            "a 32-byte messageHash and the attestation hex); refresh it with wait()")
+    emit = _Emitter(bridge, plan, on_checkpoint)
+
+    prepared_dest = state.get("preparedDestinationTransaction")
+    if prepared_dest is not None:
+        tx_id = _assert_prepared_id(prepared_dest, receipt.id, "prepared Aleo destination transaction")
+        submit_serialized(bridge, prepared_dest, tx_id)
+        submitted = receipt.replace(
+            status=Status.DESTINATION_CONFIRMING, destination_tx_id=tx_id, next_action=None,
+            protocol_state={k: v for k, v in state.items() if k != "preparedDestinationTransaction"})
+        emit(submitted)
+        emit.finalize()
+        return to_progress(plan, submitted)
+
+    nonce = _mint_secret(plan, secret_nonce)                               # before any RPC
+    att = Attestation(payload=payload, message_hash=message_hash, attestation=attestation, status="complete")
+    call = bridge.xreserve.private_mint(att, plan.recipient, secret_nonce=nonce, route=resolved.route)
+    prepared = _prepare_aleo(call, proving)
+    # invariant 3: the exact bytes live in a checkpoint before the network can ever see them
+    emit(receipt.replace(id=prepared.transaction_id,
+                         protocol_state={**state, "preparedDestinationTransaction": prepared.serialized}))
+    call.submit_prepared(prepared, wait=False)          # polling is wait()'s job, not complete()'s
+    submitted = receipt.replace(
+        status=Status.DESTINATION_CONFIRMING, destination_tx_id=prepared.transaction_id, next_action=None,
+        protocol_state={**{k: v for k, v in state.items() if k != "preparedDestinationTransaction"},
+                        "destinationProgram": call.program_id, "destinationFunction": call.function_name})
+    emit(submitted)
+    emit.finalize()
+    return to_progress(plan, submitted)
