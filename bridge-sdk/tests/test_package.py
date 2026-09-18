@@ -1,7 +1,52 @@
 import importlib
+import re
 import sys
+import tomllib
+from pathlib import Path
 
 import pytest
+
+import aleo_bridge
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_version_is_pinned_in_lockstep():
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    assert pyproject["project"]["version"] == "0.1.0" == aleo_bridge.__version__
+    assert pyproject["project"]["name"] == "aleo-bridge-sdk"
+    extras = pyproject["project"]["optional-dependencies"]
+    assert {"evm", "solana", "mcp", "dev"} <= set(extras)
+    assert any(dep.startswith("mcp>=1") and "<2" in dep for dep in extras["mcp"])
+
+
+def test_wheel_ships_agents_md():
+    assert (ROOT / "python" / "aleo_bridge" / "AGENTS.md").exists()
+    assert aleo_bridge.agent_guide().startswith("# aleo-bridge")
+
+
+def test_readme_covers_the_journey():
+    readme = (ROOT / "README.md").read_text()
+    for needle in ("Bridge.from_env()", "Bridge.from_profile()", "Ethereum(", "Solana(", "progress.next",
+                   "recover", "resume", "complete", "shield", "unshield", "python -m aleo_bridge.mcp",
+                   "scripts/rehearse.py", "BRIDGE_PRIVATE_KEY", "EVM_PRIVATE_KEY", "SOLANA_PRIVATE_KEY",
+                   "BRIDGE_LIVE_MAINNET_EXECUTE", "secret_nonce", "| `resume` |", "| `complete` |"):
+        assert needle in readme, needle
+    assert "Co-Authored-By" not in readme
+    # every active mainnet route appears in the route table
+    for route_id in ("xreserve:ethereum/usdc->aleo/usdcx", "hyperlane:ethereum/eth->aleo/eth",
+                     "hyperlane:aleo/sol->solana/sol"):
+        assert route_id in readme
+
+
+def test_ci_has_bridge_jobs():
+    workflow = (ROOT.parent / ".github" / "workflows" / "sdk-wheels.yml").read_text()
+    assert workflow.count("'bridge-sdk/**'") == 2
+    for job in ("build-bridge:", "release-bridge:"):
+        assert job in workflow
+    assert "environment: pypi-bridge" in workflow
+    assert 'pip install "$(ls bridge-sdk/dist/*.whl)[evm,solana,mcp]"' in workflow
+    assert re.search(r'pip install "\$\(ls bridge-sdk/dist/\*\.whl\)"\s*\n\s*python -c "import aleo_bridge', workflow)
 
 
 def test_import_without_optional_extras(monkeypatch):
