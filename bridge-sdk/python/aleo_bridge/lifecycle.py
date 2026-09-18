@@ -223,41 +223,48 @@ def quote(bridge, *, source, destination, amount=None, amount_atomic=None, recip
 
 # ── Checkpoint emission ───────────────────────────────────────────────────────
 
-def _persist(bridge, checkpoint: Checkpoint, receipt: Receipt | None, *, previous_id: str | None = None) -> None:
-    """Mirror *checkpoint* into the bound store: supersede the previous id, drop terminal ones.
-
-    ``receipt`` is ``None`` for a boundary the protocol module reduced and saved itself: the
-    supersede still runs (a module only ever saves — it never deletes the checkpoint its own
-    next boundary replaces), the save does not.
+def _persist(bridge, checkpoint: Checkpoint, receipt: Receipt, *, previous_id: str | None = None) -> None:
+    """Mirror *checkpoint* into the bound store: save (or drop, if terminal) BEFORE superseding
+    the previous id — never the reverse, so a crash between the two steps still leaves a valid
+    record for the transfer rather than a moment where the store holds neither.
     """
     store = getattr(bridge, "checkpoints", None)
     if store is None:
-        return
-    if previous_id is not None and previous_id != checkpoint.id:
-        store.delete(previous_id)
-    if receipt is None:
         return
     if receipt.status in TERMINAL:
         store.delete(checkpoint.id)
     else:
         store.save(checkpoint)
+    if previous_id is not None and previous_id != checkpoint.id:
+        store.delete(previous_id)
 
 
 class _Emitter:
     """Turns receipts into checkpoints: caller callback first, then the bound store.
 
     Two channels feed it — a protocol module's own ``on_checkpoint`` (which hands over a
-    ``Checkpoint`` it has already reduced and saved) and ``execute``'s own emission once the
-    send returns. A boundary that arrives through both is handed to the caller once: the two
-    reductions compare equal, being the same receipt reduced against the same plan.
+    ``Checkpoint`` it has already reduced, and saves ITSELF only after this call returns) and
+    ``execute``'s own emission once the send returns. A boundary that arrives through both is
+    handed to the caller once: the two reductions compare equal, being the same receipt reduced
+    against the same plan.
+
+    A module-emitted checkpoint supersedes the previous id before the module has actually saved
+    the new one — deleting the old id here (save-then-delete, brief §review item 6) would leave a
+    window where the store holds neither if it crashed. So that delete is parked as
+    ``_pending_supersede`` and only carried out once we know the module's save has landed: at the
+    start of the next emission (module-emitted or not — the loop that owns the module has already
+    returned from its ``store.save`` by then) or, failing that, when ``execute`` calls
+    :meth:`finalize` after its own last receipt is persisted.
     """
 
     def __init__(self, bridge, plan: Plan, on_checkpoint: Callable | None) -> None:
         self._bridge, self._plan, self._cb = bridge, plan, on_checkpoint
         self._last_id: str | None = None
         self._last: Checkpoint | None = None
+        self._pending_supersede: str | None = None
 
     def __call__(self, receipt) -> Checkpoint:
+        self._flush_pending()
         module_emitted = isinstance(receipt, Checkpoint)
         checkpoint = receipt if module_emitted else create_checkpoint(self._plan, receipt, self._bridge.registry)
         if checkpoint != self._last:
@@ -267,9 +274,26 @@ class _Emitter:
                 self._bridge.events.append((f"checkpoint:{label}", checkpoint.id))
             if self._cb is not None:
                 self._cb(checkpoint)                     # the caller's own callback: errors are theirs
-        _persist(self._bridge, checkpoint, None if module_emitted else receipt, previous_id=self._last_id)
-        self._last_id, self._last = checkpoint.id, checkpoint
+            if module_emitted:
+                self._pending_supersede = self._last_id   # module saves this one itself, after we return
+            else:
+                _persist(self._bridge, checkpoint, receipt, previous_id=self._last_id)
+            self._last_id, self._last = checkpoint.id, checkpoint
         return checkpoint
+
+    def _flush_pending(self) -> None:
+        if self._pending_supersede is None:
+            return
+        pending, self._pending_supersede = self._pending_supersede, None
+        if pending == self._last_id:
+            return
+        store = getattr(self._bridge, "checkpoints", None)
+        if store is not None:
+            store.delete(pending)
+
+    def finalize(self) -> None:
+        """Drop any still-pending supersede. Call once execute()'s final receipt is persisted."""
+        self._flush_pending()
 
 
 # ── Execution helpers ─────────────────────────────────────────────────────────
@@ -289,12 +313,26 @@ def _assert_sender(plan: Plan, address: str | None, *, family: str) -> None:
             "Re-quote with sender=None or the connection's own address.")
 
 
+def _connected_aleo_address(bridge) -> str | None:
+    """``bridge.aleo_address()``, or None when no account is configured to sign with.
+
+    A read-only facade cannot sign an Aleo leg anyway, so a missing account is not this check's
+    problem to raise on — it just means there is nothing to compare the plan's sender against.
+    """
+    try:
+        return bridge.aleo_address()
+    except (ConfigurationError, AttributeError):
+        return None
+
+
 def _read_destination_balance(bridge, plan: Plan, resolved: ResolvedRoute) -> int | None:
     """The recipient's destination balance, or None when we cannot read it.
 
     Only read when the destination connection IS the recipient (there is no per-address balance
     read in the module contracts); otherwise omit the delivery-verification pair rather than
-    baseline the wrong account.
+    baseline the wrong account. The RPC read itself is best-effort (review item 8): a transient
+    failure here is only ever used as an advisory baseline (``execute``'s pre-broadcast checkpoint)
+    or re-attempted by ``get_status``/``wait`` — it must never raise and block funds movement.
     """
     chain, asset = resolved.destination_chain, resolved.destination_asset
     if chain.family == "evm":
@@ -303,13 +341,19 @@ def _read_destination_balance(bridge, plan: Plan, resolved: ResolvedRoute) -> in
                 or conn.address.lower() != plan.recipient.lower()
                 or asset.locator is None or asset.locator.kind not in ("native", "evm-contract")):
             return None
-        return int(bridge.eth.balance(asset.id))
+        try:
+            return int(bridge.eth.balance(asset.id))
+        except Exception:                                              # noqa: BLE001 — advisory read only
+            return None
     if chain.family == "solana":
         conn = getattr(bridge, "solana", None)
         if (conn is None or conn.address != plan.recipient
                 or asset.locator is None or asset.locator.kind != "native"):
             return None
-        return int(bridge.sol.balance())
+        try:
+            return int(bridge.sol.balance())
+        except Exception:                                              # noqa: BLE001 — advisory read only
+            return None
     return None            # Aleo private records / token mappings: protocol signal instead
 
 
@@ -421,15 +465,20 @@ def execute(bridge, plan: Plan, *, on_checkpoint: Callable | None = None, provin
         eth = _module(bridge, "eth")
         _assert_sender(plan, bridge.ethereum.address, family=family)
         call = eth.transfer_remote(plan=plan)
-        return to_progress(plan, _send_call(call, emit, poll_seconds, timeout_seconds))
+        receipt = _send_call(call, emit, poll_seconds, timeout_seconds)
+        emit.finalize()
+        return to_progress(plan, receipt)
 
     if plan.protocol == "hyperlane" and family == "solana":
         sol = _module(bridge, "sol")
         _assert_sender(plan, bridge.solana.address, family=family)
         call = sol.transfer_remote(plan=plan)
-        return to_progress(plan, _send_call(call, emit, poll_seconds, timeout_seconds))
+        receipt = _send_call(call, emit, poll_seconds, timeout_seconds)
+        emit.finalize()
+        return to_progress(plan, receipt)
 
     if plan.protocol == "hyperlane" and family == "aleo":
+        _assert_sender(plan, _connected_aleo_address(bridge), family="aleo")
         as_signer = _aleo_hyperlane_mode(mode)
         verification = _delivery_verification(bridge, plan, resolved)
         gas = gas_payment_microcredits
@@ -438,21 +487,27 @@ def execute(bridge, plan: Plan, *, on_checkpoint: Callable | None = None, provin
         call = bridge.hyperlane.transfer_remote(plan.source_asset_id, plan.recipient,
                                                 amount_atomic=plan.amount_atomic, as_signer=as_signer,
                                                 gas_payment_microcredits=gas)
-        return to_progress(plan, _run_aleo_leg(bridge, plan, call, proving=proving, emit=emit,
-                                               extra_state=verification))
+        receipt = _run_aleo_leg(bridge, plan, call, proving=proving, emit=emit, extra_state=verification)
+        emit.finalize()
+        return to_progress(plan, receipt)
 
     if plan.protocol == "xreserve" and family == "evm":
         eth = _module(bridge, "eth")
         _assert_sender(plan, bridge.ethereum.address, family=family)
         nonce = _mint_secret(plan, secret_nonce)
         call = eth.deposit_usdc(plan=plan, secret_nonce=nonce)
-        return to_progress(plan, _send_call(call, emit, poll_seconds, timeout_seconds))
+        receipt = _send_call(call, emit, poll_seconds, timeout_seconds)
+        emit.finalize()
+        return to_progress(plan, receipt)
 
     if plan.protocol == "xreserve" and family == "aleo":
+        _assert_sender(plan, _connected_aleo_address(bridge), family="aleo")
         burn_mode = _xreserve_burn_mode(mode)
         call = bridge.xreserve.burn(plan.recipient, amount_atomic=plan.amount_atomic, mode=burn_mode,
                                     record=record, merkle_proof=merkle_proof)
-        return to_progress(plan, _run_aleo_leg(bridge, plan, call, proving=proving, emit=emit, extra_state={}))
+        receipt = _run_aleo_leg(bridge, plan, call, proving=proving, emit=emit, extra_state={})
+        emit.finalize()
+        return to_progress(plan, receipt)
 
     raise UnsupportedRouteError(f"Unsupported {plan.protocol} source chain family: {family} ({plan.route_id})")
 

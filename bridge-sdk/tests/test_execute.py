@@ -242,3 +242,84 @@ def test_a_stale_plan_is_refused_before_anything_is_sent():
     with pytest.raises(Exception, match="registry"):
         execute(b, plan)
     assert b.calls == [] and b.events == []
+
+
+# ── review carry-overs (items 6-8) ────────────────────────────────────────────
+
+def test_persist_never_leaves_the_store_empty_between_checkpoints(tmp_path):
+    """Item 6: ``_persist`` saves the new checkpoint before deleting the superseded id, and a
+    module-emitted checkpoint's own supersede is deferred (parked on the ``_Emitter``) until the
+    module has actually saved it — otherwise a crash between delete and save loses the record."""
+    store = FileCheckpointStore(tmp_path)
+    observed = []
+    orig_save, orig_delete = store.save, store.delete
+
+    def save(cp):
+        orig_save(cp)
+        observed.append(len(store.list()))
+
+    def delete(cid):
+        orig_delete(cid)
+        observed.append(len(store.list()))
+
+    store.save, store.delete = save, delete
+    b = FakeBridge(checkpoints=store)
+    plan = _wbtc_plan(b, sender=EVM_ADDRESS)
+    b.eth.intermediates = [Receipt(id="0x" + "11" * 32, protocol="hyperlane",
+                                   status=Status.SOURCE_APPROVAL_PENDING,
+                                   protocol_state={"routeId": plan.route_id,
+                                                   "approvalTxIds": ["0x" + "11" * 32]})]
+    execute(b, plan)
+    assert observed and all(n >= 1 for n in observed)                # never empty in between
+    assert [c.id for c in store.list()] == ["0x" + "aa" * 32]         # exactly one record after execute
+
+
+def test_aleo_hyperlane_leg_refuses_a_sender_mismatch_before_proving():
+    """Item 7: an Aleo leg checks the plan's sender against ``bridge.aleo_address()`` before
+    proving anything."""
+    b = FakeBridge(ethereum=False)
+    plan = prepare(b.registry, source="aleo/eth", destination="ethereum/eth",
+                   amount="0.000000000000000001", recipient=EVM_ADDRESS,
+                   sender="aleo1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqvfnl2t")
+    with pytest.raises(ConfigurationError, match="sender"):
+        execute(b, plan, gas_payment_microcredits=1)
+    assert b.calls == [] and "delegate_prepared" not in [e[0] for e in b.events]
+
+
+def test_aleo_xreserve_leg_refuses_a_sender_mismatch_before_proving():
+    b = FakeBridge(ethereum=False)
+    plan = prepare(b.registry, source="aleo/usdcx", destination="ethereum/usdc", amount="2.5",
+                   recipient=EVM_ADDRESS,
+                   sender="aleo1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqvfnl2t")
+    with pytest.raises(ConfigurationError, match="sender"):
+        execute(b, plan, mode="public")
+    assert b.calls == [] and "delegate_prepared" not in [e[0] for e in b.events]
+
+
+def test_aleo_leg_with_no_sender_pinned_and_no_configured_account_is_unaffected():
+    """A plan without a sender, or a bridge whose ``aleo_address()`` cannot be read, never blocks
+    the leg — the check is a no-op when there is nothing to compare."""
+    b = FakeBridge(ethereum=False)
+
+    def raises(*a, **kw):
+        raise ConfigurationError("no aleo account configured")
+
+    b.aleo_address = raises
+    execute(b, _aleo_eth_plan(b))
+    assert b.calls[0][0] == "hyperlane.quote_gas_payment"
+
+
+def test_destination_balance_baseline_read_is_best_effort(monkeypatch):
+    """Item 8: an advisory destination-balance read never blocks funds movement."""
+    b = FakeBridge()
+    b.eth.balances["ethereum/eth"] = 100
+
+    def raise_balance(asset):
+        raise RuntimeError("RPC is down")
+
+    monkeypatch.setattr(b.eth, "balance", raise_balance)
+    plan = _aleo_eth_plan(b)
+    cps = []
+    progress = execute(b, plan, gas_payment_microcredits=1, on_checkpoint=cps.append)
+    assert cps[0].delivery_verification is None
+    assert "destinationBalanceBeforeAtomic" not in progress.receipt.protocol_state
