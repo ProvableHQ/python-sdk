@@ -115,6 +115,30 @@ def test_aleo_xreserve_burn_modes_and_private_inputs():
         execute(b2, plan, mode="signer")
 
 
+def test_aleo_xreserve_burn_captures_the_destination_balance_baseline():
+    """I2: Circle has no delivery query for Aleo→EVM, so the baseline written here is the ONLY way
+    ``get_status`` branch 8 can ever see the USDC land and let ``wait`` terminate. Recorded exactly
+    like the Hyperlane leg: only when our EVM connection is itself the recipient."""
+    b = FakeBridge()                                    # ethereum configured, address == recipient
+    b.eth.balances["ethereum/usdc"] = 100
+    plan = prepare(b.registry, source="aleo/usdcx", destination="ethereum/usdc", amount="2",
+                   recipient=EVM_ADDRESS)
+    cps = []
+    progress = execute(b, plan, mode="public", on_checkpoint=cps.append)
+    assert b.calls[0] == ("eth.balance", "ethereum/usdc")          # read before the burn is built
+    assert b.calls[1][0] == "xreserve.burn"
+    assert cps[0].delivery_verification == {"balanceBeforeAtomic": "100", "expectedIncreaseAtomic": "2000000"}
+    assert progress.receipt.protocol_state["destinationBalanceBeforeAtomic"] == "100"
+    assert progress.receipt.protocol_state["expectedDestinationIncreaseAtomic"] == "2000000"
+    # a recipient that is not our connection's address still gets no baseline, and no read at all
+    b2 = FakeBridge()
+    other = prepare(b2.registry, source="aleo/usdcx", destination="ethereum/usdc", amount="2",
+                    recipient="0x0000000000000000000000000000000000000002")
+    cps2 = []
+    execute(b2, other, mode="public", on_checkpoint=cps2.append)
+    assert cps2[0].delivery_verification is None and ("eth.balance", "ethereum/usdc") not in b2.calls
+
+
 # ── EVM- and Solana-origin legs ───────────────────────────────────────────────
 
 def test_evm_hyperlane_forwards_intermediate_checkpoints_and_polling_controls():

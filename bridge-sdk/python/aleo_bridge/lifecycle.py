@@ -518,9 +518,13 @@ def execute(bridge, plan: Plan, *, on_checkpoint: Callable | None = None, provin
     if plan.protocol == "xreserve" and family == "aleo":
         _assert_sender(plan, _connected_aleo_address(bridge), family="aleo")
         burn_mode = _xreserve_burn_mode(mode)
+        # Circle publishes no delivery query for this direction (see get_status branch 8), so this
+        # advisory baseline is the only delivery signal the transfer will ever have — record it
+        # before the burn is built, exactly as the Aleo Hyperlane leg does.
+        verification = _delivery_verification(bridge, plan, resolved)
         call = bridge.xreserve.burn(plan.recipient, amount_atomic=plan.amount_atomic, mode=burn_mode,
                                     record=record, merkle_proof=merkle_proof)
-        receipt = _run_aleo_leg(bridge, plan, call, proving=proving, emit=emit, extra_state={})
+        receipt = _run_aleo_leg(bridge, plan, call, proving=proving, emit=emit, extra_state=verification)
         emit.finalize()
         return to_progress(plan, receipt)
 
@@ -611,6 +615,14 @@ def get_status(bridge, plan: Plan, receipt: Receipt) -> Receipt:
     "chainId": ...}``), then the private mint's acceptance.  Returns the SAME object when nothing
     changed.
 
+    One branch deliberately goes BEYOND veil: an Aleo→EVM xReserve burn has no canonical delivery
+    query at all (Circle publishes none for that direction), so veil leaves it ``DELIVERY_PENDING``
+    forever and ``wait`` could never terminate it. Here, when ``execute`` was able to baseline the
+    recipient's destination balance, the same arithmetic the Aleo-origin Hyperlane branch uses ends
+    the transfer. Without that baseline — or without a connection that can read it — the branch
+    degrades to veil's passthrough rather than raising: the baseline is optional, so its absence is
+    "not observable from here", not an error.
+
     A Solana transport failure inside ``SolModule.source_status`` (or the message-id log read) is
     not swallowed here: a single refresh may raise on a flaky public RPC, and retrying with backoff
     is ``wait``'s job, not this function's.
@@ -686,10 +698,21 @@ def get_status(bridge, plan: Plan, receipt: Receipt) -> Receipt:
     if route.protocol == "hyperlane":
         return receipt
 
-    # 8. xReserve Aleo→EVM: Circle exposes no canonical delivery query
+    # 8. xReserve Aleo→EVM: Circle exposes no canonical delivery query, so fall back to the baseline
+    #    execute recorded. This goes DELIBERATELY BEYOND veil, which has no delivery query for this
+    #    direction at all and therefore leaves the transfer DELIVERY_PENDING forever: without a
+    #    signal here `wait` can never terminate and the checkpoint is never freed. Unlike branch 6
+    #    a missing reader is NOT an error — the baseline is optional, so we degrade to veil's
+    #    passthrough (the caller confirms delivery out of band) instead of raising.
     if (receipt.status is Status.DELIVERY_PENDING and route.protocol == "xreserve"
             and src.family == "aleo" and dst.family == "evm"):
-        return receipt
+        before, expected = state.get("destinationBalanceBeforeAtomic"), state.get("expectedDestinationIncreaseAtomic")
+        if not (isinstance(before, str) and before.isdigit() and isinstance(expected, str) and expected.isdigit()):
+            return receipt
+        current = _read_destination_balance(bridge, plan, resolved)
+        if current is None or current < int(before) + int(expected):
+            return receipt
+        return _clear_action(receipt, status=Status.COMPLETED)
 
     # 9. Everything else that is not inbound xReserve
     if route.protocol != "xreserve" or src.family != "evm" or dst.family != "aleo":
