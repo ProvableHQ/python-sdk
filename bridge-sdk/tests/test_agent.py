@@ -222,7 +222,7 @@ def test_pending_reports_a_malformed_record_instead_of_collapsing_the_list(tmp_p
     assert len(healthy) == 1 and healthy[0]["checkpoint"] == Checkpoint.from_dict(cp).to_dict()
     assert len(broken) == 1 and broken[0]["checkpoint_id"] == "at1broken"
     assert broken[0]["error_type"] == "CheckpointInvalidError" and broken[0]["error"]
-    assert "progress" not in broken[0]
+    assert broken[0]["next"] == "failed" and "progress" not in broken[0]
     json.dumps(entries)
 
 
@@ -243,6 +243,8 @@ def test_pending_reports_files_the_store_could_not_read_instead_of_hiding_them(t
     assert len(healthy) == 1 and healthy[0]["checkpoint"] == Checkpoint.from_dict(cp).to_dict()
     assert sorted(Path(e["path"]).name for e in unreadable) == ["future.json", "garbage.json"]
     assert all(e["error"] and e["error_type"] and "progress" not in e for e in unreadable)
+    # R3: same failure shape as Bridge.pending() — one reader handles either API
+    assert all(e["next"] == "failed" for e in unreadable)
     json.dumps(entries)
 
 

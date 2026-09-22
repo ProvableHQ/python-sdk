@@ -260,7 +260,11 @@ class BridgeStatus:
     environment: str
     registry_version: str
     chains: list[ChainStatus]
-    pending: list[Progress]
+    #: One entry per stored checkpoint. A record that could be reconstructed is a ``Progress``; one
+    #: the client could not interpret at all, and a file the store could not read back, is a dict
+    #: ``{"next": "failed", "error", "error_type"}`` naming its ``checkpoint_id`` or ``path`` —
+    #: never dropped, because an unreadable record may still be a transfer holding somebody's funds.
+    pending: list[Progress | dict]
 
 
 __all__ = [

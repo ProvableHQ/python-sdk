@@ -460,9 +460,8 @@ covered hermetically by `tests/test_live_helpers.py`.
 | `BRIDGE_LIVE_MAINNET_ACK`, `BRIDGE_LIVE_MAINNET_CASES` | live tests, rehearsal | `<see tests/live/config.py>` + a comma list of `evm-hyperlane`, `evm-xreserve`, `aleo-hyperlane`, `aleo-xreserve`, `solana-hyperlane` — the named mainnet cases may run |
 | `BRIDGE_LIVE_MAINNET_EXECUTE` | live tests, rehearsal | `<see tests/live/config.py>` — without it every case quotes and prechecks only |
 
-Gates and acknowledgement strings live only in `tests/live/config.py` — nothing
-in this repository sets them, and they never appear here in copy-pasteable
-form.
+The acknowledgement strings live in `tests/live/config.py` and its hermetic
+test; nothing in this repository exports them or sets them for a real run.
 
 ## Tests
 

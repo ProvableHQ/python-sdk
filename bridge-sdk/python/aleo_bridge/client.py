@@ -273,10 +273,13 @@ class Bridge:
         """Read-only re-orientation: addresses and public balances of every registry asset per configured chain.
 
         ``pending`` is every in-flight transfer of the bound checkpoint store, reconstructed offline by
-        :meth:`pending` — no chain is read for it, and a record that cannot be interpreted comes back as a
-        ``Progress`` with ``next == "failed"`` instead of hiding the others. It is empty when no store is
-        bound. Finish any entry with ``recover`` → ``wait`` / ``resume`` / ``complete``, never by starting
-        a new transfer.
+        :meth:`pending` — no chain is read for it, and a malformed record comes back as a ``Progress``
+        with ``next == "failed"`` instead of hiding the others. A record this client cannot interpret at
+        all (an unknown route, a registry version it did not write) and a file the store could not read
+        back are dict entries instead — ``{"next": "failed", "error", "error_type"}`` plus the
+        ``checkpoint_id`` or ``path`` that names them — so nothing is ever dropped silently. It is empty
+        when no store is bound. Finish any entry with ``recover`` → ``wait`` / ``resume`` / ``complete``,
+        never by starting a new transfer.
         """
         chains = [self._aleo_chain_status()]
         if self.ethereum is not None:
@@ -290,7 +293,7 @@ class Bridge:
                         if native is not None and self.solana.address is not None else {})
             chains.append(ChainStatus(chain_id=solana_chain.id, address=self.solana.address,
                                       can_sign=self.solana.can_sign, balances=balances))
-        pending: list["Progress"] = self.pending()
+        pending: list["Progress | dict"] = self.pending()
         return BridgeStatus(environment=self.environment, registry_version=self.registry.version,
                             chains=chains, pending=pending)
 

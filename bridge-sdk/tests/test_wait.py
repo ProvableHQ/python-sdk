@@ -123,14 +123,14 @@ def test_an_aleo_to_evm_xreserve_burn_terminates_and_frees_its_checkpoint(tmp_pa
     from tests.fakes.fake_bridge import EVM_ADDRESS
     store = FileCheckpointStore(tmp_path)
     b = FakeBridge(checkpoints=store)
-    plan = prepare(b.registry, source="aleo/usdcx", destination="ethereum/usdc", amount="2",
+    plan = prepare(b.registry, source="aleo/usdcx", destination="ethereum/usdc", amount="2.000001",
                    recipient=EVM_ADDRESS)
     receipt = Receipt(id="at1burn", protocol="xreserve", status=Status.DELIVERY_PENDING, source_tx_id="at1burn",
                       protocol_state={"routeId": plan.route_id, "destinationBalanceBeforeAtomic": "100",
-                                      "expectedDestinationIncreaseAtomic": "2000000"})
+                                      "expectedDestinationIncreaseAtomic": "1"})
     progress = to_progress(plan, receipt)
     store.save(create_checkpoint(plan, receipt, b.registry))
-    reads = iter([100, 100, 2_000_100])
+    reads = iter([100, 100, 100 + 996_501])                # the real 2026-09-18 testnet delivery
     b.eth.balance = lambda asset: next(reads)
     monkeypatch.setattr("aleo_bridge.lifecycle.time.sleep", lambda s: None)
 

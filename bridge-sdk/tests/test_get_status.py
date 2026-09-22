@@ -195,18 +195,21 @@ def test_branch8_and_9_xreserve_outbound_and_not_implemented():
 def test_branch8_xreserve_aleo_to_evm_terminates_on_the_recorded_balance_baseline():
     """I2: Circle exposes no delivery query for this direction, so veil leaves it pending forever.
     When ``execute`` could baseline the recipient's USDC balance, the same arithmetic branch 6 uses
-    is the delivery signal here too — otherwise ``wait`` can never terminate an Aleo→EVM burn."""
+    is the delivery signal here too — otherwise ``wait`` can never terminate an Aleo→EVM burn.
+
+    The baseline is NET of the withdrawal fee (R1): the 2026-09-18 testnet burn of 2.000001 USDCx
+    delivered 996_501 atomic USDC, far short of the 2_000_001 burned — a predicate on the full
+    amount would never fire for the real transfer, and would fire for unrelated inflow."""
     b = FakeBridge()
-    plan = prepare(b.registry, source="aleo/usdcx", destination="ethereum/usdc", amount="2", recipient=EVM_ADDRESS)
+    plan = prepare(b.registry, source="aleo/usdcx", destination="ethereum/usdc", amount="2.000001",
+                   recipient=EVM_ADDRESS)
     receipt = Receipt(id="at1burn", protocol="xreserve", status=Status.DELIVERY_PENDING, source_tx_id="at1burn",
                       next_action={"kind": "noop"},
                       protocol_state={"routeId": plan.route_id, "destinationBalanceBeforeAtomic": "100",
-                                      "expectedDestinationIncreaseAtomic": "2000000"})
+                                      "expectedDestinationIncreaseAtomic": "1"})
     b.eth.balances["ethereum/usdc"] = 100
     assert get_status(b, plan, receipt) is receipt                    # nothing delivered yet
-    b.eth.balances["ethereum/usdc"] = 2_000_099
-    assert get_status(b, plan, receipt) is receipt                    # one atom short of the quote
-    b.eth.balances["ethereum/usdc"] = 2_000_100
+    b.eth.balances["ethereum/usdc"] = 100 + 996_501                   # the real testnet delivery
     done = get_status(b, plan, receipt)
     assert done.status is Status.COMPLETED and done.next_action is None
 
@@ -216,10 +219,11 @@ def test_branch8_falls_back_to_veils_passthrough_without_a_baseline_or_a_reader(
     or with no connection able to read the recipient's balance, branch 8 stays veil's passthrough
     rather than raising DeliveryUnknownError the way branch 6 does."""
     b = FakeBridge(ethereum=False)
-    plan = prepare(b.registry, source="aleo/usdcx", destination="ethereum/usdc", amount="2", recipient=EVM_ADDRESS)
+    plan = prepare(b.registry, source="aleo/usdcx", destination="ethereum/usdc", amount="2.000001",
+                   recipient=EVM_ADDRESS)
     baselined = Receipt(id="at1burn", protocol="xreserve", status=Status.DELIVERY_PENDING, source_tx_id="at1burn",
                         protocol_state={"routeId": plan.route_id, "destinationBalanceBeforeAtomic": "100",
-                                        "expectedDestinationIncreaseAtomic": "2000000"})
+                                        "expectedDestinationIncreaseAtomic": "1"})
     assert get_status(b, plan, baselined) is baselined                # no reader: pending, not an error
 
     b2 = FakeBridge()

@@ -312,7 +312,8 @@ def _h_pending(b, a):
     Nothing is dropped. A record this build cannot interpret at all becomes one error entry naming
     its ``checkpoint_id``, and a file the store could not even read back as a checkpoint becomes one
     naming its ``path`` — the healthy entries still come back beside them, so a corrupt or stale
-    file can never make a transfer that is still on the wire invisible.
+    file can never make a transfer that is still on the wire invisible. Both carry
+    ``"next": "failed"``, the shape ``Bridge.pending()`` also reports, so one reader handles either.
     """
     store = getattr(b, "checkpoints", None)
     if store is None:
@@ -324,10 +325,10 @@ def _h_pending(b, a):
         try:
             progress = lifecycle.progress_from_checkpoint(b.registry, cp)
         except BridgeError as exc:
-            out.append(_error_payload(exc, checkpoint_id=cp.id))
+            out.append(_error_payload(exc, next="failed", checkpoint_id=cp.id))
             continue
         out.append({"progress": _serialize(progress, b.registry), "checkpoint": cp.to_dict()})
-    out.extend(problem.to_dict() for problem in problems)
+    out.extend({"next": "failed", **problem.to_dict()} for problem in problems)
     return out
 
 

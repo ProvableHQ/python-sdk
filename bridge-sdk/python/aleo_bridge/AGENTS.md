@@ -40,10 +40,13 @@ creating. Side-chain connections come from the arguments or the same env variabl
 Read-only re-orientation: addresses and public balances of every registry asset per configured chain.
 
 ``pending`` is every in-flight transfer of the bound checkpoint store, reconstructed offline by
-:meth:`pending` — no chain is read for it, and a record that cannot be interpreted comes back as a
-``Progress`` with ``next == "failed"`` instead of hiding the others. It is empty when no store is
-bound. Finish any entry with ``recover`` → ``wait`` / ``resume`` / ``complete``, never by starting
-a new transfer.
+:meth:`pending` — no chain is read for it, and a malformed record comes back as a ``Progress``
+with ``next == "failed"`` instead of hiding the others. A record this client cannot interpret at
+all (an unknown route, a registry version it did not write) and a file the store could not read
+back are dict entries instead — ``{"next": "failed", "error", "error_type"}`` plus the
+``checkpoint_id`` or ``path`` that names them — so nothing is ever dropped silently. It is empty
+when no store is bound. Finish any entry with ``recover`` → ``wait`` / ``resume`` / ``complete``,
+never by starting a new transfer.
 
 ### `quote(self, source, destination, *, amount=None, amount_atomic=None, recipient: 'str', sender: 'str | None' = None, protocol: 'str | None' = None, mint_mode: 'str' = 'public', secret_nonce: 'str' = '0scalar')`
 

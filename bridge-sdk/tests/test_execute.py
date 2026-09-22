@@ -12,7 +12,7 @@ import pytest
 
 from aleo_bridge.checkpoint import FileCheckpointStore
 from aleo_bridge.errors import ConfigurationError, RouteUnavailableError
-from aleo_bridge.lifecycle import execute, prepare
+from aleo_bridge.lifecycle import execute, prepare, quote
 from aleo_bridge.types import Receipt, Status
 from tests.fakes.fake_bridge import ALEO_RECIPIENT, EVM_ADDRESS, SOL_ADDRESS, FakeBridge
 
@@ -115,24 +115,31 @@ def test_aleo_xreserve_burn_modes_and_private_inputs():
         execute(b2, plan, mode="signer")
 
 
-def test_aleo_xreserve_burn_captures_the_destination_balance_baseline():
-    """I2: Circle has no delivery query for Aleo→EVM, so the baseline written here is the ONLY way
-    ``get_status`` branch 8 can ever see the USDC land and let ``wait`` terminate. Recorded exactly
-    like the Hyperlane leg: only when our EVM connection is itself the recipient."""
+def test_aleo_xreserve_burn_captures_the_destination_balance_baseline_net_of_the_fee():
+    """I2/R1: Circle has no delivery query for Aleo→EVM, so the baseline written here is the ONLY
+    way ``get_status`` branch 8 can ever see the USDC land and let ``wait`` terminate. The expected
+    increase is the quote's ``amount_out`` — the withdrawal fee is paid OUT OF the burned amount,
+    so waiting for the full amount would wait for a delivery that can never arrive (and could be
+    satisfied by unrelated inflow instead). Recorded exactly like the Hyperlane leg: only when our
+    EVM connection is itself the recipient."""
     b = FakeBridge()                                    # ethereum configured, address == recipient
     b.eth.balances["ethereum/usdc"] = 100
-    plan = prepare(b.registry, source="aleo/usdcx", destination="ethereum/usdc", amount="2",
+    plan = prepare(b.registry, source="aleo/usdcx", destination="ethereum/usdc", amount="2.000001",
+                   recipient=EVM_ADDRESS)
+    quoted = quote(b, source="aleo/usdcx", destination="ethereum/usdc", amount="2.000001",
                    recipient=EVM_ADDRESS)
     cps = []
     progress = execute(b, plan, mode="public", on_checkpoint=cps.append)
     assert b.calls[0] == ("eth.balance", "ethereum/usdc")          # read before the burn is built
-    assert b.calls[1][0] == "xreserve.burn"
-    assert cps[0].delivery_verification == {"balanceBeforeAtomic": "100", "expectedIncreaseAtomic": "2000000"}
+    assert b.calls[1][0] == "xreserve.burn"                        # the quote above is offline
+    # 2.000001 USDCx burned − the registry's 2 USDCx withdrawal fee = 1 atomic unit expected out
+    assert quoted.amount_out == "0.000001" and quoted.withdrawal_fee_atomic == 2_000_000
+    assert cps[0].delivery_verification == {"balanceBeforeAtomic": "100", "expectedIncreaseAtomic": "1"}
     assert progress.receipt.protocol_state["destinationBalanceBeforeAtomic"] == "100"
-    assert progress.receipt.protocol_state["expectedDestinationIncreaseAtomic"] == "2000000"
+    assert progress.receipt.protocol_state["expectedDestinationIncreaseAtomic"] == "1"
     # a recipient that is not our connection's address still gets no baseline, and no read at all
     b2 = FakeBridge()
-    other = prepare(b2.registry, source="aleo/usdcx", destination="ethereum/usdc", amount="2",
+    other = prepare(b2.registry, source="aleo/usdcx", destination="ethereum/usdc", amount="2.000001",
                     recipient="0x0000000000000000000000000000000000000002")
     cps2 = []
     execute(b2, other, mode="public", on_checkpoint=cps2.append)

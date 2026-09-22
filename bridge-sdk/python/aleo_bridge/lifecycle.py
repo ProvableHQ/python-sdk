@@ -212,10 +212,9 @@ def quote(bridge, *, source, destination, amount=None, amount_atomic=None, recip
         q = _module(bridge, "eth").quote_deposit_usdc(plan=plan, secret_nonce=secret_nonce)
         return replace(q, plan=plan)
     if plan.protocol == "xreserve" and family == "aleo":
-        raw = resolved.route.metadata.get("withdrawalFeeAtomic")
-        if not isinstance(raw, str) or not raw.isdigit():
+        fee_atomic = _xreserve_withdrawal_fee_atomic(resolved)
+        if fee_atomic is None:
             raise RouteUnavailableError(f"xReserve withdrawal fee is missing or invalid: {plan.route_id}")
-        fee_atomic = int(raw)
         decimals = resolved.source_asset.decimals
         fee_human = format_decimal_amount(fee_atomic, decimals)
         if plan.amount_atomic <= fee_atomic:
@@ -369,13 +368,27 @@ def _read_destination_balance(bridge, plan: Plan, resolved: ResolvedRoute) -> in
     return None            # Aleo private records / token mappings: protocol signal instead
 
 
-def _delivery_verification(bridge, plan: Plan, resolved: ResolvedRoute) -> dict[str, str]:
+def _xreserve_withdrawal_fee_atomic(resolved: ResolvedRoute) -> int | None:
+    """The route's ``withdrawalFeeAtomic`` literal, or None when it is missing or malformed."""
+    raw = resolved.route.metadata.get("withdrawalFeeAtomic")
+    return int(raw) if isinstance(raw, str) and raw.isdigit() else None
+
+
+def _delivery_verification(bridge, plan: Plan, resolved: ResolvedRoute, *,
+                           expected_atomic: int | None = None) -> dict[str, str]:
     """``execute``'s advisory delivery baseline — an unreadable balance is simply omitted.
 
     The best-effort swallow lives at THIS call site and not inside ``_read_destination_balance``
     (Task 6 review item 8): here the balance is a nice-to-have baseline written into a checkpoint
     before broadcast, so a flaky RPC must never block funds movement; in ``get_status`` branch 6
     the same read is the delivery signal and must raise.
+
+    ``expected_atomic`` overrides how much the recipient should GAIN. It defaults to the full
+    transferred amount (Hyperlane delivers the amount itself and charges its fees elsewhere); an
+    xReserve burn passes the quote's ``amount_out`` instead, because the withdrawal fee is paid out
+    of the burned amount. Getting that wrong in either direction is a correctness bug, not a
+    rounding one: too high and the real delivery never satisfies the predicate, too low and
+    unrelated inflow to the same address can satisfy it.
     """
     try:
         before = _read_destination_balance(bridge, plan, resolved)
@@ -383,7 +396,10 @@ def _delivery_verification(bridge, plan: Plan, resolved: ResolvedRoute) -> dict[
         return {}
     if before is None:
         return {}
-    expected = parse_decimal_amount(plan.amount, resolved.destination_asset.decimals)
+    expected = (expected_atomic if expected_atomic is not None
+                else parse_decimal_amount(plan.amount, resolved.destination_asset.decimals))
+    if expected <= 0:
+        return {}                          # nothing to observe: no predicate could distinguish it
     return {"destinationBalanceBeforeAtomic": str(before),
             "expectedDestinationIncreaseAtomic": str(expected)}
 
@@ -527,8 +543,14 @@ def execute(bridge, plan: Plan, *, on_checkpoint: Callable | None = None, provin
         burn_mode = _xreserve_burn_mode(mode)
         # Circle publishes no delivery query for this direction (see get_status branch 8), so this
         # advisory baseline is the only delivery signal the transfer will ever have — record it
-        # before the burn is built, exactly as the Aleo Hyperlane leg does.
-        verification = _delivery_verification(bridge, plan, resolved)
+        # before the burn is built, exactly as the Aleo Hyperlane leg does. What lands is the
+        # quote's amount_out: the withdrawal fee comes OUT OF the burned amount, so a baseline on
+        # the full amount would wait for a delivery that can never arrive. With no readable fee
+        # there is no honest expectation to record, and the branch degrades to veil's passthrough.
+        fee_atomic = _xreserve_withdrawal_fee_atomic(resolved)
+        verification = ({} if fee_atomic is None else
+                        _delivery_verification(bridge, plan, resolved,
+                                               expected_atomic=plan.amount_atomic - fee_atomic))
         call = bridge.xreserve.burn(plan.recipient, amount_atomic=plan.amount_atomic, mode=burn_mode,
                                     record=record, merkle_proof=merkle_proof)
         receipt = _run_aleo_leg(bridge, plan, call, proving=proving, emit=emit, extra_state=verification)
@@ -626,7 +648,9 @@ def get_status(bridge, plan: Plan, receipt: Receipt) -> Receipt:
     query at all (Circle publishes none for that direction), so veil leaves it ``DELIVERY_PENDING``
     forever and ``wait`` could never terminate it. Here, when ``execute`` was able to baseline the
     recipient's destination balance, the same arithmetic the Aleo-origin Hyperlane branch uses ends
-    the transfer. Without that baseline — or without a connection that can read it — the branch
+    the transfer — against the amount that actually lands, which for xReserve is the quote's
+    ``amount_out`` (the withdrawal fee is paid out of the burned amount), not the burned amount
+    itself. Without that baseline — or without a connection that can read it — the branch
     degrades to veil's passthrough rather than raising: the baseline is optional, so its absence is
     "not observable from here", not an error.
 
