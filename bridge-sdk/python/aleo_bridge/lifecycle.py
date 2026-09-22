@@ -311,6 +311,16 @@ class _Emitter:
             self._last_id, self._last = checkpoint.id, checkpoint
         return checkpoint
 
+    def supersede(self, previous_id: str | None) -> None:
+        """Name the stored record this emission chain replaces, before the first emission.
+
+        ``resume`` uses it so the new source transaction's checkpoint deletes the record it
+        continues from — otherwise a dropped transfer's kept checkpoint would linger beside the
+        re-dispatched one and be listed as a second, failed transfer that no longer exists.
+        """
+        if self._last_id is None:
+            self._last_id = previous_id
+
     def _flush_pending(self) -> None:
         if self._pending_supersede is None:
             return
@@ -999,7 +1009,10 @@ def _finish(bridge, plan: Plan, receipt: Receipt, checkpoint_id: str) -> Progres
     store = getattr(bridge, "checkpoints", None)
     if store is not None and receipt.status in TERMINAL:
         if _keeps_checkpoint(receipt):
-            store.save(create_checkpoint(plan, receipt, bridge.registry))
+            kept = create_checkpoint(plan, receipt, bridge.registry)
+            store.save(kept)
+            if kept.id != checkpoint_id:      # the kept record supersedes the one we were handed
+                store.delete(checkpoint_id)
         else:
             store.delete(checkpoint_id)
     return to_progress(plan, receipt)
@@ -1357,7 +1370,9 @@ def resume(bridge, progress: Progress, *, on_checkpoint: Callable | None = None,
             "recover() and re-quote instead of resuming — resume() will not re-derive the hook the "
             "approval committed to")
 
-    recovered = eth.recover_source(plan, create_checkpoint(plan, receipt, bridge.registry), required=True)
+    existing = create_checkpoint(plan, receipt, bridge.registry)
+    emit.supersede(existing.id)          # whatever this resume writes replaces the record it started from
+    recovered = eth.recover_source(plan, existing, required=True)
     if recovered.status is not Status.SOURCE_SUBMISSION_PENDING:
         emit(recovered)                       # history already holds the irreversible step
         emit.finalize()

@@ -323,20 +323,44 @@ def test_a_dropped_dispatch_with_no_history_is_resumable_not_expired():
     assert to_progress(WBTC_PLAN, recovered).next == "resume" and w3.provider.sent == [] and sleeps == [0.5]
 
 
-def test_a_scan_that_stopped_short_of_the_verdict_head_is_not_resumable():
-    """The scan's head is clamped down to whatever node answered getLogs. If that left it behind the
-    head the dropped verdict was taken at, the replacing transaction may sit in the gap — so the
-    transfer is EXPIRED (retry recover()) rather than an invitation to dispatch a second one."""
+def test_a_head_that_advances_between_the_verdict_and_the_scan_is_still_resumable():
+    """The verdict is taken BEFORE the scan, so a chain that moves on in between can no longer make
+    an otherwise complete scan look like it stopped short — this ordering is the fix."""
     eth, w3 = mainnet_read_only()
+    record_sleeps(eth)
     w3.provider.add_receipt(APPROVAL, block_number=0x60)
     w3.provider.tx_not_found.add(DISPATCH)
     w3.provider.nonce_latest = 84
-    # The scan runs against a head of 0x65; by the time the verdict is taken the chain has moved on.
-    record_sleeps(eth, then=lambda: setattr(w3.provider, "block_number", 0x99))
+    w3.provider.block_number_step = 7                    # seven new blocks between every head read
+    recovered = eth.recover_source(WBTC_PLAN, dropped_checkpoint())
+    assert recovered.status == Status.SOURCE_SUBMISSION_PENDING and w3.provider.sent == []
+    assert to_progress(WBTC_PLAN, recovered).next == "resume"
+
+
+def test_a_scan_clamped_below_the_verdict_head_is_not_resumable():
+    """A lagging node can still drag the scan's upper bound BELOW the head the verdict was taken at.
+    The replacing transaction could sit in that gap, so the transfer is EXPIRED — and the message
+    says retry recover(), never resume()."""
+    eth, w3 = mainnet_read_only()
+    w3.provider.add_receipt(APPROVAL, block_number=101)
+    w3.provider.block_number = 200
+    w3.provider.tx_not_found.add(DISPATCH)
+    w3.provider.nonce_latest = 84
+    w3.provider.log_scan_errors[1] = HEAD_RACE
+    pauses = []
+
+    def sleep(seconds):                                  # 1st pause: the dropped re-probe
+        pauses.append(seconds)                           # 2nd: the head-race retry, on a node at 150
+        if len(pauses) > 1:
+            w3.provider.block_number = 150
+
+    eth.sleep = sleep
     recovered = eth.recover_source(WBTC_PLAN, dropped_checkpoint())
     assert recovered.status == Status.EXPIRED and recovered.protocol_state["dropped"] is True
-    assert "could not be scanned up to the head that proved the transaction dropped; retry recover()" \
-        in recovered.protocol_state["sourceError"]
+    assert recovered.protocol_state["sourceError"].endswith(
+        "source history could not be scanned up to the head that proved the transaction dropped; "
+        "retry recover(); the checkpoint is kept")
+    assert "resume()" not in recovered.protocol_state["sourceError"] and pauses == [0.5, 0.5]
 
 
 def test_a_dropped_dispatch_whose_replacement_was_our_own_resend_wins():

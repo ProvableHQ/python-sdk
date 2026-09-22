@@ -27,6 +27,7 @@ from tests.fakes.fake_bridge import ALEO_RECIPIENT, EVM_ADDRESS, SOL_ADDRESS, Fa
 from tests.test_get_status import SIG, _inbound_private
 
 APPROVAL = "0x" + "11" * 32
+DROPPED_DISPATCH = "0x" + "22" * 32
 
 
 def _prepared_progress(b):
@@ -255,6 +256,28 @@ def test_resume_evm_hyperlane_redispatches_without_re_approving():
     b2.eth.approval_required = True
     with pytest.raises(NotResumableError, match="allowance"):
         resume(b2, to_progress(plan, receipt))
+
+
+def test_resume_after_a_dropped_dispatch_leaves_only_the_new_record(tmp_path):
+    """A dropped transfer's checkpoint is deliberately KEPT (nothing moved, recover() re-scans from
+    it), so the re-dispatch has to supersede it — otherwise the store lists the failed ghost of a
+    transfer that has just been sent again."""
+    store = FileCheckpointStore(tmp_path)
+    b = FakeBridge(checkpoints=store)
+    plan = prepare(b.registry, source="ethereum/wbtc", destination="aleo/wbtc", amount="0.001",
+                   recipient=ALEO_RECIPIENT)
+    dropped = Receipt(id=DROPPED_DISPATCH, protocol="hyperlane", status=Status.SOURCE_SUBMISSION_PENDING,
+                      source_tx_id=DROPPED_DISPATCH,
+                      protocol_state={"routeId": plan.route_id, "approvalTxIds": [APPROVAL],
+                                      "sourceSender": EVM_ADDRESS, "sourceNonce": "83", "dropped": True,
+                                      "sourceError": "transaction was dropped or replaced before it mined"})
+    from aleo_bridge.checkpoint import create_checkpoint
+    store.save(create_checkpoint(plan, dropped, b.registry))
+    assert [c.id for c in store.list()] == [DROPPED_DISPATCH]
+    b.eth.recover_result = dropped
+    out = resume(b, to_progress(plan, dropped))
+    assert out.receipt.status is Status.SOURCE_CONFIRMING and out.receipt.source_tx_id != DROPPED_DISPATCH
+    assert [c.id for c in store.list()] == [out.receipt.source_tx_id]     # the stale record is gone
 
 
 def test_resume_refuses_a_plan_prepared_for_another_account():

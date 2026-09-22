@@ -82,6 +82,9 @@ LOG_SCAN_HEAD_RACE_SLEEP_SECONDS = 0.5
 """Pause between those retries — long enough for a lagging node to catch up, short enough to stay
 inside a recovery call."""
 
+_KEPT = "; the checkpoint is kept; recover() re-scans source history"
+"""Tail of every dropped ``sourceError`` that leaves a usable record behind."""
+
 DROPPED_REPROBE_SLEEP_SECONDS = 0.5
 """Pause before the second ``eth_getTransactionByHash`` probe that a "dropped" verdict needs.
 
@@ -402,12 +405,19 @@ class _DroppedVerdict:
 
     ``head_at_probe`` is what makes the verdict checkable: a recovery scan that stopped short of it
     has not looked everywhere the replacing transaction could be, so it must not be trusted to say
-    "nothing was dispatched".
+    "nothing was dispatched". ``headline`` is the fact on its own; ``advice`` is what the operator
+    should do about it, which only holds when a scan actually proved something — hence the two
+    halves, so a gate failure can state the fact without the advice.
     """
 
-    message: str
+    headline: str
+    advice: str
     nonce: int
     head_at_probe: int
+
+    @property
+    def message(self) -> str:
+        return f"{self.headline} — {self.advice}"
 
 
 @dataclass(frozen=True)
@@ -444,7 +454,6 @@ class EthModule:
         self.log_scan_head_race_sleep = LOG_SCAN_HEAD_RACE_SLEEP_SECONDS
         self.dropped_reprobe_sleep = DROPPED_REPROBE_SLEEP_SECONDS
         self.sleep: Any = time.sleep          # replaced in tests so a pause is recorded, never waited
-        self._last_scan_head: int | None = None   # head the last history scan actually reached; None = never ran
 
     @property
     def log_scan_chunk_blocks(self) -> int:
@@ -1133,14 +1142,13 @@ class EthModule:
     def _dropped(receipt: Receipt, message: str) -> Receipt:
         """Terminal ``EXPIRED``: the checkpointed transaction can never mine, and moved nothing.
 
-        The checkpoint is deliberately NOT deleted for this status (``lifecycle._persist`` keeps a
-        terminal receipt carrying ``dropped``), because it is the only record of the transfer the
-        operator can hand back to ``recover()`` once the RPC agrees with itself.
+        *message* is the complete ``sourceError``; every caller ends it by saying the checkpoint is
+        kept, because it deliberately is NOT deleted for this status (``lifecycle._persist`` keeps a
+        terminal receipt carrying ``dropped``): it is the only record of the transfer the operator
+        can hand back to ``recover()`` once the RPC agrees with itself.
         """
-        return receipt.replace(
-            status=Status.EXPIRED, next_action=None,
-            protocol_state={**receipt.protocol_state, "dropped": True,
-                            "sourceError": f"{message}; the checkpoint is kept; recover() re-scans source history"})
+        return receipt.replace(status=Status.EXPIRED, next_action=None,
+                               protocol_state={**receipt.protocol_state, "dropped": True, "sourceError": message})
 
     @staticmethod
     def _state_approvals(receipt: Receipt) -> list[str]:
@@ -1190,14 +1198,14 @@ class EthModule:
             return None                          # a lagging backend, not a dropped transaction
         head = int(self.conn.w3.eth.block_number)
         if approvals:
-            tail = "recover() then resume() re-dispatches"
+            advice = "recover() then resume() re-dispatches"
         else:
-            tail = (f"no approval anchors a history scan: inspect the sender's transactions at nonce {nonce} "
-                    "before re-sending; a fresh execute is required")
+            advice = (f"no approval anchors a history scan: inspect the sender's transactions at nonce {nonce} "
+                      "before re-sending; a fresh execute is required")
         return _DroppedVerdict(
-            message=(f"transaction {tx_hash} (nonce {nonce}) was dropped or replaced before it mined; "
-                     f"no funds moved by it — {tail}"),
-            nonce=nonce, head_at_probe=head)
+            headline=(f"transaction {tx_hash} (nonce {nonce}) was dropped or replaced before it mined; "
+                      "no funds moved by it"),
+            advice=advice, nonce=nonce, head_at_probe=head)
 
     def _validate_hyperlane_state(self, route: Route, plan: Plan, receipt: Receipt) -> bytes:
         """Bind every value that affects the dispatch before trusting checkpointed transaction ids."""
@@ -1223,7 +1231,7 @@ class EthModule:
         if observed is None:
             verdict = self._dropped_verdict(receipt, source_tx_id, self._state_approvals(receipt)) \
                 if detect_dropped else None
-            return receipt if verdict is None else self._dropped(receipt, verdict.message)
+            return receipt if verdict is None else self._dropped(receipt, verdict.message + _KEPT)
         if int(observed["status"]) == 0:
             return self._failed(receipt, "sourceError", f"EVM transaction reverted: {source_tx_id}")
         message_id = self._message_id_from_receipt(route, observed)
@@ -1281,7 +1289,7 @@ class EthModule:
         if observed is None:
             verdict = self._dropped_verdict(receipt, source_tx_id, self._state_approvals(receipt)) \
                 if detect_dropped else None
-            return receipt if verdict is None else self._dropped(receipt, verdict.message)
+            return receipt if verdict is None else self._dropped(receipt, verdict.message + _KEPT)
         if int(observed["status"]) == 0:
             return self._failed(receipt, "sourceError", f"EVM transaction reverted: {source_tx_id}")
         return self._confirmed_deposit_receipt(route, q, owner=owner,
@@ -1348,26 +1356,28 @@ class EthModule:
         value = source.get("sourceNonce")
         return value if isinstance(value, str) and value.isdigit() else None
 
-    def _recovered_dropped(self, pending: Receipt, transaction_id: str, approvals: list[str]) -> Receipt:
+    def _recovered_dropped(self, pending: Receipt, verdict: "_DroppedVerdict | None",
+                           covered_head: int | None) -> Receipt:
         """The answer for a checkpointed hash that the history scan did not match.
 
-        Unchanged (still ``SOURCE_CONFIRMING``) unless the hash can never mine. When it cannot, the
-        transfer only becomes ``SOURCE_SUBMISSION_PENDING`` — ``resume`` may re-authorize the one
-        remaining transaction — if the history scan actually RAN and reached at least the head the
-        verdict was taken at (``_scan_logs`` clamps its upper bound down to whatever node answered,
-        so a lagging backend can leave it short). Otherwise nothing proves the replacement was not
-        our own dispatch and the receipt is ``EXPIRED``, for an operator to look at or for another
-        ``recover()`` once the endpoint has caught up.
+        Unchanged (still ``SOURCE_CONFIRMING``) when there is no verdict. With one, the transfer
+        becomes ``SOURCE_SUBMISSION_PENDING`` — ``resume`` may re-authorize the one remaining
+        transaction — only if the scan actually RAN and covered at least the head the verdict was
+        taken at. The verdict is taken before the scan and the chain head is monotone, so that
+        normally holds by construction; it can still fail when ``_scan_logs`` clamped its upper
+        bound down to a lagging node's head. Then, and when the scan could not run at all, nothing
+        proves the replacement was not our own dispatch, so the receipt is ``EXPIRED`` — for an
+        operator to look at, or for another ``recover()`` once the endpoint has caught up.
         """
-        verdict = self._dropped_verdict(pending, transaction_id, approvals)
         if verdict is None:
             return pending
-        scanned_head = self._last_scan_head
-        if scanned_head is None:
-            return self._dropped(pending, verdict.message)
-        if scanned_head < verdict.head_at_probe:
-            return self._dropped(pending, f"{verdict.message}; source history could not be scanned up to the "
-                                          "head that proved the transaction dropped; retry recover()")
+        if covered_head is None:
+            return self._dropped(pending, verdict.message + _KEPT)
+        if covered_head < verdict.head_at_probe:
+            # Deliberately without the "then resume()" advice: nothing here has been proved.
+            return self._dropped(pending, f"{verdict.headline} — source history could not be scanned up to the "
+                                          "head that proved the transaction dropped; retry recover(); "
+                                          "the checkpoint is kept")
         return pending.replace(status=Status.SOURCE_SUBMISSION_PENDING,
                                protocol_state={**pending.protocol_state, "sourceError": verdict.message,
                                                "dropped": True})
@@ -1392,7 +1402,7 @@ class EthModule:
         except errors as exc:
             raise BridgeError(f"Could not read the current block number to bound a log scan of {address}: {exc}") from exc
 
-    def _scan_logs(self, address: str, from_block: int) -> list[Any]:
+    def _scan_logs(self, address: str, from_block: int) -> tuple[list[Any], int]:
         """Every log of *address* from *from_block* to the head, read in bounded ascending chunks.
 
         The head is read once so the scan terminates on a fixed range, and every request carries an
@@ -1410,7 +1420,6 @@ class EthModule:
         errors = _provider_errors()
         chunk = self.log_scan_chunk_blocks
         latest = self._head_block(address)
-        self._last_scan_head = None           # only a scan that completes may claim a head
         logs: list[Any] = []
         start = from_block
         while start <= latest:
@@ -1434,27 +1443,29 @@ class EthModule:
                         + f"Use a dedicated RPC endpoint, or a smaller EthModule(log_scan_chunk_blocks=...) "
                         f"than the current {chunk}.") from exc
             start = end + 1
-        self._last_scan_head = latest         # what this scan actually covered, after any clamping
-        return logs
+        return logs, latest                   # the head this scan actually covered, after any clamping
 
     def _recover_hyperlane_from_history(self, route: Route, recipient32: bytes, receipt: Receipt, approvals: list[str],
-                                        *, required: bool) -> Receipt | None:
-        """Scan router ``SentTransferRemote`` logs after the last confirmed approval; sender and router must match."""
+                                        *, required: bool) -> tuple[Receipt | None, int | None]:
+        """Scan router ``SentTransferRemote`` logs after the last confirmed approval; sender and router must match.
+
+        Returns ``(match or None, head the scan covered)``; the head is ``None`` when the scan could
+        not run at all, which is what tells recovery it has proved nothing.
+        """
         from web3.exceptions import TransactionNotFound
 
-        self._last_scan_head = None          # a scan that never starts has covered nothing
         Web3 = _web3().Web3
         sender = receipt.protocol_state.get("sourceSender")
         if not isinstance(sender, str) or not Web3.is_address(sender):
             if required:
                 raise BridgeError("Cannot safely resume Hyperlane without the source account used by the approval")
-            return None
+            return None, None
         from_block = self._approval_scan_block(approvals)
         if from_block is None:
             if required:
                 raise BridgeError("Cannot safely resume Hyperlane because no confirmed approval block is available "
                                   "for source history verification")
-            return None
+            return None, None
         amount = int(receipt.protocol_state["amountAtomic"])
         meta = self._hyperlane_metadata(route)                # reuse the registry validator before touching the router
         destination = meta.destination_domain
@@ -1462,7 +1473,8 @@ class EthModule:
         warp = self._contract(router, WARP_ROUTE_ABI)
         topic = Web3.keccak(text="SentTransferRemote(uint32,bytes32,uint256)")
         candidates: list[str] = []
-        for log in self._scan_logs(router, from_block):
+        logs, covered_head = self._scan_logs(router, from_block)
+        for log in logs:
             if not log["topics"] or bytes(log["topics"][0]) != bytes(topic):
                 continue
             args = warp.events.SentTransferRemote().process_log(log)["args"]
@@ -1496,7 +1508,7 @@ class EthModule:
                                            source_tx_id=tx_hash, protocol_state=state))
         if len(matches) > 1:
             raise BridgeError("Multiple matching Hyperlane dispatches were found; recovery cannot safely choose one source transaction")
-        return matches[0] if matches else None
+        return (matches[0] if matches else None), covered_head
 
     def _recover_hyperlane(self, route: Route, plan: Plan, checkpoint: Checkpoint, *, required: bool) -> Receipt:
         Web3 = _web3().Web3
@@ -1523,7 +1535,7 @@ class EthModule:
                 return pending
             if int(observed["status"]) == 0:
                 return self._failed(pending, "sourceError", f"EVM approval transaction reverted: {approvals[-1]}")
-            recovered = self._recover_hyperlane_from_history(route, recipient32, pending, approvals, required=required)
+            recovered, _ = self._recover_hyperlane_from_history(route, recipient32, pending, approvals, required=required)
             return recovered or pending.replace(status=Status.SOURCE_SUBMISSION_PENDING)
         transaction_id = self._require_hash(transaction_id, "source transaction id")
         pending = Receipt(id=transaction_id, protocol="hyperlane", status=Status.SOURCE_CONFIRMING,
@@ -1533,24 +1545,34 @@ class EthModule:
         observed = self._hyperlane_source_status(route, plan, pending, detect_dropped=False)
         if observed is not pending:
             return observed
-        recovered = self._recover_hyperlane_from_history(route, recipient32, pending, approvals, required=False)
+        # The verdict is taken BEFORE the scan. It fixes the head at which the account nonce had
+        # already moved past ours, so whatever consumed that nonce was mined at or below it — and
+        # the scan that runs next starts from a head at least that high, the chain being monotone.
+        # Taking it afterwards made a moving chain look like a scan that had stopped short.
+        verdict = self._dropped_verdict(pending, transaction_id, approvals)
+        recovered, covered_head = self._recover_hyperlane_from_history(route, recipient32, pending, approvals,
+                                                                      required=False)
         if recovered is not None:
             return recovered
-        return self._recovered_dropped(pending, transaction_id, approvals)
+        return self._recovered_dropped(pending, verdict, covered_head)
 
     def _recover_xreserve_from_history(self, route: Route, plan: Plan, q: _XReserveQuote, owner: str, approvals: list[str],
-                                       *, required: bool) -> Receipt | None:
-        """Scan xReserve logs after the last confirmed approval; a candidate matches only if every event field matches."""
-        self._last_scan_head = None          # a scan that never starts has covered nothing
+                                       *, required: bool) -> tuple[Receipt | None, int | None]:
+        """Scan xReserve logs after the last confirmed approval; a candidate matches only if every event field matches.
+
+        Returns ``(match or None, head the scan covered)``; the head is ``None`` when the scan could
+        not run at all, which is what tells recovery it has proved nothing.
+        """
         Web3 = _web3().Web3
         from_block = self._approval_scan_block(approvals)
         if from_block is None:
             if required:
                 raise BridgeError("Cannot safely resume xReserve because no confirmed approval block is available "
                                   "for source history verification")
-            return None
+            return None, None
         hashes: list[str] = []
-        for log in self._scan_logs(q.xreserve_contract, from_block):
+        logs, covered_head = self._scan_logs(q.xreserve_contract, from_block)
+        for log in logs:
             tx_hash = Web3.to_hex(log["transactionHash"])
             if tx_hash not in hashes:
                 hashes.append(tx_hash)
@@ -1566,7 +1588,7 @@ class EthModule:
                 continue                       # other accounts' deposits share the contract; unrelated unless every field matches
         if len(matches) > 1:
             raise BridgeError("Multiple matching xReserve deposits were found; recovery cannot safely choose one source transaction")
-        return matches[0] if matches else None
+        return (matches[0] if matches else None), covered_head
 
     def _recover_xreserve(self, route: Route, plan: Plan, checkpoint: Checkpoint, *, required: bool) -> Receipt:
         Web3 = _web3().Web3
@@ -1605,7 +1627,7 @@ class EthModule:
                 return pending
             if int(observed["status"]) == 0:
                 return self._failed(pending, "sourceError", f"EVM approval transaction reverted: {approvals[-1]}")
-            recovered = self._recover_xreserve_from_history(route, plan, q, owner, approvals, required=required)
+            recovered, _ = self._recover_xreserve_from_history(route, plan, q, owner, approvals, required=required)
             return recovered or pending.replace(status=Status.SOURCE_SUBMISSION_PENDING)
         transaction_id = self._require_hash(transaction_id, "xReserve source transaction id")
         pending = Receipt(id=transaction_id, protocol="xreserve", status=Status.SOURCE_CONFIRMING,
@@ -1613,10 +1635,11 @@ class EthModule:
         observed = self._xreserve_source_status(route, plan, pending, detect_dropped=False)   # history first
         if observed is not pending:
             return observed
-        recovered = self._recover_xreserve_from_history(route, plan, q, owner, approvals, required=False)
+        verdict = self._dropped_verdict(pending, transaction_id, approvals)    # before the scan; see _recover_hyperlane
+        recovered, covered_head = self._recover_xreserve_from_history(route, plan, q, owner, approvals, required=False)
         if recovered is not None:
             return recovered
-        return self._recovered_dropped(pending, transaction_id, approvals)
+        return self._recovered_dropped(pending, verdict, covered_head)
 
     def recover_source(self, plan: Plan, checkpoint: Checkpoint, *, required: bool = False) -> Receipt:
         """Reconstruct an interrupted Ethereum source leg from a checkpoint without signing (brief §2.7, §3.1, §3.2).

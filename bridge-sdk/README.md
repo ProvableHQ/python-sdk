@@ -262,9 +262,13 @@ replaced anyway, it no longer waits forever: once two probes agree the node has
 forgotten it and the account nonce has moved past the nonce it was sent at,
 `source_status` returns `EXPIRED` with a `sourceError` explaining that nothing
 moved, and its checkpoint is kept rather than deleted so `recover()` can re-scan.
-`recover_source` scans source history first — a dispatch that really landed
-wins — and hands back a resumable `SOURCE_SUBMISSION_PENDING` when that scan
-ran, reached the head the verdict was taken at, and found nothing.
+`recover_source` takes that verdict first and then scans source history — a
+dispatch that really landed wins — and hands back a resumable
+`SOURCE_SUBMISSION_PENDING` when the scan ran, covered the head the verdict was
+taken at, and found nothing; `resume()` then supersedes the dropped record with
+the new transaction's. If a transfer was finished outside the SDK, its kept
+dropped record stays listed in `pending()` until you clear it yourself with
+`store.delete(checkpoint_id)` (the id is the source transaction hash).
 
 Live checks: `BRIDGE_LIVE_READS=1 ETHEREUM_RPC_URL=…` for read-only
 mainnet quotes (`tests/live/test_eth_reads.py`); `BRIDGE_LIVE_FUNDS=1

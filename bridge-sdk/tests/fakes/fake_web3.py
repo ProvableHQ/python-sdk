@@ -150,6 +150,7 @@ class FakeRpcProvider(BaseProvider):
         self.nonce_pending: int | None = None
         self.nonce_latest: int | None = None
         self.block_number = 0x10
+        self.block_number_step = 0                       # blocks the head gains after each eth_blockNumber
         self.methods: list[str] = []
 
     def _ok(self, result: Any) -> dict:
@@ -189,7 +190,9 @@ class FakeRpcProvider(BaseProvider):
         if method == "eth_chainId":
             return self._ok(_hex(self.chain_id))
         if method == "eth_blockNumber":
-            return self._ok(_hex(self.block_number))
+            head = self.block_number
+            self.block_number += self.block_number_step   # a live chain moves on between reads
+            return self._ok(_hex(head))
         if method == "eth_gasPrice":
             return self._ok(_hex(10**9))
         if method == "eth_maxPriorityFeePerGas":
