@@ -233,7 +233,7 @@ def _drive_case(make_bridge: Callable[[], Any], case: str, route: Route, *, envi
 
     assert state.completed, f"{route.id} did not reach done: {state}"
     assert state.source_tx_id, f"{route.id} completed without a source transaction id"
-    if not live_cases.delivery_is_a_balance_rise(route, DEFAULT_REGISTRY):
+    if not live_cases.completion_has_no_destination_id(route, DEFAULT_REGISTRY):
         assert state.message_id or state.destination_tx_id, \
             f"{route.id} completed without a message id or a destination transaction id"
 

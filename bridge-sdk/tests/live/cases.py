@@ -332,6 +332,15 @@ def _select_private_record(bridge: Any, route: Route, amount_atomic: int,
     return record
 
 
+def completion_has_no_destination_id(route: Route, registry: Registry) -> bool:
+    """True for every Aleo-origin leg: the SDK proves delivery by the recipient's balance rising
+    (``get_status`` branch 6 for Hyperlane, branch 8 for xReserve) and records neither a message
+    id nor a destination transaction id — veil's ``aleo-hyperlane.live.test.ts:163`` likewise
+    asserts only ``completed`` and ``sourceTxId`` there (the 2026-09-22 mainnet
+    ``aleo/eth->ethereum/eth`` leg completed exactly this way, +1 wei on Ethereum)."""
+    return registry.chain(registry.asset(route.source_asset_id).chain_id).family == "aleo"
+
+
 def delivery_is_a_balance_rise(route: Route, registry: Registry) -> bool:
     """True for the Aleo→EVM xReserve withdrawal, the one leg with no delivery query anywhere.
 
@@ -548,7 +557,8 @@ RUNNERS: dict[str, Callable[..., LiveState]] = {
 
 __all__ = [
     "CASES", "CASE_NAMES", "CASE_TIMEOUT_SECONDS", "CaseSpec", "LiveCaseError", "RUNNERS", "Underfunded",
-    "asset_ref", "case_for_route", "default_amount", "default_recipient", "delivery_is_a_balance_rise",
+    "asset_ref", "case_for_route", "completion_has_no_destination_id", "default_amount", "default_recipient",
+    "delivery_is_a_balance_rise",
     "precheck", "print_quote", "read_balances", "route_slug", "routes_for_case", "run_aleo_hyperlane",
     "run_aleo_xreserve", "run_case", "run_evm_hyperlane", "run_evm_xreserve", "run_solana_hyperlane",
     "sender_for", "state_name",
