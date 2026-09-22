@@ -291,7 +291,14 @@ def _drive(bridge: Any, progress: Any, state: LiveState, state_path: Path, *, sp
            secret_nonce: str | None, benchmark: LiveBenchmark, save: Callable[[Any], None],
            wait_timeout_seconds: float, wait_poll_seconds: float,
            log: Callable[[str], None]) -> Any:
-    """``wait`` / ``resume`` / ``complete`` until the transfer is done. Never calls ``execute``."""
+    """``wait`` / ``resume`` / ``complete`` until the transfer is done. Never calls ``execute``.
+
+    A ``failed`` verdict whose receipt says ``dropped`` (the source transaction was replaced or
+    evicted before it mined — no funds moved) is followed exactly once the way the SDK's own error
+    text prescribes: ``recover()`` re-scans source history and, when no dispatch landed, yields the
+    resumable state that ``resume()`` re-dispatches from.  Any other ``failed`` is final.
+    """
+    followed_dropped = False
     for _ in range(_MAX_TRANSITIONS):
         if progress.next == "wait":
             progress = bridge.wait(progress, timeout_seconds=wait_timeout_seconds,
@@ -312,6 +319,15 @@ def _drive(bridge: Any, progress: Any, state: LiveState, state_path: Path, *, sp
             benchmark.mark("complete-returned")
             continue
         if progress.next == "failed":
+            dropped = bool(getattr(progress.receipt, "protocol_state", {}).get("dropped"))
+            if dropped and not followed_dropped:
+                from aleo_bridge.checkpoint import create_checkpoint
+
+                followed_dropped = True
+                log(f"  dropped    {progress.error}\n  recover    re-scanning source history before any re-dispatch")
+                progress = bridge.recover(create_checkpoint(progress.plan, progress.receipt, bridge.registry))
+                benchmark.mark("dropped-recovered")
+                continue
             raise LiveCaseError(f"{spec.name} failed: {progress.error}")
         if progress.next == "done":
             return progress
