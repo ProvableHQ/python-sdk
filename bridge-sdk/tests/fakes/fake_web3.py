@@ -143,6 +143,9 @@ class FakeRpcProvider(BaseProvider):
         self.transactions: dict[str, dict] = {}          # extra eth_getTransactionByHash answers
         self.receipts: dict[str, dict] = {}              # extra eth_getTransactionReceipt answers
         self.tx_not_found: set[str] = set()              # hashes eth_getTransactionByHash answers null for (dropped)
+        # Hashes eth_getTransactionByHash still answers for, with blockNumber null — the stale
+        # mempool view a load-balanced endpoint keeps serving for a transaction that was replaced.
+        self.tx_unmined: set[str] = set()
         self.max_priority_fee = 10**8                    # eth_maxPriorityFeePerGas (public RPCs answer 0)
         # eth_getTransactionCount per block tag; None = "as many as this fake accepted". A live
         # load-balanced RPC can forget a pending transaction, which is exactly how one nonce got
@@ -255,15 +258,19 @@ class FakeRpcProvider(BaseProvider):
             if h in self.tx_not_found:               # dropped from every mempool: web3 raises TransactionNotFound
                 return self._ok(None)
             if h in self.transactions:
-                return self._ok(self.transactions[h])
-            sent = next((t for t in self.sent if t["hash"] == h), None)
-            if sent is None:
-                return self._ok(None)
-            return self._ok({"hash": h, "from": sent["from"], "to": sent["to"], "input": sent["data"],
-                             "value": _hex(sent["value"]), "blockNumber": _hex(self.block_number + 1),
-                             "blockHash": BLOCK_HASH, "nonce": "0x0", "gas": "0x1", "gasPrice": "0x1",
-                             "transactionIndex": "0x0", "type": "0x2", "chainId": _hex(self.chain_id),
-                             "v": "0x0", "r": "0x0", "s": "0x0"})
+                answer = self.transactions[h]
+            else:
+                sent = next((t for t in self.sent if t["hash"] == h), None)
+                if sent is None:
+                    return self._ok(None)
+                answer = {"hash": h, "from": sent["from"], "to": sent["to"], "input": sent["data"],
+                          "value": _hex(sent["value"]), "blockNumber": _hex(self.block_number + 1),
+                          "blockHash": BLOCK_HASH, "nonce": "0x0", "gas": "0x1", "gasPrice": "0x1",
+                          "transactionIndex": "0x0", "type": "0x2", "chainId": _hex(self.chain_id),
+                          "v": "0x0", "r": "0x0", "s": "0x0"}
+            if h in self.tx_unmined:                 # still served, but in no block (stale mempool view)
+                answer = {**answer, "blockNumber": None, "blockHash": None, "transactionIndex": None}
+            return self._ok(answer)
         raise NotImplementedError(method)
 
     def _accept(self, tx: dict, raw: bytes | None = None) -> str:

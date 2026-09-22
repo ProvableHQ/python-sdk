@@ -258,10 +258,14 @@ for hours, so every EIP-1559 tip is raised to a floor of 0.1 gwei
 machines — and never handed out again, because a load-balanced RPC can stop
 reporting our own pending transaction and the next leg (typically a fresh
 `Ethereum`) would then replace it. If a source transaction is dropped or
-replaced anyway, it no longer waits forever: once two probes agree the node has
-forgotten it and the account nonce has moved past the nonce it was sent at,
+replaced anyway, it no longer waits forever: once two probes agree the hash is
+in no block — the node either does not know it or still serves it with a null
+`blockNumber`, which is what a load-balanced endpoint does for a replaced
+transaction — and the account nonce has moved past the nonce it was sent at,
 `source_status` returns `EXPIRED` with a `sourceError` explaining that nothing
-moved, and its checkpoint is kept rather than deleted so `recover()` can re-scan.
+moved, and its checkpoint is kept rather than deleted so `recover()` can
+re-scan. A transaction that comes back with a block number is mined, however far
+behind its receipt read is.
 `recover_source` takes that verdict first and then scans source history — a
 dispatch that really landed wins — and hands back a resumable
 `SOURCE_SUBMISSION_PENDING` when the scan ran, covered the head the verdict was

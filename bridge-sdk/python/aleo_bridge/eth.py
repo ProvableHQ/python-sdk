@@ -1160,15 +1160,23 @@ class EthModule:
         """The verdict that *tx_hash* can never mine, or ``None`` — ``None`` means "keep waiting".
 
         The cheap facts are checked first: the receipt records the nonce the transaction was
-        broadcast at (older checkpoints do not — they simply keep waiting), the node does not know
-        the transaction at all (``TransactionNotFound``, not merely "no receipt yet"), and the
-        sender's ``latest`` account nonce has moved past that nonce, so something else consumed it.
+        broadcast at (older checkpoints do not — they simply keep waiting), the node no longer has
+        it in a block, and the sender's ``latest`` account nonce has moved past that nonce, so
+        something else consumed it. A consumed nonce plus an unmined hash is final: that hash can
+        never be included.
 
-        Then the same probe runs a SECOND time after ``dropped_reprobe_sleep`` seconds. A
-        load-balanced endpoint answers each call from a different node, and one lagging backend
-        must not be enough to declare a live transaction dead: both probes have to miss it. The
-        head at the moment the verdict is taken travels with it, so recovery can refuse to call a
-        transfer resumable on a history scan that never reached that far.
+        "No longer in a block" covers TWO answers, because a load-balanced public endpoint gives
+        both for the same replaced transaction: ``TransactionNotFound``, and a transaction object
+        with ``blockNumber`` ``None`` served from a stale mempool view (this is what the live WBTC
+        run hit — requiring not-found on both probes left the receipt confirming forever). A
+        transaction that comes back WITH a block number is mined and never dropped, however far
+        behind its receipt read is.
+
+        The probe then runs a SECOND time after ``dropped_reprobe_sleep`` seconds, with the nonce
+        read in between: one lagging backend must not be enough to declare a live transaction dead,
+        so both probes have to say "gone" (either shape). The head at the moment the verdict is
+        taken travels with it, so recovery can refuse to call a transfer resumable on a history scan
+        that never reached that far.
         """
         from web3.exceptions import TransactionNotFound
 
@@ -1181,20 +1189,22 @@ class EthModule:
         if not isinstance(sender, str) or not Web3.is_address(sender):
             return None
 
-        def missing() -> bool:
+        def gone() -> bool:
+            """True when the node does not have this hash in a block: unknown, or known-unmined."""
             try:
-                return self.conn.w3.eth.get_transaction(tx_hash) is None
+                tx = self.conn.w3.eth.get_transaction(tx_hash)
             except TransactionNotFound:
                 return True
+            return tx is None or tx.get("blockNumber") is None
 
-        if not missing():
-            return None                          # still in a mempool: pending, not replaced
+        if not gone():
+            return None                          # mined: the receipt read is just lagging
         nonce = int(nonce_text)
         account_nonce = int(self.conn.w3.eth.get_transaction_count(Web3.to_checksum_address(sender), "latest"))
         if account_nonce <= nonce:
             return None                          # the nonce is still unused: nothing has replaced it
         self.sleep(self.dropped_reprobe_sleep)
-        if not missing():
+        if not gone():
             return None                          # a lagging backend, not a dropped transaction
         head = int(self.conn.w3.eth.block_number)
         if approvals:

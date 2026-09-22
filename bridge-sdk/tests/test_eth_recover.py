@@ -363,6 +363,21 @@ def test_a_scan_clamped_below_the_verdict_head_is_not_resumable():
     assert "resume()" not in recovered.protocol_state["sourceError"] and pauses == [0.5, 0.5]
 
 
+def test_a_replaced_dispatch_still_served_as_unmined_is_resumable():
+    """The live WBTC shape: the RPC still answers for the dispatch with blockNumber null while its
+    receipt is not-found and the nonce has been consumed. History holds no dispatch of ours, so the
+    transfer is resumable rather than stuck at SOURCE_CONFIRMING."""
+    eth, w3 = mainnet_read_only()
+    sleeps = record_sleeps(eth)
+    w3.provider.add_receipt(APPROVAL, block_number=0x60)
+    w3.provider.add_transaction(DISPATCH, sender=ACCT.address, to=WBTC_ROUTER)
+    w3.provider.tx_unmined.add(DISPATCH)
+    w3.provider.nonce_latest = 85
+    recovered = eth.recover_source(WBTC_PLAN, dropped_checkpoint())
+    assert recovered.status == Status.SOURCE_SUBMISSION_PENDING and sleeps == [0.5]
+    assert to_progress(WBTC_PLAN, recovered).next == "resume" and w3.provider.sent == []
+
+
 def test_a_dropped_dispatch_whose_replacement_was_our_own_resend_wins():
     """The replacement at that nonce WAS a dispatch of ours: the log scan finds it, and recovery
     follows that real transaction instead of inviting a second dispatch."""

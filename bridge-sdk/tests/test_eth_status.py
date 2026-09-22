@@ -116,6 +116,55 @@ def test_a_dropped_dispatch_is_expired_not_confirming_forever():
     assert expired.next_action is None and w3.provider.sent == [] and sleeps == [0.5]
 
 
+def test_a_replaced_transaction_still_served_as_unmined_is_dropped():
+    """Live WBTC run: the public RPC kept answering eth_getTransactionByHash for the replaced
+    dispatch with blockNumber null (a stale mempool view) while its receipt was not-found and the
+    account nonce had passed it. Requiring not-found on both probes left it confirming forever."""
+    eth, w3 = mainnet()
+    sleeps = no_real_sleep(eth)
+    receipt = Receipt(id=H2, protocol="hyperlane", status=Status.SOURCE_CONFIRMING, source_tx_id=H2,
+                      protocol_state=hyperlane_state(sourceNonce="83"))
+    w3.provider.add_transaction(H2, sender=ACCT.address, to=WBTC_ROUTER)
+    w3.provider.tx_unmined.add(H2)                                   # served, but in no block
+    w3.provider.nonce_latest = 83
+    assert eth.source_status(WBTC_PLAN, receipt) is receipt          # nonce unused: genuinely pending
+    w3.provider.nonce_latest = 85                                    # the account has moved on twice
+    expired = eth.source_status(WBTC_PLAN, receipt)
+    assert expired.status == Status.EXPIRED and expired.protocol_state["dropped"] is True
+    assert expired.protocol_state["sourceError"] == DROPPED_MESSAGE.format(h=H2) + KEPT
+    assert sleeps == [0.5] and w3.provider.sent == []
+
+
+def test_a_mined_transaction_is_never_dropped_even_if_its_receipt_lags():
+    """A transaction that comes back WITH a block number is mined; a receipt read that has not
+    caught up is a lag, never a verdict."""
+    eth, w3 = mainnet()
+    no_real_sleep(eth)
+    receipt = Receipt(id=H2, protocol="hyperlane", status=Status.SOURCE_CONFIRMING, source_tx_id=H2,
+                      protocol_state=hyperlane_state(sourceNonce="83"))
+    w3.provider.add_transaction(H2, sender=ACCT.address, to=WBTC_ROUTER, block_number=0x70)
+    w3.provider.nonce_latest = 85                                    # nonce consumed — by this very transaction
+    assert eth.source_status(WBTC_PLAN, receipt) is receipt
+
+
+def test_not_found_then_found_unmined_still_counts_as_gone():
+    """The two probes hit different backends, and 'unknown' and 'known but in no block' are the same
+    fact: this hash is not in a block."""
+    eth, w3 = mainnet()
+    receipt = Receipt(id=H2, protocol="hyperlane", status=Status.SOURCE_CONFIRMING, source_tx_id=H2,
+                      protocol_state=hyperlane_state(sourceNonce="83"))
+    w3.provider.add_transaction(H2, sender=ACCT.address, to=WBTC_ROUTER)
+    w3.provider.tx_not_found.add(H2)
+    w3.provider.nonce_latest = 85
+
+    def sleep(seconds):                                              # the next backend answers, unmined
+        w3.provider.tx_not_found.discard(H2)
+        w3.provider.tx_unmined.add(H2)
+
+    eth.sleep = sleep
+    assert eth.source_status(WBTC_PLAN, receipt).status == Status.EXPIRED
+
+
 def test_a_transaction_the_second_probe_finds_is_not_dropped():
     """One miss can be a single lagging backend of a load-balanced endpoint. A transaction the
     re-probe finds is alive, whatever the first probe and the account nonce said."""
