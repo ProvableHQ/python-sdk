@@ -81,6 +81,51 @@ def test_hyperlane_source_confirming_branch():
     assert failed.status == Status.FAILED and failed.protocol_state["sourceError"] == f"EVM transaction reverted: {H2}"
 
 
+DROPPED_MESSAGE = ("transaction {h} (nonce 83) was dropped or replaced before it mined; no funds moved by it "
+                   "— recover() then resume() re-dispatches")
+
+
+def test_a_dropped_dispatch_is_expired_not_confirming_forever():
+    """Mainnet 2026-09-22: the dispatch was replaced at its own nonce, so it can never mine — but
+    ``source_status`` kept answering SOURCE_CONFIRMING (next == "wait") indefinitely."""
+    eth, w3 = mainnet()
+    receipt = Receipt(id=H2, protocol="hyperlane", status=Status.SOURCE_CONFIRMING, source_tx_id=H2,
+                      protocol_state=hyperlane_state(sourceNonce="83"))
+    w3.provider.nonce_latest = 83                                    # still the account's next nonce: merely pending
+    w3.provider.add_transaction(H2, sender=ACCT.address, to=WBTC_ROUTER)
+    assert eth.source_status(WBTC_PLAN, receipt) is receipt
+    w3.provider.tx_not_found.add(H2)                                 # gone from every mempool, and the nonce moved on
+    assert eth.source_status(WBTC_PLAN, receipt) is receipt          # nonce 83 is still unused: nothing replaced it
+    w3.provider.nonce_latest = 84
+    expired = eth.source_status(WBTC_PLAN, receipt)
+    assert expired.status == Status.EXPIRED and expired.protocol_state["dropped"] is True
+    assert expired.protocol_state["sourceError"] == DROPPED_MESSAGE.format(h=H2)
+    assert expired.next_action is None and w3.provider.sent == []
+
+
+def test_a_dropped_xreserve_deposit_is_expired_too():
+    w3 = fake_web3(chain_id=11155111)
+    eth = make_bridge(environment="testnet", ethereum=Ethereum(w3=w3)).eth
+    receipt = Receipt(id=H2, protocol="xreserve", status=Status.SOURCE_CONFIRMING, source_tx_id=H2,
+                      protocol_state=xreserve_state(sourceNonce="83"))
+    w3.provider.tx_not_found.add(H2)
+    w3.provider.nonce_latest = 84
+    expired = eth.source_status(USDC_PLAN, receipt)
+    assert expired.status == Status.EXPIRED and expired.protocol_state["dropped"] is True
+    assert expired.protocol_state["sourceError"] == DROPPED_MESSAGE.format(h=H2)
+
+
+def test_a_receipt_without_a_source_nonce_still_waits():
+    """Checkpoints written before the nonce was recorded must not become EXPIRED on a guess."""
+    eth, w3 = mainnet()
+    receipt = Receipt(id=H2, protocol="hyperlane", status=Status.SOURCE_CONFIRMING, source_tx_id=H2,
+                      protocol_state=hyperlane_state())
+    w3.provider.tx_not_found.add(H2)
+    w3.provider.nonce_latest = 84
+    assert eth.source_status(WBTC_PLAN, receipt) is receipt
+    assert "eth_getTransactionByHash" not in w3.provider.methods     # no nonce, no reason to ask
+
+
 def test_hyperlane_state_must_match_plan():
     eth, _ = mainnet()
     bad = Receipt(id=H2, protocol="hyperlane", status=Status.SOURCE_CONFIRMING, source_tx_id=H2,

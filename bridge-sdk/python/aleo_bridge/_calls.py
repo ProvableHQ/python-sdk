@@ -231,6 +231,7 @@ class EvmOutcome:
     approval_tx_ids: tuple[str, ...]
     source_tx_id: str | None
     receipt: Any | None                # web3 receipt when status == "CONFIRMED"
+    source_nonce: int | None = None    # nonce the transaction this outcome describes went out at
 
 
 def _assert_evm_success(receipt: Any, tx_hash: str) -> None:
@@ -335,9 +336,12 @@ class EvmCall(Generic[R]):
                     self._record_broadcast(str(lost))
                 raise
             self._record_broadcast(tx_hash)
+            # The nonce this step went out at: recovery uses it to tell a slow transaction from one
+            # that was dropped or replaced (an account nonce past it can never mine it).
+            nonce = getattr(self._conn, "last_broadcast_nonce", None)
             if step.kind == "approve":
                 approvals.append(tx_hash)
-                pending = self._finish(EvmOutcome("SOURCE_APPROVAL_PENDING", sender, tuple(approvals), None, None))
+                pending = self._finish(EvmOutcome("SOURCE_APPROVAL_PENDING", sender, tuple(approvals), None, None, nonce))
                 self._checkpoint(pending, on_checkpoint, tx_hash)
                 if not wait:
                     return pending
@@ -346,7 +350,7 @@ class EvmCall(Generic[R]):
                     return pending
                 _assert_evm_success(receipt, tx_hash)
                 continue
-            pending = self._finish(EvmOutcome("SOURCE_CONFIRMING", sender, tuple(approvals), tx_hash, None))
+            pending = self._finish(EvmOutcome("SOURCE_CONFIRMING", sender, tuple(approvals), tx_hash, None, nonce))
             self._checkpoint(pending, on_checkpoint, tx_hash)
             if not wait:
                 return pending
@@ -354,7 +358,7 @@ class EvmCall(Generic[R]):
             if receipt is None:
                 return pending
             _assert_evm_success(receipt, tx_hash)
-            confirmed = self._finish(EvmOutcome("CONFIRMED", sender, tuple(approvals), tx_hash, receipt))
+            confirmed = self._finish(EvmOutcome("CONFIRMED", sender, tuple(approvals), tx_hash, receipt, nonce))
             self._checkpoint(confirmed, on_checkpoint, tx_hash)
             return confirmed
         raise BridgeError("EvmCall has no main step")

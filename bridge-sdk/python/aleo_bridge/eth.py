@@ -35,6 +35,15 @@ def _web3():
 
 _HASH_RE = re.compile(r"^0x[0-9a-fA-F]{64}$")
 
+MIN_PRIORITY_FEE_WEI = 100_000_000
+"""Floor for the EIP-1559 priority tip, in wei (0.1 gwei).
+
+Public RPC endpoints answer ``eth_maxPriorityFeePerGas`` with 0 (``ethereum-rpc.publicnode.com``
+does), and a zero-tip transaction is not picked up by builders: on 2026-09-22 a mainnet WBTC
+dispatch sat unmined until another transaction of ours took its nonce and replaced it. Every
+suggestion is therefore raised to this floor; ``Ethereum(..., min_priority_fee_wei=...)`` overrides it.
+"""
+
 LOG_SCAN_CHUNK_BLOCKS = 5_000
 """Default block span per ``eth_getLogs`` request during recovery scans.
 
@@ -84,11 +93,13 @@ class Ethereum:
     """
 
     def __init__(self, rpc_url: str | None = None, *, w3: Any = None, signer: Any = None,
-                 private_key: str | None = None) -> None:
+                 private_key: str | None = None, min_priority_fee_wei: int = MIN_PRIORITY_FEE_WEI) -> None:
         if (rpc_url is None) == (w3 is None):
             raise ConfigurationError("Pass exactly one of rpc_url or w3 to Ethereum(...)")
         if signer is not None and private_key is not None:
             raise ConfigurationError("Pass at most one of signer or private_key to Ethereum(...)")
+        if isinstance(min_priority_fee_wei, bool) or not isinstance(min_priority_fee_wei, int) or min_priority_fee_wei < 0:
+            raise ConfigurationError("min_priority_fee_wei must be a non-negative integer number of wei")
         if w3 is None:
             web3 = _web3()
             w3 = web3.Web3(web3.HTTPProvider(rpc_url))
@@ -97,6 +108,8 @@ class Ethereum:
         self._w3 = w3
         self._signer = signer
         self._chain_id: int | None = None
+        self.min_priority_fee_wei = min_priority_fee_wei
+        self._last_nonce: int | None = None
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Ethereum | None":
@@ -137,6 +150,11 @@ class Ethereum:
         return self.address is not None
 
     @property
+    def last_broadcast_nonce(self) -> int | None:
+        """Highest nonce this connection has put on the wire, or ``None`` before the first send."""
+        return self._last_nonce
+
+    @property
     def chain_id(self) -> int:
         """``eth_chainId``, read once and cached."""
         if self._chain_id is None:
@@ -158,6 +176,12 @@ class Ethereum:
         ``nonce``/``gas``/fee fields, signs, ``send_raw_transaction``. Default-account
         mode: ``send_transaction`` (the caller's middleware signs and fills gas).
         Read-only: ``ConfigurationError``.
+
+        Two rules protect a transaction the node is slow to mine. The EIP-1559 tip is
+        ``max(eth_maxPriorityFeePerGas, min_priority_fee_wei)`` — public RPCs suggest 0, and a
+        zero-tip transaction can sit unmined for hours. The nonce is
+        ``max(pending count, last nonce this connection broadcast + 1)`` — a load-balanced RPC
+        can stop reporting our own pending transaction, and reusing its nonce replaces it.
         """
         sender = self.require_address()
         Web3 = _web3().Web3
@@ -175,7 +199,11 @@ class Ethereum:
             # transaction is in the mempool. Prefer a local signer (private_key=/signer=) for anything
             # that moves funds.
             return Web3.to_hex(self._w3.eth.send_transaction(tx))
-        tx.setdefault("nonce", self._w3.eth.get_transaction_count(sender, "pending"))
+        if "nonce" not in tx:
+            pending = int(self._w3.eth.get_transaction_count(sender, "pending"))
+            # A transaction we broadcast and the RPC has since forgotten is still in SOMEONE's
+            # mempool; handing its nonce out again is how one leg silently replaces another.
+            tx["nonce"] = pending if self._last_nonce is None else max(pending, self._last_nonce + 1)
         if "gas" not in tx:
             estimate_fields = {k: v for k, v in tx.items() if k in ("from", "to", "data", "value")}
             tx["gas"] = int(self._w3.eth.estimate_gas(estimate_fields)) * 12 // 10
@@ -184,10 +212,14 @@ class Ethereum:
             if base_fee is None:
                 tx["gasPrice"] = int(self._w3.eth.gas_price)
             else:
-                tip = int(self._w3.eth.max_priority_fee)
+                tip = max(int(self._w3.eth.max_priority_fee), self.min_priority_fee_wei)
                 tx["maxPriorityFeePerGas"] = tip
                 tx["maxFeePerGas"] = int(base_fee) * 2 + tip
         signed = self._signer.sign_transaction(tx)
+        # Reserve the nonce before the broadcast, not after: a send whose RPC response is lost may
+        # still have reached the node, and that transaction must never have its nonce reused.
+        nonce = int(tx["nonce"])
+        self._last_nonce = nonce if self._last_nonce is None else max(self._last_nonce, nonce)
         # The hash is fixed by the signature, so it exists before the broadcast. Capture it first: if the
         # RPC answer is lost the node may still have accepted the bytes, and a caller who never learns the
         # hash cannot tell a failed send from a landed one (and would resend, risking a double spend).
@@ -784,7 +816,8 @@ class EthModule:
     @staticmethod
     def _hyperlane_protocol_state(route: Route, *, recipient_bytes32: bytes, destination_domain: int,
                                   native_value_atomic: int, amount_atomic: int, approval_tx_ids: list[str],
-                                  sender: str | None, message_id: str | None = None) -> dict[str, Any]:
+                                  sender: str | None, message_id: str | None = None,
+                                  source_nonce: int | str | None = None) -> dict[str, Any]:
         state: dict[str, Any] = {
             "routeId": route.id, "approvalTxIds": list(approval_tx_ids), "sourceSender": sender,
             "recipientBytes32": "0x" + recipient_bytes32.hex(), "destinationDomain": destination_domain,
@@ -792,6 +825,8 @@ class EthModule:
         }
         if message_id is not None:
             state["messageId"] = message_id
+        if source_nonce is not None:
+            state["sourceNonce"] = str(source_nonce)
         return state
 
     def _hyperlane_result(self, route: Route, q: "_HyperlaneQuote", outcome: EvmOutcome) -> DispatchReceipt:
@@ -805,7 +840,8 @@ class EthModule:
         state = self._hyperlane_protocol_state(
             route, recipient_bytes32=q.recipient_bytes32, destination_domain=q.destination_domain,
             native_value_atomic=q.native_value_atomic, amount_atomic=q.amount_atomic,
-            approval_tx_ids=approvals, sender=outcome.sender, message_id=message_id)
+            approval_tx_ids=approvals, sender=outcome.sender, message_id=message_id,
+            source_nonce=outcome.source_nonce)
         receipt = Receipt(id=rid, protocol="hyperlane", status=status, source_tx_id=outcome.source_tx_id, protocol_state=state)
         return DispatchReceipt(transaction_id=outcome.source_tx_id or approvals[-1], route_id=route.id,
                                message_id=message_id, amount_atomic=q.amount_atomic, receipt=receipt)
@@ -867,14 +903,18 @@ class EthModule:
 
     @staticmethod
     def _xreserve_protocol_state(route: Route, q: _XReserveQuote, *, approval_tx_ids: list[str], sender: str | None,
-                                 mint_mode: str, intended_recipient: str) -> dict[str, Any]:
-        return {
+                                 mint_mode: str, intended_recipient: str,
+                                 source_nonce: int | str | None = None) -> dict[str, Any]:
+        state: dict[str, Any] = {
             "routeId": route.id, "approvalTxIds": list(approval_tx_ids), "sourceSender": sender,
             "mintMode": mint_mode, "intendedRecipient": intended_recipient,
             "xReserveContract": q.xreserve_contract, "tokenAddress": q.token, "sourceChainId": q.source_chain_id,
             "remoteDomain": q.remote_domain, "remoteRecipientBytes32": "0x" + q.remote_recipient_bytes32.hex(),
             "hookData": "0x" + q.hook_data.hex(), "amountAtomic": str(q.amount_atomic), "maxFeeAtomic": str(q.max_fee_atomic),
         }
+        if source_nonce is not None:
+            state["sourceNonce"] = str(source_nonce)
+        return state
 
     def _confirmed_deposit_receipt(self, route: Route, q: _XReserveQuote, *, owner: str, approval_tx_ids: list[str],
                                    source_tx_id: str, receipt: Any, mint_mode: str, intended_recipient: str) -> Receipt:
@@ -940,7 +980,8 @@ class EthModule:
         rid = outcome.source_tx_id or approvals[-1]
         receipt = Receipt(id=rid, protocol="xreserve", status=Status(outcome.status), source_tx_id=outcome.source_tx_id,
                           protocol_state=self._xreserve_protocol_state(route, q, approval_tx_ids=approvals, sender=outcome.sender,
-                                                                       mint_mode=mint_mode, intended_recipient=intended_recipient))
+                                                                       mint_mode=mint_mode, intended_recipient=intended_recipient,
+                                                                       source_nonce=outcome.source_nonce))
         return DepositReceipt(transaction_id=rid, route_id=route.id, message_hash="", nonce="", receipt=receipt)
 
     def deposit_usdc(self, recipient: str | None = None, *, amount: Any = None, amount_atomic: int | None = None,
@@ -1004,6 +1045,54 @@ class EthModule:
         return receipt.replace(status=Status.FAILED, next_action=None,
                                protocol_state={**receipt.protocol_state, key: message})
 
+    @staticmethod
+    def _dropped(receipt: Receipt, message: str) -> Receipt:
+        """Terminal ``EXPIRED``: the checkpointed transaction can never mine, and moved nothing."""
+        return receipt.replace(status=Status.EXPIRED, next_action=None,
+                               protocol_state={**receipt.protocol_state, "sourceError": message, "dropped": True})
+
+    def _dropped_error(self, receipt: Receipt, tx_hash: str) -> str | None:
+        """The "dropped or replaced" message when *tx_hash* can never mine; ``None`` otherwise.
+
+        Three facts have to line up, and the cheap ones are checked first: the receipt records the
+        nonce the transaction was broadcast at (older checkpoints do not — they simply keep
+        waiting), the node no longer knows the transaction at all (``TransactionNotFound``, not
+        merely "no receipt yet"), and the sender's ``latest`` account nonce has moved past it, so
+        something else consumed that nonce. A transaction the node still knows is pending, however
+        long it has been pending, is left alone.
+        """
+        from web3.exceptions import TransactionNotFound
+
+        state = receipt.protocol_state
+        nonce_text = state.get("sourceNonce")
+        sender = state.get("sourceSender")
+        Web3 = _web3().Web3
+        if not isinstance(nonce_text, str) or not nonce_text.isdigit():
+            return None
+        if not isinstance(sender, str) or not Web3.is_address(sender):
+            return None
+        try:
+            if self.conn.w3.eth.get_transaction(tx_hash) is not None:
+                return None                      # still in a mempool: pending, not replaced
+        except TransactionNotFound:
+            pass
+        nonce = int(nonce_text)
+        account_nonce = int(self.conn.w3.eth.get_transaction_count(Web3.to_checksum_address(sender), "latest"))
+        if account_nonce <= nonce:
+            return None                          # the nonce is still unused: nothing has replaced it
+        return (f"transaction {tx_hash} (nonce {nonce}) was dropped or replaced before it mined; "
+                "no funds moved by it — recover() then resume() re-dispatches")
+
+    def _scan_can_run(self, approvals: list[str]) -> bool:
+        """Whether a source-history log scan could actually run, i.e. a confirmed approval gives it a
+        block to start from (the other precondition, a known sender, ``_dropped_error`` already proved).
+
+        Recovery only treats a dropped transaction as resumable once the scan has PROVED no
+        dispatch/deposit of ours exists; when the scan cannot run there is nothing to prove it
+        against, so the dropped transaction stays terminal instead of inviting a second send.
+        """
+        return bool(approvals) and self._approval_scan_block(approvals) is not None
+
     def _validate_hyperlane_state(self, route: Route, plan: Plan, receipt: Receipt) -> bytes:
         """Bind every value that affects the dispatch before trusting checkpointed transaction ids."""
         state = receipt.protocol_state
@@ -1019,13 +1108,15 @@ class EthModule:
             raise CheckpointInvalidError("Hyperlane checkpoint contains invalid approval transaction ids")
         return recipient32
 
-    def _hyperlane_source_status(self, route: Route, plan: Plan, receipt: Receipt) -> Receipt:
+    def _hyperlane_source_status(self, route: Route, plan: Plan, receipt: Receipt, *,
+                                 detect_dropped: bool = True) -> Receipt:
         self._validate_hyperlane_state(route, plan, receipt)
         self.assert_chain(route)
         source_tx_id = self._require_hash(receipt.source_tx_id, "source transaction id")
         observed = self.conn.get_receipt(source_tx_id)
         if observed is None:
-            return receipt
+            dropped = self._dropped_error(receipt, source_tx_id) if detect_dropped else None
+            return receipt if dropped is None else self._dropped(receipt, dropped)
         if int(observed["status"]) == 0:
             return self._failed(receipt, "sourceError", f"EVM transaction reverted: {source_tx_id}")
         message_id = self._message_id_from_receipt(route, observed)
@@ -1073,14 +1164,16 @@ class EthModule:
                 return Web3.to_checksum_address(candidate)
         raise ConfigurationError("Read-only EVM access requires the prepared sender address (plan.sender or protocol_state.sourceSender)")
 
-    def _xreserve_source_status(self, route: Route, plan: Plan, receipt: Receipt) -> Receipt:
+    def _xreserve_source_status(self, route: Route, plan: Plan, receipt: Receipt, *,
+                                detect_dropped: bool = True) -> Receipt:
         q = self._xreserve_quote_from_state(route, plan, receipt)
         self.assert_chain(route)
         owner = self._observed_owner(plan, receipt)
         source_tx_id = self._require_hash(receipt.source_tx_id, "xReserve source transaction id")
         observed = self.conn.get_receipt(source_tx_id)
         if observed is None:
-            return receipt
+            dropped = self._dropped_error(receipt, source_tx_id) if detect_dropped else None
+            return receipt if dropped is None else self._dropped(receipt, dropped)
         if int(observed["status"]) == 0:
             return self._failed(receipt, "sourceError", f"EVM transaction reverted: {source_tx_id}")
         return self._confirmed_deposit_receipt(route, q, owner=owner,
@@ -1095,6 +1188,15 @@ class EthModule:
         ``SOURCE_CONFIRMING``: Hyperlane → ``DELIVERY_PENDING`` with the ``DispatchId`` message id;
         xReserve → ``ATTESTATION_PENDING`` after re-verifying the ``DepositedToRemote`` event.
         An unmined transaction returns the receipt unchanged. Never signs.
+
+        A transaction that can never mine — the node has forgotten it and the sender's account
+        nonce has moved past the ``sourceNonce`` it was broadcast at, so something else took that
+        nonce — becomes ``EXPIRED`` with ``protocol_state["sourceError"]`` and ``dropped: True``.
+        This is the REFRESH answer for one known hash: it says that this transaction is dead, not
+        that the transfer never happened. ``recover_source`` answers the other question — it scans
+        source history first, so a dispatch that did land (including one of our own resends at the
+        replacing nonce) wins, and only a proved-empty history turns a dropped hash into a
+        resumable ``SOURCE_SUBMISSION_PENDING``.
 
         Deviation from veil (deliberate): veil raises for a reverted Hyperlane/xReserve *source*
         transaction but returns ``FAILED`` for a reverted approval. Here every reverted source
@@ -1127,6 +1229,33 @@ class EthModule:
         if any(not isinstance(a, str) or not _HASH_RE.fullmatch(a) for a in approvals):
             raise CheckpointInvalidError("Bridge checkpoint contains an invalid approval transaction id")
         return approvals
+
+    @staticmethod
+    def _checkpoint_nonce(source: Mapping[str, Any]) -> str | None:
+        """The checkpointed ``sourceNonce`` (decimal string), or ``None`` when absent or malformed.
+
+        Version-1 checkpoints written before the nonce was recorded simply do not have it; recovery
+        then behaves exactly as it did before, so a missing value is never an error.
+        """
+        value = source.get("sourceNonce")
+        return value if isinstance(value, str) and value.isdigit() else None
+
+    def _recovered_dropped(self, pending: Receipt, transaction_id: str, approvals: list[str]) -> Receipt:
+        """The answer for a checkpointed hash that the history scan did not match.
+
+        Unchanged (still ``SOURCE_CONFIRMING``) unless the hash can never mine. When it cannot and
+        the scan actually ran — proving no dispatch/deposit of ours exists — the transfer is back at
+        ``SOURCE_SUBMISSION_PENDING`` so ``resume`` may re-authorize the one remaining transaction;
+        the reason travels in ``sourceError``. When the scan could not run, nothing proves the
+        replacement was not our own dispatch, so the receipt is ``EXPIRED`` for an operator to look at.
+        """
+        message = self._dropped_error(pending, transaction_id)
+        if message is None:
+            return pending
+        if not self._scan_can_run(approvals):
+            return self._dropped(pending, message)
+        return pending.replace(status=Status.SOURCE_SUBMISSION_PENDING,
+                               protocol_state={**pending.protocol_state, "sourceError": message, "dropped": True})
 
     def _approval_scan_block(self, approvals: list[str]) -> int | None:
         """Highest block of a confirmed approval; an unresolved hash is skipped, a reverted one is an error."""
@@ -1219,6 +1348,7 @@ class EthModule:
                 raise BridgeError(f"EVM transaction reverted: {tx_hash}")
             message_id = self._message_id_from_receipt(route, observed)
             state = dict(receipt.protocol_state)
+            state.pop("sourceNonce", None)        # belongs to the checkpointed hash, not to this one
             if message_id is not None:
                 state["messageId"] = message_id
             matches.append(receipt.replace(id=message_id or tx_hash, status=Status.DELIVERY_PENDING,
@@ -1233,11 +1363,13 @@ class EthModule:
         approvals = self._checkpoint_approvals(checkpoint)
         sender = Web3.to_checksum_address(plan.sender) if plan.sender and Web3.is_address(plan.sender) else None
         meta = self._hyperlane_metadata(route)
+        source = checkpoint.source or {}
         state = self._hyperlane_protocol_state(route, recipient_bytes32=recipient32,
                                                destination_domain=meta.destination_domain,
                                                native_value_atomic=0, amount_atomic=plan.amount_atomic,
-                                               approval_tx_ids=approvals, sender=sender)
-        transaction_id = (checkpoint.source or {}).get("transactionId")
+                                               approval_tx_ids=approvals, sender=sender,
+                                               source_nonce=self._checkpoint_nonce(source))
+        transaction_id = source.get("transactionId")
         if not transaction_id:
             if not approvals:
                 raise CheckpointInvalidError("Bridge checkpoint contains no submitted transaction")
@@ -1255,10 +1387,15 @@ class EthModule:
         transaction_id = self._require_hash(transaction_id, "source transaction id")
         pending = Receipt(id=transaction_id, protocol="hyperlane", status=Status.SOURCE_CONFIRMING,
                           source_tx_id=transaction_id, protocol_state=state)
-        observed = self._hyperlane_source_status(route, plan, pending)
+        # History first: a dispatch that landed always beats the checkpointed hash, even when that
+        # hash was dropped (its replacement may BE our own resent dispatch).
+        observed = self._hyperlane_source_status(route, plan, pending, detect_dropped=False)
         if observed is not pending:
             return observed
-        return self._recover_hyperlane_from_history(route, recipient32, pending, approvals, required=False) or observed
+        recovered = self._recover_hyperlane_from_history(route, recipient32, pending, approvals, required=False)
+        if recovered is not None:
+            return recovered
+        return self._recovered_dropped(pending, transaction_id, approvals)
 
     def _recover_xreserve_from_history(self, route: Route, plan: Plan, q: _XReserveQuote, owner: str, approvals: list[str],
                                        *, required: bool) -> Receipt | None:
@@ -1311,7 +1448,8 @@ class EthModule:
             amount_atomic=plan.amount_atomic, max_fee_atomic=meta.max_fee_atomic, hook_data=hook,
             balance_atomic=0, allowance_atomic=0, bridge_program=meta.bridge_program, wrapper_program=meta.wrapper_program)
         state = self._xreserve_protocol_state(route, q, approval_tx_ids=approvals, sender=owner, mint_mode=plan.mint_mode,
-                                              intended_recipient=plan.recipient)
+                                              intended_recipient=plan.recipient,
+                                              source_nonce=self._checkpoint_nonce(source))
         transaction_id = source.get("transactionId")
         if not transaction_id:
             if not approvals:
@@ -1330,10 +1468,13 @@ class EthModule:
         transaction_id = self._require_hash(transaction_id, "xReserve source transaction id")
         pending = Receipt(id=transaction_id, protocol="xreserve", status=Status.SOURCE_CONFIRMING,
                           source_tx_id=transaction_id, protocol_state=state)
-        observed = self._xreserve_source_status(route, plan, pending)
+        observed = self._xreserve_source_status(route, plan, pending, detect_dropped=False)   # history first
         if observed is not pending:
             return observed
-        return self._recover_xreserve_from_history(route, plan, q, owner, approvals, required=False) or observed
+        recovered = self._recover_xreserve_from_history(route, plan, q, owner, approvals, required=False)
+        if recovered is not None:
+            return recovered
+        return self._recovered_dropped(pending, transaction_id, approvals)
 
     def recover_source(self, plan: Plan, checkpoint: Checkpoint, *, required: bool = False) -> Receipt:
         """Reconstruct an interrupted Ethereum source leg from a checkpoint without signing (brief §2.7, §3.1, §3.2).
@@ -1348,6 +1489,14 @@ class EthModule:
         runs, a completed scan that matches zero dispatches/deposits is a valid answer ("nothing
         was submitted yet"), not an error, and returns ``SOURCE_SUBMISSION_PENDING`` so ``resume``
         may re-authorize the send.
+
+        This is the history-first counterpart to ``source_status``, which refreshes one known hash
+        and calls a dropped transaction ``EXPIRED``. Here the log scan runs FIRST even when the
+        checkpointed hash was dropped, because the transaction that replaced it may be our own
+        resent dispatch — a real dispatch in history always wins. Only a scan that ran and matched
+        nothing turns a dropped hash into ``SOURCE_SUBMISSION_PENDING`` (``next == "resume"``,
+        carrying ``sourceError``); when the scan could not run at all the receipt stays ``EXPIRED``
+        rather than inviting a second send.
         """
         if checkpoint.version != 1 or checkpoint.intent.get("bridgeProtocol") != plan.protocol or checkpoint.route.get("id") != plan.route_id:
             raise CheckpointInvalidError("Bridge checkpoint does not match the prepared route")

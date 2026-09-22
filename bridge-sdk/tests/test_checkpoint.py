@@ -153,6 +153,17 @@ def test_prepared_transactions_and_hook_data():
                                                        "serializedTransaction": serialized}}
 
 
+def test_source_nonce_is_carried_into_the_checkpoint():
+    """Recovery needs the broadcast nonce to tell a pending transaction from a replaced one."""
+    plan = _plan()
+    receipt = Receipt(id=SOURCE, protocol="xreserve", status=Status.SOURCE_CONFIRMING, source_tx_id=SOURCE,
+                      protocol_state={"routeId": plan.route_id, "approvalTxIds": [APPROVAL], "sourceNonce": "83"})
+    assert create_checkpoint(plan, receipt, DEFAULT_REGISTRY).source == {
+        "approvalTransactionIds": [APPROVAL], "transactionId": SOURCE, "sourceNonce": "83"}
+    without = receipt.replace(protocol_state={"routeId": plan.route_id, "approvalTxIds": [APPROVAL]})
+    assert "sourceNonce" not in create_checkpoint(plan, without, DEFAULT_REGISTRY).source   # v1 tolerates its absence
+
+
 def test_rejects_receipts_from_other_routes_and_bad_approvals():
     plan = _plan()
     with pytest.raises(CheckpointInvalidError, match="does not match"):

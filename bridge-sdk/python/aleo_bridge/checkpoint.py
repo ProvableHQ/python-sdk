@@ -153,6 +153,11 @@ def create_checkpoint(plan: Plan, receipt: Receipt, registry: Registry) -> Check
             source["transactionId"] = receipt.source_tx_id
         if isinstance(state.get("hookData"), str):
             source["hookData"] = state["hookData"]
+        if isinstance(state.get("sourceNonce"), str) and state["sourceNonce"].isdigit():
+            # The EVM nonce the source transaction was broadcast at: recovery needs it to tell a
+            # slow transaction from one that was dropped or replaced. Version stays 1 — a
+            # checkpoint written before this existed simply has no sourceNonce.
+            source["sourceNonce"] = state["sourceNonce"]
         if isinstance(blockhash, str) and isinstance(last_valid, str):
             source["blockhash"] = blockhash
             source["lastValidBlockHeight"] = last_valid

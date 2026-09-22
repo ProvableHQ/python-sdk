@@ -94,6 +94,61 @@ def test_local_account_path_signs_and_sends_raw():
     assert "gasPrice" not in sent
 
 
+def test_a_zero_priority_fee_suggestion_is_floored():
+    """Mainnet 2026-09-22: ``ethereum-rpc.publicnode.com`` answers ``eth_maxPriorityFeePerGas``
+    with 0, so every transaction went out with a zero tip and the WBTC dispatch never mined.
+    The floor is applied to the suggestion, and ``maxFeePerGas`` still follows 2*base + tip."""
+    from aleo_bridge.eth import MIN_PRIORITY_FEE_WEI, Ethereum
+
+    w3 = fake_web3()
+    w3.provider.max_priority_fee = 0
+    Ethereum(w3=w3, private_key=KEY).send_transaction({"to": TO, "value": 1, "data": "0x"})
+    sent = w3.provider.sent[0]
+    assert MIN_PRIORITY_FEE_WEI == 100_000_000
+    assert sent["maxPriorityFeePerGas"] == MIN_PRIORITY_FEE_WEI
+    assert sent["maxFeePerGas"] == 10**9 * 2 + MIN_PRIORITY_FEE_WEI
+
+
+def test_a_suggestion_above_the_floor_is_used_as_is():
+    from aleo_bridge.eth import Ethereum
+
+    w3 = fake_web3()
+    w3.provider.max_priority_fee = 2 * 10**9
+    Ethereum(w3=w3, private_key=KEY).send_transaction({"to": TO, "value": 1, "data": "0x"})
+    sent = w3.provider.sent[0]
+    assert sent["maxPriorityFeePerGas"] == 2 * 10**9
+    assert sent["maxFeePerGas"] == 10**9 * 2 + 2 * 10**9
+
+
+def test_min_priority_fee_wei_knob_overrides_the_default_floor():
+    from aleo_bridge.eth import Ethereum
+
+    w3 = fake_web3()
+    w3.provider.max_priority_fee = 0
+    Ethereum(w3=w3, private_key=KEY, min_priority_fee_wei=3 * 10**9).send_transaction({"to": TO, "value": 1, "data": "0x"})
+    assert w3.provider.sent[0]["maxPriorityFeePerGas"] == 3 * 10**9
+    with pytest.raises(ConfigurationError, match="min_priority_fee_wei"):
+        Ethereum(w3=fake_web3(), private_key=KEY, min_priority_fee_wei=-1)
+
+
+def test_a_nonce_still_in_flight_is_never_handed_out_twice():
+    """Mainnet 2026-09-22: the dispatch sat unmined, a load-balanced RPC stopped reporting it as
+    pending, and the next leg's approval was given the SAME nonce — silently replacing the
+    dispatch. The connection remembers the highest nonce it broadcast and never goes back."""
+    from aleo_bridge.eth import Ethereum
+
+    w3 = fake_web3()
+    conn = Ethereum(w3=w3, private_key=KEY)
+    conn.send_transaction({"to": TO, "value": 1, "data": "0x"})
+    assert w3.provider.sent[0]["nonce"] == 0 and conn.last_broadcast_nonce == 0
+    w3.provider.nonce_pending = 0                      # the RPC has forgotten the transaction above
+    conn.send_transaction({"to": TO, "value": 2, "data": "0x"})
+    assert w3.provider.sent[1]["nonce"] == 1 and conn.last_broadcast_nonce == 1
+    w3.provider.nonce_pending = 9                      # a nonce that moved on elsewhere still wins
+    conn.send_transaction({"to": TO, "value": 3, "data": "0x"})
+    assert w3.provider.sent[2]["nonce"] == 9 and conn.last_broadcast_nonce == 9
+
+
 def test_legacy_gas_price_path_when_no_base_fee():
     """With no ``baseFeePerGas`` on the latest block (pre-EIP-1559 chain), eth.py falls back
     to a plain ``gasPrice`` from ``eth_gasPrice`` and sets no 1559 fee fields."""

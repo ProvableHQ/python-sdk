@@ -10,7 +10,7 @@ from aleo_bridge.errors import (BridgeError, CheckpointInvalidError, Configurati
                                 RegistryVersionMismatchError)
 from aleo_bridge.eth import LOG_SCAN_CHUNK_BLOCKS, EthModule, Ethereum, _plan_for
 from aleo_bridge.registry import DEFAULT_REGISTRY
-from aleo_bridge.types import Receipt, Status
+from aleo_bridge.types import Receipt, Status, to_progress
 from tests.fakes.fake_web3 import deposited_log, dispatch_id_log, fake_web3, make_bridge, sent_transfer_remote_log
 
 KEY = "0x" + "11" * 32
@@ -216,6 +216,54 @@ def test_hyperlane_saved_dispatch_is_observed_not_resent():
     w3.provider.add_receipt(DISPATCH, logs=[dispatch_id_log(MAILBOX, RECOVERED_MESSAGE_ID, tx_hash=DISPATCH)], sender=ACCT.address, to=WBTC_ROUTER)
     done = eth.recover_source(WBTC_PLAN, cp)
     assert done.status == Status.DELIVERY_PENDING and done.id == Web3.to_hex(RECOVERED_MESSAGE_ID) and w3.provider.sent == []
+
+
+def dropped_checkpoint(*, nonce="83"):
+    """A SOURCE_CONFIRMING checkpoint whose dispatch carries the nonce it was broadcast at."""
+    state = {"routeId": WBTC_ROUTE.id, "approvalTxIds": [APPROVAL], "sourceSender": ACCT.address,
+             "recipientBytes32": "0x" + ALEO32.hex(), "destinationDomain": 1634493807,
+             "nativeValueAtomic": "50000", "amountAtomic": "100000", "sourceNonce": nonce}
+    receipt = Receipt(id=DISPATCH, protocol="hyperlane", status=Status.SOURCE_CONFIRMING, source_tx_id=DISPATCH,
+                      protocol_state=state)
+    return create_checkpoint(WBTC_PLAN, receipt, DEFAULT_REGISTRY)
+
+
+def test_a_dropped_dispatch_with_no_history_is_resumable_not_expired():
+    """History-first: the scan proves no dispatch of ours exists, and the checkpointed hash can
+    never mine, so the operator gets SOURCE_SUBMISSION_PENDING (resume) rather than EXPIRED."""
+    eth, w3 = mainnet_read_only()
+    cp = dropped_checkpoint()
+    assert cp.source["sourceNonce"] == "83"
+    w3.provider.add_receipt(APPROVAL, block_number=0x60)
+    w3.provider.tx_not_found.add(DISPATCH)
+    w3.provider.nonce_latest = 84
+    recovered = eth.recover_source(WBTC_PLAN, cp)
+    assert recovered.status == Status.SOURCE_SUBMISSION_PENDING and "eth_getLogs" in w3.provider.methods
+    assert recovered.protocol_state["sourceError"].startswith(f"transaction {DISPATCH} (nonce 83) was dropped")
+    assert to_progress(WBTC_PLAN, recovered).next == "resume" and w3.provider.sent == []
+
+
+def test_a_dropped_dispatch_whose_replacement_was_our_own_resend_wins():
+    """The replacement at that nonce WAS a dispatch of ours: the log scan finds it, and recovery
+    follows that real transaction instead of inviting a second dispatch."""
+    eth, w3 = mainnet_read_only()
+    w3.provider.add_receipt(APPROVAL, block_number=0x60)
+    w3.provider.tx_not_found.add(DISPATCH)
+    w3.provider.nonce_latest = 84
+    dispatch_history(w3, RECOVERED)
+    recovered = eth.recover_source(WBTC_PLAN, dropped_checkpoint())
+    assert recovered.status == Status.DELIVERY_PENDING and recovered.source_tx_id == RECOVERED
+    assert recovered.id == Web3.to_hex(RECOVERED_MESSAGE_ID) and "sourceError" not in recovered.protocol_state
+
+
+def test_a_dropped_dispatch_that_cannot_be_scanned_stays_expired():
+    """No confirmed approval block means the history scan cannot run, so recovery cannot prove the
+    replacement was not our own dispatch: EXPIRED (inspect) rather than an invitation to resend."""
+    eth, w3 = mainnet_read_only()
+    w3.provider.tx_not_found.add(DISPATCH)
+    w3.provider.nonce_latest = 84
+    recovered = eth.recover_source(WBTC_PLAN, dropped_checkpoint())
+    assert recovered.status == Status.EXPIRED and recovered.protocol_state["dropped"] is True
 
 
 def test_xreserve_scan_recovers_a_confirmed_deposit_from_an_approval_only_checkpoint():

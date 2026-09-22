@@ -142,6 +142,13 @@ class FakeRpcProvider(BaseProvider):
         self.log_scan_errors: dict[int, str] = {}        # 1-based eth_getLogs call -> JSON-RPC error message
         self.transactions: dict[str, dict] = {}          # extra eth_getTransactionByHash answers
         self.receipts: dict[str, dict] = {}              # extra eth_getTransactionReceipt answers
+        self.tx_not_found: set[str] = set()              # hashes eth_getTransactionByHash answers null for (dropped)
+        self.max_priority_fee = 10**8                    # eth_maxPriorityFeePerGas (public RPCs answer 0)
+        # eth_getTransactionCount per block tag; None = "as many as this fake accepted". A live
+        # load-balanced RPC can forget a pending transaction, which is exactly how one nonce got
+        # handed out twice on mainnet — nonce_pending pins that answer independently of nonce_latest.
+        self.nonce_pending: int | None = None
+        self.nonce_latest: int | None = None
         self.block_number = 0x10
         self.methods: list[str] = []
 
@@ -186,7 +193,7 @@ class FakeRpcProvider(BaseProvider):
         if method == "eth_gasPrice":
             return self._ok(_hex(10**9))
         if method == "eth_maxPriorityFeePerGas":
-            return self._ok(_hex(10**8))
+            return self._ok(_hex(self.max_priority_fee))
         if method == "eth_feeHistory":
             return self._ok({"baseFeePerGas": [_hex(10**9)] * 2, "gasUsedRatio": [0.5],
                              "oldestBlock": "0x1", "reward": [[_hex(10**8)]]})
@@ -202,7 +209,9 @@ class FakeRpcProvider(BaseProvider):
                 block["baseFeePerGas"] = _hex(10**9)
             return self._ok(block)
         if method == "eth_getTransactionCount":
-            return self._ok(_hex(len(self.sent)))
+            tag = params[1] if len(params) > 1 else "latest"
+            pinned = self.nonce_pending if tag == "pending" else self.nonce_latest
+            return self._ok(_hex(len(self.sent) if pinned is None else pinned))
         if method == "eth_estimateGas":
             return self._ok(_hex(150_000))
         if method == "eth_getBalance":
@@ -240,6 +249,8 @@ class FakeRpcProvider(BaseProvider):
                              and from_block <= int(log["blockNumber"], 16) <= to_block])
         if method == "eth_getTransactionByHash":
             h = params[0]
+            if h in self.tx_not_found:               # dropped from every mempool: web3 raises TransactionNotFound
+                return self._ok(None)
             if h in self.transactions:
                 return self._ok(self.transactions[h])
             sent = next((t for t in self.sent if t["hash"] == h), None)

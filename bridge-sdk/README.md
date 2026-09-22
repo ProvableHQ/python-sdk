@@ -245,7 +245,24 @@ allowance to 0 first) via Hyperlane; USDC → USDCx via Circle xReserve (2 USDC
 minimum, `mint_mode` public/record/private — private deposits go to the
 shielded wrapper program and need the same `secret_nonce` at `complete` time;
 the SDK never stores it). A receipt timeout returns a pending receipt, never a
-failure. Live checks: `BRIDGE_LIVE_READS=1 ETHEREUM_RPC_URL=…` for read-only
+failure.
+
+Fees and nonces are filled defensively. Public RPC endpoints answer
+`eth_maxPriorityFeePerGas` with 0, and a zero-tip transaction can sit unmined
+for hours, so every EIP-1559 tip is raised to a floor of 0.1 gwei
+(`aleo_bridge.eth.MIN_PRIORITY_FEE_WEI`); pass
+`Ethereum(..., min_priority_fee_wei=…)` to raise or lower it (`maxFeePerGas`
+stays `2 * baseFeePerGas + tip`). Each connection also remembers the highest
+nonce it broadcast and never goes back to it, because a load-balanced RPC can
+stop reporting our own pending transaction and the next leg would then replace
+it. If a source transaction is dropped or replaced anyway, it no longer waits
+forever: once the node has forgotten it and the account nonce has moved past the
+nonce it was sent at, `source_status` returns `EXPIRED` with a `sourceError`
+explaining that nothing moved, and `recover_source` (which scans source history
+first, so a dispatch that really landed still wins) hands back a resumable
+`SOURCE_SUBMISSION_PENDING` — `recover()` then `resume()` re-dispatches.
+
+Live checks: `BRIDGE_LIVE_READS=1 ETHEREUM_RPC_URL=…` for read-only
 mainnet quotes (`tests/live/test_eth_reads.py`); `BRIDGE_LIVE_FUNDS=1
 BRIDGE_LIVE_STATE_DIR=… SEPOLIA_RPC_URL=… EVM_PRIVATE_KEY=…
 ALEO_E2E_PRIVATE_KEY=…` for the 2 USDC Sepolia leg

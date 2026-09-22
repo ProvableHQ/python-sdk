@@ -90,9 +90,11 @@ def test_record_mode_deposit_derives_nonce_payload_and_message_hash():
     assert state["amountAtomic"] == "2000000" and state["maxFeeAtomic"] == "100000" and state["depositLogIndex"] == 3
     assert state["bridgeProgram"] == "test_usdcx_bridge_v2.aleo" and state["wrapperProgram"] == "shielded_usdcx_wrapper.aleo"
     assert [cp.source for cp in seen] == [
-        {"approvalTransactionIds": [w3.provider.hash_at(1)], "hookData": "0x" + hook.hex()},
-        {"approvalTransactionIds": [w3.provider.hash_at(1)], "transactionId": w3.provider.hash_at(2), "hookData": "0x" + hook.hex()},
-        {"approvalTransactionIds": [w3.provider.hash_at(1)], "transactionId": w3.provider.hash_at(2), "hookData": "0x" + hook.hex()},
+        {"approvalTransactionIds": [w3.provider.hash_at(1)], "hookData": "0x" + hook.hex(), "sourceNonce": "0"},
+        {"approvalTransactionIds": [w3.provider.hash_at(1)], "transactionId": w3.provider.hash_at(2),
+         "hookData": "0x" + hook.hex(), "sourceNonce": "1"},
+        {"approvalTransactionIds": [w3.provider.hash_at(1)], "transactionId": w3.provider.hash_at(2),
+         "hookData": "0x" + hook.hex()},
     ]
     assert seen[-1].id == message_hash and seen[-1].intent["mintMode"] == "record"
 
@@ -177,7 +179,8 @@ def test_timeouts_return_pending_receipts():
     seen = []
     result = eth.deposit_usdc(ALEO, amount="2").send(timeout_seconds=0.01, poll_seconds=0.001, on_checkpoint=seen.append)
     assert result.receipt.status == Status.SOURCE_CONFIRMING and result.receipt.source_tx_id == w3.provider.hash_at(1)
-    assert [cp.source for cp in seen] == [{"transactionId": w3.provider.hash_at(1), "hookData": "0x" + "00" * 65}]
+    assert [cp.source for cp in seen] == [{"transactionId": w3.provider.hash_at(1), "hookData": "0x" + "00" * 65,
+                                           "sourceNonce": "0"}]
 
 
 def test_plan_driven_deposit_is_identical_to_the_recipient_driven_one():

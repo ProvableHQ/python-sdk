@@ -50,7 +50,20 @@ def test_native_eth_dispatch_is_one_transaction_with_value():
         "routeId": "hyperlane:ethereum/eth->aleo/eth", "approvalTxIds": [], "sourceSender": ACCT.address,
         "recipientBytes32": ALEO_BYTES32, "destinationDomain": 1634493807,
         "nativeValueAtomic": "69000000000101", "amountAtomic": "100", "messageId": Web3.to_hex(MESSAGE_ID),
+        "sourceNonce": "0",
     }
+
+
+def test_every_broadcast_records_the_nonce_it_went_out_at():
+    """Recovery can only tell a pending transaction from a replaced one if the nonce is saved."""
+    eth, w3 = setup(WBTC_ROUTER, quotes={WBTC_ROUTER: [(ZERO_ADDRESS, 50_000), (WBTC, 100_000)]})
+    w3.provider.nonce_latest = w3.provider.nonce_pending = 83
+    seen = []
+    result = eth.transfer_remote("ethereum/wbtc", ALEO, amount="0.001").send(poll_seconds=0.001,
+                                                                            on_checkpoint=seen.append)
+    assert [t["nonce"] for t in w3.provider.sent] == [83, 84]          # the approval, then the dispatch
+    assert result.receipt.protocol_state["sourceNonce"] == "84"
+    assert [cp.source.get("sourceNonce") for cp in seen] == ["83", "84", "84"]
 
 
 def test_wbtc_approves_exact_token_amount_then_dispatches_with_fee_value():
@@ -96,7 +109,7 @@ def test_approval_timeout_is_pending_and_checkpointed_before_polling():
         timeout_seconds=0.01, poll_seconds=0.001, on_checkpoint=seen.append)
     assert result.receipt.status == Status.SOURCE_APPROVAL_PENDING and result.receipt.source_tx_id is None
     assert result.receipt.id == w3.provider.hash_at(1) and result.message_id is None and len(w3.provider.sent) == 1
-    assert [cp.source for cp in seen] == [{"approvalTransactionIds": [w3.provider.hash_at(1)]}]
+    assert [cp.source for cp in seen] == [{"approvalTransactionIds": [w3.provider.hash_at(1)], "sourceNonce": "0"}]
     assert seen[0].intent == {"source": {"chain": "ethereum", "asset": "wbtc"}, "destination": {"chain": "aleo", "asset": "wbtc"},
                               "bridgeProtocol": "hyperlane", "amount": "0.001", "recipient": ALEO,
                               "sender": ACCT.address, "mintMode": "public"}
@@ -110,7 +123,7 @@ def test_dispatch_timeout_is_source_confirming_with_hash():
         timeout_seconds=0.01, poll_seconds=0.001, on_checkpoint=seen.append)
     assert result.receipt.status == Status.SOURCE_CONFIRMING and result.receipt.source_tx_id == w3.provider.hash_at(1)
     assert result.receipt.id == w3.provider.hash_at(1) and "messageId" not in result.receipt.protocol_state
-    assert [cp.source for cp in seen] == [{"transactionId": w3.provider.hash_at(1)}]
+    assert [cp.source for cp in seen] == [{"transactionId": w3.provider.hash_at(1), "sourceNonce": "0"}]
 
 
 def test_dispatch_id_survives_unrelated_log_before_it():
