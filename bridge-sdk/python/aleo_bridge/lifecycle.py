@@ -173,8 +173,11 @@ def quote(bridge, *, source, destination, amount=None, amount_atomic=None, recip
     Returns one of ``EvmHyperlaneQuote`` / ``SolanaHyperlaneQuote`` /
     ``AleoHyperlaneQuote`` / ``EvmXReserveQuote`` / ``AleoXReserveQuote``
     (``quote.kind``), each carrying the canonical ``plan`` that ``execute`` takes.
-    Aleo-origin xReserve quotes make no network call (fixed withdrawal fee).
-    Nothing is signed.
+    Aleo-origin xReserve quotes make no network call: the withdrawal fee comes
+    from the registry literal, which is an ASSUMPTION and not a read of what the
+    withdrawal will charge (the fee is flagged ``estimated`` and ``amount_out``
+    is therefore a lower bound — the live testnet fee on 2026-09-18 was ≈1.0035
+    USDC against the 2 USDCx literal). Nothing is signed.
 
     Dispatches to ``bridge.eth``/``bridge.sol`` with ``plan=`` (never a re-derived
     ``asset``/``recipient``/``amount_atomic`` form): those modules re-resolve the
@@ -221,8 +224,12 @@ def quote(bridge, *, source, destination, amount=None, amount_atomic=None, recip
                 f"withdrawal fee (got {plan.amount})")
         return AleoXReserveQuote(
             kind="aleo-xreserve", plan=plan,
+            # estimated: the registry literal is the quote ASSUMPTION, not a read of the fee the
+            # withdrawal will actually charge (the live testnet fee on 2026-09-18 was ~1.0035 USDC
+            # against this 2 USDCx literal), so amount_out below is a lower bound. The literal
+            # still drives the burn-minimum guard above — that guard must stay conservative.
             fees=(Fee(kind="protocol", chain_id=resolved.source_chain.id, asset_id=resolved.source_asset.id,
-                      amount=fee_human, estimated=False),),
+                      amount=fee_human, estimated=True),),
             amount_out=format_decimal_amount(plan.amount_atomic - fee_atomic, decimals),
             withdrawal_fee_atomic=fee_atomic)
     raise UnsupportedRouteError(

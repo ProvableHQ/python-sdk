@@ -49,8 +49,26 @@ class PrivacyModule:
         return value
 
     def select_record(self, program: str, amount_atomic: int, account: Any = None) -> str:
-        """Smallest unspent ``program``/``Token`` record covering *amount_atomic* (plaintext string)."""
-        rows = self._bridge.aleo.records.find(account, program=program, record="Token")
+        """Smallest unspent ``program``/``Token`` record covering *amount_atomic* (plaintext string).
+
+        Reads the account's records through the HOSTED RECORD SCANNER, which answers nothing for an
+        account that was never registered with it (the Aleo SDK's ``UUIDError``). That is re-raised
+        here as a :class:`ConfigurationError` naming the one call that fixes it — registering is a
+        privacy decision (it shares the account's VIEW KEY with the scanning service), so the SDK
+        never does it for the caller.
+        """
+        try:
+            rows = self._bridge.aleo.records.find(account, program=program, record="Token")
+        except Exception as exc:                # matched by NAME: the aleo SDK is an optional import here
+            if type(exc).__name__ != "UUIDError":
+                raise
+            raise ConfigurationError(
+                f"The hosted record scanner has no registration for this account, so it returns no "
+                f"{program} records ({exc}). Register it explicitly — "
+                "`bridge.aleo.records.register(bridge.aleo.default_account)` — which SHARES THIS "
+                "ACCOUNT'S VIEW KEY with the scanning service (it can then decrypt every record the "
+                "account owns); the SDK never does that for you. Or avoid record selection entirely: "
+                "pass record= yourself, or use a public transfer/burn.") from exc
         amounts: list[tuple[int, str]] = []
         for row in rows:
             plaintext = row.get("record_plaintext") if isinstance(row, dict) else getattr(row, "record_plaintext", None)

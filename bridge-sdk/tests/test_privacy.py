@@ -91,6 +91,30 @@ def test_select_record_reports_largest_available(bridge):
         bridge.privacy.select_record("usdcx_stablecoin.aleo", 1)
 
 
+def test_an_unregistered_record_scanner_becomes_actionable_guidance(bridge):
+    """I4: the hosted scanner raises ``UUIDError`` for an account it was never registered for — an
+    opaque name for "nobody has shared this account's view key with the scanner". Surface it as a
+    ConfigurationError that names the registration call and says what registering shares."""
+    class UUIDError(Exception):
+        pass
+
+    def unregistered(*a, **kw):
+        raise UUIDError("No UUID configured. Call register() or set_uuid() first.")
+
+    def boom(*a, **kw):
+        raise RuntimeError("scanner HTTP 503")
+
+    bridge.aleo.records.find = unregistered
+    with pytest.raises(ConfigurationError) as exc:
+        bridge.privacy.select_record("usdcx_stablecoin.aleo", 100)
+    assert "records.register" in str(exc.value) and "VIEW KEY" in str(exc.value)
+    assert isinstance(exc.value.__cause__, UUIDError)
+
+    bridge.aleo.records.find = boom                 # anything else is left exactly as it is
+    with pytest.raises(RuntimeError, match="503"):
+        bridge.privacy.select_record("usdcx_stablecoin.aleo", 100)
+
+
 def test_private_burn_defaults_resolve_through_privacy_and_freezelist(bridge):
     ONE_LIT = "[" + ",".join(["0u8"] * 31 + ["1u8"]) + "]"
     # The freeze-list root must be readable on chain for the default (unsupplied) merkle_proof=

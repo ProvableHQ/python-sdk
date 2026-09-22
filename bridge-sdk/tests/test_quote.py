@@ -49,7 +49,10 @@ def test_aleo_xreserve_quote_is_offline_and_deducts_the_withdrawal_fee():
     q = quote(b, source="aleo/usdcx", destination="ethereum/usdc", amount="2.000001", recipient=EVM_ADDRESS)
     assert isinstance(q, AleoXReserveQuote) and q.kind == "aleo-xreserve"
     assert q.amount_out == "0.000001" and q.withdrawal_fee_atomic == 2_000_000
-    assert q.fees == (q.fees[0],) and q.fees[0].kind == "protocol" and q.fees[0].estimated is False
+    # I3: the registry's 2 USDCx literal is a quote ASSUMPTION, not an exact on-chain read — the
+    # live testnet fee observed on 2026-09-18 was ~1.0035 USDC — so the fee is flagged estimated
+    # and amount_out is a lower bound. The literal still drives the burn-minimum guard below.
+    assert q.fees == (q.fees[0],) and q.fees[0].kind == "protocol" and q.fees[0].estimated is True
     assert (q.fees[0].chain_id, q.fees[0].asset_id, q.fees[0].amount) == ("aleo", "aleo/usdcx", "2")
     assert b.calls == []                                  # no network
     with pytest.raises(InvalidAmountError, match="exceed the 2 USDCx withdrawal fee"):

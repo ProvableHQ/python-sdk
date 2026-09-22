@@ -83,7 +83,11 @@ CONVERSATION_PATTERN = """\
    hook payment 8.17 ALEO"), never raw atomic units.  Minimums: xReserve
    needs at least 2 USDC in and strictly more than the 2 USDCx withdrawal fee
    out; Hyperlane moves one atomic unit but network fees and the relayer
-   payment cost more than that — say so.
+   payment cost more than that — say so.  That 2 USDCx withdrawal fee is the
+   registry's quote ASSUMPTION, not a live read: on 2026-09-18 the testnet
+   route actually charged ≈1.0035 USDC (2.000001 USDCx burned delivered
+   0.996501 USDC), so the fee is flagged `estimated` and `amount_out` on that
+   route is a LOWER BOUND — tell the user they may receive more, never less.
 4. Only `execute` after the user confirms.  Through the agent tools every
    write requires `confirm=true`; without it the tool returns the quote and
    moves nothing.  A live mainnet execution additionally needs the user's
@@ -124,12 +128,31 @@ still in flight and check again later.
    record first.  Hyperlane delivers into public balances; `shield` afterwards
    if the user wants privacy.  Private xReserve burns spend records directly.
 
+### The hosted record scanner needs the account's VIEW KEY
+
+8. Selecting a private USDCx record — `bridge.privacy.select_record`, and so
+   `bridge.unshield` and the default private xReserve burn — reads the
+   account's records through the hosted record scanner.  The scanner answers
+   nothing for an account that has not been registered with it, and
+   **registering shares that account's VIEW KEY** with the scanning service,
+   which can then decrypt every record the account owns, forever.  That is a
+   privacy decision belonging to the user, so the SDK NEVER registers on its
+   own: tell the user what registering shares, and only if they agree run
+
+   ```python
+   bridge.aleo.records.register(bridge.aleo.default_account)
+   ```
+
+   Without it record selection raises a configuration error saying exactly
+   this.  A public burn (`mode="public"`) or passing `record=` yourself needs
+   no scanner and no view key.
+
 ### While acting
 
-8. Writes are slow (proving + confirmation ≈ a minute or two on Aleo; Circle
+9. Writes are slow (proving + confirmation ≈ a minute or two on Aleo; Circle
    attestation and Hyperlane relay take minutes).  Never re-submit because a
    call seems slow — `status()` / `recover` first.
-9. Confirm, act, report ids.  Errors name their own fix — read the exception
+10. Confirm, act, report ids.  Errors name their own fix — read the exception
    message and do what it says.
 """
 

@@ -100,13 +100,15 @@ Hyperlane delivers into public balances (`shield` afterwards if you want).
 
 **Registry fee vs. live fee — a known discrepancy.** The registry's
 `xreserve:*usdcx->*usdc` literal is `withdrawalFeeAtomic = 2_000_000` (2
-USDCx), and `quote` promises exactly that. The 2026-09-18 testnet round trip
-(next section) actually delivered a live xReserve withdrawal fee of
-**≈1.0035 USDC**, not 2 USDC — Circle's fee is evidently dynamic and the
-registry literal has not been re-measured against it. This SDK does not
-change the registry literal or the quote; `amount_out` is a quote, not a
-guarantee, and the same literal is used on the mainnet route, so budget for
-the same gap there until someone re-measures it live.
+USDCx). The 2026-09-18 testnet round trip (next section) actually delivered a
+live xReserve withdrawal fee of **≈1.0035 USDC**, not 2 USDC (2.000001 USDCx
+burned delivered 0.996501 USDC) — Circle's fee is evidently dynamic and the
+registry literal has not been re-measured against it. This SDK does not change
+the registry literal, but it does not advertise it as exact either: the fee on
+that route is reported as `estimated=True`, so `amount_out` is a LOWER BOUND —
+you may receive more, never less. The burn minimum still uses the literal (it
+must stay conservative), and the same literal is used on the mainnet route, so
+budget for the same gap there until someone re-measures it live.
 
 ## The lifecycle
 
@@ -186,6 +188,24 @@ bridge.shield("aleo/eth", amount="0.001").delegate()                  # public b
 bridge.unshield("aleo/usdcx", amount="5").delegate()                  # ARC-22: record + freeze-list exclusion proof, computed for you
 bridge.freezelist.exclusion_proof(address, "usdcx_stablecoin.aleo")   # the `[MerkleProof; 2]` literal itself
 ```
+
+**Private record selection needs the hosted record scanner — and your VIEW
+KEY.** Anything that picks a private USDCx record for you
+(`bridge.privacy.select_record`, and therefore `bridge.unshield` and the
+default private xReserve burn) reads your records through the hosted record
+scanner. The scanner answers nothing for an account it has never been
+registered for, and **registering shares that account's view key** with the
+scanning service, which can then decrypt every record the account owns. That
+is your decision, so the SDK never registers on your behalf — do it
+explicitly:
+
+```python
+bridge.aleo.records.register(bridge.aleo.default_account)   # shares this account's VIEW KEY
+```
+
+Until you do, record selection raises a `ConfigurationError` saying exactly
+this. You can skip the scanner entirely by passing `record=` yourself, or by
+using a public transfer / burn (`mode="public"`).
 
 ## Tier 2 modules
 
