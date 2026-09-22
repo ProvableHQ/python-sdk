@@ -238,15 +238,30 @@ def quote(bridge, *, source, destination, amount=None, amount_atomic=None, recip
 
 # ── Checkpoint emission ───────────────────────────────────────────────────────
 
+def _keeps_checkpoint(receipt: Receipt) -> bool:
+    """A terminal receipt whose record must SURVIVE: an EVM source transaction that was dropped or
+    replaced before it mined (``protocol_state["dropped"]``).
+
+    Every other terminal status means the transfer is settled or its funds are gone, and the
+    checkpoint has nothing left to do. A dropped one is the opposite: nothing moved, and this record
+    is the only thing ``recover()`` can re-scan source history from once the RPC agrees with itself.
+    Deleting it would leave the operator with a hash and no transfer.
+    """
+    return receipt.status in TERMINAL and receipt.protocol_state.get("dropped") is True
+
+
 def _persist(bridge, checkpoint: Checkpoint, receipt: Receipt, *, previous_id: str | None = None) -> None:
     """Mirror *checkpoint* into the bound store: save (or drop, if terminal) BEFORE superseding
     the previous id — never the reverse, so a crash between the two steps still leaves a valid
     record for the transfer rather than a moment where the store holds neither.
+
+    A terminal receipt is normally dropped from the store; :func:`_keeps_checkpoint` names the one
+    exception that is saved like any live transfer instead.
     """
     store = getattr(bridge, "checkpoints", None)
     if store is None:
         return
-    if receipt.status in TERMINAL:
+    if receipt.status in TERMINAL and not _keeps_checkpoint(receipt):
         store.delete(checkpoint.id)
     else:
         store.save(checkpoint)
@@ -978,11 +993,15 @@ def _finish(bridge, plan: Plan, receipt: Receipt, checkpoint_id: str) -> Progres
     """Reduce *receipt* to ``Progress``, dropping the checkpoint (keyed on ``checkpoint_id`` —
     the checkpoint's OWN id, never ``receipt.id``: for Solana and EVM Hyperlane the checkpoint's
     id is the source transaction id while the receipt's own id flips to the message id once
-    confirmed) from the bound store once the transfer reaches a terminal status.
+    confirmed) from the bound store once the transfer reaches a terminal status —
+    except the one terminal status :func:`_keeps_checkpoint` names, which is kept and refreshed.
     """
     store = getattr(bridge, "checkpoints", None)
     if store is not None and receipt.status in TERMINAL:
-        store.delete(checkpoint_id)
+        if _keeps_checkpoint(receipt):
+            store.save(create_checkpoint(plan, receipt, bridge.registry))
+        else:
+            store.delete(checkpoint_id)
     return to_progress(plan, receipt)
 
 
@@ -1061,6 +1080,14 @@ def _reconstruct_source_receipt(plan: Plan, resolved: ResolvedRoute, cp: Checkpo
             state: dict[str, Any] = {"routeId": plan.route_id}
             if approvals:
                 state["approvalTxIds"] = approvals
+            if source.get("dropped") is True and isinstance(source.get("sourceError"), str):
+                # This hash was proved unmineable (its nonce was consumed elsewhere). The record is
+                # kept for recover(), but offline it must read as the failure it is, not as a
+                # transfer still confirming.
+                state["dropped"] = True
+                state["sourceError"] = source["sourceError"]
+                return Receipt(id=tx_id, protocol=plan.protocol, status=Status.EXPIRED, source_tx_id=tx_id,
+                              protocol_state=state)
             return Receipt(id=tx_id, protocol=plan.protocol, status=Status.SOURCE_CONFIRMING, source_tx_id=tx_id,
                           protocol_state=state)
         if approvals:

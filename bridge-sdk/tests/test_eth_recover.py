@@ -225,6 +225,20 @@ def test_a_head_race_is_transient_for_wait():
 
     assert _is_transient_error(BridgeError(f"eth_getLogs failed for blocks 1-2 of 1-2 on 0xabc: {HEAD_RACE}"))
     assert not _is_transient_error(BridgeError("eth_getLogs failed: query returned more than 10000 results"))
+    # "head" as a substring is not a head race: these must raise immediately, not be retried.
+    assert not _is_transient_error(BridgeError("eth_getLogs failed: range exceeds max header size"))
+    assert not _is_transient_error(BridgeError("eth_getLogs failed: overhead block cache exhausted"))
+
+
+def test_a_head_shaped_word_is_not_a_head_race():
+    """``overhead``/``header`` must not buy an error five retries and a 2.5 s pause."""
+    eth, w3 = mainnet_read_only()
+    record_sleeps(eth)
+    w3.provider.add_receipt(APPROVAL, block_number=0x65)
+    w3.provider.log_scan_errors[1] = "range exceeds max header size"
+    with pytest.raises(BridgeError, match="max header size"):
+        eth.recover_source(WBTC_PLAN, hyperlane_checkpoint())
+    assert len(w3.provider.log_filters) == 1              # no retry at all
 
 
 def test_xreserve_scan_is_chunked_too():
@@ -295,6 +309,7 @@ def test_a_dropped_dispatch_with_no_history_is_resumable_not_expired():
     """History-first: the scan proves no dispatch of ours exists, and the checkpointed hash can
     never mine, so the operator gets SOURCE_SUBMISSION_PENDING (resume) rather than EXPIRED."""
     eth, w3 = mainnet_read_only()
+    sleeps = record_sleeps(eth)
     cp = dropped_checkpoint()
     assert cp.source["sourceNonce"] == "83"
     w3.provider.add_receipt(APPROVAL, block_number=0x60)
@@ -302,8 +317,26 @@ def test_a_dropped_dispatch_with_no_history_is_resumable_not_expired():
     w3.provider.nonce_latest = 84
     recovered = eth.recover_source(WBTC_PLAN, cp)
     assert recovered.status == Status.SOURCE_SUBMISSION_PENDING and "eth_getLogs" in w3.provider.methods
-    assert recovered.protocol_state["sourceError"].startswith(f"transaction {DISPATCH} (nonce 83) was dropped")
-    assert to_progress(WBTC_PLAN, recovered).next == "resume" and w3.provider.sent == []
+    assert recovered.protocol_state["sourceError"] == (
+        f"transaction {DISPATCH} (nonce 83) was dropped or replaced before it mined; no funds moved by it "
+        "— recover() then resume() re-dispatches")
+    assert to_progress(WBTC_PLAN, recovered).next == "resume" and w3.provider.sent == [] and sleeps == [0.5]
+
+
+def test_a_scan_that_stopped_short_of_the_verdict_head_is_not_resumable():
+    """The scan's head is clamped down to whatever node answered getLogs. If that left it behind the
+    head the dropped verdict was taken at, the replacing transaction may sit in the gap — so the
+    transfer is EXPIRED (retry recover()) rather than an invitation to dispatch a second one."""
+    eth, w3 = mainnet_read_only()
+    w3.provider.add_receipt(APPROVAL, block_number=0x60)
+    w3.provider.tx_not_found.add(DISPATCH)
+    w3.provider.nonce_latest = 84
+    # The scan runs against a head of 0x65; by the time the verdict is taken the chain has moved on.
+    record_sleeps(eth, then=lambda: setattr(w3.provider, "block_number", 0x99))
+    recovered = eth.recover_source(WBTC_PLAN, dropped_checkpoint())
+    assert recovered.status == Status.EXPIRED and recovered.protocol_state["dropped"] is True
+    assert "could not be scanned up to the head that proved the transaction dropped; retry recover()" \
+        in recovered.protocol_state["sourceError"]
 
 
 def test_a_dropped_dispatch_whose_replacement_was_our_own_resend_wins():
@@ -323,10 +356,13 @@ def test_a_dropped_dispatch_that_cannot_be_scanned_stays_expired():
     """No confirmed approval block means the history scan cannot run, so recovery cannot prove the
     replacement was not our own dispatch: EXPIRED (inspect) rather than an invitation to resend."""
     eth, w3 = mainnet_read_only()
+    record_sleeps(eth)
     w3.provider.tx_not_found.add(DISPATCH)
     w3.provider.nonce_latest = 84
     recovered = eth.recover_source(WBTC_PLAN, dropped_checkpoint())
     assert recovered.status == Status.EXPIRED and recovered.protocol_state["dropped"] is True
+    assert recovered.protocol_state["sourceError"].endswith(
+        "the checkpoint is kept; recover() re-scans source history")
 
 
 def test_xreserve_scan_recovers_a_confirmed_deposit_from_an_approval_only_checkpoint():

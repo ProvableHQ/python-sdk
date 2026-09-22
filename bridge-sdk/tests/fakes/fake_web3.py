@@ -318,7 +318,16 @@ class FakeRpcProvider(BaseProvider):
 
 
 def fake_web3(**config: Any) -> Web3:
-    """A real ``Web3`` over ``FakeRpcProvider``; reach the state through ``w3.provider``."""
+    """A real ``Web3`` over ``FakeRpcProvider``; reach the state through ``w3.provider``.
+
+    Also forgets ``eth._NONCE_HIGH_WATER``: that mark is process-wide on purpose (a fresh
+    ``Ethereum`` for the next leg must still see it), but each call here is a brand-new fake chain
+    whose nonces start over. Two connections built over ONE ``fake_web3`` still share the mark,
+    which is what the cross-instance test exercises.
+    """
+    from aleo_bridge.eth import _NONCE_HIGH_WATER
+
+    _NONCE_HIGH_WATER.clear()
     return Web3(FakeRpcProvider(**config))
 
 

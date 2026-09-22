@@ -45,6 +45,15 @@ dispatch sat unmined until another transaction of ours took its nonce and replac
 suggestion is therefore raised to this floor; ``Ethereum(..., min_priority_fee_wei=...)`` overrides it.
 """
 
+_NONCE_HIGH_WATER: dict[tuple[int, str], int] = {}
+"""``(chain id, checksummed sender)`` → the highest nonce this PROCESS has broadcast for it.
+
+Shared by every :class:`Ethereum` in the process on purpose: the live suite (and the 2026-09-22
+incident) builds a fresh connection per phase and per leg, so a per-instance counter would have
+reset exactly where the replacement happened. It is not shared across processes or machines — two
+runners on one key still race, and only the node's own pending count separates them.
+"""
+
 LOG_SCAN_CHUNK_BLOCKS = 5_000
 """Default block span per ``eth_getLogs`` request during recovery scans.
 
@@ -54,16 +63,16 @@ enough behind the head. Recovery therefore walks the range in chunks of this man
 """
 
 
-HEAD_RACE_RE = re.compile(r"beyond current head|head block|exceeds.*head", re.IGNORECASE)
+HEAD_RACE_RE = re.compile(r"beyond current head\b|\bhead block\b|exceeds.*\bhead\b", re.IGNORECASE)
 """A JSON-RPC error that means "your ``toBlock`` is ahead of the block I have", not a bad request.
 
 A load-balanced endpoint answers ``eth_blockNumber`` and ``eth_getLogs`` from different nodes, so a
 range bounded by one node's head can be beyond another's: on 2026-09-22 publicnode answered a
 recovery scan with ``-32602 block range extends beyond current head block`` for a range it had
-itself just handed out. Kept deliberately narrow — only phrasings about the HEAD block match, so a
-genuine "range too large" or "query returned more than N results" still fails loudly rather than
-being retried forever. ``lifecycle._is_transient_error`` reads it too, so ``wait`` retries instead
-of aborting.
+itself just handed out. Kept deliberately narrow — only word-bounded phrasings about the HEAD block
+match, so a genuine "range too large", "query returned more than N results", "range exceeds max
+header size" or "overhead block cache" still fails loudly rather than being retried forever.
+``lifecycle._is_transient_error`` reads it too, so ``wait`` retries instead of aborting.
 """
 
 LOG_SCAN_HEAD_RACE_RETRIES = 5
@@ -72,6 +81,13 @@ LOG_SCAN_HEAD_RACE_RETRIES = 5
 LOG_SCAN_HEAD_RACE_SLEEP_SECONDS = 0.5
 """Pause between those retries — long enough for a lagging node to catch up, short enough to stay
 inside a recovery call."""
+
+DROPPED_REPROBE_SLEEP_SECONDS = 0.5
+"""Pause before the second ``eth_getTransactionByHash`` probe that a "dropped" verdict needs.
+
+One miss can be a single lagging backend of a load-balanced endpoint; declaring a live transaction
+dead on that would invite a duplicate send. Both probes must miss it.
+"""
 
 
 def _provider_errors() -> tuple[type[BaseException], ...]:
@@ -119,8 +135,6 @@ class Ethereum:
             raise ConfigurationError("Pass exactly one of rpc_url or w3 to Ethereum(...)")
         if signer is not None and private_key is not None:
             raise ConfigurationError("Pass at most one of signer or private_key to Ethereum(...)")
-        if isinstance(min_priority_fee_wei, bool) or not isinstance(min_priority_fee_wei, int) or min_priority_fee_wei < 0:
-            raise ConfigurationError("min_priority_fee_wei must be a non-negative integer number of wei")
         if w3 is None:
             web3 = _web3()
             w3 = web3.Web3(web3.HTTPProvider(rpc_url))
@@ -140,6 +154,9 @@ class Ethereum:
         ``BRIDGE_EVM_PRIVATE_KEY`` for the key, ``BRIDGE_LIVE_ETHEREUM_RPC_URL`` for the RPC url.
         The primary variable wins when both a primary and its alias are set; the both-or-neither
         rule applies to whichever pair resolves (primary, falling back to alias, per variable).
+
+        ``BRIDGE_MIN_PRIORITY_FEE_WEI`` (digits only) overrides the EIP-1559 tip floor, for a chain
+        or a moment where 0.1 gwei is not enough to be mined.
         """
         env = os.environ if env is None else env
         key = env.get("EVM_PRIVATE_KEY") or env.get("BRIDGE_EVM_PRIVATE_KEY")
@@ -150,7 +167,12 @@ class Ethereum:
                 "(aliases: BRIDGE_EVM_PRIVATE_KEY, BRIDGE_LIVE_ETHEREUM_RPC_URL)")
         if not key:
             return None
-        return cls(url, private_key=key)
+        floor = env.get("BRIDGE_MIN_PRIORITY_FEE_WEI") or None      # exported-but-empty reads as unset
+        if floor is not None and not str(floor).isdigit():
+            raise ConfigurationError(
+                f"BRIDGE_MIN_PRIORITY_FEE_WEI must be a whole number of wei; got {floor!r}")
+        return cls(url, private_key=key,
+                   min_priority_fee_wei=MIN_PRIORITY_FEE_WEI if floor is None else int(floor))
 
     @property
     def w3(self) -> Any:
@@ -171,8 +193,23 @@ class Ethereum:
         return self.address is not None
 
     @property
+    def min_priority_fee_wei(self) -> int:
+        """Floor applied to every EIP-1559 tip suggestion, in wei. Validated on every assignment."""
+        return self._min_priority_fee_wei
+
+    @min_priority_fee_wei.setter
+    def min_priority_fee_wei(self, value: Any) -> None:
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ConfigurationError("min_priority_fee_wei must be a non-negative integer number of wei")
+        self._min_priority_fee_wei = value
+
+    @property
     def last_broadcast_nonce(self) -> int | None:
-        """Highest nonce this connection has put on the wire, or ``None`` before the first send."""
+        """Highest nonce THIS connection has put on the wire, or ``None`` before its first send.
+
+        The nonce a send actually picks also respects :data:`_NONCE_HIGH_WATER`, the process-wide
+        mark for this ``(chain, sender)`` — per process, not across processes or machines.
+        """
         return self._last_nonce
 
     @property
@@ -201,8 +238,10 @@ class Ethereum:
         Two rules protect a transaction the node is slow to mine. The EIP-1559 tip is
         ``max(eth_maxPriorityFeePerGas, min_priority_fee_wei)`` — public RPCs suggest 0, and a
         zero-tip transaction can sit unmined for hours. The nonce is
-        ``max(pending count, last nonce this connection broadcast + 1)`` — a load-balanced RPC
-        can stop reporting our own pending transaction, and reusing its nonce replaces it.
+        ``max(pending count, high-water mark for this (chain, sender) + 1)`` — a load-balanced RPC
+        can stop reporting our own pending transaction, and reusing its nonce replaces it. That
+        mark lives in :data:`_NONCE_HIGH_WATER`, shared by every ``Ethereum`` in this PROCESS (the
+        next leg usually builds a fresh connection) — not across processes or machines.
         """
         sender = self.require_address()
         Web3 = _web3().Web3
@@ -220,11 +259,14 @@ class Ethereum:
             # transaction is in the mempool. Prefer a local signer (private_key=/signer=) for anything
             # that moves funds.
             return Web3.to_hex(self._w3.eth.send_transaction(tx))
+        mark_key = (self.chain_id, sender)
         if "nonce" not in tx:
             pending = int(self._w3.eth.get_transaction_count(sender, "pending"))
             # A transaction we broadcast and the RPC has since forgotten is still in SOMEONE's
-            # mempool; handing its nonce out again is how one leg silently replaces another.
-            tx["nonce"] = pending if self._last_nonce is None else max(pending, self._last_nonce + 1)
+            # mempool; handing its nonce out again is how one leg silently replaces another. The
+            # mark is process-wide, so a fresh Ethereum() for the next leg still sees it.
+            high_water = _NONCE_HIGH_WATER.get(mark_key)
+            tx["nonce"] = pending if high_water is None else max(pending, high_water + 1)
         if "gas" not in tx:
             estimate_fields = {k: v for k, v in tx.items() if k in ("from", "to", "data", "value")}
             tx["gas"] = int(self._w3.eth.estimate_gas(estimate_fields)) * 12 // 10
@@ -241,6 +283,8 @@ class Ethereum:
         # still have reached the node, and that transaction must never have its nonce reused.
         nonce = int(tx["nonce"])
         self._last_nonce = nonce if self._last_nonce is None else max(self._last_nonce, nonce)
+        previous = _NONCE_HIGH_WATER.get(mark_key)
+        _NONCE_HIGH_WATER[mark_key] = nonce if previous is None else max(previous, nonce)
         # The hash is fixed by the signature, so it exists before the broadcast. Capture it first: if the
         # RPC answer is lost the node may still have accepted the bytes, and a caller who never learns the
         # hash cannot tell a failed send from a landed one (and would resend, risking a double spend).
@@ -353,6 +397,20 @@ class _XReserveRouteMetadata:
 
 
 @dataclass(frozen=True)
+class _DroppedVerdict:
+    """"This hash can never mine", plus the head the verdict was taken at.
+
+    ``head_at_probe`` is what makes the verdict checkable: a recovery scan that stopped short of it
+    has not looked everywhere the replacing transaction could be, so it must not be trusted to say
+    "nothing was dispatched".
+    """
+
+    message: str
+    nonce: int
+    head_at_probe: int
+
+
+@dataclass(frozen=True)
 class _XReserveQuote:
     """Contract-level facts behind an ``EvmXReserveQuote``; also rebuilt from receipts during status/recovery."""
 
@@ -384,7 +442,9 @@ class EthModule:
         self.log_scan_chunk_blocks = log_scan_chunk_blocks        # recovery eth_getLogs span; lower it for strict RPCs
         self.log_scan_head_race_retries = LOG_SCAN_HEAD_RACE_RETRIES
         self.log_scan_head_race_sleep = LOG_SCAN_HEAD_RACE_SLEEP_SECONDS
-        self.sleep: Any = time.sleep          # replaced in tests so the retry pause is recorded, never waited
+        self.dropped_reprobe_sleep = DROPPED_REPROBE_SLEEP_SECONDS
+        self.sleep: Any = time.sleep          # replaced in tests so a pause is recorded, never waited
+        self._last_scan_head: int | None = None   # head the last history scan actually reached; None = never ran
 
     @property
     def log_scan_chunk_blocks(self) -> int:
@@ -1071,19 +1131,36 @@ class EthModule:
 
     @staticmethod
     def _dropped(receipt: Receipt, message: str) -> Receipt:
-        """Terminal ``EXPIRED``: the checkpointed transaction can never mine, and moved nothing."""
-        return receipt.replace(status=Status.EXPIRED, next_action=None,
-                               protocol_state={**receipt.protocol_state, "sourceError": message, "dropped": True})
+        """Terminal ``EXPIRED``: the checkpointed transaction can never mine, and moved nothing.
 
-    def _dropped_error(self, receipt: Receipt, tx_hash: str) -> str | None:
-        """The "dropped or replaced" message when *tx_hash* can never mine; ``None`` otherwise.
+        The checkpoint is deliberately NOT deleted for this status (``lifecycle._persist`` keeps a
+        terminal receipt carrying ``dropped``), because it is the only record of the transfer the
+        operator can hand back to ``recover()`` once the RPC agrees with itself.
+        """
+        return receipt.replace(
+            status=Status.EXPIRED, next_action=None,
+            protocol_state={**receipt.protocol_state, "dropped": True,
+                            "sourceError": f"{message}; the checkpoint is kept; recover() re-scans source history"})
 
-        Three facts have to line up, and the cheap ones are checked first: the receipt records the
-        nonce the transaction was broadcast at (older checkpoints do not — they simply keep
-        waiting), the node no longer knows the transaction at all (``TransactionNotFound``, not
-        merely "no receipt yet"), and the sender's ``latest`` account nonce has moved past it, so
-        something else consumed that nonce. A transaction the node still knows is pending, however
-        long it has been pending, is left alone.
+    @staticmethod
+    def _state_approvals(receipt: Receipt) -> list[str]:
+        """The receipt's own approval ids — what a history scan would anchor itself to."""
+        ids = receipt.protocol_state.get("approvalTxIds")
+        return [i for i in ids if isinstance(i, str)] if isinstance(ids, list) else []
+
+    def _dropped_verdict(self, receipt: Receipt, tx_hash: str, approvals: list[str]) -> "_DroppedVerdict | None":
+        """The verdict that *tx_hash* can never mine, or ``None`` — ``None`` means "keep waiting".
+
+        The cheap facts are checked first: the receipt records the nonce the transaction was
+        broadcast at (older checkpoints do not — they simply keep waiting), the node does not know
+        the transaction at all (``TransactionNotFound``, not merely "no receipt yet"), and the
+        sender's ``latest`` account nonce has moved past that nonce, so something else consumed it.
+
+        Then the same probe runs a SECOND time after ``dropped_reprobe_sleep`` seconds. A
+        load-balanced endpoint answers each call from a different node, and one lagging backend
+        must not be enough to declare a live transaction dead: both probes have to miss it. The
+        head at the moment the verdict is taken travels with it, so recovery can refuse to call a
+        transfer resumable on a history scan that never reached that far.
         """
         from web3.exceptions import TransactionNotFound
 
@@ -1095,27 +1172,32 @@ class EthModule:
             return None
         if not isinstance(sender, str) or not Web3.is_address(sender):
             return None
-        try:
-            if self.conn.w3.eth.get_transaction(tx_hash) is not None:
-                return None                      # still in a mempool: pending, not replaced
-        except TransactionNotFound:
-            pass
+
+        def missing() -> bool:
+            try:
+                return self.conn.w3.eth.get_transaction(tx_hash) is None
+            except TransactionNotFound:
+                return True
+
+        if not missing():
+            return None                          # still in a mempool: pending, not replaced
         nonce = int(nonce_text)
         account_nonce = int(self.conn.w3.eth.get_transaction_count(Web3.to_checksum_address(sender), "latest"))
         if account_nonce <= nonce:
             return None                          # the nonce is still unused: nothing has replaced it
-        return (f"transaction {tx_hash} (nonce {nonce}) was dropped or replaced before it mined; "
-                "no funds moved by it — recover() then resume() re-dispatches")
-
-    def _scan_can_run(self, approvals: list[str]) -> bool:
-        """Whether a source-history log scan could actually run, i.e. a confirmed approval gives it a
-        block to start from (the other precondition, a known sender, ``_dropped_error`` already proved).
-
-        Recovery only treats a dropped transaction as resumable once the scan has PROVED no
-        dispatch/deposit of ours exists; when the scan cannot run there is nothing to prove it
-        against, so the dropped transaction stays terminal instead of inviting a second send.
-        """
-        return bool(approvals) and self._approval_scan_block(approvals) is not None
+        self.sleep(self.dropped_reprobe_sleep)
+        if not missing():
+            return None                          # a lagging backend, not a dropped transaction
+        head = int(self.conn.w3.eth.block_number)
+        if approvals:
+            tail = "recover() then resume() re-dispatches"
+        else:
+            tail = (f"no approval anchors a history scan: inspect the sender's transactions at nonce {nonce} "
+                    "before re-sending; a fresh execute is required")
+        return _DroppedVerdict(
+            message=(f"transaction {tx_hash} (nonce {nonce}) was dropped or replaced before it mined; "
+                     f"no funds moved by it — {tail}"),
+            nonce=nonce, head_at_probe=head)
 
     def _validate_hyperlane_state(self, route: Route, plan: Plan, receipt: Receipt) -> bytes:
         """Bind every value that affects the dispatch before trusting checkpointed transaction ids."""
@@ -1139,8 +1221,9 @@ class EthModule:
         source_tx_id = self._require_hash(receipt.source_tx_id, "source transaction id")
         observed = self.conn.get_receipt(source_tx_id)
         if observed is None:
-            dropped = self._dropped_error(receipt, source_tx_id) if detect_dropped else None
-            return receipt if dropped is None else self._dropped(receipt, dropped)
+            verdict = self._dropped_verdict(receipt, source_tx_id, self._state_approvals(receipt)) \
+                if detect_dropped else None
+            return receipt if verdict is None else self._dropped(receipt, verdict.message)
         if int(observed["status"]) == 0:
             return self._failed(receipt, "sourceError", f"EVM transaction reverted: {source_tx_id}")
         message_id = self._message_id_from_receipt(route, observed)
@@ -1196,8 +1279,9 @@ class EthModule:
         source_tx_id = self._require_hash(receipt.source_tx_id, "xReserve source transaction id")
         observed = self.conn.get_receipt(source_tx_id)
         if observed is None:
-            dropped = self._dropped_error(receipt, source_tx_id) if detect_dropped else None
-            return receipt if dropped is None else self._dropped(receipt, dropped)
+            verdict = self._dropped_verdict(receipt, source_tx_id, self._state_approvals(receipt)) \
+                if detect_dropped else None
+            return receipt if verdict is None else self._dropped(receipt, verdict.message)
         if int(observed["status"]) == 0:
             return self._failed(receipt, "sourceError", f"EVM transaction reverted: {source_tx_id}")
         return self._confirmed_deposit_receipt(route, q, owner=owner,
@@ -1267,19 +1351,26 @@ class EthModule:
     def _recovered_dropped(self, pending: Receipt, transaction_id: str, approvals: list[str]) -> Receipt:
         """The answer for a checkpointed hash that the history scan did not match.
 
-        Unchanged (still ``SOURCE_CONFIRMING``) unless the hash can never mine. When it cannot and
-        the scan actually ran — proving no dispatch/deposit of ours exists — the transfer is back at
-        ``SOURCE_SUBMISSION_PENDING`` so ``resume`` may re-authorize the one remaining transaction;
-        the reason travels in ``sourceError``. When the scan could not run, nothing proves the
-        replacement was not our own dispatch, so the receipt is ``EXPIRED`` for an operator to look at.
+        Unchanged (still ``SOURCE_CONFIRMING``) unless the hash can never mine. When it cannot, the
+        transfer only becomes ``SOURCE_SUBMISSION_PENDING`` — ``resume`` may re-authorize the one
+        remaining transaction — if the history scan actually RAN and reached at least the head the
+        verdict was taken at (``_scan_logs`` clamps its upper bound down to whatever node answered,
+        so a lagging backend can leave it short). Otherwise nothing proves the replacement was not
+        our own dispatch and the receipt is ``EXPIRED``, for an operator to look at or for another
+        ``recover()`` once the endpoint has caught up.
         """
-        message = self._dropped_error(pending, transaction_id)
-        if message is None:
+        verdict = self._dropped_verdict(pending, transaction_id, approvals)
+        if verdict is None:
             return pending
-        if not self._scan_can_run(approvals):
-            return self._dropped(pending, message)
+        scanned_head = self._last_scan_head
+        if scanned_head is None:
+            return self._dropped(pending, verdict.message)
+        if scanned_head < verdict.head_at_probe:
+            return self._dropped(pending, f"{verdict.message}; source history could not be scanned up to the "
+                                          "head that proved the transaction dropped; retry recover()")
         return pending.replace(status=Status.SOURCE_SUBMISSION_PENDING,
-                               protocol_state={**pending.protocol_state, "sourceError": message, "dropped": True})
+                               protocol_state={**pending.protocol_state, "sourceError": verdict.message,
+                                               "dropped": True})
 
     def _approval_scan_block(self, approvals: list[str]) -> int | None:
         """Highest block of a confirmed approval; an unresolved hash is skipped, a reverted one is an error."""
@@ -1319,6 +1410,7 @@ class EthModule:
         errors = _provider_errors()
         chunk = self.log_scan_chunk_blocks
         latest = self._head_block(address)
+        self._last_scan_head = None           # only a scan that completes may claim a head
         logs: list[Any] = []
         start = from_block
         while start <= latest:
@@ -1342,6 +1434,7 @@ class EthModule:
                         + f"Use a dedicated RPC endpoint, or a smaller EthModule(log_scan_chunk_blocks=...) "
                         f"than the current {chunk}.") from exc
             start = end + 1
+        self._last_scan_head = latest         # what this scan actually covered, after any clamping
         return logs
 
     def _recover_hyperlane_from_history(self, route: Route, recipient32: bytes, receipt: Receipt, approvals: list[str],
@@ -1349,6 +1442,7 @@ class EthModule:
         """Scan router ``SentTransferRemote`` logs after the last confirmed approval; sender and router must match."""
         from web3.exceptions import TransactionNotFound
 
+        self._last_scan_head = None          # a scan that never starts has covered nothing
         Web3 = _web3().Web3
         sender = receipt.protocol_state.get("sourceSender")
         if not isinstance(sender, str) or not Web3.is_address(sender):
@@ -1447,6 +1541,7 @@ class EthModule:
     def _recover_xreserve_from_history(self, route: Route, plan: Plan, q: _XReserveQuote, owner: str, approvals: list[str],
                                        *, required: bool) -> Receipt | None:
         """Scan xReserve logs after the last confirmed approval; a candidate matches only if every event field matches."""
+        self._last_scan_head = None          # a scan that never starts has covered nothing
         Web3 = _web3().Web3
         from_block = self._approval_scan_block(approvals)
         if from_block is None:

@@ -153,6 +153,12 @@ def create_checkpoint(plan: Plan, receipt: Receipt, registry: Registry) -> Check
             source["transactionId"] = receipt.source_tx_id
         if isinstance(state.get("hookData"), str):
             source["hookData"] = state["hookData"]
+        if state.get("dropped") is True and isinstance(state.get("sourceError"), str):
+            # The verdict that this source transaction can never mine. Kept as a pair so a listing
+            # rebuilt offline (Bridge.pending) reports the transfer as failed-and-explained rather
+            # than as still confirming a hash nothing will ever mine.
+            source["dropped"] = True
+            source["sourceError"] = state["sourceError"]
         if isinstance(state.get("sourceNonce"), str) and state["sourceNonce"].isdigit():
             # The EVM nonce the source transaction was broadcast at: recovery needs it to tell a
             # slow transaction from one that was dropped or replaced. Version stays 1 — a

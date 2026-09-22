@@ -251,16 +251,20 @@ Fees and nonces are filled defensively. Public RPC endpoints answer
 `eth_maxPriorityFeePerGas` with 0, and a zero-tip transaction can sit unmined
 for hours, so every EIP-1559 tip is raised to a floor of 0.1 gwei
 (`aleo_bridge.eth.MIN_PRIORITY_FEE_WEI`); pass
-`Ethereum(..., min_priority_fee_wei=…)` to raise or lower it (`maxFeePerGas`
-stays `2 * baseFeePerGas + tip`). Each connection also remembers the highest
-nonce it broadcast and never goes back to it, because a load-balanced RPC can
-stop reporting our own pending transaction and the next leg would then replace
-it. If a source transaction is dropped or replaced anyway, it no longer waits
-forever: once the node has forgotten it and the account nonce has moved past the
-nonce it was sent at, `source_status` returns `EXPIRED` with a `sourceError`
-explaining that nothing moved, and `recover_source` (which scans source history
-first, so a dispatch that really landed still wins) hands back a resumable
-`SOURCE_SUBMISSION_PENDING` — `recover()` then `resume()` re-dispatches.
+`Ethereum(..., min_priority_fee_wei=…)` or set `BRIDGE_MIN_PRIORITY_FEE_WEI`
+(whole wei, read by `from_env`) to raise or lower it (`maxFeePerGas` stays
+`2 * baseFeePerGas + tip`). The highest nonce broadcast for a
+`(chain, sender)` is also remembered **per process** — not across processes or
+machines — and never handed out again, because a load-balanced RPC can stop
+reporting our own pending transaction and the next leg (typically a fresh
+`Ethereum`) would then replace it. If a source transaction is dropped or
+replaced anyway, it no longer waits forever: once two probes agree the node has
+forgotten it and the account nonce has moved past the nonce it was sent at,
+`source_status` returns `EXPIRED` with a `sourceError` explaining that nothing
+moved, and its checkpoint is kept rather than deleted so `recover()` can re-scan.
+`recover_source` scans source history first — a dispatch that really landed
+wins — and hands back a resumable `SOURCE_SUBMISSION_PENDING` when that scan
+ran, reached the head the verdict was taken at, and found nothing.
 
 Live checks: `BRIDGE_LIVE_READS=1 ETHEREUM_RPC_URL=…` for read-only
 mainnet quotes (`tests/live/test_eth_reads.py`); `BRIDGE_LIVE_FUNDS=1
@@ -470,6 +474,7 @@ covered hermetically by `tests/test_live_helpers.py`.
 | `ALEO_API_KEY`, `ALEO_CONSUMER_ID` | `from_env` | optional Provable credentials for legacy endpoints |
 | `EVM_PRIVATE_KEY`, `ETHEREUM_RPC_URL` | `from_env`, rehearsal | Ethereum signer + RPC (both or neither); aliases `BRIDGE_EVM_PRIVATE_KEY` / `BRIDGE_LIVE_ETHEREUM_RPC_URL` — used by the user's live shell/veil config, and NOT live-test-only: ordinary `Ethereum.from_env()` reads them too, so leaving one exported points everyday calls at that endpoint; the primary variable wins when both are set |
 | `SOLANA_PRIVATE_KEY`, `SOLANA_RPC_URL` | `from_env`, rehearsal | Solana signer (base58 or `id.json` array) + RPC (optional); aliases `BRIDGE_SOLANA_PRIVATE_KEY` / `BRIDGE_LIVE_SOLANA_RPC_URL`, same precedence and same everyday-call caveat as the Ethereum pair |
+| `BRIDGE_MIN_PRIORITY_FEE_WEI` | `Ethereum.from_env` | override the EIP-1559 tip floor (whole wei, digits only); default 0.1 gwei |
 | `BRIDGE_CHECKPOINT_DIR` | `from_env` | bind a `FileCheckpointStore` |
 | `ALEO_BRIDGE_HOME` | `from_profile` | profile directory (default `~/.aleo-bridge/`), holds only the Aleo key, mode 600 |
 | `ALEO_E2E_PRIVATE_KEY` | live tests / rehearsal, testnet | testnet Aleo key (alias `BRIDGE_LIVE_ALEO_TESTNET_PRIVATE_KEY`) |

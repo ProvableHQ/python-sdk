@@ -3,7 +3,7 @@ from eth_account import Account
 from web3 import Web3
 from web3.middleware import SignAndSendRawMiddlewareBuilder
 
-from aleo_bridge.errors import ConfigurationError
+from aleo_bridge.errors import BridgeError, ConfigurationError
 from tests.fakes.fake_web3 import fake_web3
 
 KEY = "0x" + "11" * 32
@@ -147,6 +147,53 @@ def test_a_nonce_still_in_flight_is_never_handed_out_twice():
     w3.provider.nonce_pending = 9                      # a nonce that moved on elsewhere still wins
     conn.send_transaction({"to": TO, "value": 3, "data": "0x"})
     assert w3.provider.sent[2]["nonce"] == 9 and conn.last_broadcast_nonce == 9
+
+
+def test_the_nonce_mark_is_shared_by_every_connection_in_the_process():
+    """The live suite builds a fresh ``Ethereum`` per phase and per leg — exactly the incident's
+    topology — so the high-water mark cannot live on the instance."""
+    from aleo_bridge.eth import Ethereum
+
+    w3 = fake_web3()
+    first = Ethereum(w3=w3, private_key=KEY)
+    first.send_transaction({"to": TO, "value": 1, "data": "0x"})
+    w3.provider.nonce_pending = 0                      # the RPC has forgotten that transaction
+    second = Ethereum(w3=w3, private_key=KEY)          # the next leg's connection, same account
+    second.send_transaction({"to": TO, "value": 2, "data": "0x"})
+    assert [t["nonce"] for t in w3.provider.sent] == [0, 1]
+    assert first.last_broadcast_nonce == 0 and second.last_broadcast_nonce == 1
+
+
+def test_a_lost_send_response_still_burns_the_nonce():
+    """The node may have taken the bytes, so that nonce is spent whatever the RPC answered."""
+    from aleo_bridge.eth import Ethereum
+
+    w3 = fake_web3()
+    w3.provider.send_errors[1] = "connection reset"
+    w3.provider.nonce_pending = 0
+    conn = Ethereum(w3=w3, private_key=KEY)
+    with pytest.raises(BridgeError, match="may have been broadcast"):
+        conn.send_transaction({"to": TO, "value": 1, "data": "0x"})
+    assert conn.last_broadcast_nonce == 0
+    w3.provider.send_errors.clear()      # a lost send never reached self.sent, so it is still "send #1"
+    conn.send_transaction({"to": TO, "value": 2, "data": "0x"})
+    assert w3.provider.sent[-1]["nonce"] == 1
+
+
+def test_min_priority_fee_wei_from_env_and_on_assignment():
+    from aleo_bridge.eth import MIN_PRIORITY_FEE_WEI, Ethereum
+
+    env = {"EVM_PRIVATE_KEY": KEY, "ETHEREUM_RPC_URL": "https://rpc.example", "BRIDGE_MIN_PRIORITY_FEE_WEI": "2000000000"}
+    assert Ethereum.from_env(env).min_priority_fee_wei == 2 * 10**9
+    assert Ethereum.from_env({k: v for k, v in env.items() if k != "BRIDGE_MIN_PRIORITY_FEE_WEI"}) \
+        .min_priority_fee_wei == MIN_PRIORITY_FEE_WEI
+    with pytest.raises(ConfigurationError, match="BRIDGE_MIN_PRIORITY_FEE_WEI"):
+        Ethereum.from_env({**env, "BRIDGE_MIN_PRIORITY_FEE_WEI": "0.1gwei"})
+    conn = Ethereum(w3=fake_web3(), private_key=KEY)
+    conn.min_priority_fee_wei = 0                       # a caller may disable the floor deliberately
+    assert conn.min_priority_fee_wei == 0
+    with pytest.raises(ConfigurationError, match="min_priority_fee_wei"):
+        conn.min_priority_fee_wei = -1
 
 
 def test_legacy_gas_price_path_when_no_base_fee():

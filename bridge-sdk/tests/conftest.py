@@ -240,6 +240,17 @@ def default_mappings() -> dict:
     }
 
 
+@pytest.fixture(autouse=True)
+def _fresh_nonce_high_water():
+    """``eth._NONCE_HIGH_WATER`` is process-wide by design (a fresh ``Ethereum`` per leg must still
+    see the mark), so one test's sends would otherwise push the next test's nonces up."""
+    from aleo_bridge.eth import _NONCE_HIGH_WATER
+
+    _NONCE_HIGH_WATER.clear()
+    yield
+    _NONCE_HIGH_WATER.clear()
+
+
 @pytest.fixture
 def fake_aleo(monkeypatch) -> FakeAleo:
     monkeypatch.setattr("aleo_bridge._calls._network_module", lambda aleo: FakeNetModule)

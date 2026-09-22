@@ -7,7 +7,7 @@ from aleo_bridge.errors import (BridgeError, ChainMismatchError, CheckpointInval
                                 UnsupportedRouteError)
 from aleo_bridge.eth import Ethereum, _plan_for
 from aleo_bridge.registry import DEFAULT_REGISTRY
-from aleo_bridge.types import Receipt, Status
+from aleo_bridge.types import Receipt, Status, to_progress
 from tests.fakes.fake_web3 import deposited_log, dispatch_id_log, fake_web3, make_bridge
 
 KEY = "0x" + "11" * 32
@@ -81,14 +81,26 @@ def test_hyperlane_source_confirming_branch():
     assert failed.status == Status.FAILED and failed.protocol_state["sourceError"] == f"EVM transaction reverted: {H2}"
 
 
+KEPT = "; the checkpoint is kept; recover() re-scans source history"
 DROPPED_MESSAGE = ("transaction {h} (nonce 83) was dropped or replaced before it mined; no funds moved by it "
                    "— recover() then resume() re-dispatches")
+NO_ANCHOR_MESSAGE = ("transaction {h} (nonce 83) was dropped or replaced before it mined; no funds moved by it "
+                     "— no approval anchors a history scan: inspect the sender's transactions at nonce 83 "
+                     "before re-sending; a fresh execute is required")
+
+
+def no_real_sleep(eth):
+    """Record the dropped-verdict re-probe pause instead of waiting it out."""
+    sleeps = []
+    eth.sleep = sleeps.append
+    return sleeps
 
 
 def test_a_dropped_dispatch_is_expired_not_confirming_forever():
     """Mainnet 2026-09-22: the dispatch was replaced at its own nonce, so it can never mine — but
     ``source_status`` kept answering SOURCE_CONFIRMING (next == "wait") indefinitely."""
     eth, w3 = mainnet()
+    sleeps = no_real_sleep(eth)
     receipt = Receipt(id=H2, protocol="hyperlane", status=Status.SOURCE_CONFIRMING, source_tx_id=H2,
                       protocol_state=hyperlane_state(sourceNonce="83"))
     w3.provider.nonce_latest = 83                                    # still the account's next nonce: merely pending
@@ -96,23 +108,77 @@ def test_a_dropped_dispatch_is_expired_not_confirming_forever():
     assert eth.source_status(WBTC_PLAN, receipt) is receipt
     w3.provider.tx_not_found.add(H2)                                 # gone from every mempool, and the nonce moved on
     assert eth.source_status(WBTC_PLAN, receipt) is receipt          # nonce 83 is still unused: nothing replaced it
+    assert sleeps == []                                              # no verdict yet, so no re-probe either
     w3.provider.nonce_latest = 84
     expired = eth.source_status(WBTC_PLAN, receipt)
     assert expired.status == Status.EXPIRED and expired.protocol_state["dropped"] is True
-    assert expired.protocol_state["sourceError"] == DROPPED_MESSAGE.format(h=H2)
-    assert expired.next_action is None and w3.provider.sent == []
+    assert expired.protocol_state["sourceError"] == DROPPED_MESSAGE.format(h=H2) + KEPT
+    assert expired.next_action is None and w3.provider.sent == [] and sleeps == [0.5]
+
+
+def test_a_transaction_the_second_probe_finds_is_not_dropped():
+    """One miss can be a single lagging backend of a load-balanced endpoint. A transaction the
+    re-probe finds is alive, whatever the first probe and the account nonce said."""
+    eth, w3 = mainnet()
+    receipt = Receipt(id=H2, protocol="hyperlane", status=Status.SOURCE_CONFIRMING, source_tx_id=H2,
+                      protocol_state=hyperlane_state(sourceNonce="83"))
+    w3.provider.add_transaction(H2, sender=ACCT.address, to=WBTC_ROUTER)
+    w3.provider.tx_not_found.add(H2)
+    w3.provider.nonce_latest = 84
+    no_real_sleep(eth)
+    eth.sleep = lambda seconds: w3.provider.tx_not_found.discard(H2)   # the next backend knows it
+    assert eth.source_status(WBTC_PLAN, receipt) is receipt
+
+
+def test_a_dropped_transaction_with_no_approval_says_what_to_inspect():
+    """A native-ETH route has no approval, so no history scan can ever anchor itself: the message
+    must not promise that recover()/resume() will sort it out."""
+    eth, w3 = mainnet()
+    no_real_sleep(eth)
+    receipt = Receipt(id=H2, protocol="hyperlane", status=Status.SOURCE_CONFIRMING, source_tx_id=H2,
+                      protocol_state=hyperlane_state(approvalTxIds=[], sourceNonce="83"))
+    w3.provider.tx_not_found.add(H2)
+    w3.provider.nonce_latest = 84
+    expired = eth.source_status(WBTC_PLAN, receipt)
+    assert expired.status == Status.EXPIRED
+    assert expired.protocol_state["sourceError"] == NO_ANCHOR_MESSAGE.format(h=H2) + KEPT
 
 
 def test_a_dropped_xreserve_deposit_is_expired_too():
     w3 = fake_web3(chain_id=11155111)
     eth = make_bridge(environment="testnet", ethereum=Ethereum(w3=w3)).eth
+    no_real_sleep(eth)
     receipt = Receipt(id=H2, protocol="xreserve", status=Status.SOURCE_CONFIRMING, source_tx_id=H2,
                       protocol_state=xreserve_state(sourceNonce="83"))
     w3.provider.tx_not_found.add(H2)
     w3.provider.nonce_latest = 84
     expired = eth.source_status(USDC_PLAN, receipt)
     assert expired.status == Status.EXPIRED and expired.protocol_state["dropped"] is True
-    assert expired.protocol_state["sourceError"] == DROPPED_MESSAGE.format(h=H2)
+    assert expired.protocol_state["sourceError"] == DROPPED_MESSAGE.format(h=H2) + KEPT
+
+
+def test_a_dropped_transfer_keeps_its_checkpoint_and_stays_listed(tmp_path):
+    """Every other terminal status frees its checkpoint; a dropped one must not. Nothing moved, and
+    this record is all ``recover()`` has to re-scan source history from."""
+    from aleo_bridge.checkpoint import FileCheckpointStore, create_checkpoint
+
+    store = FileCheckpointStore(tmp_path)
+    w3 = fake_web3()
+    bridge = make_bridge(ethereum=Ethereum(w3=w3, private_key=KEY), checkpoints=store)
+    bridge.eth.sleep = lambda seconds: None
+    receipt = Receipt(id=H2, protocol="hyperlane", status=Status.SOURCE_CONFIRMING, source_tx_id=H2,
+                      protocol_state=hyperlane_state(sourceNonce="83"))
+    store.save(create_checkpoint(WBTC_PLAN, receipt, DEFAULT_REGISTRY))
+    w3.provider.tx_not_found.add(H2)
+    w3.provider.nonce_latest = 84
+    progress = bridge.wait(to_progress(WBTC_PLAN, receipt), poll_seconds=0, timeout_seconds=5)
+    assert progress.receipt.status == Status.EXPIRED and progress.next == "failed"
+    assert progress.error.endswith("the checkpoint is kept; recover() re-scans source history")
+    kept = store.list()
+    assert [cp.id for cp in kept] == [H2] and kept[0].source["dropped"] is True
+    listed = bridge.pending()
+    assert [(p.next, p.receipt.status) for p in listed] == [("failed", Status.EXPIRED)]
+    assert listed[0].error == progress.error                         # the reason survives the round trip
 
 
 def test_a_receipt_without_a_source_nonce_still_waits():
