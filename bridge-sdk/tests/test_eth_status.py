@@ -215,6 +215,25 @@ def test_a_probe_whose_nonce_or_sender_disagrees_with_the_checkpoint_is_no_verdi
     assert eth.source_status(WBTC_PLAN, receipt).status == Status.EXPIRED
 
 
+def test_a_raw_provider_nonce_is_compared_not_raised_on():
+    """A provider that bypasses web3's result formatters serves `nonce` as a hex string. The
+    cross-check must still compare it (never raise out of source_status), and an unparseable
+    value simply skips the check."""
+    eth, w3 = mainnet()
+    no_real_sleep(eth)
+    receipt = Receipt(id=H2, protocol="hyperlane", status=Status.SOURCE_CONFIRMING, source_tx_id=H2,
+                      protocol_state=hyperlane_state(sourceNonce="83"))
+    w3.provider.nonce_latest = 85
+    served = {"hash": H2, "from": ACCT.address, "to": WBTC_ROUTER, "blockNumber": None}
+    w3.eth.get_transaction = lambda _h: served                      # bypasses web3's result formatters
+    served["nonce"] = "0x5b"                                        # 91: disagrees
+    assert eth.source_status(WBTC_PLAN, receipt) is receipt
+    served["nonce"] = "0x53"                                        # 83: agrees
+    assert eth.source_status(WBTC_PLAN, receipt).status == Status.EXPIRED
+    served["nonce"] = "garbage"                                     # skipped, not raised
+    assert eth.source_status(WBTC_PLAN, receipt).status == Status.EXPIRED
+
+
 def test_a_dropped_transaction_with_no_approval_says_what_to_inspect():
     """A native-ETH route has no approval, so no history scan can ever anchor itself: the message
     must not promise that recover()/resume() will sort it out."""

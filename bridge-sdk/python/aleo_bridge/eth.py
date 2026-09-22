@@ -1223,7 +1223,9 @@ class EthModule:
                 return False                     # mined
             tx_nonce = tx.get("nonce")
             tx_from = tx.get("from")
-            if tx_nonce is not None and int(tx_nonce) != nonce:
+            if isinstance(tx_nonce, str) and tx_nonce.startswith("0x"):
+                tx_nonce = int(tx_nonce, 16)     # a raw provider may skip web3's result formatters
+            if isinstance(tx_nonce, int) and tx_nonce != nonce:
                 return False                     # this hash was not broadcast at the checkpointed nonce
             if isinstance(tx_from, str) and tx_from.lower() != sender.lower():
                 return False                     # nor by the checkpointed sender
