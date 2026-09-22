@@ -1020,3 +1020,21 @@ def test_the_suite_sets_no_acknowledgement_and_prints_no_settable_form():
     assert "export " not in source
     assert live_config.MAINNET_ACK not in source and live_config.MAINNET_EXECUTE_ACK not in source
     assert "setenv" not in source and "os.environ[" not in source
+
+
+def test_hyperlane_lookup_is_skipped_for_aleo_origin_ids():
+    """An Aleo ``at1…`` source id has no explorer bytea form (bech32, not base58): the lookup
+    returns None immediately, never posts, and never polls — the SDK's own delivery check
+    (balance rise on the destination) is the verdict for Aleo-origin legs, as in veil."""
+    def never_post(*_args, **_kwargs):
+        raise AssertionError("the explorer must not be queried for an Aleo source id")
+
+    aleo_id = "at1fhunxkgp2zgqmu4qv8848qmc9c3ytcgzmzm758860nyzlad2s58q0jr0ge"
+    assert live_helpers._bytea(aleo_id) is None
+    assert live_helpers.hyperlane_delivery(aleo_id, post=never_post) is None
+    slept: list[float] = []
+    assert live_helpers.wait_for_hyperlane_delivery(
+        aleo_id, post=never_post, sleep=slept.append, now=lambda: 0.0, timeout_seconds=5, poll_seconds=1) is None
+    assert slept == []
+    assert live_helpers._bytea("not-base58-0OIl") is None          # a bad base58 string degrades the same way
+    assert live_helpers._bytea("0x" + "ab" * 32) == "\\x" + "ab" * 32  # EVM hashes are unchanged

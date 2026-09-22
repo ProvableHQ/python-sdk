@@ -298,11 +298,21 @@ def _post(url: str, payload: dict[str, Any], timeout: float) -> Any:
                          headers={"content-type": "application/json"})
 
 
-def _bytea(source_tx_id: str) -> str:
-    """veil helpers.ts:81-83: an EVM ``0x`` hash or a Solana base58 signature → PostgreSQL bytea."""
+def _bytea(source_tx_id: str) -> str | None:
+    """veil helpers.ts:81-83: an EVM ``0x`` hash or a Solana base58 signature → PostgreSQL bytea.
+
+    An Aleo transaction id (``at1…``, bech32) has no bytea form the explorer indexes by, and veil's
+    aleo-hyperlane live test never queries the explorer for it — the SDK's own delivery check is
+    the verdict there.  Returns None for such ids so callers skip the lookup instead of crashing.
+    """
     if source_tx_id.startswith("0x"):
         return f"\\x{source_tx_id[2:]}"
-    return f"\\x{b58decode(source_tx_id).hex()}"
+    if source_tx_id.startswith("at1"):
+        return None
+    try:
+        return f"\\x{b58decode(source_tx_id).hex()}"
+    except ValueError:
+        return None
 
 
 def _normalize(value: str) -> str:
@@ -317,7 +327,10 @@ def hyperlane_delivery(source_tx_id: str, *, post: Callable[..., Any] = _post,
     (HTTP 429/5xx, or an unreachable host): a rate-limited explorer says nothing about the
     transfer.  A GraphQL error is a bug in the query and is raised (veil helpers.ts:104-106).
     """
-    payload = {"query": HYPERLANE_QUERY, "variables": {"hash": _bytea(source_tx_id)}}
+    bytea = _bytea(source_tx_id)
+    if bytea is None:                                   # Aleo-origin: nothing the explorer can be asked
+        return None
+    payload = {"query": HYPERLANE_QUERY, "variables": {"hash": bytea}}
     try:
         response = post(HYPERLANE_EXPLORER_URL, payload, timeout)
     except Exception:                                   # noqa: BLE001 — network flake, never a verdict
@@ -351,6 +364,8 @@ def wait_for_hyperlane_delivery(source_tx_id: str, *, timeout_seconds: float = D
     This lookup is a convenience on top of a leg the SDK has already called ``done``, so a timeout
     or a throttled explorer returns None instead of failing the case (veil parity §8).
     """
+    if _bytea(source_tx_id) is None:                    # Aleo-origin leg: skip the poll entirely
+        return None
     try:
         return wait_for(lambda: hyperlane_delivery(source_tx_id, post=post),
                         timeout_seconds=timeout_seconds, poll_seconds=poll_seconds, sleep=sleep, now=now)
