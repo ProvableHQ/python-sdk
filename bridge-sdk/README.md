@@ -261,11 +261,14 @@ reporting our own pending transaction and the next leg (typically a fresh
 replaced anyway, it no longer waits forever: once two probes agree the hash is
 in no block — the node either does not know it or still serves it with a null
 `blockNumber`, which is what a load-balanced endpoint does for a replaced
-transaction — and the account nonce has moved past the nonce it was sent at,
-`source_status` returns `EXPIRED` with a `sourceError` explaining that nothing
-moved, and its checkpoint is kept rather than deleted so `recover()` can
-re-scan. A transaction that comes back with a block number is mined, however far
-behind its receipt read is.
+transaction — and the account nonce has moved past the nonce it was sent at **as
+seen by a node that has imported the block that consumed it**, and a final
+re-read of the receipt still finds none, `source_status` returns `EXPIRED` with a
+`sourceError` explaining that nothing moved, and its checkpoint is kept rather
+than deleted so `recover()` can re-scan. A transaction that comes back with a
+block number is mined, however far behind its receipt read is; so is one whose
+receipt appears on that last re-read, and a probe whose own `nonce` or `from`
+disagrees with the checkpoint yields no verdict at all.
 `recover_source` takes that verdict first and then scans source history — a
 dispatch that really landed wins — and hands back a resumable
 `SOURCE_SUBMISSION_PENDING` when the scan ran, covered the head the verdict was

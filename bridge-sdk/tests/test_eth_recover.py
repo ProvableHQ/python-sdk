@@ -370,7 +370,7 @@ def test_a_replaced_dispatch_still_served_as_unmined_is_resumable():
     eth, w3 = mainnet_read_only()
     sleeps = record_sleeps(eth)
     w3.provider.add_receipt(APPROVAL, block_number=0x60)
-    w3.provider.add_transaction(DISPATCH, sender=ACCT.address, to=WBTC_ROUTER)
+    w3.provider.add_transaction(DISPATCH, sender=ACCT.address, to=WBTC_ROUTER, nonce=83)
     w3.provider.tx_unmined.add(DISPATCH)
     w3.provider.nonce_latest = 85
     recovered = eth.recover_source(WBTC_PLAN, dropped_checkpoint())

@@ -1162,8 +1162,8 @@ class EthModule:
         The cheap facts are checked first: the receipt records the nonce the transaction was
         broadcast at (older checkpoints do not — they simply keep waiting), the node no longer has
         it in a block, and the sender's ``latest`` account nonce has moved past that nonce, so
-        something else consumed it. A consumed nonce plus an unmined hash is final: that hash can
-        never be included.
+        something else consumed it. A consumed nonce plus an unmined hash is final — *as seen by a
+        node that has imported the block that consumed the nonce*: that hash can never be included.
 
         "No longer in a block" covers TWO answers, because a load-balanced public endpoint gives
         both for the same replaced transaction: ``TransactionNotFound``, and a transaction object
@@ -1177,6 +1177,22 @@ class EthModule:
         so both probes have to say "gone" (either shape). The head at the moment the verdict is
         taken travels with it, so recovery can refuse to call a transfer resumable on a history scan
         that never reached that far.
+
+        Two more things must hold before the verdict is issued, because every read above can be
+        served by a backend that has not imported the block our own transaction mined in — the
+        receipt read misses, both probes answer from a stale mempool, and the ``latest`` nonce comes
+        from a fresh backend where OUR transaction consumed it:
+
+        * the receipt is re-read once more, and a receipt that has appeared withdraws the verdict —
+          the first read was simply lagging, and nothing was dropped;
+        * where a probe served the transaction object, its own ``nonce`` and ``from`` must match the
+          checkpoint (only fields actually present are compared; a probe that raised
+          ``TransactionNotFound`` offers nothing to compare). A disagreement means the checkpoint
+          does not describe this hash, and a verdict resting on its nonce would be about somebody
+          else's transaction — so there is no verdict.
+
+        Every one of these checks can only withhold a verdict, never produce one: a wrong "dropped"
+        tells an operator that no funds moved, and that claim has to be the conservative one.
         """
         from web3.exceptions import TransactionNotFound
 
@@ -1189,23 +1205,40 @@ class EthModule:
         if not isinstance(sender, str) or not Web3.is_address(sender):
             return None
 
+        nonce = int(nonce_text)
+
         def gone() -> bool:
-            """True when the node does not have this hash in a block: unknown, or known-unmined."""
+            """True when the node does not have this hash in a block: unknown, or known-unmined.
+
+            False whenever the served transaction contradicts the checkpoint, too: an inconsistent
+            answer is never evidence that this hash was dropped.
+            """
             try:
                 tx = self.conn.w3.eth.get_transaction(tx_hash)
             except TransactionNotFound:
                 return True
-            return tx is None or tx.get("blockNumber") is None
+            if tx is None:
+                return True
+            if tx.get("blockNumber") is not None:
+                return False                     # mined
+            tx_nonce = tx.get("nonce")
+            tx_from = tx.get("from")
+            if tx_nonce is not None and int(tx_nonce) != nonce:
+                return False                     # this hash was not broadcast at the checkpointed nonce
+            if isinstance(tx_from, str) and tx_from.lower() != sender.lower():
+                return False                     # nor by the checkpointed sender
+            return True
 
         if not gone():
-            return None                          # mined: the receipt read is just lagging
-        nonce = int(nonce_text)
+            return None                          # mined, or not the transaction the checkpoint describes
         account_nonce = int(self.conn.w3.eth.get_transaction_count(Web3.to_checksum_address(sender), "latest"))
         if account_nonce <= nonce:
             return None                          # the nonce is still unused: nothing has replaced it
         self.sleep(self.dropped_reprobe_sleep)
         if not gone():
             return None                          # a lagging backend, not a dropped transaction
+        if self.conn.get_receipt(tx_hash) is not None:
+            return None                          # mined after all: the one receipt read was lagging
         head = int(self.conn.w3.eth.block_number)
         if approvals:
             advice = "recover() then resume() re-dispatches"

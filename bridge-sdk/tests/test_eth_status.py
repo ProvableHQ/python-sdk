@@ -124,7 +124,7 @@ def test_a_replaced_transaction_still_served_as_unmined_is_dropped():
     sleeps = no_real_sleep(eth)
     receipt = Receipt(id=H2, protocol="hyperlane", status=Status.SOURCE_CONFIRMING, source_tx_id=H2,
                       protocol_state=hyperlane_state(sourceNonce="83"))
-    w3.provider.add_transaction(H2, sender=ACCT.address, to=WBTC_ROUTER)
+    w3.provider.add_transaction(H2, sender=ACCT.address, to=WBTC_ROUTER, nonce=83)
     w3.provider.tx_unmined.add(H2)                                   # served, but in no block
     w3.provider.nonce_latest = 83
     assert eth.source_status(WBTC_PLAN, receipt) is receipt          # nonce unused: genuinely pending
@@ -153,7 +153,7 @@ def test_not_found_then_found_unmined_still_counts_as_gone():
     eth, w3 = mainnet()
     receipt = Receipt(id=H2, protocol="hyperlane", status=Status.SOURCE_CONFIRMING, source_tx_id=H2,
                       protocol_state=hyperlane_state(sourceNonce="83"))
-    w3.provider.add_transaction(H2, sender=ACCT.address, to=WBTC_ROUTER)
+    w3.provider.add_transaction(H2, sender=ACCT.address, to=WBTC_ROUTER, nonce=83)
     w3.provider.tx_not_found.add(H2)
     w3.provider.nonce_latest = 85
 
@@ -177,6 +177,42 @@ def test_a_transaction_the_second_probe_finds_is_not_dropped():
     no_real_sleep(eth)
     eth.sleep = lambda seconds: w3.provider.tx_not_found.discard(H2)   # the next backend knows it
     assert eth.source_status(WBTC_PLAN, receipt) is receipt
+
+
+def test_a_receipt_that_appears_on_the_re_read_withdraws_the_verdict():
+    """The whole verdict can be built out of lagging backends: the one receipt read misses, both
+    probes serve the tx unmined from a stale mempool view, and the `latest` nonce read lands on a
+    fresh backend where OUR OWN now-mined transaction consumed it. Re-reading the receipt before
+    the verdict is issued is what tells those apart — and a found receipt means nothing was dropped."""
+    eth, w3 = mainnet()
+    sleeps = no_real_sleep(eth)
+    receipt = Receipt(id=H2, protocol="hyperlane", status=Status.SOURCE_CONFIRMING, source_tx_id=H2,
+                      protocol_state=hyperlane_state(sourceNonce="83"))
+    w3.provider.add_transaction(H2, sender=ACCT.address, to=WBTC_ROUTER, nonce=83)
+    w3.provider.tx_unmined.add(H2)                                   # both probes: served, in no block
+    w3.provider.add_receipt(H2, sender=ACCT.address, to=WBTC_ROUTER)
+    w3.provider.receipt_delay[H2] = 1                                # the FIRST receipt read lags; the re-read finds it
+    w3.provider.nonce_latest = 84                                    # consumed — by this very transaction
+    assert eth.source_status(WBTC_PLAN, receipt) is receipt          # no verdict: the receipt exists
+    assert sleeps == [0.5] and w3.provider.sent == []
+
+
+def test_a_probe_whose_nonce_or_sender_disagrees_with_the_checkpoint_is_no_verdict():
+    """A probe that serves the transaction hands us its own `nonce` and `from`. If either disagrees
+    with the checkpoint, the checkpoint does not describe this hash, and a verdict built on its
+    nonce would be about somebody else's transaction: never dropped on inconsistent data."""
+    eth, w3 = mainnet()
+    no_real_sleep(eth)
+    receipt = Receipt(id=H2, protocol="hyperlane", status=Status.SOURCE_CONFIRMING, source_tx_id=H2,
+                      protocol_state=hyperlane_state(sourceNonce="83"))
+    w3.provider.tx_unmined.add(H2)
+    w3.provider.nonce_latest = 85
+    w3.provider.add_transaction(H2, sender=ACCT.address, to=WBTC_ROUTER, nonce=91)   # not the checkpointed nonce
+    assert eth.source_status(WBTC_PLAN, receipt) is receipt
+    w3.provider.add_transaction(H2, sender=WBTC_ROUTER, to=WBTC_ROUTER, nonce=83)    # not the checkpointed sender
+    assert eth.source_status(WBTC_PLAN, receipt) is receipt
+    w3.provider.add_transaction(H2, sender=ACCT.address, to=WBTC_ROUTER, nonce=83)   # both agree: the verdict stands
+    assert eth.source_status(WBTC_PLAN, receipt).status == Status.EXPIRED
 
 
 def test_a_dropped_transaction_with_no_approval_says_what_to_inspect():

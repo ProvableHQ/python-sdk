@@ -180,12 +180,16 @@ class FakeRpcProvider(BaseProvider):
             "cumulativeGasUsed": "0x1", "gasUsed": "0x1", "effectiveGasPrice": "0x1", "type": "0x2",
             "contractAddress": None, "logsBloom": "0x" + "00" * 256, "logs": logs or []}
 
-    def add_transaction(self, tx_hash: str, *, sender: str, to: str, block_number: int = 0x65) -> None:
-        """Serve eth_getTransactionByHash for a hash the fake never accepted itself."""
+    def add_transaction(self, tx_hash: str, *, sender: str, to: str, block_number: int = 0x65, nonce: int = 0) -> None:
+        """Serve eth_getTransactionByHash for a hash the fake never accepted itself.
+
+        *nonce* is the transaction's own nonce as the node reports it: the dropped verdict
+        cross-checks it against the checkpoint, so a test about a checkpointed nonce has to stage it.
+        """
         self._observe_block(block_number)
         self.transactions[tx_hash] = {
             "hash": tx_hash, "from": to_checksum_address(sender), "to": to_checksum_address(to), "input": "0x", "value": "0x0",
-            "blockNumber": _hex(block_number), "blockHash": BLOCK_HASH, "nonce": "0x0", "gas": "0x1", "gasPrice": "0x1",
+            "blockNumber": _hex(block_number), "blockHash": BLOCK_HASH, "nonce": _hex(nonce), "gas": "0x1", "gasPrice": "0x1",
             "transactionIndex": "0x0", "type": "0x2", "chainId": _hex(self.chain_id), "v": "0x0", "r": "0x0", "s": "0x0"}
 
     def make_request(self, method: str, params: Any) -> dict:
