@@ -444,6 +444,36 @@ def test_resume_write_error_surfaces_recover_guidance_and_the_checkpoint():
     assert NONCE not in json.dumps(out)
 
 
+def test_resume_refuses_a_missing_private_nonce_before_any_rpc():
+    """m5: ``lifecycle.resume`` checks the nonce before touching the network, but routing that
+    refusal through the write path relabelled it ``next: "recover"`` — "your deposit may already be
+    on the wire". It never left the process. Pre-check it like ``bridge_complete`` does, so the
+    answer is the actionable configuration error and nothing is read or sent."""
+    b = FakeBridge()
+    plan = prepare(b.registry, source="ethereum/usdc", destination="aleo/usdcx", amount="2",
+                   recipient=ALEO_RECIPIENT, sender=EVM_ADDRESS, mint_mode="private")
+    approval = "0x" + "11" * 32
+    receipt = Receipt(id=approval, protocol="xreserve", status=Status.SOURCE_SUBMISSION_PENDING,
+                      protocol_state={"routeId": plan.route_id, "approvalTxIds": [approval],
+                                      "sourceSender": EVM_ADDRESS,
+                                      "hookData": "0x" + b.eth.hook_data.hex()})
+    b.eth.recover_result = receipt
+    cp = create_checkpoint(plan, receipt, b.registry).to_dict()
+
+    out = dispatch_tool(b, "bridge_resume", {"checkpoint": cp, "confirm": True})
+    assert out["error_type"] == "ConfigurationError" and "secret_nonce" in out["error"]
+    assert out.get("next") != "recover" and "how_to_fix" in out
+    # recover()'s read-only history scan ran; nothing that re-quotes or sends the deposit did
+    assert not any(name in ("eth.deposit_usdc", "eth.quote_deposit_usdc") for name, *_ in b.calls)
+    json.dumps(out)
+
+    # the same refusal without confirm= — the gate must not hide the missing input either
+    assert dispatch_tool(b, "bridge_resume", {"checkpoint": cp})["error_type"] == "ConfigurationError"
+    # and with the nonce the verb proceeds exactly as before
+    ok = dispatch_tool(b, "bridge_resume", {"checkpoint": cp, "secret_nonce": NONCE, "confirm": True})
+    assert "error" not in ok and NONCE not in json.dumps(ok)
+
+
 def test_complete_write_error_surfaces_recover_guidance_and_the_prepared_checkpoint():
     b = FakeBridge(environment="testnet")
     cp = _inbound_private_checkpoint(b)

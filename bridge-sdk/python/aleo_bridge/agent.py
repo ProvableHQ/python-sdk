@@ -345,8 +345,30 @@ def _h_execute(b, a):
         gas_payment_microcredits=a.get("gas_payment_microcredits"), secret_nonce=a.get("secret_nonce")))
 
 
+def _resume_needs_nonce(bridge: Any, progress: Any) -> bool:
+    """True when ``lifecycle.resume`` would demand a ``secret_nonce`` for this progress.
+
+    Only an EVM-source xReserve deposit with ``mint_mode == "private"``: it re-quotes the hook the
+    approval committed to, which is derived from the secret. An Aleo leg rebroadcasts proved bytes
+    and needs nothing.
+    """
+    plan = progress.plan
+    if plan.protocol != "xreserve" or getattr(plan, "mint_mode", "public") != "private":
+        return False
+    try:
+        resolved = lifecycle.resolve_route(bridge.registry, plan)
+    except BridgeError:
+        return False                       # an unresolvable route has a louder problem than this
+    return resolved.source_chain.family == "evm"
+
+
 def _h_resume(b, a):
     progress = lifecycle.recover(b, a["checkpoint"])                 # reads only
+    if _resume_needs_nonce(b, progress) and not a.get("secret_nonce"):
+        # Pre-checked like _h_complete: lifecycle.resume refuses this before any RPC, but routed
+        # through _write that refusal would come back as next: "recover" — "it may already be on
+        # the wire" — for a transfer that never left the process. Say what is actually missing.
+        return _missing_nonce("the deposit this resume finishes")
     if not a.get("confirm"):
         return _confirmation(progress=_serialize(progress, b.registry))
     return _write(b, lambda seen: lifecycle.resume(b, progress, on_checkpoint=seen.append,
