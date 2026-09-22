@@ -306,7 +306,10 @@ jobs:
         run: |
           cd "$RUNNER_TEMP"
           python -c "import aleo_bridge, aleo_bridge.eth, aleo_bridge.sol, aleo_bridge.mcp; print('aleo-bridge-sdk', aleo_bridge.__version__)"
-          python -m aleo_bridge | head -1
+          # Assert on the guide's content: `| head -1` alone exits 0 even when the wheel ships no
+          # AGENTS.md and the command prints nothing at all.
+          python -m aleo_bridge > agent-guide.txt
+          head -1 agent-guide.txt | grep -q '^# aleo-bridge'
       - name: Smoke test wheel WITHOUT extras
         run: |
           pip uninstall -y aleo-bridge-sdk web3 eth-account solders solana mcp

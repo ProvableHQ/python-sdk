@@ -25,6 +25,20 @@ def test_wheel_ships_agents_md():
     assert aleo_bridge.agent_guide().startswith("# aleo-bridge")
 
 
+def test_the_build_config_keeps_agents_md_inside_the_wheel():
+    """m7: ``agent_guide()`` reads AGENTS.md out of the installed package, so the file has to be
+    shipped, not just committed. hatchling packages the whole ``python/aleo_bridge`` directory —
+    assert both halves of that (the package root, and AGENTS.md being under it) and that nothing
+    excludes it again, so a future build-config edit that drops it fails here."""
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    wheel = pyproject["tool"]["hatch"]["build"]["targets"]["wheel"]
+    package_root = ROOT / "python" / "aleo_bridge"
+    assert wheel["packages"] == ["python/aleo_bridge"]
+    assert (package_root / "AGENTS.md").is_file()
+    for key in ("exclude", "artifacts-exclude"):
+        assert not any(".md" in pattern or "AGENTS" in pattern for pattern in wheel.get(key, []))
+
+
 def test_readme_covers_the_journey():
     readme = (ROOT / "README.md").read_text()
     for needle in ("Bridge.from_env()", "Bridge.from_profile()", "Ethereum(", "Solana(", "progress.next",
@@ -47,6 +61,9 @@ def test_ci_has_bridge_jobs():
     assert "environment: pypi-bridge" in workflow
     assert 'pip install "$(ls bridge-sdk/dist/*.whl)[evm,solana,mcp]"' in workflow
     assert re.search(r'pip install "\$\(ls bridge-sdk/dist/\*\.whl\)"\s*\n\s*python -c "import aleo_bridge', workflow)
+    # m7: the `python -m aleo_bridge` smoke must ASSERT on its output — piping it into head
+    # succeeds even when the guide is empty or missing from the wheel.
+    assert re.search(r"python -m aleo_bridge[^\n]*\n[^\n]*grep -q ['\"]?\^?# aleo-bridge", workflow)
 
 
 def test_import_without_optional_extras(monkeypatch):
