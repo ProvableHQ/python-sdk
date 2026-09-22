@@ -9,6 +9,7 @@ import os
 import stat
 import time
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 
@@ -199,6 +200,28 @@ def test_file_store_roundtrip_mode_and_atomic_rename(tmp_path):
     store.delete(SOURCE)
     store.delete(SOURCE)                                # idempotent
     assert store.list() == [] and store.load(SOURCE) is None
+
+
+def test_file_store_skips_unreadable_files_and_reports_them(tmp_path):
+    # I1: one file the store cannot read back must never hide the transfers next to it — list()
+    # returns the healthy records, and the rejects come back through list_with_problems().
+    store = FileCheckpointStore(tmp_path)
+    plan = _plan()
+    cp = create_checkpoint(plan, Receipt(id=SOURCE, protocol="xreserve", status=Status.SOURCE_CONFIRMING,
+                                         source_tx_id=SOURCE, protocol_state={"routeId": plan.route_id}),
+                           DEFAULT_REGISTRY)
+    store.save(cp)
+    (tmp_path / "future.json").write_text(json.dumps({"version": 2, "intent": {}, "route": {}}), encoding="utf-8")
+    (tmp_path / "garbage.json").write_text("{not json at all", encoding="utf-8")
+
+    assert store.list() == [cp]
+    checkpoints, problems = store.list_with_problems()
+    assert checkpoints == [cp]
+    assert {Path(p.path).name for p in problems} == {"future.json", "garbage.json"}
+    assert {p.error_type for p in problems} == {"CheckpointInvalidError"}
+    assert all(p.error for p in problems)
+    assert [p.to_dict() for p in store.list_problems()] == [p.to_dict() for p in problems]
+    assert set(problems[0].to_dict()) == {"error", "error_type", "path"}
 
 
 def test_file_store_sanitizes_ids_and_orders_by_mtime(tmp_path):

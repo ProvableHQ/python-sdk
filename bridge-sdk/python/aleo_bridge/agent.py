@@ -305,23 +305,29 @@ def _h_pending(b, a):
     Reconstruction is :func:`lifecycle.progress_from_checkpoint`, exactly what ``Bridge.pending()``
     runs per record (no network read, so one unreachable chain can never hide the others). It is
     called here rather than through ``Bridge.pending()`` because that verb returns bare ``Progress``
-    objects: it neither pairs each one with the checkpoint that produced it — which is what the
+    objects: it does not pair each one with the checkpoint that produced it — which is what the
     recovery tools take back, and must be the STORED record, not one re-derived from a receipt an
-    offline reconstruction may have flattened — nor reports the records it could not interpret at
-    all (it drops them). Here such a record becomes one error entry naming its checkpoint id, and
-    the healthy entries still come back.
+    offline reconstruction may have flattened.
+
+    Nothing is dropped. A record this build cannot interpret at all becomes one error entry naming
+    its ``checkpoint_id``, and a file the store could not even read back as a checkpoint becomes one
+    naming its ``path`` — the healthy entries still come back beside them, so a corrupt or stale
+    file can never make a transfer that is still on the wire invisible.
     """
     store = getattr(b, "checkpoints", None)
     if store is None:
         return []
+    lister = getattr(store, "list_with_problems", None)
+    checkpoints, problems = lister() if callable(lister) else (store.list(), [])
     out: list[dict[str, Any]] = []
-    for cp in store.list():
+    for cp in checkpoints:
         try:
             progress = lifecycle.progress_from_checkpoint(b.registry, cp)
         except BridgeError as exc:
             out.append(_error_payload(exc, checkpoint_id=cp.id))
             continue
         out.append({"progress": _serialize(progress, b.registry), "checkpoint": cp.to_dict()})
+    out.extend(problem.to_dict() for problem in problems)
     return out
 
 

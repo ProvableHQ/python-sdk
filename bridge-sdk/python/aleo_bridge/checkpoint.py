@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
-from .errors import CheckpointInvalidError
+from .errors import BridgeError, CheckpointInvalidError
 from .registry import Registry
 from .types import Plan, Receipt
 
@@ -190,6 +190,24 @@ def create_checkpoint(plan: Plan, receipt: Receipt, registry: Registry) -> Check
                       source=source, destination=destination, delivery_verification=verification)
 
 
+@dataclass(frozen=True)
+class CheckpointProblem:
+    """One stored record that could not be read back as a checkpoint.
+
+    A half-written file, a foreign JSON file dropped into the directory, or a record written by a
+    future version is reported as one of these instead of aborting the listing — the transfers
+    alongside it still come back.
+    """
+
+    path: str
+    error: str
+    error_type: str
+
+    def to_dict(self) -> dict[str, str]:
+        """The failure entry ``Bridge.pending()`` / ``bridge_pending`` report for this file."""
+        return {"error": self.error, "error_type": self.error_type, "path": self.path}
+
+
 @runtime_checkable
 class CheckpointStore(Protocol):
     """Where checkpoints live between processes. Implement all four methods."""
@@ -206,9 +224,11 @@ _UNSAFE = re.compile(r"[^A-Za-z0-9_-]")
 class FileCheckpointStore:
     """One ``<id>.json`` per receipt id under *directory*; mode 0600; atomic rename.
 
-    ``list()`` returns oldest-first by mtime. ``delete()`` of a missing id is a
-    no-op. Ids are sanitized for the filesystem; the stored ``receiptId`` keeps
-    the original.
+    ``list()`` returns oldest-first by mtime, skipping any file it cannot read
+    back as a checkpoint — those come back from ``list_problems()`` /
+    ``list_with_problems()`` instead, so one bad file never hides the transfers
+    beside it. ``delete()`` of a missing id is a no-op. Ids are sanitized for the
+    filesystem; the stored ``receiptId`` keeps the original.
     """
 
     def __init__(self, directory: Path | str) -> None:
@@ -241,10 +261,36 @@ class FileCheckpointStore:
             return None
         return Checkpoint.from_json(path.read_text(encoding="utf-8"))
 
+    def _paths(self) -> list[Path]:
+        return sorted((p for p in self.directory.glob("*.json") if not p.name.startswith(".")),
+                      key=lambda p: (p.stat().st_mtime_ns, p.name))
+
+    def list_with_problems(self) -> tuple[list[Checkpoint], list[CheckpointProblem]]:
+        """Every readable checkpoint, plus a :class:`CheckpointProblem` per file that is not one.
+
+        One unreadable file must never hide every in-flight transfer: a record this store cannot
+        parse (bad JSON, a future version, no transaction to identify it by) or cannot even read
+        (permissions, a half-written file, non-UTF-8 bytes) is skipped here and reported, so
+        ``Bridge.pending()`` can list the healthy transfers AND say what it could not read.
+        """
+        checkpoints: list[Checkpoint] = []
+        problems: list[CheckpointProblem] = []
+        for path in self._paths():
+            try:
+                checkpoints.append(Checkpoint.from_json(path.read_text(encoding="utf-8")))
+            except (BridgeError, OSError, UnicodeDecodeError) as exc:
+                problems.append(CheckpointProblem(path=str(path), error=str(exc),
+                                                  error_type=type(exc).__name__))
+        return checkpoints, problems
+
     def list(self) -> list[Checkpoint]:
-        paths = sorted((p for p in self.directory.glob("*.json") if not p.name.startswith(".")),
-                       key=lambda p: (p.stat().st_mtime_ns, p.name))
-        return [Checkpoint.from_json(p.read_text(encoding="utf-8")) for p in paths]
+        """Oldest-first by mtime; files that are not readable checkpoints are skipped (see
+        :meth:`list_problems`)."""
+        return self.list_with_problems()[0]
+
+    def list_problems(self) -> list[CheckpointProblem]:
+        """The files ``list()`` skipped, one entry each."""
+        return self.list_with_problems()[1]
 
     def delete(self, checkpoint_id: str) -> None:
         try:
@@ -253,4 +299,4 @@ class FileCheckpointStore:
             pass
 
 
-__all__ = ["Checkpoint", "CheckpointStore", "FileCheckpointStore", "create_checkpoint"]
+__all__ = ["Checkpoint", "CheckpointProblem", "CheckpointStore", "FileCheckpointStore", "create_checkpoint"]

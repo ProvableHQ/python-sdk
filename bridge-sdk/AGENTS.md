@@ -119,6 +119,12 @@ unreachable chain can never hide the others. A malformed checkpoint yields a ``P
 with ``next == "failed"`` and ``error`` set instead of raising; call ``wait()``/``recover()``
 on any entry to refresh it against live chain state.
 
+Nothing is ever dropped silently. A record this client cannot interpret at all — a route
+that no longer exists, a registry version this build did not write — and a file the store
+could not even read back come back as ``{"next": "failed", "error", "error_type"}`` entries
+(naming the ``checkpoint_id`` or the ``path``) alongside the healthy ``Progress`` objects,
+so a stale or corrupt file can never make a transfer that is still on the wire invisible.
+
 ## Serving a chatting user (the conversation pattern)
 
 ### Keys and identity

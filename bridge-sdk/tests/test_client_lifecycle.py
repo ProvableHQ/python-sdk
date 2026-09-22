@@ -10,11 +10,12 @@ so the export pin below now covers them; ``AGENTS.md`` is still Task 12's, and `
 is left untouched.
 """
 import inspect
+import json
 from pathlib import Path
 
 import aleo_bridge
 from aleo_bridge import agent, lifecycle
-from aleo_bridge.checkpoint import FileCheckpointStore, create_checkpoint
+from aleo_bridge.checkpoint import Checkpoint, FileCheckpointStore, create_checkpoint
 from aleo_bridge.client import Bridge
 from aleo_bridge.types import Receipt, Status
 from tests.fakes.fake_bridge import ALEO_RECIPIENT, EVM_ADDRESS, SOL_ADDRESS, FakeBridge
@@ -151,6 +152,36 @@ def test_pending_folds_a_malformed_checkpoint_into_a_failed_entry(tmp_path):
     good, bad = out
     assert good.next == "wait" and good.receipt.source_tx_id == "at1good"
     assert bad.next == "failed" and bad.error is not None and "no submitted source transaction" in bad.error
+
+
+def test_pending_reports_unreadable_files_and_version_mismatches_instead_of_dropping_them(tmp_path):
+    # I1/m4: neither a file the STORE cannot parse (a v2 record, a garbage file) nor a checkpoint
+    # THIS client cannot interpret (registry version mismatch) may abort or silently shrink the
+    # listing — the healthy transfer still comes back, and each problem is its own failed entry.
+    store = FileCheckpointStore(tmp_path)
+    b = FakeBridge(ethereum=False, checkpoints=store)
+    plan = lifecycle.prepare(b.registry, source="aleo/eth", destination="ethereum/eth",
+                             amount="0.000000000000000001", recipient=EVM_ADDRESS)
+    healthy = create_checkpoint(plan, Receipt(id="at1good", protocol="hyperlane", status=Status.SOURCE_CONFIRMING,
+                                              source_tx_id="at1good", protocol_state={"routeId": plan.route_id}),
+                                b.registry)
+    store.save(healthy)
+    store.save(Checkpoint(version=1, receipt_id="at1old", intent=healthy.intent,
+                          route={"id": plan.route_id, "registryVersion": "0.0.0-ancient"},
+                          source={"transactionId": "at1old"}))
+    (tmp_path / "future.json").write_text(json.dumps({"version": 2, "intent": {}, "route": {}}), encoding="utf-8")
+    (tmp_path / "garbage.json").write_text("{not json", encoding="utf-8")
+
+    out = Bridge.pending(b)
+    progresses = [p for p in out if not isinstance(p, dict)]
+    failures = [p for p in out if isinstance(p, dict)]
+    assert len(progresses) == 1 and progresses[0].receipt.source_tx_id == "at1good"
+    assert all(f["next"] == "failed" and f["error"] and f["error_type"] for f in failures)
+    mismatch = [f for f in failures if f.get("checkpoint_id") == "at1old"]
+    assert len(mismatch) == 1 and mismatch[0]["error_type"] == "RegistryVersionMismatchError"
+    unreadable = sorted(Path(f["path"]).name for f in failures if "path" in f)
+    assert unreadable == ["future.json", "garbage.json"]
+    assert b.calls == []                                   # still offline
 
 
 def test_bridge_verb_signatures_are_a_superset_of_the_lifecycle_verb_they_forward_to():

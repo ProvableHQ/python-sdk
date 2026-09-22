@@ -6,6 +6,7 @@ tool result, the synthetic xReserve max-fee entry, structured errors for an unco
 and `next: "recover"` guidance when a send's outcome is ambiguous.
 """
 import json
+from pathlib import Path
 
 import pytest
 
@@ -222,6 +223,26 @@ def test_pending_reports_a_malformed_record_instead_of_collapsing_the_list(tmp_p
     assert len(broken) == 1 and broken[0]["checkpoint_id"] == "at1broken"
     assert broken[0]["error_type"] == "CheckpointInvalidError" and broken[0]["error"]
     assert "progress" not in broken[0]
+    json.dumps(entries)
+
+
+def test_pending_reports_files_the_store_could_not_read_instead_of_hiding_them(tmp_path):
+    # I1: a file the STORE itself cannot read back (a future version, a half-written file) is not a
+    # checkpoint at all, so it never reaches progress_from_checkpoint — it must still be reported,
+    # named by path, next to the healthy transfers rather than silently skipped.
+    store = FileCheckpointStore(tmp_path)
+    b = FakeBridge(ethereum=False, checkpoints=store)
+    cp, _ = _aleo_out_checkpoint(b)
+    store.save(Checkpoint.from_dict(cp))
+    (tmp_path / "future.json").write_text(json.dumps({"version": 2, "intent": {}, "route": {}}), encoding="utf-8")
+    (tmp_path / "garbage.json").write_text("{not json at all", encoding="utf-8")
+
+    entries = dispatch_tool(b, "bridge_pending", {})
+    healthy = [e for e in entries if "progress" in e]
+    unreadable = [e for e in entries if "path" in e]
+    assert len(healthy) == 1 and healthy[0]["checkpoint"] == Checkpoint.from_dict(cp).to_dict()
+    assert sorted(Path(e["path"]).name for e in unreadable) == ["future.json", "garbage.json"]
+    assert all(e["error"] and e["error_type"] and "progress" not in e for e in unreadable)
     json.dumps(entries)
 
 

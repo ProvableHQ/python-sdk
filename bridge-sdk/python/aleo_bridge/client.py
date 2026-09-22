@@ -394,16 +394,28 @@ class Bridge:
         unreachable chain can never hide the others. A malformed checkpoint yields a ``Progress``
         with ``next == "failed"`` and ``error`` set instead of raising; call ``wait()``/``recover()``
         on any entry to refresh it against live chain state.
+
+        Nothing is ever dropped silently. A record this client cannot interpret at all — a route
+        that no longer exists, a registry version this build did not write — and a file the store
+        could not even read back come back as ``{"next": "failed", "error", "error_type"}`` entries
+        (naming the ``checkpoint_id`` or the ``path``) alongside the healthy ``Progress`` objects,
+        so a stale or corrupt file can never make a transfer that is still on the wire invisible.
         """
         store = self.checkpoints
         if store is None:
             return []
-        out = []
-        for cp in store.list():
+        lister = getattr(store, "list_with_problems", None)
+        checkpoints, problems = lister() if callable(lister) else (store.list(), [])
+        out: list = []
+        for cp in checkpoints:
             try:
                 out.append(_lifecycle.progress_from_checkpoint(self.registry, cp))
-            except BridgeError:
-                continue    # no Plan could be rebuilt at all (bad format/version/route) — nothing to report
+            except BridgeError as exc:
+                # No Plan could be rebuilt at all (bad format/version/route): report it, never drop
+                # it — an unreadable record may still be a transfer holding somebody's funds.
+                out.append({"next": "failed", "error": str(exc), "error_type": type(exc).__name__,
+                            "checkpoint_id": cp.id})
+        out.extend({"next": "failed", **problem.to_dict()} for problem in problems)
         return out
 
     # ── constructors ──
