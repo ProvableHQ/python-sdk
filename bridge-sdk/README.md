@@ -118,12 +118,13 @@ quote    = bridge.quote(source, destination, amount="…" | amount_atomic=…, r
 progress = bridge.execute(quote.plan, on_checkpoint=save, proving="delegate", mode=None,
                           record=None, merkle_proof=None, gas_payment_microcredits=None,
                           secret_nonce=None, poll_seconds=1.0, timeout_seconds=120.0)
-progress = bridge.wait(progress, until=None, poll_seconds=15.0, timeout_seconds=1200.0, on_update=None)
+progress = bridge.wait(progress, until=None, poll_seconds=15.0, timeout_seconds=1200.0, on_update=None,
+                       on_error=None, max_consecutive_errors=5)
 receipt  = bridge.get_status(plan, receipt)          # one refresh, no polling
 progress = bridge.recover(checkpoint)                # reads only
 progress = bridge.resume(progress, on_checkpoint=save)
 progress = bridge.complete(progress, secret_nonce="…", on_checkpoint=save)
-bridge.pending()                                     # recover() every stored checkpoint
+bridge.pending()                                     # offline, from the checkpoint store
 ```
 
 `execute` emits a `Checkpoint` at every boundary: after each approval hash,
@@ -456,8 +457,8 @@ covered hermetically by `tests/test_live_helpers.py`.
 | `ALEO_BRIDGE_HOME` | `from_profile` | profile directory (default `~/.aleo-bridge/`), holds only the Aleo key, mode 600 |
 | `ALEO_E2E_PRIVATE_KEY` | live tests / rehearsal, testnet | testnet Aleo key (alias `BRIDGE_LIVE_ALEO_TESTNET_PRIVATE_KEY`) |
 | `BRIDGE_LIVE_FUNDS`, `BRIDGE_LIVE_STATE_DIR` | live tests, rehearsal | `1` + a directory outside the repo — funded cases exist at all |
-| `BRIDGE_LIVE_MAINNET_ACK`, `BRIDGE_LIVE_MAINNET_CASES` | live tests, rehearsal | `I_ACKNOWLEDGE_BRIDGE_MAINNET_FUNDS` (see `tests/live/config.py`) + `leg-3,leg-5,…` — the named mainnet cases may run |
-| `BRIDGE_LIVE_MAINNET_EXECUTE` | live tests, rehearsal | `I_ACKNOWLEDGE_THIS_SUBMITS_MAINNET_TRANSACTIONS` — without it every case quotes and prechecks only |
+| `BRIDGE_LIVE_MAINNET_ACK`, `BRIDGE_LIVE_MAINNET_CASES` | live tests, rehearsal | `<see tests/live/config.py>` + a comma list of `evm-hyperlane`, `evm-xreserve`, `aleo-hyperlane`, `aleo-xreserve`, `solana-hyperlane` — the named mainnet cases may run |
+| `BRIDGE_LIVE_MAINNET_EXECUTE` | live tests, rehearsal | `<see tests/live/config.py>` — without it every case quotes and prechecks only |
 
 Gates and acknowledgement strings live only in `tests/live/config.py` — nothing
 in this repository sets them, and they never appear here in copy-pasteable
