@@ -847,6 +847,49 @@ def test_recover_resolves_the_case_from_the_state_file(rehearse, fake, state_dir
     assert seen["route_id"] == ETH_ROUTE and Path(seen["state_path"]) == state_path
 
 
+def test_testnet_submission_is_gated_only_on_the_funds_variables(rehearse, monkeypatch, tmp_path):
+    """I6: the mainnet acknowledgements gate MAINNET funds. Requiring them on testnet too made
+    ``--recover`` unable to finish a testnet transfer at all — the checkpoint was already on disk
+    and the funds already committed, and the run would only ever re-quote."""
+    monkeypatch.setenv(FUNDS, "1")
+    monkeypatch.setenv(STATE_DIR, str(tmp_path))
+
+    allowed, reason = rehearse.execution_allowed("aleo-xreserve", quote_only=False, environment="testnet")
+    assert allowed and "testnet" in reason
+    allowed, reason = rehearse.execution_allowed("aleo-xreserve", quote_only=False, environment="mainnet")
+    assert not allowed and ACK in reason and CASES in reason
+    # --quote-only and the funds gate still win in both environments
+    for environment in ("testnet", "mainnet"):
+        assert rehearse.execution_allowed("aleo-xreserve", quote_only=True, environment=environment)[0] is False
+    monkeypatch.delenv(FUNDS)
+    allowed, reason = rehearse.execution_allowed("aleo-xreserve", quote_only=False, environment="testnet")
+    assert not allowed and FUNDS in reason
+
+
+def test_recover_builds_its_client_for_the_environment_the_state_file_names(rehearse, fake, monkeypatch,
+                                                                            tmp_path):
+    """I6: ``--recover`` used to build a bare ``Bridge.from_env()``, i.e. always the mainnet key —
+    so a testnet state file was resumed with the wrong account. It now builds the client the way
+    the live suite does, per environment, from ``tests/live/config.py``."""
+    monkeypatch.setenv(STATE_DIR, str(tmp_path))
+    testnet_route = "xreserve:aleo-testnet/usdcx->sepolia/usdc"
+    state_path = tmp_path / "testnet" / "aleo-xreserve-resume.json"
+    live_helpers.save_live_state(state_path, live_helpers.LiveState(route_id=testnet_route, source_tx_id="at1s"))
+    built = []
+
+    def fake_build(environment):
+        built.append(environment)
+        return fake
+
+    def runner(bridge, route_id, **kwargs):
+        return live_helpers.LiveState(route_id=route_id, source_tx_id="at1s", completed=True)
+
+    monkeypatch.setattr(live_helpers, "build_bridge", fake_build)
+    monkeypatch.setitem(live_cases.RUNNERS, "aleo-xreserve", runner)
+    assert rehearse.run(["--recover", str(state_path), "--quote-only"], log=lambda _: None) == rehearse.EXIT_OK
+    assert built == ["testnet"]                    # never Bridge.from_env(), never the mainnet key
+
+
 def test_the_table_renders_one_line_per_route(rehearse):
     rows = [{"case": "evm-hyperlane", "route_id": ETH_ROUTE, "status": "quote-only", "reason": "",
              "source_tx_id": None, "message_id": None, "destination_tx_id": None, "resume": ""},

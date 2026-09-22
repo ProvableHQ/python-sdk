@@ -383,7 +383,35 @@ def redacted(values: Iterable[str]) -> str:
     return f"sha256:{digest[:12]}"
 
 
+def build_bridge(environment: str) -> Any:
+    """A fresh client for *environment* — new facade, new connections, same checkpoint store.
+
+    Keys and endpoints are resolved only through ``config``: the testnet bridge can never pick up
+    the mainnet Aleo key, and an unset RPC variable falls back to the public default. The pytest
+    suite and ``scripts/rehearse.py --recover`` share this one builder, so a rehearsal can never
+    resume a transfer with a different account than the suite would have used.
+    """
+    from tests.live import config as live_config
+
+    from aleo_bridge import Bridge
+    from aleo_bridge.checkpoint import FileCheckpointStore
+    from aleo_bridge.client import build_aleo
+    from aleo_bridge.eth import Ethereum
+    from aleo_bridge.sol import Solana
+
+    aleo = build_aleo(live_config.aleo_endpoint(), live_config.ALEO_NETWORKS[environment],
+                      live_config.aleo_private_key(environment))
+    ethereum = Ethereum(live_config.evm_rpc_url(environment),
+                        private_key=live_config.evm_private_key(environment))
+    solana = Solana.from_env() if environment == "mainnet" else None
+    store = FileCheckpointStore(live_config.state_dir() / environment / "checkpoints")
+    bridge = Bridge(aleo, ethereum=ethereum, solana=solana, checkpoints=store)
+    assert bridge.environment == environment
+    return bridge
+
+
 __all__ = [
+    "build_bridge",
     "DEFAULT_POLL_SECONDS", "DEFAULT_TIMEOUT_SECONDS", "ExplorerError", "HYPERLANE_EXPLORER_URL",
     "HYPERLANE_QUERY", "HyperlaneDelivery", "LiveBenchmark", "LiveCaseError", "LiveState",
     "LiveStateError", "LiveTimeoutError", "Mark", "Underfunded", "ensure_secret_nonce",

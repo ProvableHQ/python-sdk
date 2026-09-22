@@ -34,6 +34,7 @@ from aleo_bridge.registry import DEFAULT_REGISTRY, Route
 
 from . import cases as live_cases
 from . import config as live_config
+from . import helpers as live_helpers
 from .helpers import LiveBenchmark, LiveTimeoutError, Underfunded
 
 pytestmark = pytest.mark.live
@@ -85,26 +86,9 @@ def _params(case: str) -> Any:
 # ── clients ──────────────────────────────────────────────────────────────────
 
 def _build_bridge(environment: str) -> Any:
-    """A fresh client for *environment* — new facade, new connections, same checkpoint store.
-
-    Keys and endpoints are resolved only through ``config``: the testnet bridge can never pick up
-    the mainnet Aleo key, and an unset RPC variable falls back to the public default.
-    """
-    from aleo_bridge import Bridge
-    from aleo_bridge.checkpoint import FileCheckpointStore
-    from aleo_bridge.client import build_aleo
-    from aleo_bridge.eth import Ethereum
-    from aleo_bridge.sol import Solana
-
-    aleo = build_aleo(live_config.aleo_endpoint(), live_config.ALEO_NETWORKS[environment],
-                      live_config.aleo_private_key(environment))
-    ethereum = Ethereum(live_config.evm_rpc_url(environment),
-                        private_key=live_config.evm_private_key(environment))
-    solana = Solana.from_env() if environment == "mainnet" else None
-    store = FileCheckpointStore(live_config.state_dir() / environment / "checkpoints")
-    bridge = Bridge(aleo, ethereum=ethereum, solana=solana, checkpoints=store)
-    assert bridge.environment == environment
-    return bridge
+    """A fresh client for *environment*, from the one builder ``scripts/rehearse.py`` also uses
+    (``helpers.build_bridge``) — so a rehearsal resumes with exactly the account this suite would."""
+    return live_helpers.build_bridge(environment)
 
 
 #: Opt-in for sharing a MAINNET view key with the hosted record scanner (see below).

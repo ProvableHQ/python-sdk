@@ -9,10 +9,13 @@
 The CLI and the pytest suite call the SAME case functions, so a rehearsal and a test cannot drift.
 
 This script never sets, exports, prints or suggests a value for an acknowledgement variable.  It
-READS ``BRIDGE_LIVE_FUNDS`` / ``BRIDGE_LIVE_STATE_DIR`` / ``BRIDGE_LIVE_MAINNET_ACK`` /
-``BRIDGE_LIVE_MAINNET_CASES`` / ``BRIDGE_LIVE_MAINNET_EXECUTE``; without all of them it runs to the
-quote and reports what it would have submitted.  Keys, secret nonces, attestations and record
-plaintexts never reach the output — addresses, amounts and transaction ids do.
+READS ``BRIDGE_LIVE_FUNDS`` / ``BRIDGE_LIVE_STATE_DIR`` and, on MAINNET only, ``BRIDGE_LIVE_MAINNET_ACK``
+/ ``BRIDGE_LIVE_MAINNET_CASES`` / ``BRIDGE_LIVE_MAINNET_EXECUTE``; without them it runs to the
+quote and reports what it would have submitted.  Testnet is gated on the funds variables alone —
+those acknowledgements exist to protect mainnet funds.  ``--recover`` builds its client the way
+the live suite does, per environment, so a testnet state file is never resumed with the mainnet
+account.  Keys, secret nonces, attestations and record plaintexts never reach the output —
+addresses, amounts and transaction ids do.
 
 Exit codes: ``0`` everything ran (or was quoted/skipped), ``1`` a case failed, ``2`` a case is
 still pending (a timeout leaves the checkpoint on disk; re-run with ``--recover``).
@@ -33,8 +36,10 @@ if str(ROOT / "python") not in sys.path:
     sys.path.insert(0, str(ROOT / "python"))
 
 from aleo_bridge.errors import BridgeError, PollingTimeoutError            # noqa: E402
+from aleo_bridge.registry import DEFAULT_REGISTRY                          # noqa: E402
 from tests.live import cases as live_cases                                 # noqa: E402
 from tests.live import config as live_config                               # noqa: E402
+from tests.live import helpers as live_helpers                             # noqa: E402
 from tests.live.helpers import (LiveBenchmark, LiveCaseError, LiveTimeoutError,   # noqa: E402
                                 Underfunded, load_live_state)
 
@@ -78,13 +83,21 @@ def resolve_routes(registry: Any, case: str, route: str | None = None,
     return chosen
 
 
-def execution_allowed(case: str, *, quote_only: bool) -> tuple[bool, str]:
-    """Whether the wallet may submit, and the reason when it may not (variable names only)."""
+def execution_allowed(case: str, *, quote_only: bool, environment: str = "mainnet") -> tuple[bool, str]:
+    """Whether the wallet may submit, and the reason when it may not (variable names only).
+
+    The MAINNET_ACK / MAINNET_CASES / MAINNET_EXECUTE acknowledgements gate MAINNET funds, and are
+    required only there. Demanding them on testnet made ``--recover`` unable to finish a testnet
+    transfer at all: the funds are already committed and the checkpoint is already on disk, so a
+    rehearsal that can only re-quote is useless. Testnet needs the funds gate and nothing else.
+    """
     if quote_only:
         return False, "--quote-only was given"
     if not live_config.live_funds_enabled():
         return False, (f"{live_config.FUNDS_VAR} and {live_config.STATE_DIR_VAR} do not enable "
                        "funded live cases")
+    if environment != "mainnet":
+        return True, f"{environment} needs no mainnet acknowledgement"
     if not live_config.mainnet_case_enabled(case):
         return False, (f"{live_config.MAINNET_ACK_VAR} and {live_config.MAINNET_CASES_VAR} do not "
                        f"enable the {case} case")
@@ -172,19 +185,36 @@ def _default_bridge() -> Any:
     return Bridge.from_env()
 
 
-def run(argv: list[str] | None = None, *, bridge_factory: Callable[[], Any] = _default_bridge,
+def _recovery_route_id(state_path: Path) -> str:
+    route_id = json.loads(state_path.read_text(encoding="utf-8")).get("routeId")
+    if not isinstance(route_id, str):
+        raise SystemExit(f"{state_path} does not name a routeId")
+    return route_id
+
+
+def run(argv: list[str] | None = None, *, bridge_factory: Callable[[], Any] | None = None,
         log: Callable[[str], None] = print) -> int:
     args = parse_args(argv)
     run_benchmark = LiveBenchmark("rehearse", log=log)
+
+    # --recover finishes a transfer whose funds are already committed, so its client must be the
+    # one the live suite would have built for THAT state file's environment (per-environment keys
+    # and endpoints from tests/live/config.py) — a bare Bridge.from_env() is always the mainnet
+    # account and would resume a testnet transfer with the wrong signer.
+    recovery_path = Path(args.recover).expanduser().resolve() if args.recover else None
+    if bridge_factory is None:
+        if recovery_path is not None:
+            recovery_environment = DEFAULT_REGISTRY.route(_recovery_route_id(recovery_path)).environment
+            bridge_factory = lambda: live_helpers.build_bridge(recovery_environment)    # noqa: E731
+        else:
+            bridge_factory = _default_bridge
     bridge = bridge_factory()
     run_benchmark.mark("clients-created")
     environment = bridge.environment
 
-    if args.recover:
-        state_path = Path(args.recover).expanduser().resolve()
-        route_id = json.loads(state_path.read_text(encoding="utf-8")).get("routeId")
-        if not isinstance(route_id, str):
-            raise SystemExit(f"{state_path} does not name a routeId")
+    if recovery_path is not None:
+        state_path = recovery_path
+        route_id = _recovery_route_id(state_path)
         route = bridge.registry.route(route_id)
         case = args.case or live_cases.case_for_route(bridge.registry, route)
         if case is None:
@@ -196,13 +226,16 @@ def run(argv: list[str] | None = None, *, bridge_factory: Callable[[], Any] = _d
         targets = [(route, state_path_for(case, route.id, environment))
                    for route in resolve_routes(bridge.registry, case, args.route, environment)]
 
-    execute, reason = execution_allowed(case, quote_only=args.quote_only)
+    execute, reason = execution_allowed(case, quote_only=args.quote_only, environment=environment)
     log(f"case {case} · environment {environment} · registry {bridge.registry.version}")
     log(f"submission: {'ENABLED' if execute else 'disabled'} ({reason})")
     if not execute and not args.quote_only:
-        log("Nothing will be submitted. Mainnet submission is gated on the acknowledgement variables "
-            f"({live_config.MAINNET_ACK_VAR}, {live_config.MAINNET_CASES_VAR}, "
-            f"{live_config.MAINNET_EXECUTE_VAR}); set them yourself, for one command, in your own shell.")
+        gates = (f"{live_config.FUNDS_VAR} and {live_config.STATE_DIR_VAR}" if environment != "mainnet"
+                 else f"{live_config.FUNDS_VAR}, {live_config.STATE_DIR_VAR}, "
+                      f"{live_config.MAINNET_ACK_VAR}, {live_config.MAINNET_CASES_VAR} and "
+                      f"{live_config.MAINNET_EXECUTE_VAR}")
+        log(f"Nothing will be submitted. Submission on {environment} is gated on {gates}; "
+            "set them yourself, for one command, in your own shell.")
 
     rows = [run_route(bridge, case, route, execute=execute, state_path=path, log=log)
             for route, path in targets]
