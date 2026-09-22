@@ -24,6 +24,7 @@ from ._calls import is_duplicate_submission
 from .encoding import HOOK_DATA_BYTES
 from ._plan import build_plan
 from .checkpoint import Checkpoint, create_checkpoint
+from .eth import HEAD_RACE_RE            # one definition of "the RPC head lagged", shared with wait()'s classifier
 from .errors import (
     AttestationError,
     BridgeError,
@@ -842,6 +843,10 @@ def _is_transient_error(exc: Exception) -> bool:
         if type(exc).__name__ == "ProviderConnectionError":     # web3 extra not installed here
             return True
     if isinstance(exc, BridgeError) and _TRANSIENT_BRIDGE_ERROR_RE.search(str(exc)):
+        return True
+    # A recovery log scan that hit a lagging RPC head (eth.HEAD_RACE_RE) has already retried on its
+    # own; it is still the cluster catching up, not a real failure, so wait() polls again.
+    if isinstance(exc, BridgeError) and HEAD_RACE_RE.search(str(exc)):
         return True
     return False
 

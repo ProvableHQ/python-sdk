@@ -164,6 +164,69 @@ def test_a_failing_log_chunk_names_the_span_it_could_not_read():
     assert len(w3.provider.log_filters) == 2                         # stopped at the failing chunk
 
 
+HEAD_RACE = "block range extends beyond current head block"
+
+
+def record_sleeps(eth, *, then=None):
+    """Replace the retry pause with a recorder; *then* runs at each pause (to move the fake's head)."""
+    sleeps = []
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        if then is not None:
+            then()
+
+    eth.sleep = sleep
+    return sleeps
+
+
+def test_a_lagging_rpc_head_is_retried_not_fatal():
+    """Mainnet 2026-09-22: publicnode rejected -32602 'block range extends beyond current head
+    block' for a range its own eth_blockNumber had just handed out — the node answering getLogs was
+    behind the one answering the head. Recovery re-reads the head and retries instead of aborting."""
+    eth, w3 = mainnet_read_only()
+    w3.provider.add_receipt(APPROVAL, block_number=0x60)
+    dispatch_history(w3, RECOVERED, block_number=0x65)
+    w3.provider.log_scan_errors[1] = HEAD_RACE
+    sleeps = record_sleeps(eth, then=lambda: setattr(w3.provider, "block_number", w3.provider.block_number + 1))
+    receipt = eth.recover_source(WBTC_PLAN, hyperlane_checkpoint())
+    assert receipt.status == Status.DELIVERY_PENDING and receipt.source_tx_id == RECOVERED
+    assert sleeps == [0.5] and len(w3.provider.log_filters) == 2      # one retry, one recorded pause
+
+
+def test_a_head_race_follows_the_answering_node_down():
+    """The retry's upper bound only moves DOWN, to the head the answering node admits to."""
+    eth, w3 = mainnet_read_only()
+    w3.provider.add_receipt(APPROVAL, block_number=101)
+    w3.provider.block_number = 200
+    w3.provider.log_scan_errors[1] = HEAD_RACE
+    record_sleeps(eth, then=lambda: setattr(w3.provider, "block_number", 150))
+    assert eth.recover_source(WBTC_PLAN, hyperlane_checkpoint()).status == Status.SOURCE_SUBMISSION_PENDING
+    assert [(f["fromBlock"], f["toBlock"]) for f in w3.provider.log_filters] == [
+        (hex(101), hex(200)), (hex(101), hex(150))]
+
+
+def test_a_head_race_that_never_clears_still_raises():
+    """The retries are bounded: a scan that cannot finish must never read as an empty history."""
+    eth, w3 = mainnet_read_only()
+    w3.provider.add_receipt(APPROVAL, block_number=0x65)
+    for call in range(1, 8):
+        w3.provider.log_scan_errors[call] = HEAD_RACE
+    sleeps = record_sleeps(eth)
+    with pytest.raises(BridgeError, match="head lagged the range it reported") as exc:
+        eth.recover_source(WBTC_PLAN, hyperlane_checkpoint())
+    assert HEAD_RACE in str(exc.value)
+    assert sleeps == [0.5] * 5 and len(w3.provider.log_filters) == 6       # 1 attempt + 5 retries
+
+
+def test_a_head_race_is_transient_for_wait():
+    """``wait`` polls again rather than aborting the transfer over a cluster that is catching up."""
+    from aleo_bridge.lifecycle import _is_transient_error
+
+    assert _is_transient_error(BridgeError(f"eth_getLogs failed for blocks 1-2 of 1-2 on 0xabc: {HEAD_RACE}"))
+    assert not _is_transient_error(BridgeError("eth_getLogs failed: query returned more than 10000 results"))
+
+
 def test_xreserve_scan_is_chunked_too():
     w3 = fake_web3(chain_id=11155111)
     eth = make_bridge(environment="testnet", ethereum=Ethereum(w3=w3)).eth

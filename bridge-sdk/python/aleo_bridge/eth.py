@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from dataclasses import dataclass, fields
 from typing import Any, Mapping
 
@@ -51,6 +52,26 @@ Public RPC endpoints cap the range (and the result size) of a single ``eth_getLo
 unbounded ``{"fromBlock": n}`` filter is refused outright by most of them once ``n`` is far
 enough behind the head. Recovery therefore walks the range in chunks of this many blocks.
 """
+
+
+HEAD_RACE_RE = re.compile(r"beyond current head|head block|exceeds.*head", re.IGNORECASE)
+"""A JSON-RPC error that means "your ``toBlock`` is ahead of the block I have", not a bad request.
+
+A load-balanced endpoint answers ``eth_blockNumber`` and ``eth_getLogs`` from different nodes, so a
+range bounded by one node's head can be beyond another's: on 2026-09-22 publicnode answered a
+recovery scan with ``-32602 block range extends beyond current head block`` for a range it had
+itself just handed out. Kept deliberately narrow — only phrasings about the HEAD block match, so a
+genuine "range too large" or "query returned more than N results" still fails loudly rather than
+being retried forever. ``lifecycle._is_transient_error`` reads it too, so ``wait`` retries instead
+of aborting.
+"""
+
+LOG_SCAN_HEAD_RACE_RETRIES = 5
+"""How many times one ``eth_getLogs`` chunk re-reads the head and retries before giving up."""
+
+LOG_SCAN_HEAD_RACE_SLEEP_SECONDS = 0.5
+"""Pause between those retries — long enough for a lagging node to catch up, short enough to stay
+inside a recovery call."""
 
 
 def _provider_errors() -> tuple[type[BaseException], ...]:
@@ -361,6 +382,9 @@ class EthModule:
         self.network: str = bridge.network            # "mainnet" | "testnet" → aleo.<network> for encoders
         self.chain: Chain = self.registry.chain(EVM_CHAIN_BY_ENVIRONMENT[bridge.environment])
         self.log_scan_chunk_blocks = log_scan_chunk_blocks        # recovery eth_getLogs span; lower it for strict RPCs
+        self.log_scan_head_race_retries = LOG_SCAN_HEAD_RACE_RETRIES
+        self.log_scan_head_race_sleep = LOG_SCAN_HEAD_RACE_SLEEP_SECONDS
+        self.sleep: Any = time.sleep          # replaced in tests so the retry pause is recorded, never waited
 
     @property
     def log_scan_chunk_blocks(self) -> int:
@@ -1270,30 +1294,53 @@ class EthModule:
             block = number if block is None or number > block else block
         return block
 
+    def _head_block(self, address: str) -> int:
+        errors = _provider_errors()
+        try:
+            return int(self.conn.w3.eth.block_number)
+        except errors as exc:
+            raise BridgeError(f"Could not read the current block number to bound a log scan of {address}: {exc}") from exc
+
     def _scan_logs(self, address: str, from_block: int) -> list[Any]:
         """Every log of *address* from *from_block* to the head, read in bounded ascending chunks.
 
         The head is read once so the scan terminates on a fixed range, and every request carries an
         explicit ``fromBlock``/``toBlock``: an unbounded filter is what public RPCs reject or truncate,
         and a truncated answer would silently read as "no dispatch/deposit was ever submitted".
+
+        A load-balanced endpoint can answer ``eth_getLogs`` from a node behind the one that gave us
+        that head, which rejects the range it just handed out (:data:`HEAD_RACE_RE`). Such a chunk is
+        retried up to ``log_scan_head_race_retries`` times, pausing ``log_scan_head_race_sleep``
+        seconds and re-reading the head each time; the scan's upper bound only ever moves DOWN to the
+        answering node's head, so the range stays one the whole cluster can serve. Any other provider
+        error, and a head race that outlives the retries, still raises ``BridgeError`` — a scan that
+        cannot finish must never look like an empty history.
         """
         errors = _provider_errors()
         chunk = self.log_scan_chunk_blocks
-        try:
-            latest = int(self.conn.w3.eth.block_number)
-        except errors as exc:
-            raise BridgeError(f"Could not read the current block number to bound a log scan of {address}: {exc}") from exc
+        latest = self._head_block(address)
         logs: list[Any] = []
         start = from_block
         while start <= latest:
             end = min(start + chunk - 1, latest)
-            try:
-                logs.extend(self.conn.w3.eth.get_logs({"address": address, "fromBlock": start, "toBlock": end}))
-            except errors as exc:
-                raise BridgeError(
-                    f"eth_getLogs failed for blocks {start}-{end} of {from_block}-{latest} on {address}: {exc}. "
-                    f"Use a dedicated RPC endpoint, or a smaller EthModule(log_scan_chunk_blocks=...) "
-                    f"than the current {chunk}.") from exc
+            for attempt in range(self.log_scan_head_race_retries + 1):
+                try:
+                    logs.extend(self.conn.w3.eth.get_logs({"address": address, "fromBlock": start, "toBlock": end}))
+                    break
+                except errors as exc:
+                    head_race = HEAD_RACE_RE.search(str(exc)) is not None
+                    if head_race and attempt < self.log_scan_head_race_retries:
+                        self.sleep(self.log_scan_head_race_sleep)
+                        latest = min(latest, self._head_block(address))
+                        end = min(end, latest)
+                        if end >= start:
+                            continue                  # the answering node has caught up, or we followed it down
+                    raise BridgeError(
+                        f"eth_getLogs failed for blocks {start}-{end} of {from_block}-{latest} on {address}: {exc}. "
+                        + (f"The endpoint's head lagged the range it reported for {self.log_scan_head_race_retries} "
+                           f"retries. " if head_race else "")
+                        + f"Use a dedicated RPC endpoint, or a smaller EthModule(log_scan_chunk_blocks=...) "
+                        f"than the current {chunk}.") from exc
             start = end + 1
         return logs
 
