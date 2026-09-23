@@ -80,7 +80,7 @@ class HyperlaneModule:
     def outbound_route(self, asset: Any) -> Route:
         """The single active, non-placeholder Hyperlane route leaving this Aleo asset."""
         source = self._aleo_asset(asset)
-        candidates = [r for r in self._bridge.registry.routes(protocol="hyperlane", include_unavailable=True,
+        candidates = [r for r in self._bridge.registry.routes(bridge_protocol="hyperlane", include_unavailable=True,
                                                              environment=self._bridge.environment)
                       if r.source_asset_id == source.id]
         if not candidates:
@@ -110,7 +110,7 @@ class HyperlaneModule:
         return GasQuote(route.id, gas_limit, config["gas_overhead"], config["gas_price"], config["exchange_rate"], payment)
 
     def _mailbox_program(self) -> str:
-        for route in self._bridge.registry.routes(protocol="hyperlane", include_unavailable=True, environment=self._bridge.environment):
+        for route in self._bridge.registry.routes(bridge_protocol="hyperlane", include_unavailable=True, environment=self._bridge.environment):
             program = route.metadata.get("aleoMailboxProgram")
             if isinstance(program, str) and program:
                 return program

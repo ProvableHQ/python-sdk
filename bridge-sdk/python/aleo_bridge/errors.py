@@ -29,7 +29,7 @@ class RouteNotFoundError(BridgeError):
 
 
 class AmbiguousRouteError(BridgeError):
-    """More than one route matches; pass protocol= to disambiguate."""
+    """More than one route matches; pass bridge_protocol= to disambiguate."""
 
 
 class RouteUnavailableError(BridgeError):

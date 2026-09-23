@@ -152,27 +152,34 @@ class Registry:
         raise RouteNotFoundError(f"Unknown bridge asset: {chain}/{key}")
 
     # ── routes ──
-    def _endpoint_matches(self, asset_id: str, selector: str | None) -> bool:
-        if selector is None:
-            return True
+    def _endpoint_matches(self, asset_id: str, chain: str | None, key: str | None) -> bool:
         asset = self._asset_by_id[asset_id]
-        if "/" in selector:
-            return asset.id.lower() == selector.lower()
-        return asset.chain_id.lower() == selector.lower()
+        if chain is not None and asset.chain_id.lower() != chain.lower():
+            return False
+        if key is not None and asset.key.lower() != key.lower():
+            return False
+        return True
 
-    def routes(self, source: str | None = None, destination: str | None = None, protocol: str | None = None,
-               symbol: str | None = None, include_unavailable: bool = False, environment: str | None = None) -> list[Route]:
-        """Filter routes; *source*/*destination* accept a chain id or an ``"chain/key"`` asset ref.
-        Disabled routes are hidden unless *include_unavailable*; metadata-required routes are always listed."""
+    def routes(self, *, source_chain: str | None = None, source_asset: str | None = None,
+               destination_chain: str | None = None, destination_asset: str | None = None,
+               bridge_protocol: str | None = None, symbol: str | None = None,
+               include_unavailable: bool = False, environment: str | None = None) -> list[Route]:
+        """Filter routes with veil's ``getRoutes`` vocabulary: ``source_chain`` / ``destination_chain``
+        (chain ids), ``bridge_protocol`` (``"xreserve"`` | ``"hyperlane"``; veil's ``quote`` spelling,
+        used for every selector in this SDK) and ``symbol``, plus ``source_asset`` /
+        ``destination_asset`` (asset keys such as ``"usdc"``) to narrow a chain pair to one asset.
+        Every filter is case-insensitive. Disabled routes are hidden unless *include_unavailable*;
+        metadata-required routes are always listed."""
         out = []
         for r in self._routes:
             if not include_unavailable and r.availability == "disabled":
                 continue
             if environment is not None and r.environment != environment:
                 continue
-            if protocol is not None and r.protocol != protocol:
+            if bridge_protocol is not None and r.protocol != bridge_protocol:
                 continue
-            if not self._endpoint_matches(r.source_asset_id, source) or not self._endpoint_matches(r.destination_asset_id, destination):
+            if (not self._endpoint_matches(r.source_asset_id, source_chain, source_asset)
+                    or not self._endpoint_matches(r.destination_asset_id, destination_chain, destination_asset)):
                 continue
             if symbol is not None:
                 symbols = {self._asset_by_id[r.source_asset_id].symbol.lower(), self._asset_by_id[r.destination_asset_id].symbol.lower()}
@@ -187,19 +194,31 @@ class Registry:
         except KeyError:
             raise RouteNotFoundError(f"Unknown bridge route: {route_id}") from None
 
-    def find_route(self, source: Any, destination: Any, protocol: str | None = None) -> Route:
-        """prepare()'s lookup: the single non-disabled route for an exact asset pair (metadata-required included)."""
-        src, dst = self.asset(source), self.asset(destination)
-        matches = [r for r in self._routes
-                   if r.source_asset_id == src.id and r.destination_asset_id == dst.id
-                   and r.availability != "disabled" and (protocol is None or r.protocol == protocol)]
+    def find_route(self, *, source_chain: str, source_asset: str, destination_chain: str,
+                   destination_asset: str | None = None, bridge_protocol: str | None = None) -> Route:
+        """prepare()'s lookup: the single non-disabled route out of ``source_chain``/``source_asset``
+        into ``destination_chain`` (metadata-required included). ``destination_asset`` and
+        ``bridge_protocol`` are only needed when more than one route fits; the error says which one."""
+        matches = self.routes(source_chain=source_chain, source_asset=source_asset,
+                              destination_chain=destination_chain, destination_asset=destination_asset,
+                              bridge_protocol=bridge_protocol)
         if not matches:
+            wanted = f"{source_chain}/{source_asset} to {destination_chain}"
+            if destination_asset:
+                wanted += f"/{destination_asset}"
             raise RouteNotFoundError(
-                f"No bridge route from {src.id} to {dst.id}" + (f" over {protocol}" if protocol else "")
-                + "; list candidates with registry.routes(source=..., destination=...)")
+                f"No bridge route from {wanted}" + (f" over {bridge_protocol}" if bridge_protocol else "")
+                + "; list candidates with routes(source_chain=..., destination_chain=...)")
         if len(matches) > 1:
+            ids = [r.id for r in matches]
+            hints = []
+            if destination_asset is None and len({r.destination_asset_id for r in matches}) > 1:
+                hints.append("destination_asset=")
+            if bridge_protocol is None and len({r.protocol for r in matches}) > 1:
+                hints.append("bridge_protocol=")
             raise AmbiguousRouteError(
-                f"{len(matches)} routes from {src.id} to {dst.id}: {[r.id for r in matches]} — pass protocol=")
+                f"{len(matches)} routes from {source_chain}/{source_asset} to {destination_chain}: {ids}"
+                f" — pass {' and/or '.join(hints) or 'a narrower filter'}")
         return matches[0]
 
 

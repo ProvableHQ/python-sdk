@@ -488,7 +488,7 @@ class EthModule:
     def _hyperlane_route(self, asset: Asset) -> Route:
         if asset.chain_id != self.chain.id:
             raise RouteNotFoundError(f"{asset.id} is not on {self.chain.id}; bridge.eth drives {self.chain.id} only")
-        candidates = [r for r in self.registry.routes(protocol="hyperlane", include_unavailable=True,
+        candidates = [r for r in self.registry.routes(bridge_protocol="hyperlane", include_unavailable=True,
                                                      environment=self.bridge.environment)
                       if r.source_asset_id == asset.id]
         if not candidates:
@@ -504,7 +504,7 @@ class EthModule:
         return active[0]
 
     def _xreserve_route(self) -> Route:
-        routes = [r for r in self.registry.routes(protocol="xreserve", environment=self.bridge.environment)
+        routes = [r for r in self.registry.routes(bridge_protocol="xreserve", environment=self.bridge.environment)
                   if self.registry.asset(r.source_asset_id).chain_id == self.chain.id]
         if len(routes) != 1:
             raise RouteNotFoundError(f"Expected exactly one xReserve deposit route from {self.chain.id}, found {len(routes)}")
@@ -1731,7 +1731,7 @@ class EthModule:
         checked. Only if no such route exists do we fall back to any route that merely touches this
         chain (whose ``mailboxAddress`` may be the remote one, and is unvalidated).
         """
-        routes = list(self.registry.routes(protocol="hyperlane", include_unavailable=True,
+        routes = list(self.registry.routes(bridge_protocol="hyperlane", include_unavailable=True,
                                            environment=self.bridge.environment))
         for route in routes:
             if self.registry.asset(route.source_asset_id).chain_id != self.chain.id:

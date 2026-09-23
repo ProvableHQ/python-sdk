@@ -32,7 +32,7 @@ class XReserveModule:
     # ── routes ──
     def _single(self, direction: str) -> Route:
         registry, aleo = self._bridge.registry, self._bridge.aleo_chain().id
-        matches = [r for r in registry.routes(protocol="xreserve", include_unavailable=True, environment=self._bridge.environment)
+        matches = [r for r in registry.routes(bridge_protocol="xreserve", include_unavailable=True, environment=self._bridge.environment)
                    if registry.asset(r.destination_asset_id if direction == "inbound" else r.source_asset_id).chain_id == aleo]
         if not matches:
             raise RouteNotFoundError(f"No {direction} xReserve route for {self._bridge.environment}")

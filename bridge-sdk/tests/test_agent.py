@@ -20,13 +20,15 @@ from tests.fakes.fake_bridge import ALEO_RECIPIENT, EVM_ADDRESS, RECORD_PLAINTEX
 READS = {"bridge_status", "bridge_list_assets", "bridge_list_routes", "bridge_quote", "bridge_get_progress",
          "bridge_pending"}
 WRITES = {"bridge_execute", "bridge_resume", "bridge_complete", "bridge_shield", "bridge_unshield"}
-QUOTE_ARGS = {"source": "ethereum/usdc", "destination": "aleo/usdcx", "amount": "2", "recipient": ALEO_RECIPIENT}
+QUOTE_ARGS = {"source_chain": "ethereum", "source_asset": "usdc", "destination_chain": "aleo",
+              "destination_asset": "usdcx", "amount": "2", "recipient": ALEO_RECIPIENT}
+QUOTE_REQUIRED = ["source_chain", "source_asset", "destination_chain", "amount", "recipient"]
 NONCE = "7scalar"
 
 
 def _aleo_out_checkpoint(b):
     """A checkpoint for an Aleo-origin Hyperlane transfer that was proved but never broadcast."""
-    plan = prepare(b.registry, source="aleo/eth", destination="ethereum/eth", amount="0.000000000000000001",
+    plan = prepare(b.registry, source_chain="aleo", source_asset="eth", destination_chain="ethereum", destination_asset="eth", amount="0.000000000000000001",
                    recipient=EVM_ADDRESS)
     serialized = json.dumps({"type": "execute", "id": "at1prepared", "fee": {}})
     cp = {"version": 1,
@@ -70,10 +72,17 @@ def test_tool_surface_and_schemas():
             assert t["input_schema"]["properties"]["confirm"]["type"] == "boolean"
             assert "confirm" in t["description"].lower()
     execute = next(t for t in tools if t["name"] == "bridge_execute")
-    assert set(execute["input_schema"]["required"]) == {"source", "destination", "amount", "recipient"}
+    assert set(execute["input_schema"]["required"]) == set(QUOTE_REQUIRED)
     assert "plan" not in execute["input_schema"]["properties"]                # agents never carry plans
     quote = next(t for t in tools if t["name"] == "bridge_quote")
     assert quote["input_schema"]["properties"]["mint_mode"]["enum"] == ["public", "record", "private"]
+    # veil's parameter vocabulary: chain ids + asset keys, protocol — never 'chain/key' refs
+    # veil's quote key is bridgeProtocol (its getRoutes key is protocol) — mirror both spellings exactly
+    assert {"destination_asset", "bridge_protocol"} <= set(quote["input_schema"]["properties"])
+    assert not {"source", "destination", "protocol"} & set(quote["input_schema"]["properties"])
+    routes = next(t for t in tools if t["name"] == "bridge_list_routes")
+    assert {"source_chain", "destination_chain", "bridge_protocol", "symbol"} <= set(routes["input_schema"]["properties"])
+    assert not {"source", "destination", "protocol"} & set(routes["input_schema"]["properties"])
     assert "private key" not in json.dumps(tools).lower()
 
 
@@ -103,7 +112,7 @@ def test_serialize_adds_the_xreserve_max_fee_entry():
                               "amount": "0.1", "estimated": True, "label": "xReserve max fee"}]
     # and the same entry appears when _serialize is handed the quote object on its own
     from aleo_bridge import lifecycle
-    raw = lifecycle.quote(b, source="ethereum/usdc", destination="aleo/usdcx", amount="2",
+    raw = lifecycle.quote(b, source_chain="ethereum", source_asset="usdc", destination_chain="aleo", destination_asset="usdcx", amount="2",
                           recipient=ALEO_RECIPIENT)
     assert _serialize(raw)["fees"][-1]["label"] == "xReserve max fee"
 
@@ -126,10 +135,12 @@ def test_read_tools():
     assert status["environment"] == "mainnet" and status["chains"][0]["balances"] == {"aleo/usdcx": 5_000_000}
     assets = dispatch_tool(b, "bridge_list_assets", {"chain": "aleo"})
     assert {a["symbol"] for a in assets} >= {"USDCx", "ETH", "WBTC", "USDT", "SOL"} and all(a["chain_id"] == "aleo" for a in assets)
-    routes = dispatch_tool(b, "bridge_list_routes", {"protocol": "xreserve"})
+    routes = dispatch_tool(b, "bridge_list_routes", {"bridge_protocol": "xreserve"})
     assert routes and all(r["protocol"] == "xreserve" and r["availability"] == "active" for r in routes)
     all_routes = dispatch_tool(b, "bridge_list_routes", {"include_unavailable": True})
     assert any(r["availability"] == "metadata-required" for r in all_routes)
+    outbound = dispatch_tool(b, "bridge_list_routes", {"source_chain": "solana", "destination_chain": "aleo"})
+    assert [r["id"] for r in outbound] == ["hyperlane:solana/sol->aleo/sol", "hyperlane:solana/aleo->aleo/aleo"]
     q = dispatch_tool(b, "bridge_quote", {**QUOTE_ARGS, "mint_mode": "private", "secret_nonce": NONCE})
     assert q["kind"] == "evm-xreserve" and q["plan"]["route_id"] == "xreserve:ethereum/usdc->aleo/usdcx"
     assert q["plan"]["amount"] == "2" and q["hook_data"].startswith("0x")
@@ -158,7 +169,7 @@ def test_execute_requires_confirm_and_requotes_internally():
 def test_get_progress_and_pending(tmp_path):
     store = FileCheckpointStore(tmp_path)
     b = FakeBridge(ethereum=False, checkpoints=store)
-    out = dispatch_tool(b, "bridge_execute", {"source": "aleo/eth", "destination": "ethereum/eth",
+    out = dispatch_tool(b, "bridge_execute", {"source_chain": "aleo", "source_asset": "eth", "destination_chain": "ethereum", "destination_asset": "eth",
                                               "amount": "0.000000000000000001", "recipient": EVM_ADDRESS,
                                               "gas_payment_microcredits": 1, "confirm": True})
     assert out["progress"]["receipt"]["status"] == "SOURCE_CONFIRMING"
@@ -326,7 +337,7 @@ def test_bridge_tools_returns_deep_copies():
     assert second[0]["description"] != "mutated"
     assert "injected" not in second[0]["input_schema"]["properties"]
     fresh_quote = next(t for t in second if t["name"] == "bridge_quote")
-    assert fresh_quote["input_schema"]["required"] == ["source", "destination", "amount", "recipient"]
+    assert fresh_quote["input_schema"]["required"] == QUOTE_REQUIRED
     assert fresh_quote["input_schema"]["properties"] is not quote["input_schema"]["properties"]
 
 
@@ -398,8 +409,8 @@ def test_unconfigured_chain_returns_a_structured_error():
         assert "next" not in out
     assert b.calls == [] and b.events == []
     out = dispatch_tool(FakeBridge(solana=False), "bridge_quote",
-                        {"source": "solana/sol", "destination": "aleo/sol", "amount": "0.1",
-                         "recipient": ALEO_RECIPIENT})
+                        {"source_chain": "solana", "source_asset": "sol", "destination_chain": "aleo",
+                         "amount": "0.1", "recipient": ALEO_RECIPIENT})
     assert "SOLANA_PRIVATE_KEY" in out["how_to_fix"]
 
 
@@ -427,7 +438,7 @@ def test_ambiguous_send_surfaces_recover_guidance_and_the_checkpoint():
 
 def test_resume_write_error_surfaces_recover_guidance_and_the_checkpoint():
     b = FakeBridge()
-    plan = prepare(b.registry, source="ethereum/usdc", destination="aleo/usdcx", amount="2",
+    plan = prepare(b.registry, source_chain="ethereum", source_asset="usdc", destination_chain="aleo", destination_asset="usdcx", amount="2",
                    recipient=ALEO_RECIPIENT, sender=EVM_ADDRESS, mint_mode="private")
     approval = "0x" + "11" * 32
     receipt = Receipt(id=approval, protocol="xreserve", status=Status.SOURCE_SUBMISSION_PENDING,
@@ -452,7 +463,7 @@ def test_resume_refuses_a_missing_private_nonce_before_any_rpc():
     on the wire". It never left the process. Pre-check it like ``bridge_complete`` does, so the
     answer is the actionable configuration error and nothing is read or sent."""
     b = FakeBridge()
-    plan = prepare(b.registry, source="ethereum/usdc", destination="aleo/usdcx", amount="2",
+    plan = prepare(b.registry, source_chain="ethereum", source_asset="usdc", destination_chain="aleo", destination_asset="usdcx", amount="2",
                    recipient=ALEO_RECIPIENT, sender=EVM_ADDRESS, mint_mode="private")
     approval = "0x" + "11" * 32
     receipt = Receipt(id=approval, protocol="xreserve", status=Status.SOURCE_SUBMISSION_PENDING,

@@ -12,7 +12,7 @@ SIG = "0x" + "11" * 65
 
 
 def _inbound_private(b):
-    plan = prepare(b.registry, source="sepolia/usdc", destination="aleo-testnet/usdcx", amount="2",
+    plan = prepare(b.registry, source_chain="sepolia", source_asset="usdc", destination_chain="aleo-testnet", destination_asset="usdcx", amount="2",
                    recipient=ALEO_RECIPIENT, mint_mode="private")
     hook = xreserve_hook_data("private", ALEO_RECIPIENT, "testnet", "7scalar")
     payload = xreserve_deposit_payload(amount=2_000_000, remote_domain=10_002, remote_token=b"\x11" * 32,
@@ -30,7 +30,7 @@ def _inbound_private(b):
 
 def test_guards_and_terminal_passthrough():
     b = FakeBridge(ethereum=False)
-    plan = prepare(b.registry, source="aleo/eth", destination="ethereum/eth", amount="0.000000000000000001",
+    plan = prepare(b.registry, source_chain="aleo", source_asset="eth", destination_chain="ethereum", destination_asset="eth", amount="0.000000000000000001",
                    recipient=EVM_ADDRESS)
     with pytest.raises(CheckpointInvalidError, match="does not match"):
         get_status(b, plan, Receipt(id="x", protocol="hyperlane", status=Status.SOURCE_CONFIRMING,
@@ -45,7 +45,7 @@ def test_guards_and_terminal_passthrough():
 
 def test_branch1_evm_approval_pending_delegates_to_eth_source_status():
     b = FakeBridge()
-    plan = prepare(b.registry, source="ethereum/wbtc", destination="aleo/wbtc", amount="0.001", recipient=ALEO_RECIPIENT)
+    plan = prepare(b.registry, source_chain="ethereum", source_asset="wbtc", destination_chain="aleo", destination_asset="wbtc", amount="0.001", recipient=ALEO_RECIPIENT)
     receipt = Receipt(id="0x" + "11" * 32, protocol="hyperlane", status=Status.SOURCE_APPROVAL_PENDING,
                       protocol_state={"routeId": plan.route_id, "approvalTxIds": ["0x" + "11" * 32]})
     b.eth.source_status_result = receipt.replace(status=Status.SOURCE_SUBMISSION_PENDING)
@@ -56,7 +56,7 @@ def test_branch1_evm_approval_pending_delegates_to_eth_source_status():
 @pytest.mark.parametrize("node_status,expected", [("accepted", Status.DELIVERY_PENDING), ("rejected", Status.FAILED)])
 def test_branch2_aleo_source_confirming_reads_confirmed_transaction(node_status, expected):
     b = FakeBridge(ethereum=False)
-    plan = prepare(b.registry, source="aleo/usdcx", destination="ethereum/usdc", amount="2.1", recipient=EVM_ADDRESS)
+    plan = prepare(b.registry, source_chain="aleo", source_asset="usdcx", destination_chain="ethereum", destination_asset="usdc", amount="2.1", recipient=EVM_ADDRESS)
     receipt = Receipt(id="at1burn", protocol="xreserve", status=Status.SOURCE_CONFIRMING, source_tx_id="at1burn",
                       protocol_state={"routeId": plan.route_id}, next_action={"kind": "stale"})
     pending = get_status(b, plan, receipt)
@@ -73,14 +73,14 @@ def test_branch2_aleo_source_confirming_reads_confirmed_transaction(node_status,
 
 def test_branch3_4_hyperlane_source_confirming_evm_and_solana():
     b = FakeBridge(solana=True)
-    evm_plan = prepare(b.registry, source="ethereum/eth", destination="aleo/eth", amount="0.000000000000000001",
+    evm_plan = prepare(b.registry, source_chain="ethereum", source_asset="eth", destination_chain="aleo", destination_asset="eth", amount="0.000000000000000001",
                        recipient=ALEO_RECIPIENT)
     evm_receipt = Receipt(id="0x" + "aa" * 32, protocol="hyperlane", status=Status.SOURCE_CONFIRMING,
                           source_tx_id="0x" + "aa" * 32, protocol_state={"routeId": evm_plan.route_id})
     b.eth.source_status_result = evm_receipt.replace(status=Status.DELIVERY_PENDING,
                                                      protocol_state={**evm_receipt.protocol_state, "messageId": "0x" + "cd" * 32})
     assert get_status(b, evm_plan, evm_receipt).protocol_state["messageId"] == "0x" + "cd" * 32
-    sol_plan = prepare(b.registry, source="solana/sol", destination="aleo/sol", amount="0.000000001",
+    sol_plan = prepare(b.registry, source_chain="solana", source_asset="sol", destination_chain="aleo", destination_asset="sol", amount="0.000000001",
                        recipient=ALEO_RECIPIENT, sender=SOL_ADDRESS)
     sol_receipt = Receipt(id="sig", protocol="hyperlane", status=Status.SOURCE_CONFIRMING, source_tx_id="sig",
                           protocol_state={"routeId": sol_plan.route_id})
@@ -93,7 +93,7 @@ def test_branch3_4_hyperlane_source_confirming_evm_and_solana():
 
 def test_branch5_hyperlane_delivery_via_destination_mailbox():
     b = FakeBridge()
-    to_aleo = prepare(b.registry, source="ethereum/eth", destination="aleo/eth", amount="0.000000000000000001",
+    to_aleo = prepare(b.registry, source_chain="ethereum", source_asset="eth", destination_chain="aleo", destination_asset="eth", amount="0.000000000000000001",
                       recipient=ALEO_RECIPIENT)
     mid = "0x" + "cd" * 32
     receipt = Receipt(id=mid, protocol="hyperlane", status=Status.DELIVERY_PENDING, source_tx_id="0x" + "aa" * 32,
@@ -103,7 +103,7 @@ def test_branch5_hyperlane_delivery_via_destination_mailbox():
     assert get_status(b, to_aleo, receipt).status is Status.COMPLETED
     assert b.calls[-1] == ("hyperlane.is_delivered", mid)
 
-    to_evm = prepare(b.registry, source="aleo/eth", destination="ethereum/eth", amount="0.000000000000000001",
+    to_evm = prepare(b.registry, source_chain="aleo", source_asset="eth", destination_chain="ethereum", destination_asset="eth", amount="0.000000000000000001",
                      recipient=EVM_ADDRESS)
     receipt2 = Receipt(id="at1x", protocol="hyperlane", status=Status.DELIVERY_PENDING, source_tx_id="at1x",
                        protocol_state={"routeId": to_evm.route_id, "messageId": mid})
@@ -114,7 +114,7 @@ def test_branch5_hyperlane_delivery_via_destination_mailbox():
 
 def test_branch5_solana_delivery_pending_without_message_id_fills_from_logs():
     b = FakeBridge(solana=True)
-    plan = prepare(b.registry, source="solana/sol", destination="aleo/sol", amount="0.000000001",
+    plan = prepare(b.registry, source_chain="solana", source_asset="sol", destination_chain="aleo", destination_asset="sol", amount="0.000000001",
                    recipient=ALEO_RECIPIENT, sender=SOL_ADDRESS)
     sig = "5igNature" * 8
     receipt = Receipt(id=sig, protocol="hyperlane", status=Status.DELIVERY_PENDING, source_tx_id=sig,
@@ -147,7 +147,7 @@ def test_branch5_solana_delivery_pending_without_message_id_fills_from_logs():
 
 def test_branch6_aleo_origin_balance_diff_fallback():
     b = FakeBridge(solana=True)
-    plan = prepare(b.registry, source="aleo/sol", destination="solana/sol", amount="0.000000001", recipient=SOL_ADDRESS)
+    plan = prepare(b.registry, source_chain="aleo", source_asset="sol", destination_chain="solana", destination_asset="sol", amount="0.000000001", recipient=SOL_ADDRESS)
     receipt = Receipt(id="at1source", protocol="hyperlane", status=Status.DELIVERY_PENDING, source_tx_id="at1source",
                       protocol_state={"routeId": plan.route_id, "destinationBalanceBeforeAtomic": "100",
                                       "expectedDestinationIncreaseAtomic": "1"})
@@ -167,7 +167,7 @@ def test_branch6_a_failing_destination_balance_read_propagates():
     SIGNAL, not an advisory baseline. A transport failure must surface here so ``wait``'s transient
     classifier can retry it — swallowing it would read as "not delivered yet" forever."""
     b = FakeBridge(solana=True)
-    plan = prepare(b.registry, source="aleo/sol", destination="solana/sol", amount="0.000000001",
+    plan = prepare(b.registry, source_chain="aleo", source_asset="sol", destination_chain="solana", destination_asset="sol", amount="0.000000001",
                    recipient=SOL_ADDRESS)
     receipt = Receipt(id="at1source", protocol="hyperlane", status=Status.DELIVERY_PENDING,
                       source_tx_id="at1source",
@@ -184,7 +184,7 @@ def test_branch6_a_failing_destination_balance_read_propagates():
 
 def test_branch8_and_9_xreserve_outbound_and_not_implemented():
     b = FakeBridge(ethereum=False)
-    plan = prepare(b.registry, source="aleo/usdcx", destination="ethereum/usdc", amount="2.1", recipient=EVM_ADDRESS)
+    plan = prepare(b.registry, source_chain="aleo", source_asset="usdcx", destination_chain="ethereum", destination_asset="usdc", amount="2.1", recipient=EVM_ADDRESS)
     receipt = Receipt(id="at1burn", protocol="xreserve", status=Status.DELIVERY_PENDING, source_tx_id="at1burn",
                       protocol_state={"routeId": plan.route_id})
     assert get_status(b, plan, receipt) is receipt
@@ -201,7 +201,7 @@ def test_branch8_xreserve_aleo_to_evm_terminates_on_the_recorded_balance_baselin
     delivered 996_501 atomic USDC, far short of the 2_000_001 burned — a predicate on the full
     amount would never fire for the real transfer, and would fire for unrelated inflow."""
     b = FakeBridge()
-    plan = prepare(b.registry, source="aleo/usdcx", destination="ethereum/usdc", amount="2.000001",
+    plan = prepare(b.registry, source_chain="aleo", source_asset="usdcx", destination_chain="ethereum", destination_asset="usdc", amount="2.000001",
                    recipient=EVM_ADDRESS)
     receipt = Receipt(id="at1burn", protocol="xreserve", status=Status.DELIVERY_PENDING, source_tx_id="at1burn",
                       next_action={"kind": "noop"},
@@ -219,7 +219,7 @@ def test_branch8_falls_back_to_veils_passthrough_without_a_baseline_or_a_reader(
     or with no connection able to read the recipient's balance, branch 8 stays veil's passthrough
     rather than raising DeliveryUnknownError the way branch 6 does."""
     b = FakeBridge(ethereum=False)
-    plan = prepare(b.registry, source="aleo/usdcx", destination="ethereum/usdc", amount="2.000001",
+    plan = prepare(b.registry, source_chain="aleo", source_asset="usdcx", destination_chain="ethereum", destination_asset="usdc", amount="2.000001",
                    recipient=EVM_ADDRESS)
     baselined = Receipt(id="at1burn", protocol="xreserve", status=Status.DELIVERY_PENDING, source_tx_id="at1burn",
                         protocol_state={"routeId": plan.route_id, "destinationBalanceBeforeAtomic": "100",
@@ -259,7 +259,7 @@ def test_branch10_nullifier_first_then_attestation_then_private_action():
     assert ready.protocol_state["attestation"] == SIG
     assert get_status(b, plan, ready) is ready                                    # action required → unchanged
     # public mode → DELIVERY_PENDING with attestation kept
-    public_plan = prepare(b.registry, source="sepolia/usdc", destination="aleo-testnet/usdcx", amount="2",
+    public_plan = prepare(b.registry, source_chain="sepolia", source_asset="usdc", destination_chain="aleo-testnet", destination_asset="usdcx", amount="2",
                           recipient=ALEO_RECIPIENT)
     public = receipt.replace(protocol_state={**receipt.protocol_state, "mintMode": "public"})
     out = get_status(b, public_plan, public)
@@ -308,7 +308,7 @@ def test_message_id_never_falls_back_to_source_tx_id():
     # receipt.id == receipt.source_tx_id (the source transaction hash) — that must never be
     # mistaken for the Hyperlane message id, even though it has the same 0x + 64-hex shape.
     b = FakeBridge()
-    to_aleo = prepare(b.registry, source="ethereum/eth", destination="aleo/eth", amount="0.000000000000000001",
+    to_aleo = prepare(b.registry, source_chain="ethereum", source_asset="eth", destination_chain="aleo", destination_asset="eth", amount="0.000000000000000001",
                       recipient=ALEO_RECIPIENT)
     tx = "0x" + "aa" * 32
     receipt = Receipt(id=tx, protocol="hyperlane", status=Status.DELIVERY_PENDING, source_tx_id=tx,
@@ -322,7 +322,7 @@ def test_solana_message_id_fill_in_raises_on_missing_connection():
     # the log-read try/except, so a missing connection surfaces as ConfigurationError instead of
     # being swallowed as "still unavailable".
     b = FakeBridge(ethereum=False, solana=False)
-    plan = prepare(b.registry, source="solana/sol", destination="aleo/sol", amount="0.000000001",
+    plan = prepare(b.registry, source_chain="solana", source_asset="sol", destination_chain="aleo", destination_asset="sol", amount="0.000000001",
                    recipient=ALEO_RECIPIENT, sender=SOL_ADDRESS)
     sig = "5igNature" * 8
     receipt = Receipt(id=sig, protocol="hyperlane", status=Status.DELIVERY_PENDING, source_tx_id=sig,

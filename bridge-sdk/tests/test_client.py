@@ -122,7 +122,7 @@ def test_status_lists_the_pending_transfers_of_the_bound_store(fake_aleo, tmp_pa
 
     store = FileCheckpointStore(tmp_path)
     bridge = Bridge(fake_aleo, checkpoints=store)
-    plan = lifecycle.prepare(bridge.registry, source="aleo/eth", destination="ethereum/eth",
+    plan = lifecycle.prepare(bridge.registry, source_chain="aleo", source_asset="eth", destination_chain="ethereum", destination_asset="eth",
                              amount="0.000000000000000001", recipient=EVM_ADDRESS)
     store.save(create_checkpoint(plan, Receipt(id="at1pending", protocol="hyperlane",
                                                status=Status.SOURCE_CONFIRMING, source_tx_id="at1pending",
@@ -252,3 +252,16 @@ def test_cli_prints_agent_guide_by_default(capsys):
     out = capsys.readouterr().out
     assert out == aleo_bridge.agent_guide()
     assert "# aleo-bridge — agent guide" in out
+
+
+def test_routes_filters_the_registry_for_this_environment(fake_aleo):
+    from aleo_bridge.registry import DEFAULT_REGISTRY as REG
+    bridge = Bridge(fake_aleo)
+    # veil getRoutes vocabulary, scoped to the client's environment
+    assert [r.id for r in bridge.routes(source_chain="solana", destination_chain="aleo")] == \
+        ["hyperlane:solana/sol->aleo/sol", "hyperlane:solana/aleo->aleo/aleo"]
+    assert [r.id for r in bridge.routes(source_chain="ethereum", source_asset="usdc")] == \
+        ["xreserve:ethereum/usdc->aleo/usdcx"]
+    assert bridge.routes() == REG.routes(environment="mainnet")
+    assert bridge.routes(bridge_protocol="xreserve", include_unavailable=True) == \
+        REG.routes(bridge_protocol="xreserve", include_unavailable=True, environment="mainnet")

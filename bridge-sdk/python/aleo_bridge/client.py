@@ -299,25 +299,44 @@ class Bridge:
 
     # ── Tier 1: the lifecycle ──────────────────────────────────────────────
 
-    def quote(self, source, destination, *, amount=None, amount_atomic=None, recipient: str,
-              sender: str | None = None, protocol: str | None = None, mint_mode: str = "public",
-              secret_nonce: str = "0scalar"):
+    def routes(self, *, source_chain: str | None = None, source_asset: str | None = None,
+               destination_chain: str | None = None, destination_asset: str | None = None,
+               bridge_protocol: str | None = None, symbol: str | None = None, include_unavailable: bool = False):
+        """The routes of this client's environment, filtered like veil's ``getRoutes``:
+        ``source_chain`` / ``destination_chain`` (chain ids such as ``"ethereum"``, ``"solana"``,
+        ``"aleo"``), ``bridge_protocol`` (``"xreserve"`` or ``"hyperlane"``), ``symbol``, and
+        ``source_asset`` / ``destination_asset`` (asset keys such as ``"usdc"``) to narrow a chain
+        pair to one asset. Pass a result to ``quote(route=...)``. Reads only the pinned registry."""
+        return self.registry.routes(source_chain=source_chain, source_asset=source_asset,
+                                    destination_chain=destination_chain, destination_asset=destination_asset,
+                                    bridge_protocol=bridge_protocol, symbol=symbol,
+                                    include_unavailable=include_unavailable, environment=self.environment)
+
+    def quote(self, *, source_chain: str | None = None, source_asset: str | None = None,
+              destination_chain: str | None = None, destination_asset: str | None = None,
+              bridge_protocol: str | None = None, route=None, amount=None, amount_atomic=None, recipient: str,
+              sender: str | None = None, mint_mode: str = "public", secret_nonce: str = "0scalar"):
         """Price a transfer and get the plan that ``execute`` takes. Nothing is signed.
 
-        ``source`` / ``destination`` are ``"chain/key"`` strings or ``(chain, key)``
-        tuples (``"ethereum/usdc"``, ``"aleo/usdcx"``); give exactly one of
-        ``amount`` (human units, str) or ``amount_atomic`` (int).  ``recipient`` is
-        the destination-chain address.  ``mint_mode`` (xReserve into Aleo only):
-        ``"public"`` balance, ``"record"`` minted by the relayer, or ``"private"``
-        — you finish it yourself with ``complete`` and must keep ``secret_nonce``.
-        Returns a kind-specific ``Quote`` (``quote.kind`` in evm-hyperlane /
+        Name the route the way veil's ``quote`` does: ``source_chain`` + ``source_asset``
+        + ``destination_chain`` (``"ethereum"``, ``"usdc"``, ``"aleo"``), adding
+        ``destination_asset`` / ``bridge_protocol`` (``"xreserve"`` | ``"hyperlane"``)
+        only when more than one route fits — or ``route=`` with a ``Route`` from
+        ``routes()`` or its id.  Give exactly one of ``amount`` (human units, str)
+        or ``amount_atomic`` (int).  ``recipient`` is the destination-chain
+        address.  ``mint_mode`` (xReserve into Aleo only): ``"public"`` balance,
+        ``"record"`` minted by the relayer, or ``"private"`` — you finish it
+        yourself with ``complete`` and must keep ``secret_nonce``.  Returns a
+        kind-specific ``Quote`` (``quote.kind`` in evm-hyperlane /
         solana-hyperlane / aleo-hyperlane / evm-xreserve / aleo-xreserve) with
         ``fees`` and ``amount_out`` in human units and ``quote.plan``.  Show the
         user fees + amount before ``execute``.
         """
-        return _lifecycle.quote(self, source=source, destination=destination, amount=amount,
+        return _lifecycle.quote(self, source_chain=source_chain, source_asset=source_asset,
+                                destination_chain=destination_chain, destination_asset=destination_asset,
+                                bridge_protocol=bridge_protocol, route=route, amount=amount,
                                 amount_atomic=amount_atomic, recipient=recipient, sender=sender,
-                                protocol=protocol, mint_mode=mint_mode, secret_nonce=secret_nonce)
+                                mint_mode=mint_mode, secret_nonce=secret_nonce)
 
     def execute(self, plan, *, on_checkpoint=None, proving: str = "delegate", mode: str | None = None,
                 record: str | None = None, merkle_proof: str | None = None,

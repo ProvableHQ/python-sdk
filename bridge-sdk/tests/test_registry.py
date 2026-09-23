@@ -85,7 +85,7 @@ def test_usdcx_only_via_xreserve_and_others_via_hyperlane():
 
 
 def test_xreserve_routes():
-    xr = REG.routes(protocol="xreserve", include_unavailable=True)
+    xr = REG.routes(bridge_protocol="xreserve", include_unavailable=True)
     assert [r.id for r in xr] == ["xreserve:ethereum/usdc->aleo/usdcx", "xreserve:aleo/usdcx->ethereum/usdc",
                                   "xreserve:sepolia/usdc->aleo-testnet/usdcx", "xreserve:aleo-testnet/usdcx->sepolia/usdc"]
     assert all(r.availability == "active" and r.active for r in xr)
@@ -243,33 +243,58 @@ def test_metadata_required_routes():
     assert all(m[f"aleoAllowanceAmount{i}"] == "0" for i in range(4))
 
 
-def test_route_filters_and_find_route():
-    assert [r.id for r in REG.routes(source="aleo", protocol="xreserve")] == ["xreserve:aleo/usdcx->ethereum/usdc"]
-    assert [r.id for r in REG.routes(source="aleo/wbtc")] == ["hyperlane:aleo/wbtc->ethereum/wbtc"]
-    assert [r.id for r in REG.routes(destination="aleo", symbol="wbtc")] == ["hyperlane:ethereum/wbtc->aleo/wbtc"]
+def test_route_filters_follow_veil_get_routes():
+    # veil getRoutes: protocol / sourceChainId / destinationChainId / symbol — chain ids, never asset refs.
+    assert [r.id for r in REG.routes(source_chain="aleo", bridge_protocol="xreserve")] == ["xreserve:aleo/usdcx->ethereum/usdc"]
+    assert [r.id for r in REG.routes(destination_chain="aleo", symbol="wbtc")] == ["hyperlane:ethereum/wbtc->aleo/wbtc"]
     assert len(REG.routes(environment="testnet")) == 2 and len(REG.routes(environment="mainnet")) == 20
-    assert len(REG.routes(source="solana")) == 2  # SOL deposit + metadata-required ALEO
-    assert REG.find_route("aleo/wbtc", "ethereum/wbtc").id == "hyperlane:aleo/wbtc->ethereum/wbtc"
-    assert REG.find_route(("ethereum", "usdc"), ("aleo", "usdcx"), protocol="xreserve").id == "xreserve:ethereum/usdc->aleo/usdcx"
-    assert REG.find_route("aleo/usad", "ethereum/usad").availability == "metadata-required"  # visible, refused later
+    assert len(REG.routes(source_chain="solana")) == 2  # SOL deposit + metadata-required ALEO
+    assert len(REG.routes(source_chain="SOLANA", destination_chain="Aleo")) == 2   # case-insensitive
+    # the asset filters narrow a chain pair to one asset on either side
+    assert [r.id for r in REG.routes(source_chain="aleo", source_asset="wbtc")] == ["hyperlane:aleo/wbtc->ethereum/wbtc"]
+    assert [r.id for r in REG.routes(destination_chain="ethereum", destination_asset="usdc")] == ["xreserve:aleo/usdcx->ethereum/usdc"]
+    with pytest.raises(TypeError):
+        REG.routes("aleo")                                    # keyword-only: no positional selectors
+
+
+def test_find_route_resolves_by_chain_and_asset_keywords():
+    assert REG.find_route(source_chain="aleo", source_asset="wbtc", destination_chain="ethereum",
+                          destination_asset="wbtc").id == "hyperlane:aleo/wbtc->ethereum/wbtc"
+    # destination_asset and protocol are optional when the remaining filters leave one route
+    assert REG.find_route(source_chain="ethereum", source_asset="usdc",
+                          destination_chain="aleo").id == "xreserve:ethereum/usdc->aleo/usdcx"
+    assert REG.find_route(source_chain="Ethereum", source_asset="USDC", destination_chain="ALEO",
+                          bridge_protocol="xreserve").id == "xreserve:ethereum/usdc->aleo/usdcx"
+    assert REG.find_route(source_chain="aleo", source_asset="usad",
+                          destination_chain="ethereum").availability == "metadata-required"  # visible, refused later
     with pytest.raises(RouteNotFoundError):
-        REG.find_route("aleo/wbtc", "solana/sol")
+        REG.find_route(source_chain="aleo", source_asset="wbtc", destination_chain="solana")
     with pytest.raises(RouteNotFoundError):
-        REG.find_route("aleo/wbtc", "ethereum/wbtc", protocol="xreserve")
+        REG.find_route(source_chain="aleo", source_asset="wbtc", destination_chain="ethereum", bridge_protocol="xreserve")
+    with pytest.raises(RouteNotFoundError):
+        REG.find_route(source_chain="aleo", source_asset="doge", destination_chain="ethereum")
     with pytest.raises(RouteNotFoundError):
         REG.route("hyperlane:aleo/doge->ethereum/doge")
-    # A synthetic duplicate pair across protocols is ambiguous without protocol=
+    # A synthetic duplicate pair across protocols is ambiguous without bridge_protocol=, and the error says so
     dup = Route("xreserve:aleo/wbtc->ethereum/wbtc", "xreserve", "mainnet", "aleo/wbtc", "ethereum/wbtc", "active", None, None, {})
     reg2 = Registry(REG.version, REG.chains(), REG.assets(), [*REG.routes(include_unavailable=True), dup])
-    with pytest.raises(AmbiguousRouteError):
-        reg2.find_route("aleo/wbtc", "ethereum/wbtc")
-    assert reg2.find_route("aleo/wbtc", "ethereum/wbtc", protocol="hyperlane").protocol == "hyperlane"
+    with pytest.raises(AmbiguousRouteError, match="bridge_protocol="):
+        reg2.find_route(source_chain="aleo", source_asset="wbtc", destination_chain="ethereum")
+    assert reg2.find_route(source_chain="aleo", source_asset="wbtc", destination_chain="ethereum",
+                           bridge_protocol="hyperlane").protocol == "hyperlane"
+    # Two destination assets for one source asset are ambiguous without destination_asset=
+    fork = Route("hyperlane:aleo/wbtc->ethereum/usdt", "hyperlane", "mainnet", "aleo/wbtc", "ethereum/usdt", "active", None, None, {})
+    reg4 = Registry(REG.version, REG.chains(), REG.assets(), [*REG.routes(include_unavailable=True), fork])
+    with pytest.raises(AmbiguousRouteError, match="destination_asset="):
+        reg4.find_route(source_chain="aleo", source_asset="wbtc", destination_chain="ethereum")
+    assert reg4.find_route(source_chain="aleo", source_asset="wbtc", destination_chain="ethereum",
+                           destination_asset="usdt") is fork
     # disabled routes are hidden from routes() and find_route() unless include_unavailable
     off = Route("hyperlane:aleo/eth->ethereum/eth", "hyperlane", "mainnet", "aleo/eth", "ethereum/eth", "disabled", None, None, {})
     reg3 = Registry(REG.version, REG.chains(), REG.assets(), [off])
     assert reg3.routes() == [] and reg3.routes(include_unavailable=True) == [off]
     with pytest.raises(RouteNotFoundError):
-        reg3.find_route("aleo/eth", "ethereum/eth")
+        reg3.find_route(source_chain="aleo", source_asset="eth", destination_chain="ethereum")
 
 
 def test_route_meta_helpers():

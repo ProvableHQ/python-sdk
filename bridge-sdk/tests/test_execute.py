@@ -22,22 +22,22 @@ PREPARED_TX = {"preparedTransaction": {"transactionId": "at1fake1",
 
 
 def _aleo_eth_plan(b, recipient=EVM_ADDRESS):
-    return prepare(b.registry, source="aleo/eth", destination="ethereum/eth",
+    return prepare(b.registry, source_chain="aleo", source_asset="eth", destination_chain="ethereum", destination_asset="eth",
                    amount="0.000000000000000001", recipient=recipient)
 
 
 def _usdc_plan(b, **kw):
-    return prepare(b.registry, source="ethereum/usdc", destination="aleo/usdcx", amount="2",
+    return prepare(b.registry, source_chain="ethereum", source_asset="usdc", destination_chain="aleo", destination_asset="usdcx", amount="2",
                    recipient=ALEO_RECIPIENT, **kw)
 
 
 def _wbtc_plan(b, **kw):
-    return prepare(b.registry, source="ethereum/wbtc", destination="aleo/wbtc", amount="0.001",
+    return prepare(b.registry, source_chain="ethereum", source_asset="wbtc", destination_chain="aleo", destination_asset="wbtc", amount="0.001",
                    recipient=ALEO_RECIPIENT, **kw)
 
 
 def _sol_plan(b, **kw):
-    return prepare(b.registry, source="solana/sol", destination="aleo/sol", amount="0.000000001",
+    return prepare(b.registry, source_chain="solana", source_asset="sol", destination_chain="aleo", destination_asset="sol", amount="0.000000001",
                    recipient=ALEO_RECIPIENT, **kw)
 
 
@@ -98,7 +98,7 @@ def test_aleo_hyperlane_captures_destination_balance_baseline_for_own_recipient(
 
 def test_aleo_xreserve_burn_modes_and_private_inputs():
     b = FakeBridge(ethereum=False)
-    plan = prepare(b.registry, source="aleo/usdcx", destination="ethereum/usdc", amount="2.5",
+    plan = prepare(b.registry, source_chain="aleo", source_asset="usdcx", destination_chain="ethereum", destination_asset="usdc", amount="2.5",
                    recipient=EVM_ADDRESS)
     cps = []
     progress = execute(b, plan, record="{ owner: aleo1..., amount: 3000000u128.private }",
@@ -124,9 +124,9 @@ def test_aleo_xreserve_burn_captures_the_destination_balance_baseline_net_of_the
     EVM connection is itself the recipient."""
     b = FakeBridge()                                    # ethereum configured, address == recipient
     b.eth.balances["ethereum/usdc"] = 100
-    plan = prepare(b.registry, source="aleo/usdcx", destination="ethereum/usdc", amount="2.000001",
+    plan = prepare(b.registry, source_chain="aleo", source_asset="usdcx", destination_chain="ethereum", destination_asset="usdc", amount="2.000001",
                    recipient=EVM_ADDRESS)
-    quoted = quote(b, source="aleo/usdcx", destination="ethereum/usdc", amount="2.000001",
+    quoted = quote(b, source_chain="aleo", source_asset="usdcx", destination_chain="ethereum", destination_asset="usdc", amount="2.000001",
                    recipient=EVM_ADDRESS)
     cps = []
     progress = execute(b, plan, mode="public", on_checkpoint=cps.append)
@@ -139,7 +139,7 @@ def test_aleo_xreserve_burn_captures_the_destination_balance_baseline_net_of_the
     assert progress.receipt.protocol_state["expectedDestinationIncreaseAtomic"] == "1"
     # a recipient that is not our connection's address still gets no baseline, and no read at all
     b2 = FakeBridge()
-    other = prepare(b2.registry, source="aleo/usdcx", destination="ethereum/usdc", amount="2.000001",
+    other = prepare(b2.registry, source_chain="aleo", source_asset="usdcx", destination_chain="ethereum", destination_asset="usdc", amount="2.000001",
                     recipient="0x0000000000000000000000000000000000000002")
     cps2 = []
     execute(b2, other, mode="public", on_checkpoint=cps2.append)
@@ -208,7 +208,7 @@ def test_sender_mismatch_missing_connection_and_unavailable_route():
     with pytest.raises(ConfigurationError, match="Solana connection"):
         execute(b, _sol_plan(b))
     with pytest.raises(RouteUnavailableError):
-        execute(b, prepare(b.registry, source="aleo/aleo", destination="ethereum/aleo", amount="1",
+        execute(b, prepare(b.registry, source_chain="aleo", source_asset="aleo", destination_chain="ethereum", destination_asset="aleo", amount="1",
                            recipient=EVM_ADDRESS))
     no_eth = FakeBridge(ethereum=False)                # bridge.ethereum is None → bridge.eth must not be touched
     with pytest.raises(ConfigurationError, match="Ethereum connection"):
@@ -309,7 +309,7 @@ def test_aleo_hyperlane_leg_refuses_a_sender_mismatch_before_proving():
     """Item 7: an Aleo leg checks the plan's sender against ``bridge.aleo_address()`` before
     proving anything."""
     b = FakeBridge(ethereum=False)
-    plan = prepare(b.registry, source="aleo/eth", destination="ethereum/eth",
+    plan = prepare(b.registry, source_chain="aleo", source_asset="eth", destination_chain="ethereum", destination_asset="eth",
                    amount="0.000000000000000001", recipient=EVM_ADDRESS,
                    sender="aleo1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqvfnl2t")
     with pytest.raises(ConfigurationError, match="sender"):
@@ -319,7 +319,7 @@ def test_aleo_hyperlane_leg_refuses_a_sender_mismatch_before_proving():
 
 def test_aleo_xreserve_leg_refuses_a_sender_mismatch_before_proving():
     b = FakeBridge(ethereum=False)
-    plan = prepare(b.registry, source="aleo/usdcx", destination="ethereum/usdc", amount="2.5",
+    plan = prepare(b.registry, source_chain="aleo", source_asset="usdcx", destination_chain="ethereum", destination_asset="usdc", amount="2.5",
                    recipient=EVM_ADDRESS,
                    sender="aleo1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqvfnl2t")
     with pytest.raises(ConfigurationError, match="sender"):

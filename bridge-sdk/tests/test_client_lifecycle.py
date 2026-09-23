@@ -58,12 +58,18 @@ def _spy(monkeypatch, name):
 def test_quote_forwards(monkeypatch):
     seen = _spy(monkeypatch, "quote")
     b = FakeBridge()
-    assert Bridge.quote(b, "ethereum/usdc", "aleo/usdcx", amount="2", recipient=ALEO_RECIPIENT,
-                        mint_mode="private", secret_nonce="7scalar", sender=EVM_ADDRESS, protocol="xreserve") == "result"
+    assert Bridge.quote(b, source_chain="ethereum", source_asset="usdc", destination_chain="aleo",
+                        destination_asset="usdcx", amount="2", recipient=ALEO_RECIPIENT,
+                        mint_mode="private", secret_nonce="7scalar", sender=EVM_ADDRESS, bridge_protocol="xreserve") == "result"
     assert seen["bridge"] is b and seen["args"] == ()
-    assert seen["kwargs"] == dict(source="ethereum/usdc", destination="aleo/usdcx", amount="2", amount_atomic=None,
-                                  recipient=ALEO_RECIPIENT, sender=EVM_ADDRESS, protocol="xreserve",
+    assert seen["kwargs"] == dict(source_chain="ethereum", source_asset="usdc", destination_chain="aleo",
+                                  destination_asset="usdcx", bridge_protocol="xreserve", route=None,
+                                  amount="2", amount_atomic=None, recipient=ALEO_RECIPIENT, sender=EVM_ADDRESS,
                                   mint_mode="private", secret_nonce="7scalar")
+    # the route= form forwards untouched too
+    route = b.registry.route("xreserve:ethereum/usdc->aleo/usdcx")
+    Bridge.quote(b, route=route, amount="2", recipient=ALEO_RECIPIENT)
+    assert seen["kwargs"]["route"] is route and seen["kwargs"]["source_chain"] is None
 
 
 def test_execute_wait_get_status_recover_resume_complete_forward(monkeypatch):
@@ -116,12 +122,12 @@ def test_pending_recovers_every_stored_checkpoint_offline(tmp_path):
     b = FakeBridge(solana=True, checkpoints=store)
     b._eth, b._sol = _Boom(), _Boom()
 
-    evm_plan = lifecycle.prepare(b.registry, source="ethereum/wbtc", destination="aleo/wbtc", amount="0.001",
+    evm_plan = lifecycle.prepare(b.registry, source_chain="ethereum", source_asset="wbtc", destination_chain="aleo", destination_asset="wbtc", amount="0.001",
                                  recipient=ALEO_RECIPIENT, sender=EVM_ADDRESS)
     store.save(create_checkpoint(evm_plan, Receipt(id="0x" + "11" * 32, protocol="hyperlane",
                                                    status=Status.SOURCE_CONFIRMING, source_tx_id="0x" + "11" * 32,
                                                    protocol_state={"routeId": evm_plan.route_id}), b.registry))
-    sol_plan = lifecycle.prepare(b.registry, source="solana/sol", destination="aleo/sol", amount="0.000000001",
+    sol_plan = lifecycle.prepare(b.registry, source_chain="solana", source_asset="sol", destination_chain="aleo", destination_asset="sol", amount="0.000000001",
                                  recipient=ALEO_RECIPIENT, sender=SOL_ADDRESS)
     store.save(create_checkpoint(sol_plan, Receipt(id="sig", protocol="hyperlane", status=Status.SOURCE_CONFIRMING,
                                                    source_tx_id="sig", protocol_state={"routeId": sol_plan.route_id}),
@@ -139,7 +145,7 @@ def test_pending_folds_a_malformed_checkpoint_into_a_failed_entry(tmp_path):
     # healthy checkpoints alongside it in the same store.
     store = FileCheckpointStore(tmp_path)
     b = FakeBridge(ethereum=False, checkpoints=store)
-    plan = lifecycle.prepare(b.registry, source="aleo/eth", destination="ethereum/eth",
+    plan = lifecycle.prepare(b.registry, source_chain="aleo", source_asset="eth", destination_chain="ethereum", destination_asset="eth",
                              amount="0.000000000000000001", recipient=EVM_ADDRESS)
     store.save(create_checkpoint(plan, Receipt(id="at1good", protocol="hyperlane", status=Status.SOURCE_CONFIRMING,
                                                source_tx_id="at1good", protocol_state={"routeId": plan.route_id}),
@@ -160,7 +166,7 @@ def test_pending_reports_unreadable_files_and_version_mismatches_instead_of_drop
     # listing — the healthy transfer still comes back, and each problem is its own failed entry.
     store = FileCheckpointStore(tmp_path)
     b = FakeBridge(ethereum=False, checkpoints=store)
-    plan = lifecycle.prepare(b.registry, source="aleo/eth", destination="ethereum/eth",
+    plan = lifecycle.prepare(b.registry, source_chain="aleo", source_asset="eth", destination_chain="ethereum", destination_asset="eth",
                              amount="0.000000000000000001", recipient=EVM_ADDRESS)
     healthy = create_checkpoint(plan, Receipt(id="at1good", protocol="hyperlane", status=Status.SOURCE_CONFIRMING,
                                               source_tx_id="at1good", protocol_state={"routeId": plan.route_id}),

@@ -94,25 +94,58 @@ def _require_active(route: Route) -> None:
 
 # ── prepare ───────────────────────────────────────────────────────────────────
 
-def prepare(registry: Registry, *, source, destination, amount=None, amount_atomic=None,
-            recipient: str, sender: str | None = None, protocol: str | None = None,
-            mint_mode: str = "public") -> Plan:
-    """Describe how *amount* of *source* moves to *destination* — pure, no network.
+def select_route(registry: Registry, *, source_chain: str | None = None, source_asset: str | None = None,
+                 destination_chain: str | None = None, destination_asset: str | None = None,
+                 bridge_protocol: str | None = None, route: "Route | str | None" = None) -> Route:
+    """The route a caller named — either ``route`` (a :class:`Route` from ``routes()`` or its id)
+    or veil's ``quote`` selectors (``source.chain`` / ``source.asset`` / ``destination.chain`` /
+    ``destination.asset`` / ``bridgeProtocol``, flattened) — never both, never neither."""
+    filters = {"source_chain": source_chain, "source_asset": source_asset,
+               "destination_chain": destination_chain, "destination_asset": destination_asset,
+               "bridge_protocol": bridge_protocol}
+    given = [name for name, value in filters.items() if value is not None]
+    if route is not None:
+        if given:
+            raise ConfigurationError(
+                f"Pass route= or the chain/asset filters ({', '.join(given)}), not both")
+        return route if isinstance(route, Route) else registry.route(route)
+    if source_chain is None or source_asset is None or destination_chain is None:
+        missing = [name for name in ("source_chain", "source_asset", "destination_chain") if filters[name] is None]
+        raise ConfigurationError(
+            f"Name the transfer with route= or with source_chain=, source_asset= and destination_chain= "
+            f"(missing: {', '.join(missing)}); destination_asset= and bridge_protocol= only when more than "
+            "one route fits")
+    return registry.find_route(source_chain=source_chain, source_asset=source_asset,
+                               destination_chain=destination_chain,
+                               destination_asset=destination_asset, bridge_protocol=bridge_protocol)
 
-    Resolves the single non-disabled route for the asset pair (``protocol``
-    disambiguates), validates the mint mode (non-public only for xReserve into
-    Aleo), parses the amount with the source decimals AND re-parses it with the
-    destination decimals so no precision is silently lost, regex-checks the
-    recipient against the destination chain, then hands off to
-    :func:`aleo_bridge._plan.build_plan` for the step list — the same builder
-    ``bridge.eth.*`` / ``bridge.sol.*`` use, so a caller-supplied plan and a
-    ``prepare()``-built one are always identical for the same route and amount.
-    Nothing is signed and no chain is contacted; ``quote`` adds live prices on
-    top of this.
+
+def prepare(registry: Registry, *, source_chain: str | None = None, source_asset: str | None = None,
+            destination_chain: str | None = None, destination_asset: str | None = None,
+            bridge_protocol: str | None = None, route: "Route | str | None" = None,
+            amount=None, amount_atomic=None, recipient: str, sender: str | None = None,
+            mint_mode: str = "public") -> Plan:
+    """Describe how *amount* moves along one route — pure, no network.
+
+    The route is named the way veil's ``quote`` names it: ``source_chain`` /
+    ``source_asset`` / ``destination_chain`` / ``destination_asset`` /
+    ``bridge_protocol`` (the last two only when more than one route fits), or
+    ``route`` (a :class:`Route` from ``routes()`` or its id) — see
+    :func:`select_route`. Then validates the mint
+    mode (non-public only for xReserve into Aleo), parses the amount with the
+    source decimals AND re-parses it with the destination decimals so no
+    precision is silently lost, regex-checks the recipient against the
+    destination chain, and hands off to :func:`aleo_bridge._plan.build_plan` for
+    the step list — the same builder ``bridge.eth.*`` / ``bridge.sol.*`` use, so
+    a caller-supplied plan and a ``prepare()``-built one are always identical for
+    the same route and amount. Nothing is signed and no chain is contacted;
+    ``quote`` adds live prices on top of this.
     """
-    src = registry.asset(source)
-    dst = registry.asset(destination)
-    route = registry.find_route(src.id, dst.id, protocol)
+    route = select_route(registry, source_chain=source_chain, source_asset=source_asset,
+                         destination_chain=destination_chain, destination_asset=destination_asset,
+                         bridge_protocol=bridge_protocol, route=route)
+    src = registry.asset(route.source_asset_id)
+    dst = registry.asset(route.destination_asset_id)
     dst_chain = registry.chain(dst.chain_id)
 
     if mint_mode not in MINT_MODES:
@@ -166,9 +199,11 @@ def _credits_asset_id(chain: Chain) -> str:
 
 # ── quote ─────────────────────────────────────────────────────────────────────
 
-def quote(bridge, *, source, destination, amount=None, amount_atomic=None, recipient: str,
-          sender: str | None = None, protocol: str | None = None, mint_mode: str = "public",
-          secret_nonce: str = "0scalar") -> Quote:
+def quote(bridge, *, source_chain: str | None = None, source_asset: str | None = None,
+          destination_chain: str | None = None, destination_asset: str | None = None,
+          bridge_protocol: str | None = None, route: "Route | str | None" = None,
+          amount=None, amount_atomic=None, recipient: str, sender: str | None = None,
+          mint_mode: str = "public", secret_nonce: str = "0scalar") -> Quote:
     """Price a transfer: ``prepare`` + the source-side live read for the route kind.
 
     Returns one of ``EvmHyperlaneQuote`` / ``SolanaHyperlaneQuote`` /
@@ -187,9 +222,10 @@ def quote(bridge, *, source, destination, amount=None, amount_atomic=None, recip
     ``replace``) so the plan on the result is always exactly what ``prepare()``
     built, regardless of what the module attached internally.
     """
-    plan = prepare(bridge.registry, source=source, destination=destination, amount=amount,
-                   amount_atomic=amount_atomic, recipient=recipient, sender=sender,
-                   protocol=protocol, mint_mode=mint_mode)
+    plan = prepare(bridge.registry, source_chain=source_chain, source_asset=source_asset,
+                   destination_chain=destination_chain, destination_asset=destination_asset,
+                   bridge_protocol=bridge_protocol, route=route, amount=amount, amount_atomic=amount_atomic,
+                   recipient=recipient, sender=sender, mint_mode=mint_mode)
     resolved = resolve_route(bridge.registry, plan)
     _require_active(resolved.route)
     family = resolved.source_chain.family
@@ -976,10 +1012,12 @@ def _plan_from_intent(registry: Registry, intent: dict[str, Any]) -> Plan:
     """
     try:
         return prepare(registry,
-                       source=(intent["source"]["chain"], intent["source"]["asset"]),
-                       destination=(intent["destination"]["chain"], intent["destination"]["asset"]),
+                       source_chain=intent["source"]["chain"], source_asset=intent["source"]["asset"],
+                       destination_chain=intent["destination"]["chain"],
+                       destination_asset=intent["destination"]["asset"],
+                       bridge_protocol=intent.get("bridgeProtocol"),
                        amount=intent["amount"], recipient=intent["recipient"], sender=intent.get("sender"),
-                       protocol=intent.get("bridgeProtocol"), mint_mode=intent.get("mintMode", "public"))
+                       mint_mode=intent.get("mintMode", "public"))
     except (KeyError, TypeError) as exc:
         raise CheckpointInvalidError(f"Bridge checkpoint intent is incomplete: missing {exc}") from exc
 

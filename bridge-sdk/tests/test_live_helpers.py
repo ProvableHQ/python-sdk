@@ -428,8 +428,8 @@ class LiveFakeBridge(FakeBridge):
     the fake keeps the harness honest (it may only call verbs that exist) without a second fake.
     """
 
-    def quote(self, source, destination, **kwargs):
-        return lifecycle.quote(self, source=source, destination=destination, **kwargs)
+    def quote(self, **kwargs):
+        return lifecycle.quote(self, **kwargs)
 
     def execute(self, plan, **kwargs):
         return lifecycle.execute(self, plan, **kwargs)
@@ -589,7 +589,7 @@ def test_an_unconfigured_destination_chain_is_reported_not_an_attribute_error():
 def _xreserve_quote(**extra):
     from aleo_bridge.types import EvmXReserveQuote
 
-    plan = lifecycle.prepare(DEFAULT_REGISTRY, source="ethereum/usdc", destination="aleo/usdcx",
+    plan = lifecycle.prepare(DEFAULT_REGISTRY, source_chain="ethereum", source_asset="usdc", destination_chain="aleo", destination_asset="usdcx",
                              amount="2", recipient=ALEO_RECIPIENT, mint_mode="private")
     return EvmXReserveQuote(kind="evm-xreserve", plan=plan, fees=(), amount_out="2", hook_data=b"",
                             remote_recipient_bytes32=b"\x00" * 32, balance_atomic=5_000_000,
@@ -614,7 +614,7 @@ class _ScriptedBridge:
 
     def __init__(self, steps):
         self.steps, self.calls = list(steps), []
-        self.plan = lifecycle.prepare(DEFAULT_REGISTRY, source="ethereum/usdc", destination="aleo/usdcx",
+        self.plan = lifecycle.prepare(DEFAULT_REGISTRY, source_chain="ethereum", source_asset="usdc", destination_chain="aleo", destination_asset="usdcx",
                                       amount="2", recipient=ALEO_RECIPIENT, mint_mode="private")
 
     def _next(self, verb):

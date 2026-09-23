@@ -36,11 +36,11 @@ def test_build_server_constructs():
 
 async def test_call_tool_dispatches_and_serializes():
     b = FakeBridge()
-    out = await call_tool(b, "bridge_quote", {"source": "ethereum/usdc", "destination": "aleo/usdcx",
+    out = await call_tool(b, "bridge_quote", {"source_chain": "ethereum", "source_asset": "usdc", "destination_chain": "aleo", "destination_asset": "usdcx",
                                               "amount": "2", "recipient": ALEO_RECIPIENT})
     assert out[0].type == "text"
     assert json.loads(out[0].text)["kind"] == "evm-xreserve"
-    gated = await call_tool(b, "bridge_execute", {"source": "ethereum/usdc", "destination": "aleo/usdcx",
+    gated = await call_tool(b, "bridge_execute", {"source_chain": "ethereum", "source_asset": "usdc", "destination_chain": "aleo", "destination_asset": "usdcx",
                                                   "amount": "2", "recipient": ALEO_RECIPIENT})
     assert json.loads(gated[0].text)["confirmation_required"] is True and b.events == []
 
@@ -59,7 +59,7 @@ async def test_build_server_handlers_list_and_dispatch_through_the_real_server_w
     call_result = await server.request_handlers[types.CallToolRequest](
         types.CallToolRequest(params=types.CallToolRequestParams(
             name="bridge_execute",
-            arguments={"source": "ethereum/usdc", "destination": "aleo/usdcx", "amount": "2",
+            arguments={"source_chain": "ethereum", "source_asset": "usdc", "destination_chain": "aleo", "destination_asset": "usdcx", "amount": "2",
                       "recipient": ALEO_RECIPIENT})))
     payload = json.loads(call_result.root.content[0].text)
     assert payload["confirmation_required"] is True

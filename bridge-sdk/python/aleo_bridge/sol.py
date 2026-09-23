@@ -631,7 +631,8 @@ class SolModule:
         route regardless of ``self.environment``; this guards that the route's own environment
         matches the module's, mirroring how ``EthModule`` scopes its route lookups by environment.
         """
-        route = self.registry.find_route(SOLANA_SOL_ASSET_ID, ALEO_SOL_ASSET_ID, protocol="hyperlane")
+        route = self.registry.find_route(source_chain="solana", source_asset="sol", destination_chain="aleo",
+                                         destination_asset="sol", bridge_protocol="hyperlane")
         if route.environment != self.environment:
             raise RouteNotFoundError(f"No Solana Hyperlane route to Aleo for environment {self.environment!r}")
         return route

@@ -51,7 +51,8 @@ from aleo_bridge import Bridge
 
 bridge = Bridge.from_env()                      # BRIDGE_PRIVATE_KEY (+ EVM/Solana keys) from the environment
 print(bridge.status())                          # addresses, balances, pending transfers
-quote = bridge.quote("ethereum/wbtc", "aleo/wbtc", amount="0.001", recipient=bridge.aleo_address())
+quote = bridge.quote(source_chain="ethereum", source_asset="wbtc", destination_chain="aleo",
+                     amount="0.001", recipient=bridge.aleo_address())   # or route=<id from bridge.routes()>
 print(quote.fees, quote.amount_out)             # show these to the user BEFORE executing
 progress = bridge.execute(quote.plan)           # source step; checkpoints saved to the bound store
 progress = bridge.wait(progress)                # stops at resume / complete / done / failed

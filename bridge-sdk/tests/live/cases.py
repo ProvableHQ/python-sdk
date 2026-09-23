@@ -96,7 +96,7 @@ def routes_for_case(registry: Registry, case: str, environment: str = "mainnet")
     silently dropping them (veil parity §2).
     """
     spec = CASES[case]
-    return [route for route in registry.routes(environment=environment, protocol=spec.protocol)
+    return [route for route in registry.routes(environment=environment, bridge_protocol=spec.protocol)
             if registry.chain(registry.asset(route.source_asset_id).chain_id).family == spec.source_family]
 
 
@@ -452,9 +452,8 @@ def run_case(bridge: Any, case: str, route_id: str, *, state_path: Path | str, r
 
     progress = None
     if state.checkpoint is None:
-        quote = bridge.quote(asset_ref(source), asset_ref(destination), amount=amount, recipient=recipient,
-                             sender=sender, protocol=route.protocol, mint_mode=spec.mint_mode,
-                             secret_nonce=secret_nonce or "0scalar")
+        quote = bridge.quote(route=route, amount=amount, recipient=recipient, sender=sender,
+                             mint_mode=spec.mint_mode, secret_nonce=secret_nonce or "0scalar")
         benchmark.mark("quote-returned")
         print_quote(bridge, quote, case=case, route_id=route_id, log=log)
         balances = precheck(bridge, quote, case=case, log=log)

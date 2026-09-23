@@ -24,9 +24,12 @@ SOURCE = "0x" + "22" * 32
 EVM1 = "0x0000000000000000000000000000000000000001"
 
 
-def _make_plan(registry: Registry, *, source, destination, amount, recipient,
-               sender=None, protocol=None, mint_mode="public") -> Plan:
-    route = registry.find_route(source, destination, protocol=protocol)
+def _make_plan(registry: Registry, *, source_chain, source_asset, destination_chain, destination_asset,
+               amount, recipient, sender=None, bridge_protocol=None, mint_mode="public") -> Plan:
+    route = registry.find_route(source_chain=source_chain, source_asset=source_asset,
+                                destination_chain=destination_chain, destination_asset=destination_asset,
+                                bridge_protocol=bridge_protocol)
+    source, destination = route.source_asset_id, route.destination_asset_id
     src = registry.asset(source)
     dst = registry.asset(destination)
     amount_atomic = int(Decimal(amount) * (10 ** src.decimals))
@@ -37,7 +40,7 @@ def _make_plan(registry: Registry, *, source, destination, amount, recipient,
 
 
 def _plan(**kw):
-    base = dict(source="sepolia/usdc", destination="aleo-testnet/usdcx", amount="2",
+    base = dict(source_chain="sepolia", source_asset="usdc", destination_chain="aleo-testnet", destination_asset="usdcx", amount="2",
                 recipient=RECIPIENT, mint_mode="private")
     base.update(kw)
     return _make_plan(DEFAULT_REGISTRY, **base)
@@ -74,7 +77,7 @@ def test_allowlist_persists_intent_and_ids_only():
 
 
 def test_mint_mode_only_when_destination_is_an_aleo_program():
-    outbound = _make_plan(DEFAULT_REGISTRY, source="aleo/wbtc", destination="ethereum/wbtc",
+    outbound = _make_plan(DEFAULT_REGISTRY, source_chain="aleo", source_asset="wbtc", destination_chain="ethereum", destination_asset="wbtc",
                           amount="0.1", recipient=EVM1)
     cp = create_checkpoint(outbound, Receipt(id="at1x", protocol="hyperlane", status=Status.SOURCE_CONFIRMING,
                                              source_tx_id="at1x", protocol_state={"routeId": outbound.route_id}),
@@ -99,7 +102,7 @@ def test_sender_from_plan_or_source_sender():
 
 
 def test_solana_blockhash_pair_both_or_neither():
-    plan = _make_plan(DEFAULT_REGISTRY, source="solana/sol", destination="aleo/sol", amount="0.000000001",
+    plan = _make_plan(DEFAULT_REGISTRY, source_chain="solana", source_asset="sol", destination_chain="aleo", destination_asset="sol", amount="0.000000001",
                       recipient=RECIPIENT, sender="11111111111111111111111111111111")
     ok = Receipt(id="sig", protocol="hyperlane", status=Status.SOURCE_CONFIRMING, source_tx_id="sig",
                  protocol_state={"routeId": plan.route_id, "blockhash": "recent", "lastValidBlockHeight": "123456789"})
@@ -114,7 +117,7 @@ def test_solana_blockhash_pair_both_or_neither():
 
 
 def test_delivery_verification_pair_both_or_neither():
-    plan = _make_plan(DEFAULT_REGISTRY, source="aleo/sol", destination="solana/sol", amount="0.000000001",
+    plan = _make_plan(DEFAULT_REGISTRY, source_chain="aleo", source_asset="sol", destination_chain="solana", destination_asset="sol", amount="0.000000001",
                       recipient="11111111111111111111111111111111")
     receipt = Receipt(id="at1s", protocol="hyperlane", status=Status.SOURCE_CONFIRMING, source_tx_id="at1s",
                       protocol_state={"routeId": plan.route_id, "destinationBalanceBeforeAtomic": "100",
@@ -128,7 +131,7 @@ def test_delivery_verification_pair_both_or_neither():
 
 
 def test_prepared_transactions_and_hook_data():
-    plan = _make_plan(DEFAULT_REGISTRY, source="aleo/eth", destination="ethereum/eth",
+    plan = _make_plan(DEFAULT_REGISTRY, source_chain="aleo", source_asset="eth", destination_chain="ethereum", destination_asset="eth",
                       amount="0.000000000000000001", recipient=EVM1)
     serialized = json.dumps({"type": "execute", "id": "at1prepared", "fee": {}})
     cp = create_checkpoint(plan, Receipt(id="at1prepared", protocol="hyperlane",
@@ -237,7 +240,7 @@ def test_file_store_skips_unreadable_files_and_reports_them(tmp_path):
 
 def test_file_store_sanitizes_ids_and_orders_by_mtime(tmp_path):
     store = FileCheckpointStore(str(tmp_path))
-    plan = _make_plan(DEFAULT_REGISTRY, source="aleo/eth", destination="ethereum/eth",
+    plan = _make_plan(DEFAULT_REGISTRY, source_chain="aleo", source_asset="eth", destination_chain="ethereum", destination_asset="eth",
                       amount="0.000000000000000001", recipient=EVM1)
     a = create_checkpoint(plan, Receipt(id="at1a", protocol="hyperlane", status=Status.SOURCE_CONFIRMING,
                                         source_tx_id="at1a", protocol_state={"routeId": plan.route_id}), DEFAULT_REGISTRY)

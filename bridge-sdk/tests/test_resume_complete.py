@@ -33,7 +33,7 @@ DROPPED_DISPATCH = "0x" + "22" * 32
 def _prepared_progress(b):
     """An Aleo-origin transfer proved but never broadcast — exactly what ``execute`` checkpoints
     between ``delegate_prepared`` and ``submit_prepared``."""
-    plan = prepare(b.registry, source="aleo/eth", destination="ethereum/eth",
+    plan = prepare(b.registry, source_chain="aleo", source_asset="eth", destination_chain="ethereum", destination_asset="eth",
                    amount="0.000000000000000001", recipient=EVM_ADDRESS)
     serialized = json.dumps({"type": "execute", "id": "at1prepared", "fee": {}})
     receipt = Receipt(id="at1prepared", protocol="hyperlane", status=Status.SOURCE_SUBMISSION_PENDING,
@@ -44,7 +44,7 @@ def _prepared_progress(b):
 
 
 def _xreserve_progress(b, **plan_kw):
-    plan = prepare(b.registry, source="ethereum/usdc", destination="aleo/usdcx", amount="2",
+    plan = prepare(b.registry, source_chain="ethereum", source_asset="usdc", destination_chain="aleo", destination_asset="usdcx", amount="2",
                    recipient=ALEO_RECIPIENT, sender=EVM_ADDRESS, **plan_kw)
     receipt = Receipt(id=APPROVAL, protocol="xreserve", status=Status.SOURCE_SUBMISSION_PENDING,
                       protocol_state={"routeId": plan.route_id, "approvalTxIds": [APPROVAL],
@@ -145,7 +145,7 @@ def test_resume_refuses_a_solana_source_leg_and_points_at_recover():
     """``SolCall`` has no approval step and no resumable pre-broadcast state: there is nothing to
     continue, so resume never guesses — it sends the caller to recover()/wait()."""
     b = FakeBridge(solana=True)
-    plan = prepare(b.registry, source="solana/sol", destination="aleo/sol", amount="0.000000001",
+    plan = prepare(b.registry, source_chain="solana", source_asset="sol", destination_chain="aleo", destination_asset="sol", amount="0.000000001",
                    recipient=ALEO_RECIPIENT, sender=SOL_ADDRESS)
     sig = "5igNature" * 8
     receipt = Receipt(id=sig, protocol="hyperlane", status=Status.SOURCE_SUBMISSION_PENDING,
@@ -241,7 +241,7 @@ def test_resume_of_a_private_mint_without_its_secret_nonce_is_refused_before_any
 
 def test_resume_evm_hyperlane_redispatches_without_re_approving():
     b = FakeBridge()
-    plan = prepare(b.registry, source="ethereum/wbtc", destination="aleo/wbtc", amount="0.001",
+    plan = prepare(b.registry, source_chain="ethereum", source_asset="wbtc", destination_chain="aleo", destination_asset="wbtc", amount="0.001",
                    recipient=ALEO_RECIPIENT)
     receipt = Receipt(id=APPROVAL, protocol="hyperlane", status=Status.SOURCE_SUBMISSION_PENDING,
                       protocol_state={"routeId": plan.route_id, "approvalTxIds": [APPROVAL],
@@ -264,7 +264,7 @@ def test_resume_after_a_dropped_dispatch_leaves_only_the_new_record(tmp_path):
     transfer that has just been sent again."""
     store = FileCheckpointStore(tmp_path)
     b = FakeBridge(checkpoints=store)
-    plan = prepare(b.registry, source="ethereum/wbtc", destination="aleo/wbtc", amount="0.001",
+    plan = prepare(b.registry, source_chain="ethereum", source_asset="wbtc", destination_chain="aleo", destination_asset="wbtc", amount="0.001",
                    recipient=ALEO_RECIPIENT)
     dropped = Receipt(id=DROPPED_DISPATCH, protocol="hyperlane", status=Status.SOURCE_SUBMISSION_PENDING,
                       source_tx_id=DROPPED_DISPATCH,
@@ -283,7 +283,7 @@ def test_resume_after_a_dropped_dispatch_leaves_only_the_new_record(tmp_path):
 def test_resume_refuses_a_plan_prepared_for_another_account():
     b = FakeBridge()
     plan, receipt = _xreserve_progress(b)
-    stale = prepare(b.registry, source="ethereum/usdc", destination="aleo/usdcx", amount="2",
+    stale = prepare(b.registry, source_chain="ethereum", source_asset="usdc", destination_chain="aleo", destination_asset="usdcx", amount="2",
                     recipient=ALEO_RECIPIENT, sender="0x0000000000000000000000000000000000000009")
     with pytest.raises(ConfigurationError, match="sender"):
         resume(b, to_progress(stale, receipt.replace(protocol_state={**receipt.protocol_state,

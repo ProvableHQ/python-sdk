@@ -26,7 +26,8 @@ from aleo_bridge import Bridge
 bridge = Bridge.from_env()                     # keys + RPCs from the environment (table below)
 print(bridge.status())                         # addresses, balances of every bridge asset, pending transfers
 
-quote = bridge.quote("ethereum/wbtc", "aleo/wbtc", amount="0.001", recipient=bridge.aleo_address())
+quote = bridge.quote(source_chain="ethereum", source_asset="wbtc", destination_chain="aleo",
+                     amount="0.001", recipient=bridge.aleo_address())
 print(quote.kind, quote.fees, quote.amount_out) # show fees + amount_out before moving anything
 
 progress = bridge.execute(quote.plan)          # approval (if needed) + dispatch; checkpoints saved
@@ -78,8 +79,13 @@ notes in the environment table below.
 
 ## Routes
 
-Assets are `"chain/key"` (`"ethereum/usdc"`, `"aleo/usdcx"`); `bridge.registry`
-lists everything. Active mainnet routes:
+Routes are named the way veil's `quote` names them, flattened: `source_chain` +
+`source_asset` + `destination_chain` (`"ethereum"`, `"usdc"`, `"aleo"`), with
+`destination_asset` and `bridge_protocol` (`"xreserve"` | `"hyperlane"`) only
+when more than one route fits. `bridge.routes(...)` lists them with veil's
+`getRoutes` filters (`source_chain`, `destination_chain`, `bridge_protocol`,
+`symbol`), and `quote(route=...)` takes one of its results or a route id. Active
+mainnet routes:
 
 | Route | Protocol | Minimum | Notes |
 | --- | --- | --- | --- |
@@ -113,8 +119,12 @@ budget for the same gap there until someone re-measures it live.
 ## The lifecycle
 
 ```python
-quote    = bridge.quote(source, destination, amount="…" | amount_atomic=…, recipient=…,
-                        sender=None, protocol=None, mint_mode="public", secret_nonce="0scalar")
+routes   = bridge.routes(source_chain=None, source_asset=None, destination_chain=None, destination_asset=None,
+                         bridge_protocol=None, symbol=None, include_unavailable=False)
+quote    = bridge.quote(source_chain=…, source_asset=…, destination_chain=…, destination_asset=None, bridge_protocol=None,
+                        # or route=Route | route_id instead of the five filters
+                        amount="…" | amount_atomic=…, recipient=…, sender=None,
+                        mint_mode="public", secret_nonce="0scalar")
 progress = bridge.execute(quote.plan, on_checkpoint=save, proving="delegate", mode=None,
                           record=None, merkle_proof=None, gas_payment_microcredits=None,
                           secret_nonce=None, poll_seconds=1.0, timeout_seconds=120.0)
@@ -313,7 +323,8 @@ round trip runs from `scripts/rehearse.py` (see "Live rehearsal" below).
 ```python
 from aleo_bridge import bridge_tools, dispatch_tool
 tools = bridge_tools()                 # Claude `tools=` shape; bridge_tools(include_writes=False) for read-only
-dispatch_tool(bridge, "bridge_quote", {"source": "ethereum/usdc", "destination": "aleo/usdcx", "amount": "2", "recipient": addr})
+dispatch_tool(bridge, "bridge_quote", {"source_chain": "ethereum", "source_asset": "usdc", "destination_chain": "aleo",
+                                       "amount": "2", "recipient": addr})
 ```
 
 Reads: `bridge_status`, `bridge_list_assets`, `bridge_list_routes`, `bridge_quote`,

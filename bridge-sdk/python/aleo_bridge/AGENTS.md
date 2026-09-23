@@ -17,7 +17,8 @@ from aleo_bridge import Bridge
 
 bridge = Bridge.from_env()                      # BRIDGE_PRIVATE_KEY (+ EVM/Solana keys) from the environment
 print(bridge.status())                          # addresses, balances, pending transfers
-quote = bridge.quote("ethereum/wbtc", "aleo/wbtc", amount="0.001", recipient=bridge.aleo_address())
+quote = bridge.quote(source_chain="ethereum", source_asset="wbtc", destination_chain="aleo",
+                     amount="0.001", recipient=bridge.aleo_address())   # or route=<id from bridge.routes()>
 print(quote.fees, quote.amount_out)             # show these to the user BEFORE executing
 progress = bridge.execute(quote.plan)           # source step; checkpoints saved to the bound store
 progress = bridge.wait(progress)                # stops at resume / complete / done / failed
@@ -48,17 +49,20 @@ back are dict entries instead — ``{"next": "failed", "error", "error_type"}`` 
 when no store is bound. Finish any entry with ``recover`` → ``wait`` / ``resume`` / ``complete``,
 never by starting a new transfer.
 
-### `quote(self, source, destination, *, amount=None, amount_atomic=None, recipient: 'str', sender: 'str | None' = None, protocol: 'str | None' = None, mint_mode: 'str' = 'public', secret_nonce: 'str' = '0scalar')`
+### `quote(self, *, source_chain: 'str | None' = None, source_asset: 'str | None' = None, destination_chain: 'str | None' = None, destination_asset: 'str | None' = None, bridge_protocol: 'str | None' = None, route=None, amount=None, amount_atomic=None, recipient: 'str', sender: 'str | None' = None, mint_mode: 'str' = 'public', secret_nonce: 'str' = '0scalar')`
 
 Price a transfer and get the plan that ``execute`` takes. Nothing is signed.
 
-``source`` / ``destination`` are ``"chain/key"`` strings or ``(chain, key)``
-tuples (``"ethereum/usdc"``, ``"aleo/usdcx"``); give exactly one of
-``amount`` (human units, str) or ``amount_atomic`` (int).  ``recipient`` is
-the destination-chain address.  ``mint_mode`` (xReserve into Aleo only):
-``"public"`` balance, ``"record"`` minted by the relayer, or ``"private"``
-— you finish it yourself with ``complete`` and must keep ``secret_nonce``.
-Returns a kind-specific ``Quote`` (``quote.kind`` in evm-hyperlane /
+Name the route the way veil's ``quote`` does: ``source_chain`` + ``source_asset``
++ ``destination_chain`` (``"ethereum"``, ``"usdc"``, ``"aleo"``), adding
+``destination_asset`` / ``bridge_protocol`` (``"xreserve"`` | ``"hyperlane"``)
+only when more than one route fits — or ``route=`` with a ``Route`` from
+``routes()`` or its id.  Give exactly one of ``amount`` (human units, str)
+or ``amount_atomic`` (int).  ``recipient`` is the destination-chain
+address.  ``mint_mode`` (xReserve into Aleo only): ``"public"`` balance,
+``"record"`` minted by the relayer, or ``"private"`` — you finish it
+yourself with ``complete`` and must keep ``secret_nonce``.  Returns a
+kind-specific ``Quote`` (``quote.kind`` in evm-hyperlane /
 solana-hyperlane / aleo-hyperlane / evm-xreserve / aleo-xreserve) with
 ``fees`` and ``amount_out`` in human units and ``quote.plan``.  Show the
 user fees + amount before ``execute``.

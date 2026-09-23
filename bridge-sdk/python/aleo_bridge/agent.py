@@ -174,22 +174,22 @@ def _error_payload(exc: Exception, **extra: Any) -> dict[str, Any]:
     return payload
 
 
-def _connection_gap(bridge: Any, source: Any) -> dict[str, Any] | None:
-    """Probe the connection a transfer out of *source* would sign with (spec §10: a missing
+def _connection_gap(bridge: Any, source_chain: Any) -> dict[str, Any] | None:
+    """Probe the connection a transfer out of *source_chain* would sign with (spec §10: a missing
     connection is a configuration answer the model can act on, not an exception)."""
     try:
-        asset = bridge.registry.asset(source)
-        family = bridge.registry.chain(asset.chain_id).family
-    except BridgeError:
+        chain = bridge.registry.chain(source_chain)
+        family = chain.family
+    except (BridgeError, TypeError):
         return None                                   # let the real lookup produce the real error
     if family == "evm" and getattr(bridge, "ethereum", None) is None:
         return _error_payload(ConfigurationError(
-            f"No Ethereum connection is configured, and {asset.id} transfers are signed on "
-            f"{asset.chain_id}."), how_to_fix=EVM_HOW_TO_FIX)
+            f"No Ethereum connection is configured, and transfers out of {chain.id} are signed "
+            "there."), how_to_fix=EVM_HOW_TO_FIX)
     if family == "solana" and getattr(bridge, "solana", None) is None:
         return _error_payload(ConfigurationError(
-            f"No Solana connection is configured, and {asset.id} transfers are signed on "
-            f"{asset.chain_id}."), how_to_fix=SOLANA_HOW_TO_FIX)
+            f"No Solana connection is configured, and transfers out of {chain.id} are signed "
+            "there."), how_to_fix=SOLANA_HOW_TO_FIX)
     return None
 
 
@@ -203,18 +203,21 @@ def _missing_nonce(what: str) -> dict[str, Any]:
 # ── shared argument handling ──────────────────────────────────────────────────
 
 _QUOTE_PROPS = {
-    "source": {**_S, "description": "Source asset as 'chain/key', e.g. 'ethereum/usdc', 'aleo/eth', 'solana/sol'."},
-    "destination": {**_S, "description": "Destination asset as 'chain/key', e.g. 'aleo/usdcx', 'ethereum/eth'."},
+    "source_chain": {**_S, "description": "Chain the funds leave: 'ethereum', 'solana', 'aleo' (testnet: 'sepolia', 'aleo-testnet')."},
+    "source_asset": {**_S, "description": "Asset key on the source chain: 'usdc', 'eth', 'wbtc', 'usdt', 'sol', 'usdcx'."},
+    "destination_chain": {**_S, "description": "Chain the funds arrive on: 'aleo', 'ethereum', 'solana'."},
+    "destination_asset": {**_S, "description": "Asset key on the destination chain ('usdcx', 'eth', ...). Only needed when "
+                                               "the source asset can arrive as more than one asset."},
     "amount": {**_S, "description": "Positive decimal amount in source-asset display units (e.g. '2', '0.001')."},
     "recipient": {**_S, "description": "Destination-chain address that receives the funds."},
     "sender": {**_S, "description": "Optional source-chain address; must be the configured connection's address."},
-    "protocol": {**_S, "enum": ["xreserve", "hyperlane"], "description": "Only needed when both protocols serve the pair."},
+    "bridge_protocol": {**_S, "enum": ["xreserve", "hyperlane"], "description": "Only needed when both protocols serve the pair."},
     "mint_mode": {**_S, "enum": ["public", "record", "private"],
                   "description": "xReserve into Aleo only. 'private' requires the user to complete the mint later with the same secret_nonce."},
     "secret_nonce": {**_S, "description": "Private-mint commitment secret, REQUIRED when mint_mode is 'private' "
                                           "(there is no default). The user must keep it for bridge_complete; the SDK never stores it."},
 }
-_QUOTE_REQUIRED = ["source", "destination", "amount", "recipient"]
+_QUOTE_REQUIRED = ["source_chain", "source_asset", "destination_chain", "amount", "recipient"]
 _CONFIRM = {"confirm": {**_B, "description": "Set true to move funds. Without it the quote is returned and nothing is submitted."}}
 _CHECKPOINT = {"checkpoint": {"type": "object",
                               "description": "The checkpoint dict returned by bridge_get_progress, by an entry of "
@@ -227,9 +230,10 @@ def _quote_kwargs(args: dict[str, Any]) -> dict[str, Any]:
     a private one must carry its own (checked by :func:`_private_nonce_gap` first)."""
     mint_mode = args.get("mint_mode") or "public"
     secret_nonce = args.get("secret_nonce")
-    return dict(source=args["source"], destination=args["destination"], amount=str(args["amount"]),
-                recipient=args["recipient"], sender=args.get("sender"), protocol=args.get("protocol"),
-                mint_mode=mint_mode,
+    return dict(source_chain=args["source_chain"], source_asset=args["source_asset"],
+                destination_chain=args["destination_chain"], destination_asset=args.get("destination_asset"),
+                bridge_protocol=args.get("bridge_protocol"), amount=str(args["amount"]),
+                recipient=args["recipient"], sender=args.get("sender"), mint_mode=mint_mode,
                 secret_nonce=secret_nonce if mint_mode == "private" else (secret_nonce or "0scalar"))
 
 
@@ -280,14 +284,16 @@ def _h_list_assets(b, a):
 
 
 def _h_list_routes(b, a):
-    return _serialize(b.registry.routes(source=a.get("source"), destination=a.get("destination"),
-                                        protocol=a.get("protocol"), symbol=a.get("symbol"),
+    return _serialize(b.registry.routes(source_chain=a.get("source_chain"), source_asset=a.get("source_asset"),
+                                        destination_chain=a.get("destination_chain"),
+                                        destination_asset=a.get("destination_asset"),
+                                        bridge_protocol=a.get("bridge_protocol"), symbol=a.get("symbol"),
                                         include_unavailable=bool(a.get("include_unavailable", False)),
                                         environment=a.get("environment", b.environment)), b.registry)
 
 
 def _h_quote(b, a):
-    gap = _private_nonce_gap(a) or _connection_gap(b, a.get("source"))
+    gap = _private_nonce_gap(a) or _connection_gap(b, a.get("source_chain"))
     if gap is not None:
         return gap
     return _serialize(lifecycle.quote(b, **_quote_kwargs(a)), b.registry)
@@ -335,7 +341,7 @@ def _h_pending(b, a):
 # ── writes (confirm-gated) ────────────────────────────────────────────────────
 
 def _h_execute(b, a):
-    gap = _private_nonce_gap(a) or _connection_gap(b, a.get("source"))
+    gap = _private_nonce_gap(a) or _connection_gap(b, a.get("source_chain"))
     if gap is not None:
         return gap
     quote = lifecycle.quote(b, **_quote_kwargs(a))
@@ -425,7 +431,8 @@ _READ_TOOLS: list[tuple[str, str, dict[str, Any], Callable[[Any, dict[str, Any]]
     ("bridge_list_routes",
      "Supported directions and their protocol (xreserve = USDC<->USDCx via Circle; hyperlane = ETH/WBTC/USDT/SOL). "
      "Active routes move funds; metadata-required ones are listed but refused by quote/execute.",
-     _schema({"source": _S, "destination": _S, "protocol": {**_S, "enum": ["xreserve", "hyperlane"]}, "symbol": _S,
+     _schema({"source_chain": _S, "source_asset": _S, "destination_chain": _S, "destination_asset": _S,
+              "bridge_protocol": {**_S, "enum": ["xreserve", "hyperlane"]}, "symbol": _S,
               "include_unavailable": _B, "environment": {**_S, "enum": ["mainnet", "testnet"]}}, []), _h_list_routes),
     ("bridge_quote",
      "Validate and price a transfer: route, fees (human units), amount_out, approval needs. Reads chain state, "

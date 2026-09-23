@@ -14,7 +14,7 @@ HASH = "0x" + "ab" * 32
 
 def _plan():
     from aleo_bridge.lifecycle import prepare
-    return prepare(DEFAULT_REGISTRY, source="ethereum/eth", destination="aleo/eth", amount_atomic=1,
+    return prepare(DEFAULT_REGISTRY, source_chain="ethereum", source_asset="eth", destination_chain="aleo", destination_asset="eth", amount_atomic=1,
                    recipient="aleo1k5a999p502ty77ur8yryj7qmj2rtxyl8jylpnkcnfuvgyt0vxvyssyn69g",
                    sender="0x734C0a5AB55885974cEDb9D6ff71d8E8448c7375")
 

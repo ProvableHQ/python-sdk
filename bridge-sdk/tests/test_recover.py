@@ -12,7 +12,7 @@ EVM1 = EVM_ADDRESS
 
 
 def _aleo_eth_checkpoint(b, **source):
-    plan = prepare(b.registry, source="aleo/eth", destination="ethereum/eth", amount="0.000000000000000001",
+    plan = prepare(b.registry, source_chain="aleo", source_asset="eth", destination_chain="ethereum", destination_asset="eth", amount="0.000000000000000001",
                    recipient=EVM1)
     return plan, {"version": 1,
                   "intent": {"source": {"chain": "aleo", "asset": "eth"}, "destination": {"chain": "ethereum", "asset": "eth"},
@@ -75,7 +75,7 @@ def test_submitted_aleo_source_is_observed_once_never_rebroadcast():
 
 def test_solana_checkpoint_validates_blockhash_pair_and_reads_status():
     b = FakeBridge(solana=True)
-    plan = prepare(b.registry, source="solana/sol", destination="aleo/sol", amount="0.000000001",
+    plan = prepare(b.registry, source_chain="solana", source_asset="sol", destination_chain="aleo", destination_asset="sol", amount="0.000000001",
                    recipient=ALEO_RECIPIENT, sender=SOL_ADDRESS)
     cp = create_checkpoint(plan, Receipt(id="sig", protocol="hyperlane", status=Status.SOURCE_CONFIRMING, source_tx_id="sig",
                                          protocol_state={"routeId": plan.route_id, "blockhash": "recent",
@@ -96,7 +96,7 @@ def test_solana_checkpoint_validates_blockhash_pair_and_reads_status():
 
 def test_evm_hyperlane_delegates_to_eth_recover_source():
     b = FakeBridge()
-    plan = prepare(b.registry, source="ethereum/wbtc", destination="aleo/wbtc", amount="0.001", recipient=ALEO_RECIPIENT,
+    plan = prepare(b.registry, source_chain="ethereum", source_asset="wbtc", destination_chain="aleo", destination_asset="wbtc", amount="0.001", recipient=ALEO_RECIPIENT,
                    sender=EVM1)
     cp = create_checkpoint(plan, Receipt(id="0x" + "11" * 32, protocol="hyperlane", status=Status.SOURCE_APPROVAL_PENDING,
                                          protocol_state={"routeId": plan.route_id, "approvalTxIds": ["0x" + "11" * 32]}),
@@ -112,7 +112,7 @@ def test_evm_hyperlane_delegates_to_eth_recover_source():
 
 def test_evm_xreserve_recovery_paths():
     b = FakeBridge(environment="testnet")
-    plan = prepare(b.registry, source="sepolia/usdc", destination="aleo-testnet/usdcx", amount="2",
+    plan = prepare(b.registry, source_chain="sepolia", source_asset="usdc", destination_chain="aleo-testnet", destination_asset="usdcx", amount="2",
                    recipient=ALEO_RECIPIENT, mint_mode="private", sender=EVM1)
     base = create_checkpoint(plan, Receipt(id="0x" + "22" * 32, protocol="xreserve", status=Status.SOURCE_CONFIRMING,
                                            source_tx_id="0x" + "22" * 32, protocol_state={"routeId": plan.route_id}),
@@ -154,7 +154,7 @@ def test_unsupported_route_and_terminal_cleanup(tmp_path):
     b.aleo.confirmed_transactions["at1burn"] = {"status": "rejected"}
     progress = recover(b, cp)
     assert progress.next == "failed" and store.list() == []
-    burn = prepare(b.registry, source="aleo/usdcx", destination="ethereum/usdc", amount="2.1", recipient=EVM1)
+    burn = prepare(b.registry, source_chain="aleo", source_asset="usdcx", destination_chain="ethereum", destination_asset="usdc", amount="2.1", recipient=EVM1)
     ok = recover(b, create_checkpoint(burn, Receipt(id="at1b", protocol="xreserve", status=Status.SOURCE_CONFIRMING,
                                                     source_tx_id="at1b", protocol_state={"routeId": burn.route_id}), b.registry))
     assert ok.next == "wait"
@@ -182,7 +182,7 @@ def test_terminal_cleanup_deletes_by_checkpoint_id_not_receipt_id(tmp_path):
     # cp.id ("sig"), never one keyed on receipt.id ("msg-divergent").
     store = FileCheckpointStore(tmp_path)
     b = FakeBridge(solana=True, checkpoints=store)
-    plan = prepare(b.registry, source="solana/sol", destination="aleo/sol", amount="0.000000001",
+    plan = prepare(b.registry, source_chain="solana", source_asset="sol", destination_chain="aleo", destination_asset="sol", amount="0.000000001",
                    recipient=ALEO_RECIPIENT, sender=SOL_ADDRESS)
     cp = create_checkpoint(plan, Receipt(id="sig", protocol="hyperlane", status=Status.SOURCE_CONFIRMING,
                                          source_tx_id="sig", protocol_state={"routeId": plan.route_id,
@@ -209,7 +209,7 @@ def test_recovered_plan_round_trips_through_checkpoint():
     # holds for an EVM, a Solana and an Aleo-origin route by checking recover()'s Progress.plan.
     b = FakeBridge(solana=True)
 
-    evm_plan = prepare(b.registry, source="ethereum/wbtc", destination="aleo/wbtc", amount="0.001",
+    evm_plan = prepare(b.registry, source_chain="ethereum", source_asset="wbtc", destination_chain="aleo", destination_asset="wbtc", amount="0.001",
                        recipient=ALEO_RECIPIENT, sender=EVM1)
     evm_cp = create_checkpoint(evm_plan, Receipt(id="0x" + "11" * 32, protocol="hyperlane",
                                                  status=Status.SOURCE_APPROVAL_PENDING,
@@ -219,7 +219,7 @@ def test_recovered_plan_round_trips_through_checkpoint():
                                    protocol_state={"routeId": evm_plan.route_id, "approvalTxIds": ["0x" + "11" * 32]})
     assert recover(b, evm_cp).plan == evm_plan
 
-    sol_plan = prepare(b.registry, source="solana/sol", destination="aleo/sol", amount="0.000000001",
+    sol_plan = prepare(b.registry, source_chain="solana", source_asset="sol", destination_chain="aleo", destination_asset="sol", amount="0.000000001",
                        recipient=ALEO_RECIPIENT, sender=SOL_ADDRESS)
     sol_cp = create_checkpoint(sol_plan, Receipt(id="sig", protocol="hyperlane", status=Status.SOURCE_CONFIRMING,
                                                  source_tx_id="sig", protocol_state={"routeId": sol_plan.route_id}),

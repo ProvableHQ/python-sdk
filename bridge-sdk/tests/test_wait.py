@@ -15,7 +15,7 @@ from tests.test_get_status import SIG, _inbound_private
 
 
 def _sol_progress(b):
-    plan = prepare(b.registry, source="aleo/sol", destination="solana/sol", amount="0.000000001", recipient=SOL_ADDRESS)
+    plan = prepare(b.registry, source_chain="aleo", source_asset="sol", destination_chain="solana", destination_asset="sol", amount="0.000000001", recipient=SOL_ADDRESS)
     receipt = Receipt(id="at1source", protocol="hyperlane", status=Status.DELIVERY_PENDING, source_tx_id="at1source",
                       protocol_state={"routeId": plan.route_id, "destinationBalanceBeforeAtomic": "100",
                                       "expectedDestinationIncreaseAtomic": "1"})
@@ -123,7 +123,7 @@ def test_an_aleo_to_evm_xreserve_burn_terminates_and_frees_its_checkpoint(tmp_pa
     from tests.fakes.fake_bridge import EVM_ADDRESS
     store = FileCheckpointStore(tmp_path)
     b = FakeBridge(checkpoints=store)
-    plan = prepare(b.registry, source="aleo/usdcx", destination="ethereum/usdc", amount="2.000001",
+    plan = prepare(b.registry, source_chain="aleo", source_asset="usdcx", destination_chain="ethereum", destination_asset="usdc", amount="2.000001",
                    recipient=EVM_ADDRESS)
     receipt = Receipt(id="at1burn", protocol="xreserve", status=Status.DELIVERY_PENDING, source_tx_id="at1burn",
                       protocol_state={"routeId": plan.route_id, "destinationBalanceBeforeAtomic": "100",
