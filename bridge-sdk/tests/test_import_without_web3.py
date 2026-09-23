@@ -25,4 +25,4 @@ def test_package_imports_without_web3(monkeypatch):
 
     with pytest.raises(MissingExtraError) as exc_info:
         pkg.Ethereum("http://127.0.0.1:1")
-    assert "aleo-bridge-sdk[evm]" in str(exc_info.value)
+    assert "web3" in str(exc_info.value) and "aleo-bridge-sdk" in str(exc_info.value)

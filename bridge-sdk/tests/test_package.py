@@ -15,8 +15,11 @@ def test_version_is_pinned_in_lockstep():
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text())
     assert pyproject["project"]["version"] == "0.1.0" == aleo_bridge.__version__
     assert pyproject["project"]["name"] == "aleo-bridge-sdk"
+    deps = pyproject["project"]["dependencies"]
+    for base in ("aleo-sdk", "pynacl", "web3", "eth-account", "solders", "solana"):
+        assert any(dep.startswith(base) for dep in deps), f"{base} must be a base dependency"
     extras = pyproject["project"]["optional-dependencies"]
-    assert {"evm", "solana", "mcp", "dev"} <= set(extras)
+    assert set(extras) == {"mcp", "dev"}                     # no chain family hides behind an extra
     assert any(dep.startswith("mcp>=1") and "<2" in dep for dep in extras["mcp"])
 
 
@@ -59,7 +62,7 @@ def test_ci_has_bridge_jobs():
     for job in ("build-bridge:", "release-bridge:"):
         assert job in workflow
     assert "environment: pypi-bridge" in workflow
-    assert 'pip install "$(ls bridge-sdk/dist/*.whl)[evm,solana,mcp]"' in workflow
+    assert 'pip install "$(ls bridge-sdk/dist/*.whl)[mcp]"' in workflow
     assert re.search(r'pip install "\$\(ls bridge-sdk/dist/\*\.whl\)"\s*\n\s*python -c "import aleo_bridge', workflow)
     # m7: the `python -m aleo_bridge` smoke must ASSERT on its output — piping it into head
     # succeeds even when the guide is empty or missing from the wheel.
@@ -89,7 +92,8 @@ def test_error_hierarchy_and_messages():
         assert issubclass(cls, e.BridgeError)
     err = e.MissingExtraError("evm", "Ethereum connections")
     assert err.extra == "evm"
-    assert "pip install 'aleo-bridge-sdk[evm]'" in str(err)
+    assert "web3" in str(err) and "--force-reinstall aleo-bridge-sdk" in str(err)   # base dep, not an extra
+    assert "pip install 'aleo-bridge-sdk[mcp]'" in str(e.MissingExtraError("mcp", "The MCP server"))
 
 
 def test_polling_timeout_carries_status():

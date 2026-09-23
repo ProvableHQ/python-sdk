@@ -15,13 +15,26 @@ class ConfigurationError(BridgeError):
     """The client, environment, or registry is configured inconsistently."""
 
 
+_BASE_PACKAGES = {"evm": "web3 and eth-account", "solana": "solders and solana"}
+
+
 class MissingExtraError(BridgeError):
-    """An optional dependency group is required for this feature."""
+    """A dependency this feature needs is not importable.
+
+    The chain-family packages are base dependencies of ``aleo-bridge-sdk`` (there is no ``[evm]``
+    or ``[solana]`` extra), so hitting this for them means a broken or trimmed environment; the MCP
+    server is the one feature that still lives behind an extra.
+    """
 
     def __init__(self, extra: str, feature: str) -> None:
         self.extra = extra
         self.feature = feature
-        super().__init__(f"{feature} requires the '{extra}' extra: pip install 'aleo-bridge-sdk[{extra}]'")
+        if extra in _BASE_PACKAGES:
+            hint = (f"{feature} requires {_BASE_PACKAGES[extra]}, which install with aleo-bridge-sdk itself: "
+                    f"pip install --force-reinstall aleo-bridge-sdk")
+        else:
+            hint = f"{feature} requires the '{extra}' extra: pip install 'aleo-bridge-sdk[{extra}]'"
+        super().__init__(hint)
 
 
 class RouteNotFoundError(BridgeError):

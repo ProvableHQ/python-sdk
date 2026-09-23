@@ -10,10 +10,8 @@ It is a port of veil's `@provablehq/aleo-bridge-sdk` 0.1.0 (registry
 `aleo-sdk`.
 
 ```sh
-pip install aleo-bridge-sdk               # Aleo legs only
-pip install 'aleo-bridge-sdk[evm]'        # + Ethereum (web3, eth-account)
-pip install 'aleo-bridge-sdk[solana]'     # + Solana (solders, solana)
-pip install 'aleo-bridge-sdk[evm,solana]' # everything
+pip install aleo-bridge-sdk               # Aleo, Ethereum and Solana legs
+pip install 'aleo-bridge-sdk[mcp]'        # + the stdio MCP server
 ```
 
 Import name: `aleo_bridge`.

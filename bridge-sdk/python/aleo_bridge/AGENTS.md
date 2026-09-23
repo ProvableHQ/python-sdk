@@ -5,7 +5,7 @@
 
 Typed Python client that moves assets between Aleo, Ethereum and Solana
 over the reviewed Hyperlane warp routes and Circle xReserve deployments
-(`pip install aleo-bridge-sdk[evm,solana]`, imports as `aleo_bridge`).
+(`pip install aleo-bridge-sdk`, imports as `aleo_bridge`).
 MCP alternative: `python -m aleo_bridge.mcp` exposes the same lifecycle as
 tools; `aleo_bridge.agent.bridge_tools()` gives Claude-shape tool schemas.
 Registry version `2026-08-31.solana-deposits.1`.

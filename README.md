@@ -51,7 +51,7 @@ python -m aleo_shield_swap.mcp      # stdio server with the lifecycle tools
 
 ## Bridging (move assets between Ethereum, Solana and Aleo)
 
-The [`bridge-sdk`](./bridge-sdk) package (`pip install 'aleo-bridge-sdk[evm,solana]'`,
+The [`bridge-sdk`](./bridge-sdk) package (`pip install aleo-bridge-sdk`,
 import `aleo_bridge`) drives the Aleo bridges from Python with the same
 verb structure as the facade: Hyperlane for ETH, WBTC, USDT and SOL, and
 Circle xReserve for USDC ⇄ USDCx, in both directions, with checkpointed

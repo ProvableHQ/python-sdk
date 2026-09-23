@@ -45,7 +45,7 @@ def test_package_imports_without_solders_or_solana(monkeypatch):
 
     with pytest.raises(ReimportedMissingExtraError) as exc_info:
         pkg.Solana()
-    assert "aleo-bridge-sdk[solana]" in str(exc_info.value)
+    assert "solders" in str(exc_info.value) and "aleo-bridge-sdk" in str(exc_info.value)
 
 
 def test_read_only_connection_needs_no_solana_extra(monkeypatch):
@@ -57,7 +57,7 @@ def test_read_only_connection_needs_no_solana_extra(monkeypatch):
         conn.sign_message(b"payload")
     with pytest.raises(ConfigurationError, match="read-only"):
         conn.pubkey
-    with pytest.raises(MissingExtraError, match=r"aleo-bridge-sdk\[solana\]"):
+    with pytest.raises(MissingExtraError, match=r"solders and solana"):
         sol.Solana()
     with pytest.raises(MissingExtraError):
         sol.Solana(client=_Reader(), private_key="[1,2,3]")

@@ -295,14 +295,14 @@ jobs:
         run: |
           pip install build
           python -m build bridge-sdk --outdir bridge-sdk/dist
-      - name: Test against the built aleo-sdk wheel (all extras, hermetic only)
+      - name: Test against the built aleo-sdk wheel (hermetic only)
         run: |
           pip install sdk-dist/aleo_sdk-*.whl
-          pip install "$(ls bridge-sdk/dist/*.whl)[evm,solana,mcp]" pytest pytest-asyncio
+          pip install "$(ls bridge-sdk/dist/*.whl)[mcp]" pytest pytest-asyncio
           cd bridge-sdk && python -m pytest -q -m "not live"
       - name: AGENTS.md up to date
         run: python bridge-sdk/codegen/gen_context.py --check
-      - name: Smoke test wheel with extras
+      - name: Smoke test the bare wheel
         run: |
           cd "$RUNNER_TEMP"
           python -c "import aleo_bridge, aleo_bridge.eth, aleo_bridge.sol, aleo_bridge.mcp; print('aleo-bridge-sdk', aleo_bridge.__version__)"
