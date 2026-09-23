@@ -85,10 +85,10 @@ lists everything. Active mainnet routes:
 | --- | --- | --- | --- |
 | `xreserve:ethereum/usdc->aleo/usdcx` | Circle xReserve | 2 USDC | `mint_mode` public / record / **private** (you finish with `complete`) |
 | `xreserve:aleo/usdcx->ethereum/usdc` | Circle xReserve | > 2 USDCx | 2 USDCx withdrawal fee; private burn (default) needs a record + exclusion proof — computed for you |
-| `hyperlane:ethereum/eth->aleo/eth` / reverse | Hyperlane (native) | 1 wei | `msg.value` carries ETH + relayer fee |
-| `hyperlane:ethereum/wbtc->aleo/wbtc` / reverse | Hyperlane (collateral) | 1 sat | approval + dispatch |
-| `hyperlane:ethereum/usdt->aleo/usdt` / reverse | Hyperlane (collateral) | 1 µUSDT | approval reset to 0 first (USDT) |
-| `hyperlane:solana/sol->aleo/sol` / `hyperlane:aleo/sol->solana/sol` | Hyperlane | 1 lamport | IGP + rent quoted live |
+| `hyperlane:ethereum/eth->aleo/eth` / reverse | Hyperlane (native) | any positive amount (1 wei ran live) | `msg.value` carries ETH + relayer fee |
+| `hyperlane:ethereum/wbtc->aleo/wbtc` / reverse | Hyperlane (collateral) | any positive amount (1 sat ran live) | approval + dispatch |
+| `hyperlane:ethereum/usdt->aleo/usdt` / reverse | Hyperlane (collateral) | any positive amount | approval reset to 0 first (USDT) |
+| `hyperlane:solana/sol->aleo/sol` / `hyperlane:aleo/sol->solana/sol` | Hyperlane | any positive amount (1 lamport ran live) | IGP + rent quoted live; the Solana side costs ≈ 0.0056 SOL of which ≈ 0.0037 is account rent |
 
 Testnet: `xreserve:sepolia/usdc->aleo-testnet/usdcx` and its reverse. ALEO and
 USAD routes, plus every `base`/`hyperevm` route, are `metadata-required`:
@@ -487,8 +487,9 @@ covered hermetically by `tests/test_live_helpers.py`.
 | `SOLANA_PRIVATE_KEY`, `SOLANA_RPC_URL` | `from_env`, rehearsal | Solana signer (base58 or `id.json` array) + RPC (optional); aliases `BRIDGE_SOLANA_PRIVATE_KEY` / `BRIDGE_LIVE_SOLANA_RPC_URL`, same precedence and same everyday-call caveat as the Ethereum pair |
 | `BRIDGE_MIN_PRIORITY_FEE_WEI` | `Ethereum.from_env` | override the EIP-1559 tip floor (whole wei, digits only); default 0.1 gwei |
 | `BRIDGE_CHECKPOINT_DIR` | `from_env` | bind a `FileCheckpointStore` |
-| `ALEO_BRIDGE_HOME` | `from_profile` | profile directory (default `~/.aleo-bridge/`), holds only the Aleo key, mode 600 |
-| `ALEO_E2E_PRIVATE_KEY` | live tests / rehearsal, testnet | testnet Aleo key (alias `BRIDGE_LIVE_ALEO_TESTNET_PRIVATE_KEY`) |
+| `ALEO_BRIDGE_HOME` | `from_profile` | profile directory (default `~/.aleo-bridge/`): the Aleo key (mode 600) and the profile's `checkpoints/` store — never EVM or Solana keys |
+| `BRIDGE_PRIVATE_KEY_FILE` | `from_profile` | file form of `BRIDGE_PRIVATE_KEY`, read once when the profile is first created |
+| `BRIDGE_LIVE_ALEO_TESTNET_PRIVATE_KEY` | live tests / rehearsal, testnet | testnet Aleo key; falls back to `ALEO_E2E_PRIVATE_KEY` when unset |
 | `BRIDGE_LIVE_FUNDS`, `BRIDGE_LIVE_STATE_DIR` | live tests, rehearsal | `1` + a directory outside the repo — funded cases exist at all |
 | `BRIDGE_LIVE_MAINNET_ACK`, `BRIDGE_LIVE_MAINNET_CASES` | live tests, rehearsal | `<see tests/live/config.py>` + a comma list of `evm-hyperlane`, `evm-xreserve`, `aleo-hyperlane`, `aleo-xreserve`, `solana-hyperlane` — the named mainnet cases may run |
 | `BRIDGE_LIVE_MAINNET_EXECUTE` | live tests, rehearsal | `<see tests/live/config.py>` — without it every case quotes and prechecks only |

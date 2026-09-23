@@ -49,6 +49,28 @@ pip install "shield-swap-sdk[mcp]"
 python -m aleo_shield_swap.mcp      # stdio server with the lifecycle tools
 ```
 
+## Bridging (move assets between Ethereum, Solana and Aleo)
+
+The [`bridge-sdk`](./bridge-sdk) package (`pip install 'aleo-bridge-sdk[evm,solana]'`,
+import `aleo_bridge`) drives the Aleo bridges from Python with the same
+verb structure as the facade: Hyperlane for ETH, WBTC, USDT and SOL, and
+Circle xReserve for USDC ⇄ USDCx, in both directions, with checkpointed
+recovery so an interrupted transfer is finished rather than re-sent.
+
+```python
+from aleo_bridge import Bridge
+
+bridge = Bridge.from_env()                                   # Aleo, EVM and Solana keys from the environment
+quote = bridge.quote("ethereum/usdc", "aleo/usdcx", amount="5", recipient=bridge.aleo_address())
+progress = bridge.wait(bridge.execute(quote.plan))           # approval + deposit, then poll to done / resume / complete
+```
+
+Agents get the same surface through `python -m aleo_bridge` (the generated
+guide), `aleo_bridge.agent.bridge_tools()`, and the stdio MCP server
+`python -m aleo_bridge.mcp`; every write is confirm-gated and shows fees
+before anything moves. See [bridge-sdk/README.md](./bridge-sdk/README.md)
+for routes, connections, recovery and the live test suite.
+
 ## Quick Start (facade)
 
 ```python
@@ -309,6 +331,8 @@ assert sig.verify(pk.address, b"hello")
 ## Codebases Included
 
 - [**sdk**](./sdk/): A library that brings Aleo MainnetV0 functionalities to Python developers.
+- [**shield-swap-sdk**](./shield-swap-sdk/): Typed client and agent tools for the shield_swap AMM.
+- [**bridge-sdk**](./bridge-sdk/): Typed client and agent tools for the Hyperlane and xReserve bridges between Ethereum, Solana and Aleo.
 - [**zkml**](./zkml/): A transpiler library that converts Python machine learning models into Leo code.
 - [**zkml-research**](./zkml-research/): Research on accurate/constraint-efficient zkML techniques, mostly for internal purposes.
 
