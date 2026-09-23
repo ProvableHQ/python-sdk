@@ -517,8 +517,6 @@ BRIDGE_LIVE_READS=1 .venv/bin/python -m pytest -m live tests/live -q    # read-o
 BRIDGE_LIVE_READS=1 BRIDGE_LIVE_SIMULATE=1 .venv/bin/python -m pytest -m live tests/live -q
 ```
 
-Literals and vectors: `docs/veil-brief.md`.
-
 ## Development
 
 ```sh
