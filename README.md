@@ -61,7 +61,8 @@ recovery so an interrupted transfer is finished rather than re-sent.
 from aleo_bridge import Bridge
 
 bridge = Bridge.from_env()                                   # Aleo, EVM and Solana keys from the environment
-quote = bridge.quote("ethereum/usdc", "aleo/usdcx", amount="5", recipient=bridge.aleo_address())
+quote = bridge.quote(source_chain="ethereum", source_asset="usdc", destination_chain="aleo",
+                     amount="5", recipient=bridge.aleo_address())
 progress = bridge.wait(bridge.execute(quote.plan))           # approval + deposit, then poll to done / resume / complete
 ```
 
