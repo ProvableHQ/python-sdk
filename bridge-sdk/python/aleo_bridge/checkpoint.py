@@ -243,7 +243,7 @@ class FileCheckpointStore:
     """
 
     def __init__(self, directory: Path | str) -> None:
-        self.directory = Path(directory)
+        self.directory = Path(directory).expanduser()     # "~/.aleo-bridge/checkpoints" means the home directory
         self.directory.mkdir(parents=True, exist_ok=True)
 
     def _path(self, checkpoint_id: str) -> Path:
