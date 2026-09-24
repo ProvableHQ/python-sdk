@@ -52,15 +52,15 @@ python -m aleo_shield_swap.mcp      # stdio server with the lifecycle tools
 ## Bridging (move assets between Ethereum, Solana and Aleo)
 
 The [`bridge-sdk`](./bridge-sdk) package (`pip install aleo-bridge-sdk`,
-import `aleo_bridge`) drives the Aleo bridges from Python with the same
-verb structure as the facade: Hyperlane for ETH, WBTC, USDT and SOL, and
-Circle xReserve for USDC ⇄ USDCx, in both directions, with checkpointed
-recovery so an interrupted transfer is finished rather than re-sent.
+import `aleo_bridge`) moves ETH, WBTC, USDT and SOL over Hyperlane and USDC
+over Circle xReserve, into Aleo and back out, with the same verb structure
+as the facade. A checkpoint saved at every submission lets an interrupted
+transfer be finished rather than sent twice.
 
 ```python
-from aleo_bridge import Bridge
+from aleo_bridge import Bridge, Ethereum
 
-bridge = Bridge.from_env()                                   # Aleo, EVM and Solana keys from the environment
+bridge = Bridge(aleo, ethereum=Ethereum(ethereum_rpc_url, private_key=evm_private_key))
 quote = bridge.quote(source_chain="ethereum", source_asset="usdc", destination_chain="aleo",
                      amount="5", recipient=bridge.aleo_address())
 progress = bridge.wait(bridge.execute(quote.plan))           # approval + deposit, then poll to done / resume / complete

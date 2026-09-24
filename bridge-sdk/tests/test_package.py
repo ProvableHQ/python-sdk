@@ -43,17 +43,20 @@ def test_the_build_config_keeps_agents_md_inside_the_wheel():
 
 
 def test_readme_covers_the_journey():
+    """The README is written for a caller: explicit client construction, the lifecycle, recovery,
+    privacy conversions, and the agent surface. Operator tooling (live tests, rehearsal gates,
+    environment-variable conveniences) stays out of it."""
     readme = (ROOT / "README.md").read_text()
-    for needle in ("Bridge.from_env()", "Bridge.from_profile()", "Ethereum(", "Solana(", "progress.next",
+    for needle in ("Bridge(", "Ethereum(", "Solana(", "FileCheckpointStore(", "progress.next",
                    "recover", "resume", "complete", "shield", "unshield", "python -m aleo_bridge.mcp",
-                   "scripts/rehearse.py", "BRIDGE_PRIVATE_KEY", "EVM_PRIVATE_KEY", "SOLANA_PRIVATE_KEY",
-                   "BRIDGE_LIVE_MAINNET_EXECUTE", "secret_nonce", "| `resume` |", "| `complete` |"):
+                   "secret_nonce", "records.register", "| `resume` |", "| `complete` |"):
         assert needle in readme, needle
-    assert "Co-Authored-By" not in readme
-    # every active mainnet route appears in the route table
-    for route_id in ("xreserve:ethereum/usdc->aleo/usdcx", "hyperlane:ethereum/eth->aleo/eth",
-                     "hyperlane:aleo/sol->solana/sol"):
-        assert route_id in readme
+    for absent in ("from_env", "BRIDGE_LIVE_", "rehearse", "Co-Authored-By", "Tier 2"):
+        assert absent not in readme, absent
+    # every active mainnet route appears in the transfer table, named by chain and asset
+    for row in ("| Ethereum USDC | Aleo | USDCx | Circle xReserve |", "| Ethereum ETH | Aleo | ETH | Hyperlane |",
+                "| Aleo SOL | Solana | SOL | Hyperlane |", "| Aleo USDT | Ethereum | USDT | Hyperlane |"):
+        assert row in readme, row
 
 
 def test_ci_has_bridge_jobs():
