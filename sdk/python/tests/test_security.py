@@ -64,32 +64,20 @@ def test_decrypt_roundtrip() -> None:
     assert decrypted == msg
 
 
-def test_encrypt_requires_pynacl() -> None:
-    """Helpful ImportError when pynacl is not installed."""
+@pytest.mark.parametrize("function_name,args,purpose", [
+    ("encrypt_proving_request", ("dGVzdA==", b"msg"), "DPS encryption"),
+    ("encrypt_registration_request", ("dGVzdA==", None, 0), "record scanner registration"),
+])
+def test_encrypt_requires_pynacl(monkeypatch, function_name, args, purpose) -> None:
+    """An incomplete installation explains how to restore the required dependency."""
     import sys
-    import importlib
+    import aleo.security as security
 
-    # Temporarily hide nacl
-    original = sys.modules.get("nacl")
-    original_public = sys.modules.get("nacl.public")
-
-    sys.modules["nacl"] = None  # type: ignore[assignment]
-    sys.modules["nacl.public"] = None  # type: ignore[assignment]
-
-    try:
-        # Re-import security with nacl hidden
-        import aleo.security as sec_mod
-        # Force reimport
-        importlib.reload(sec_mod)
-        with pytest.raises(ImportError, match="aleo-sdk\\[dps\\]"):
-            sec_mod.encrypt_proving_request("dGVzdA==", b"msg")
-    finally:
-        if original is None:
-            sys.modules.pop("nacl", None)
-        else:
-            sys.modules["nacl"] = original
-        if original_public is None:
-            sys.modules.pop("nacl.public", None)
-        else:
-            sys.modules["nacl.public"] = original_public
-        importlib.reload(sec_mod)
+    monkeypatch.setitem(sys.modules, "nacl", None)
+    monkeypatch.setitem(sys.modules, "nacl.public", None)
+    with pytest.raises(ImportError) as exc:
+        getattr(security, function_name)(*args)
+    assert str(exc.value) == (
+        f"PyNaCl is required for {purpose}. "
+        "Restore the required dependency with: python -m pip install 'pynacl>=1.5'"
+    )
