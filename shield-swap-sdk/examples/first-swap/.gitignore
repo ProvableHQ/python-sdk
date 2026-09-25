@@ -1,2 +1,4 @@
 .venv/
 __pycache__/
+testnet-aleo*.jsonl
+testnet-aleo*.lock

@@ -5,31 +5,28 @@ from decimal import Decimal
 
 from aleo import Aleo, HTTPProvider, testnet
 
-from aleo_shield_swap import ShieldSwap
+from aleo_shield_swap import Journal, ShieldSwap
 
 
 ENABLE_JOURNAL = False
 
 
 if __name__ == "__main__":
-    # Optionally retain the account and swap journal in the SDK's default profile.
+    # Create an in-memory account or use an existing private key.
+    key = os.environ.get("SHIELD_SWAP_PRIVATE_KEY")
+    private_key = testnet.PrivateKey.from_string(key) if key else testnet.PrivateKey.random()
+    aleo = Aleo(HTTPProvider("https://edge.provable.com/api", network="testnet"))
+    account = aleo.account.from_private_key(private_key)
+    aleo.default_account = account
+    aleo.records.register(account)
+    dex = ShieldSwap(aleo)
+    address = str(account.address)
+
+    # Optionally retain this account's swap handles in the SDK journal.
     if ENABLE_JOURNAL:
-        dex = ShieldSwap.from_profile(network="testnet")
-        if dex.profile.network != "testnet":
-            raise RuntimeError("This example requires a testnet profile")
-        private_key = testnet.PrivateKey.from_string(dex.profile.private_key)
-    else:
-        # Create an in-memory account or use an existing private key.
-        key = os.environ.get("SHIELD_SWAP_PRIVATE_KEY")
-        private_key = testnet.PrivateKey.from_string(key) if key else testnet.PrivateKey.random()
-        aleo = Aleo(HTTPProvider("https://edge.provable.com/api", network="testnet"))
-        account = aleo.account.from_private_key(private_key)
-        aleo.default_account = account
-        aleo.records.register(account)
-        dex = ShieldSwap(aleo)
+        dex.journal = Journal(f"testnet-{address}.jsonl")
 
     # Sign the API challenge with the account's private key.
-    address = str(private_key.address)
     dex.api.authenticate(address, lambda message: str(private_key.sign(message.encode())))
 
     # Request testnet tokens, then wait for the faucet job to finish.

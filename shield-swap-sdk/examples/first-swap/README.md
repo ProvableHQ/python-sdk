@@ -26,7 +26,8 @@ python -m aleo_shield_swap.examples.first_swap.swap
 
 `SHIELD_SWAP_PRIVATE_KEY` optionally supplies an existing testnet account.
 Otherwise the example generates a private key in memory. `ShieldSwap(aleo)`
-uses the configured Aleo client without creating a profile or swap journal.
+uses the configured Aleo client. Both journal settings use the same account
+and register it with the record scanner.
 
 `dex.api.authenticate()` signs the API challenge with the account's key.
 `request_airdrop()` starts the testnet faucet job; `get_airdrop_job()` polls it
@@ -48,7 +49,7 @@ submits one claim and waits for confirmation. `claim.transaction_id` identifies
 the claim and `claim.amount_out` contains the received ETH in base units.
 The example writes no console logs. Local account storage is disabled by default.
 
-The private key and swap handle remain in memory. **Retain both before ending
+With journaling disabled, the private key and swap handle remain in memory. **Retain both before ending
 an interrupted session.** The handle contains the blinding information needed
 to claim; `handle.to_json()` serializes it. Neither value is saved automatically.
 A newly generated key is lost when the process exits unless retained separately.
@@ -58,11 +59,12 @@ with the same private key, restore the retained handle with
 `SwapHandle.from_json(...)`, and claim after confirming the swap transaction.
 Do not rerun the whole script to recover a swap.
 
-Set `ENABLE_JOURNAL = True` in `swap.py` to enable the SDK's saved profile
-and swap journal under `~/.shield-swap`. This calls
-`ShieldSwap.from_profile(network="testnet")`; the SDK retains the account and
-swap handle, and the example records the confirmed claim. An existing profile
-keeps its saved account; `SHIELD_SWAP_PRIVATE_KEY` applies when creating a new
-profile. A mainnet profile stops the example before funding or trading.
+Set `ENABLE_JOURNAL = True` in `swap.py` to attach the SDK's `Journal` at
+`testnet-<account-address>.jsonl` in the working directory. The SDK retains swap
+handles there, and the example records the confirmed claim. Keep the file
+private: it contains the blinding information needed to claim.
 
-With `ENABLE_JOURNAL = False` (the default), no profile or journal is created.
+The flag only controls journal attachment. It does not change the account,
+client, network, or record scanning, and it does not save the private key.
+Use the same private key and journal to recover a pending swap.
+With `ENABLE_JOURNAL = False` (the default), no journal is created.
