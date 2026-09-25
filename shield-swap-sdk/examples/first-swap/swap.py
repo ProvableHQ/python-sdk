@@ -3,16 +3,21 @@ import os
 
 from aleo import Aleo, HTTPProvider, testnet
 
-from aleo_shield_swap import Journal, ShieldSwap
+from aleo_shield_swap import Journal, Profile, ShieldSwap
 
 
 ENABLE_JOURNAL = False
 
 
 if __name__ == "__main__":
-    # Create an in-memory account or use an existing private key.
+    # Load a saved account or use an existing private key.
     key = os.environ.get("SHIELD_SWAP_PRIVATE_KEY")
-    private_key = testnet.PrivateKey.from_string(key) if key else testnet.PrivateKey.random()
+    if not key:
+        profile = Profile.load_or_create(network="testnet")
+        if profile.network != "testnet":
+            raise RuntimeError("This example requires a testnet profile")
+        key = profile.private_key
+    private_key = testnet.PrivateKey.from_string(key)
     aleo = Aleo(HTTPProvider("https://edge.provable.com/api", network="testnet"))
     account = aleo.account.from_private_key(private_key)
     aleo.records.register(account)
@@ -50,6 +55,7 @@ if __name__ == "__main__":
         amount_in=amount_in,
         expected_out=quote.estimated_amount_out,
         slippage_bps=50,
+        record_wait_seconds=120,
     ).delegate(wait=True)
 
     # Claim the confirmed swap's output once using its returned handle.

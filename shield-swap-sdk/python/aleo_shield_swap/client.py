@@ -772,6 +772,7 @@ class ShieldSwap:
         identity: Optional[BlindedIdentity] = None,
         token_in_program: Optional[str] = None,
         token_record: Optional[str] = None,
+        record_wait_seconds: float = 0.0,
         wrapper_proofs: Optional[str] = None,
         track: bool = True,
         imports: Optional[dict[str, str]] = None,
@@ -788,7 +789,8 @@ class ShieldSwap:
         Quote with ``api.get_route`` and pass ``expected_out``. Without a quote,
         the spot estimate ignores fees and price impact. Wrapped inputs use
         underlying token records and route through the swap router automatically.
-        The SDK selects a covering record unless ``token_record`` is supplied.
+        ``record_wait_seconds`` waits for a covering record (default 0);
+        ``token_record`` bypasses scanning. Provider errors propagate.
 
         Preparing a call reserves a blinding counter when a journal is attached,
         even if the call is discarded or only simulated. The journal retains the
@@ -815,6 +817,18 @@ class ShieldSwap:
             slippage_bps=slippage_bps, expected_out=expected_out,
             sqrt_price_limit=sqrt_price_limit,
         )
+        # Resolve the record-funding program lazily: an explicit record
+        # needs no registry lookup (its program registration comes from
+        # token_in_program= or imports=).
+        program = token_in_program
+        record = token_record
+        if record is None:
+            program = program or self._token_program(token_in_id)
+            record = select_token_record(
+                self._aleo, program=program, min_amount=amount_in,
+                token_id=token_in_id, account=acct, wait_seconds=record_wait_seconds,
+            )
+
         deadline = get_deadline(self._aleo, deadline_offset_blocks)
         swap_nonce = nonce if nonce is not None else generate_swap_nonce()
         # With a journal, reserve through it: reservation is serialized by the
@@ -829,18 +843,6 @@ class ShieldSwap:
             counter = identity.counter
         elif identity is None:
             identity = next_blinded_identity(self._aleo, acct, self.program)
-
-        # Resolve the record-funding program lazily: an explicit record
-        # needs no registry lookup (its program registration comes from
-        # token_in_program= or imports=).
-        program = token_in_program
-        record = token_record
-        if record is None:
-            program = program or self._token_program(token_in_id)
-            record = select_token_record(
-                self._aleo, program=program, min_amount=amount_in,
-                token_id=token_in_id, account=acct,
-            )
 
         route = swap_route(self._is_wrapped(token_in_id))
         # Dynamic dispatch: the prover cannot discover token callees
@@ -910,7 +912,7 @@ class ShieldSwap:
                 self.journal.record_swap(handle, counter)
             return handle
 
-        return DexCall(self._aleo, bound, build_result)
+        return DexCall(self._aleo, bound, build_result, build_before_wait=True)
 
     def claim_swap_output(
         self,

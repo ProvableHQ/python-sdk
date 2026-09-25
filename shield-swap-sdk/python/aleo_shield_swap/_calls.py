@@ -74,10 +74,12 @@ class DexCall(Generic[R]):
     -> R`` turns the submitted transaction into the method's typed result."""
 
     def __init__(self, aleo: Any, bound: Any,
-                 build_result: Callable[[str, list[str]], R]) -> None:
+                 build_result: Callable[[str, list[str]], R], *,
+                 build_before_wait: bool = False) -> None:
         self._aleo = aleo
         self._bound = bound
         self._build = build_result
+        self._build_before_wait = build_before_wait
 
     def __repr__(self) -> str:
         return f"DexCall({self._bound!r})"
@@ -113,6 +115,16 @@ class DexCall(Generic[R]):
         payload = self._bound.delegate(account, **fee_kwargs)
         tx_id = extract_tx_id(payload)
         decoded = _payload_transitions(payload)
+        # Swap builders retain claim secrets before any confirmation I/O. An
+        # ID-only response retains a provisional handle, completed after lookup.
+        if self._build_before_wait:
+            outputs = root_outputs(decoded or [], self._bound.program_id,
+                                   self._bound.function_name)
+            result = self._build(tx_id, outputs)
+            if decoded is not None:
+                if wait:
+                    self._aleo.network.wait_for_transaction(tx_id, timeout=wait_timeout)
+                return result
         if decoded is None:
             self._aleo.network.wait_for_transaction(tx_id, timeout=wait_timeout)
             tx = self._aleo.network.get_transaction_object(tx_id)

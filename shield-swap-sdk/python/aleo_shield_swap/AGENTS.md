@@ -405,7 +405,7 @@ exhausting it raises — the fail-fast for a systematically wrong program.
 
 ### Chain methods
 
-### `swap(self, *, pool_key: 'str', token_in_id: 'str', amount_in: 'int | str | Decimal', slippage_bps: 'int' = 50, expected_out: 'Optional[int | str | Decimal]' = None, sqrt_price_limit: 'Optional[int]' = None, deadline_offset_blocks: 'int' = 10000, nonce: 'Optional[int]' = None, identity: 'Optional[BlindedIdentity]' = None, token_in_program: 'Optional[str]' = None, token_record: 'Optional[str]' = None, wrapper_proofs: 'Optional[str]' = None, track: 'bool' = True, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[SwapHandle]'`
+### `swap(self, *, pool_key: 'str', token_in_id: 'str', amount_in: 'int | str | Decimal', slippage_bps: 'int' = 50, expected_out: 'Optional[int | str | Decimal]' = None, sqrt_price_limit: 'Optional[int]' = None, deadline_offset_blocks: 'int' = 10000, nonce: 'Optional[int]' = None, identity: 'Optional[BlindedIdentity]' = None, token_in_program: 'Optional[str]' = None, token_record: 'Optional[str]' = None, record_wait_seconds: 'float' = 0.0, wrapper_proofs: 'Optional[str]' = None, track: 'bool' = True, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[SwapHandle]'`
 
 Prepare one private swap; submit with ``transact()`` or ``delegate()``.
 
@@ -418,7 +418,8 @@ Returned handle amounts remain in base units.
 Quote with ``api.get_route`` and pass ``expected_out``. Without a quote,
 the spot estimate ignores fees and price impact. Wrapped inputs use
 underlying token records and route through the swap router automatically.
-The SDK selects a covering record unless ``token_record`` is supplied.
+``record_wait_seconds`` waits for a covering record (default 0);
+``token_record`` bypasses scanning. Provider errors propagate.
 
 Preparing a call reserves a blinding counter when a journal is attached,
 even if the call is discarded or only simulated. The journal retains the

@@ -7,6 +7,9 @@ shared from ``_core``/``derivations`` — only the I/O differs.
 """
 from __future__ import annotations
 
+import asyncio
+import math
+import time
 import logging
 from decimal import Decimal
 from typing import Any, Callable, Generic, Optional, TypeVar
@@ -278,18 +281,26 @@ class AsyncShieldSwap:
         return identities.at(counter)
 
     async def _select_token_record(self, *, program: str, min_amount: int,
-                                   token_id: Optional[str], account: Any) -> str:
+                                   token_id: Optional[str], account: Any,
+                                   wait_seconds: float = 0.0) -> str:
+        if not math.isfinite(wait_seconds) or wait_seconds < 0:
+            raise ValueError("record_wait_seconds must be finite and nonnegative")
         provider = self._aleo.record_provider
         if provider is None:
             raise InsufficientRecordsError(
                 "No record provider configured — pass token_record= explicitly.")
-        records = await provider.find(account, program=program, unspent=True)
-        chosen = pick_covering_record(records, min_amount=min_amount, token_id=token_id)
-        if chosen is None:
-            raise InsufficientRecordsError(
-                f"No unspent {program} record covers {min_amount} "
-                f"(token_id={token_id or 'any'}) — privatize funds or pass token_record=.")
-        return chosen
+        deadline = time.monotonic() + wait_seconds
+        while True:
+            records = await provider.find(account, program=program, unspent=True)
+            chosen = pick_covering_record(records, min_amount=min_amount, token_id=token_id)
+            if chosen is not None:
+                return chosen
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise InsufficientRecordsError(
+                    f"No unspent {program} record covers {min_amount} "
+                    f"(token_id={token_id or 'any'}) — privatize funds or pass token_record=.")
+            await asyncio.sleep(min(5.0, remaining))
 
     async def _select_position_record(self, pool_key: str, account: Any,
                                       position_token_id: Optional[str] = None) -> str:
@@ -592,6 +603,7 @@ class AsyncShieldSwap:
                    nonce: Optional[int] = None,
                    token_in_program: Optional[str] = None,
                    token_record: Optional[str] = None,
+                   record_wait_seconds: float = 0.0,
                    identity: Optional[BlindedIdentity] = None,
                    wrapper_proofs: Optional[str] = None,
                    imports: Optional[dict[str, str]] = None,
@@ -613,6 +625,8 @@ class AsyncShieldSwap:
         tokens), converted using registry decimals. Floats, excess precision,
         non-finite values, and amounts outside u128 are rejected before proving.
         Returned handle amounts remain in base units.
+        ``record_wait_seconds`` waits for a covering record (default 0);
+        ``token_record`` bypasses scanning. Provider errors propagate.
 
         Quote first (``dex.api.get_route``) and pass *expected_out*: without
         it a spot estimate is used, which ignores fees and price impact.
@@ -640,20 +654,20 @@ class AsyncShieldSwap:
             pool=pool, slot=slot, token_in_id=token_in_id, amount_in=amount_in,
             slippage_bps=slippage_bps, expected_out=expected_out,
             sqrt_price_limit=sqrt_price_limit)
-        deadline = int(await self._aleo.network.get_latest_height()) + deadline_offset_blocks
-        swap_nonce = nonce if nonce is not None else generate_swap_nonce()
-        if identity is None:
-            identity = await self._next_blinded_identity(acct)
-
         record = token_record
         if record is None:
             program = token_in_program or await self._token_program(token_in_id)
             record = await self._select_token_record(
                 program=program, min_amount=amount_in,
-                token_id=token_in_id, account=acct)
+                token_id=token_in_id, account=acct, wait_seconds=record_wait_seconds)
             token_programs = [program]
         else:
             token_programs = [token_in_program] if token_in_program else []
+
+        deadline = int(await self._aleo.network.get_latest_height()) + deadline_offset_blocks
+        swap_nonce = nonce if nonce is not None else generate_swap_nonce()
+        if identity is None:
+            identity = await self._next_blinded_identity(acct)
 
         route = swap_route(await self._is_wrapped(token_in_id))
         if route.program != self.program:
