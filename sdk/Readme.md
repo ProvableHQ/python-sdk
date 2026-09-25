@@ -1,6 +1,6 @@
 # Aleo Python SDK (MainnetV0)
 
-The Aleo Python SDK provides Python bindings to Aleo's zero-knowledge cryptographic primitives, built with snarkvm 4.9.1.
+The Aleo Python SDK provides Python bindings to Aleo's zero-knowledge cryptographic primitives, built with snarkvm 4.10.0.
 
 It ships two layers:
 
