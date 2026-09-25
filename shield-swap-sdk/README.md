@@ -41,6 +41,19 @@ pip install -e "shield-swap-sdk[mcp]"          # + the MCP server
 
 Requires `aleo-sdk>=0.3` (this repo's SDK; imports as `aleo`) and Python 3.10+.
 
+## First swap example
+
+Create a testnet account, request tokens, swap 1.5 USDCx for ETH, and collect
+the output with the [runnable first-swap example](examples/first-swap/README.md).
+The wheel includes the same example:
+
+```bash
+python -m aleo_shield_swap.examples.first_swap.swap
+```
+
+Run from a private working directory; account and recovery state are saved in
+`.shield-first-swap/`. Use `--claim` from the same directory to resume collection.
+
 ## Agents
 
 `AGENTS.md` (generated from the SDK's docstrings — always current) is the

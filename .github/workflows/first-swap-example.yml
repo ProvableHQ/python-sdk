@@ -1,0 +1,41 @@
+name: First swap example
+on:
+  pull_request:
+    paths:
+      - 'shield-swap-sdk/examples/first-swap/**'
+      - 'shield-swap-sdk/pyproject.toml'
+      - 'shield-swap-sdk/python/**'
+      - 'sdk/python/**'
+      - '.github/workflows/first-swap-example.yml'
+  push:
+    paths:
+      - 'shield-swap-sdk/examples/first-swap/**'
+      - 'shield-swap-sdk/pyproject.toml'
+      - 'shield-swap-sdk/python/**'
+      - 'sdk/python/**'
+      - '.github/workflows/first-swap-example.yml'
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - run: python -m unittest -v test_swap
+        working-directory: shield-swap-sdk/examples/first-swap
+      - run: python -m pip wheel --no-deps ./shield-swap-sdk -w /tmp/first-swap-wheel
+      - name: Check packaged example and exclude state
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+          wheel = next(Path('/tmp/first-swap-wheel').glob('*.whl'))
+          with ZipFile(wheel) as archive:
+              examples = sorted(name for name in archive.namelist() if '/examples/' in name)
+              assert examples == [
+                  'aleo_shield_swap/examples/first_swap/README.md',
+                  'aleo_shield_swap/examples/first_swap/swap.py',
+              ], examples
+              compile(archive.read(examples[1]), examples[1], 'exec')
+          PY
