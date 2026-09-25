@@ -8,18 +8,28 @@ from aleo import Aleo, HTTPProvider, testnet
 from aleo_shield_swap import ShieldSwap
 
 
+ENABLE_JOURNAL = False
+
+
 if __name__ == "__main__":
-    # Create a testnet account or use an existing private key.
-    key = os.environ.get("SHIELD_SWAP_PRIVATE_KEY")
-    private_key = testnet.PrivateKey.from_string(key) if key else testnet.PrivateKey.random()
-    aleo = Aleo(HTTPProvider("https://edge.provable.com/api", network="testnet"))
-    account = aleo.account.from_private_key(private_key)
-    aleo.default_account = account
-    aleo.records.register(account)
-    dex = ShieldSwap(aleo)
+    # Optionally retain the account and swap journal in the SDK's default profile.
+    if ENABLE_JOURNAL:
+        dex = ShieldSwap.from_profile(network="testnet")
+        if dex.profile.network != "testnet":
+            raise RuntimeError("This example requires a testnet profile")
+        private_key = testnet.PrivateKey.from_string(dex.profile.private_key)
+    else:
+        # Create an in-memory account or use an existing private key.
+        key = os.environ.get("SHIELD_SWAP_PRIVATE_KEY")
+        private_key = testnet.PrivateKey.from_string(key) if key else testnet.PrivateKey.random()
+        aleo = Aleo(HTTPProvider("https://edge.provable.com/api", network="testnet"))
+        account = aleo.account.from_private_key(private_key)
+        aleo.default_account = account
+        aleo.records.register(account)
+        dex = ShieldSwap(aleo)
 
     # Sign the API challenge with the account's private key.
-    address = str(account.address)
+    address = str(private_key.address)
     dex.api.authenticate(address, lambda message: str(private_key.sign(message.encode())))
 
     # Request testnet tokens, then wait for the faucet job to finish.
@@ -71,5 +81,7 @@ if __name__ == "__main__":
 
     # Claim the confirmed swap's output once using its returned handle.
     claim = dex.claim_swap_output(handle).delegate(wait=True)
+    if dex.journal is not None:
+        dex.journal.record_claim(handle.swap_id, claim.transaction_id, claim.amount_out)
     if claim.amount_out <= 0:
         raise RuntimeError("The claim returned no ETH")

@@ -45,7 +45,7 @@ Requires `aleo-sdk>=0.3` (this repo's SDK; imports as `aleo`) and Python 3.10+.
 
 The [first-swap example](./examples/first-swap) creates and funds a testnet
 account, swaps USDCx for ETH, and claims the output using SDK calls directly.
-It uses an in-memory account and swap handle; no profile or journal is required.
+It uses an in-memory account and swap handle by default; `ENABLE_JOURNAL` opts into SDK profile storage and journaling.
 Releases containing the example support
 `python -m aleo_shield_swap.examples.first_swap.swap`.
 

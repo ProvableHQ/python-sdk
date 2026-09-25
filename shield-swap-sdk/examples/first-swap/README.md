@@ -46,7 +46,7 @@ One unspent record must cover 1.5 USDCx.
 After the swap confirms, `claim_swap_output(handle).delegate(wait=True)`
 submits one claim and waits for confirmation. `claim.transaction_id` identifies
 the claim and `claim.amount_out` contains the received ETH in base units.
-The example writes no console logs or local account files.
+The example writes no console logs. Local account storage is disabled by default.
 
 The private key and swap handle remain in memory. **Retain both before ending
 an interrupted session.** The handle contains the blinding information needed
@@ -58,7 +58,11 @@ with the same private key, restore the retained handle with
 `SwapHandle.from_json(...)`, and claim after confirming the swap transaction.
 Do not rerun the whole script to recover a swap.
 
-For automatic account storage and swap journaling, use
-`ShieldSwap.from_profile(network="testnet")` instead of constructing
-`ShieldSwap(aleo)`. That optional path stores the profile under `~/.shield-swap`;
-it is not required for `swap()` or `claim_swap_output()`.
+Set `ENABLE_JOURNAL = True` in `swap.py` to enable the SDK's saved profile
+and swap journal under `~/.shield-swap`. This calls
+`ShieldSwap.from_profile(network="testnet")`; the SDK retains the account and
+swap handle, and the example records the confirmed claim. An existing profile
+keeps its saved account; `SHIELD_SWAP_PRIVATE_KEY` applies when creating a new
+profile. A mainnet profile stops the example before funding or trading.
+
+With `ENABLE_JOURNAL = False` (the default), no profile or journal is created.
