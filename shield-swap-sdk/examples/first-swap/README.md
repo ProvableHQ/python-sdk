@@ -33,7 +33,15 @@ before the first run. An existing profile keeps its saved account and network;
 the example stops if that network is mainnet. Keep the profile private and
 retain it for recovery.
 
-`dex.onboard()` handles authentication and testnet funding. The example finds
+`dex.api.authenticate()` signs the API challenge with the profile's account.
+`request_airdrop()` starts the testnet faucet job; `get_airdrop_job()` polls it
+until completion. `funding.results` contains each token's outcome and transaction
+ID. Job completion does not guarantee every token transfer succeeded.
+
+The faucet allows one request per address per 15 minutes. A rate-limit error
+stops the example; inspect the existing funding before requesting again.
+The example waits for the scanner to report at least 1.5 USDCx before trading.
+It finds
 a direct USDCx/ETH pool and calls `swap_many(count=1)`, which quotes the trade,
 selects a token record, and records the submitted handle in the SDK journal.
 One unspent record must cover 1.5 USDCx.
