@@ -1,5 +1,6 @@
 """Create and fund a testnet account, swap 1.5 USDCx for ETH, and claim the output."""
 import time
+from decimal import Decimal
 
 from aleo import testnet
 
@@ -44,26 +45,27 @@ if __name__ == "__main__":
     else:
         raise RuntimeError("USDCx is not available; inspect funding.results and the account balance")
 
-    # Submit one swap with a 0.5% slippage limit. The SDK journals its handle.
-    swaps = dex.swap_many(
+    # Quote the selected pool and convert the expected ETH output to base units.
+    quote = dex.api.get_route(
+        token_in=source.id, token_out=target.id, amount_in="1.5", pool_key=pool.key,
+    )
+    if not quote.estimated_amount_out:
+        raise RuntimeError("The selected pool returned no quote")
+    expected_out = int(Decimal(quote.estimated_amount_out) * 10**target.decimals)
+    if expected_out <= 0:
+        raise RuntimeError("The quote returned no ETH")
+
+    # Submit one swap and wait for confirmation. The SDK journals its handle.
+    handle = dex.swap(
         pool_key=pool.key,
         token_in_id=source.id,
         amount_in=amount_in,
-        count=1,
+        expected_out=expected_out,
         slippage_bps=50,
-    )
-    if swaps.failures or len(swaps.handles) != 1:
-        raise RuntimeError("Swap submission needs inspection; use the SDK journal before retrying")
+    ).delegate(wait=True)
 
-    # Collect the output after confirmation, without submitting another swap.
-    for attempt in range(40):
-        claims = dex.collect_all()
-        claim = next((item for item in claims.claimed
-                      if item["swap_id"] == swaps.handles[0].swap_id), None)
-        if claim is not None:
-            if claim["amount_out"] <= 0:
-                raise RuntimeError("The claim returned no ETH")
-            break
-        time.sleep(15)
-    else:
-        raise RuntimeError("Claim is still pending; resume with dex.collect_all()")
+    # Claim the confirmed swap's output once, then update the SDK journal.
+    claim = dex.claim_swap_output(handle).delegate(wait=True)
+    dex.journal.record_claim(handle.swap_id, claim.transaction_id, claim.amount_out)
+    if claim.amount_out <= 0:
+        raise RuntimeError("The claim returned no ETH")

@@ -41,16 +41,17 @@ ID. Job completion does not guarantee every token transfer succeeded.
 The faucet allows one request per address per 15 minutes. A rate-limit error
 stops the example; inspect the existing funding before requesting again.
 The example waits for the scanner to report at least 1.5 USDCx before trading.
-It finds
-a direct USDCx/ETH pool and calls `swap_many(count=1)`, which quotes the trade,
-selects a token record, and records the submitted handle in the SDK journal.
+It quotes a direct USDCx/ETH pool with `get_route()`, then calls
+`swap(...).delegate(wait=True)` with that quote and a 0.5% slippage limit.
+The SDK selects a token record and saves the swap handle in its journal.
 One unspent record must cover 1.5 USDCx.
 
 ## Completion and recovery
 
-A successful run ends after `collect_all()` reports the swap's claim.
-`claim["transaction_id"]` identifies the claim and `claim["amount_out"]`
-contains the received ETH in base units. The example writes no console logs
+After the swap confirms, `claim_swap_output(handle).delegate(wait=True)`
+submits one claim and waits for confirmation. The example records the claim
+in the SDK journal. `claim.transaction_id` identifies the claim and
+`claim.amount_out` contains the received ETH in base units. The example writes no console logs
 or additional result files.
 
 Each run submits a new trade. To recover an interrupted run, load the same
