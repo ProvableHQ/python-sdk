@@ -32,9 +32,8 @@ if __name__ == "__main__":
     funding = dex.api.confirm_airdrop(address)
 
     # Find a direct USDCx/ETH pool and convert 1.5 USDCx to base units.
-    tokens = dex.api.get_tokens()
-    source = next(token for token in tokens if token.symbol == "USDCx")
-    target = next(token for token in tokens if token.symbol == "ETH")
+    source = dex.api.get_token("USDCx")
+    target = dex.api.get_token("ETH")
     pool = next(pool for pool in dex.api.get_pools()
                 if {pool.token0, pool.token1} == {source.id, target.id})
 

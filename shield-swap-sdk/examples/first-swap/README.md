@@ -40,7 +40,8 @@ The helper polls every 5 seconds and times out after 10 minutes by default.
 `AirdropPendingError.job_id` identifies a timed-out job for further status reads.
 A rate-limited account can continue if it already holds enough USDCx.
 The example waits for the scanner to report at least 1.5 USDCx before trading.
-It quotes a direct USDCx/ETH pool with `get_route()`, then calls
+It looks up USDCx and ETH with `get_token(symbol)`, quotes a direct pool
+with `get_route()`, then calls
 `swap(...).delegate(wait=True)` with that quote and a 0.5% slippage limit.
 The SDK selects a token record and returns the handle needed to claim.
 One unspent record must cover 1.5 USDCx.

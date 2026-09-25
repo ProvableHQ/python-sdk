@@ -55,6 +55,16 @@ def _airdrop_outcome(job: models.AirdropJob, job_id: str,
     return None
 
 
+def _token_by_symbol(tokens: list[models.TokenDoc], symbol: str) -> models.TokenDoc:
+    """Find one exact symbol match without choosing between duplicate symbols."""
+    matches = [token for token in tokens if token.symbol == symbol]
+    if not matches:
+        raise ValueError(f"Unknown token symbol: {symbol}")
+    if len(matches) > 1:
+        raise ValueError(f"Ambiguous token symbol: {symbol}")
+    return matches[0]
+
+
 def _check(resp: Any) -> None:
     """Map DEX API failures to the lifecycle taxonomy; DexApiError otherwise.
 
@@ -636,6 +646,29 @@ class ApiClient:
         """
         return [_build(models.TokenDoc, t) for t in self._get("/tokens")["data"]]
 
+    def get_token(self, symbol: str) -> models.TokenDoc:
+        """Look up one listed token by its exact, case-sensitive symbol.
+
+        Fetches the token registry through ``get_tokens()`` and returns the
+        matching token, including its ID, decimals, and token programs.
+
+        Args:
+            symbol: Listed token symbol, such as ``"ETH"`` or ``"USDCx"``.
+
+        Returns:
+            Metadata for the single matching token.
+
+        Raises:
+            ValueError: The symbol is unknown or matches more than one token.
+            DexApiError: Fetching the token registry fails.
+
+        Example::
+
+            source = api.get_token("USDCx")
+            target = api.get_token("ETH")
+        """
+        return _token_by_symbol(self.get_tokens(), symbol)
+
     def get_pool(self, pool_key: str) -> models.PoolWithStatsDoc:
         """One pool with its token metadata, reserves, display orientation, and
         rolling stats.  Network read; 404 for an unknown key."""
@@ -1113,6 +1146,14 @@ class AsyncApiClient:
         return _build(models.ReferralAddressBatchResponse,
                       (await self._post("/referral/address-batches",
                                         {"code": code, "blinded_addresses": blinded_addresses}))["data"])
+
+    async def get_token(self, symbol: str) -> models.TokenDoc:
+        """Look up a token by exact symbol; see :meth:`ApiClient.get_token`.
+
+        Fetches the registry asynchronously. Raises ``ValueError`` for an
+        unknown or ambiguous symbol and propagates API errors.
+        """
+        return _token_by_symbol(await self.get_tokens(), symbol)
 
     async def get_pool(self, pool_key: str) -> models.PoolWithStatsDoc:
         """One pool with stats — see :meth:`ApiClient.get_pool`."""
