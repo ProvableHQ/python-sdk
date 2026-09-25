@@ -1,24 +1,29 @@
 """Create and fund a testnet account, swap 1.5 USDCx for ETH, and claim the output."""
+import os
 import time
 from decimal import Decimal
 
-from aleo import testnet
+from aleo import Aleo, HTTPProvider, testnet
 
 from aleo_shield_swap import ShieldSwap
 
 
 if __name__ == "__main__":
-    # Load the SDK profile or create one. It retains the account and swap journal.
-    dex = ShieldSwap.from_profile(network="testnet")
-    if dex.profile.network != "testnet":
-        raise RuntimeError("This example requires a testnet profile")
+    # Create a testnet account or use an existing private key.
+    key = os.environ.get("SHIELD_SWAP_PRIVATE_KEY")
+    private_key = testnet.PrivateKey.from_string(key) if key else testnet.PrivateKey.random()
+    aleo = Aleo(HTTPProvider("https://edge.provable.com/api", network="testnet"))
+    account = aleo.account.from_private_key(private_key)
+    aleo.default_account = account
+    aleo.records.register(account)
+    dex = ShieldSwap(aleo)
 
-    # Sign the API challenge with the account saved in the SDK profile.
-    private_key = testnet.PrivateKey.from_string(dex.profile.private_key)
-    dex.api.authenticate(dex.profile.address, lambda message: str(private_key.sign(message.encode())))
+    # Sign the API challenge with the account's private key.
+    address = str(account.address)
+    dex.api.authenticate(address, lambda message: str(private_key.sign(message.encode())))
 
     # Request testnet tokens, then wait for the faucet job to finish.
-    airdrop = dex.api.request_airdrop(dex.profile.address)
+    airdrop = dex.api.request_airdrop(address)
     for attempt in range(120):
         funding = dex.api.get_airdrop_job(airdrop.job_id)
         if funding.status == "complete":
@@ -55,7 +60,7 @@ if __name__ == "__main__":
     if expected_out <= 0:
         raise RuntimeError("The quote returned no ETH")
 
-    # Submit one swap and wait for confirmation. The SDK journals its handle.
+    # Submit one swap and wait for confirmation. Keep the returned handle for the claim.
     handle = dex.swap(
         pool_key=pool.key,
         token_in_id=source.id,
@@ -64,8 +69,7 @@ if __name__ == "__main__":
         slippage_bps=50,
     ).delegate(wait=True)
 
-    # Claim the confirmed swap's output once, then update the SDK journal.
+    # Claim the confirmed swap's output once using its returned handle.
     claim = dex.claim_swap_output(handle).delegate(wait=True)
-    dex.journal.record_claim(handle.swap_id, claim.transaction_id, claim.amount_out)
     if claim.amount_out <= 0:
         raise RuntimeError("The claim returned no ETH")
