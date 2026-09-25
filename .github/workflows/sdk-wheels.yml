@@ -6,6 +6,7 @@ on:
       - 'sdk/**'
       - 'sdk-abi/**'
       - 'shield-swap-sdk/**'
+      - 'bridge-sdk/**'
       - '.github/workflows/sdk-wheels.yml'
       - '.github/workflows/sdk.yml'
     branches:
@@ -18,6 +19,7 @@ on:
       - 'sdk/**'
       - 'sdk-abi/**'
       - 'shield-swap-sdk/**'
+      - 'bridge-sdk/**'
       - '.github/workflows/sdk-wheels.yml'
       - '.github/workflows/sdk.yml'
   workflow_dispatch:
@@ -271,17 +273,65 @@ jobs:
           name: shield-swap-wheels-universal
           path: shield-swap-sdk/dist
 
+  # aleo-bridge-sdk is pure Python (hatchling): one universal wheel + sdist.
+  # Tested against the built aleo-sdk wheel; installed WITH every extra for the
+  # suite and WITHOUT extras for the import smoke — an Aleo-only install must
+  # import (extras raise MissingExtraError at the point of use, never at import).
+  # Only the hermetic suite runs here (`-m "not live"`): no key, no live RPC.
+  build-bridge:
+    name: bridge-build
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-linux-x86_64
+          path: sdk-dist
+      - name: Build wheel + sdist
+        run: |
+          pip install build
+          python -m build bridge-sdk --outdir bridge-sdk/dist
+      - name: Test against the built aleo-sdk wheel (hermetic only)
+        run: |
+          pip install sdk-dist/aleo_sdk-*.whl
+          pip install "$(ls bridge-sdk/dist/*.whl)[mcp]" pytest pytest-asyncio
+          cd bridge-sdk && python -m pytest -q -m "not live"
+      - name: AGENTS.md up to date
+        run: python bridge-sdk/codegen/gen_context.py --check
+      - name: Smoke test the bare wheel
+        run: |
+          cd "$RUNNER_TEMP"
+          python -c "import aleo_bridge, aleo_bridge.eth, aleo_bridge.sol, aleo_bridge.mcp; print('aleo-bridge-sdk', aleo_bridge.__version__)"
+          # Assert on the guide's content: `| head -1` alone exits 0 even when the wheel ships no
+          # AGENTS.md and the command prints nothing at all.
+          python -m aleo_bridge > agent-guide.txt
+          head -1 agent-guide.txt | grep -q '^# aleo-bridge'
+      - name: Smoke test wheel WITHOUT extras
+        run: |
+          pip uninstall -y aleo-bridge-sdk web3 eth-account solders solana mcp
+          pip install "$(ls bridge-sdk/dist/*.whl)"
+          python -c "import aleo_bridge; from aleo_bridge import Bridge, Ethereum, Solana, DEFAULT_REGISTRY; print(len(DEFAULT_REGISTRY.routes(include_unavailable=True, environment=None)), 'routes')"
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: bridge-wheels-universal
+          path: bridge-sdk/dist
+
   # Publishing uses PyPI trusted publishing (OIDC) — no token secret. Each
   # package has its own job because a pending publisher must be unique per
   # (repo, workflow, environment): the job's environment name must exactly
-  # match the publisher registered on PyPI for that project. All three gate
-  # on every build job, and they release strictly in dependency order:
-  # abi -> sdk -> shield-swap (shield-swap-sdk requires aleo-sdk on PyPI).
+  # match the publisher registered on PyPI for that project. All gate on
+  # every build job, and they release strictly in dependency order:
+  # abi -> sdk -> shield-swap / bridge (both require aleo-sdk on PyPI).
   release-abi:
     name: Release aleo-contract-abi-generator
     runs-on: ubuntu-latest
     if: "startsWith(github.ref, 'refs/tags/')"
-    needs: [build, sdist, build-abi, sdist-abi, build-shield-swap]
+    needs: [build, sdist, build-abi, sdist-abi, build-shield-swap, build-bridge]
     environment: pypi-abi
     permissions:
       id-token: write
@@ -301,7 +351,7 @@ jobs:
     name: Release aleo-sdk
     runs-on: ubuntu-latest
     if: "startsWith(github.ref, 'refs/tags/')"
-    needs: [build, sdist, build-abi, sdist-abi, build-shield-swap, release-abi]
+    needs: [build, sdist, build-abi, sdist-abi, build-shield-swap, build-bridge, release-abi]
     environment: pypi
     permissions:
       id-token: write
@@ -321,7 +371,7 @@ jobs:
     name: Release shield-swap-sdk
     runs-on: ubuntu-latest
     if: "startsWith(github.ref, 'refs/tags/')"
-    needs: [build, sdist, build-abi, sdist-abi, build-shield-swap, release-sdk]
+    needs: [build, sdist, build-abi, sdist-abi, build-shield-swap, build-bridge, release-sdk]
     environment: pypi-shield-swap
     permissions:
       id-token: write
@@ -329,6 +379,26 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           pattern: 'shield-swap-wheels-*'
+          merge-multiple: true
+          path: dist
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          skip-existing: true
+
+  release-bridge:
+    name: Release aleo-bridge-sdk
+    runs-on: ubuntu-latest
+    if: "startsWith(github.ref, 'refs/tags/')"
+    needs: [build, sdist, build-abi, sdist-abi, build-shield-swap, build-bridge, release-sdk]
+    environment: pypi-bridge
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: 'bridge-wheels-*'
           merge-multiple: true
           path: dist
       - name: Publish to PyPI

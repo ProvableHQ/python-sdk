@@ -1,0 +1,27 @@
+{
+  "intent": {
+    "amount": "676.2",
+    "bridgeProtocol": "hyperlane",
+    "destination": {
+      "asset": "sol",
+      "chain": "aleo"
+    },
+    "mintMode": "public",
+    "recipient": "aleo1rs6fdxg703s3em27uhxsehhfd8znaly22jt6upggrxc77q8d9yfq33pk28",
+    "sender": "4LZtvKvBAM8Hcf5tuL5R7xYj9JC12v6ho8igDnwzo6WC",
+    "source": {
+      "asset": "sol",
+      "chain": "solana"
+    }
+  },
+  "journalId": "2026-09-25_001_solana-sol_to_aleo-sol_676.2",
+  "receiptId": "cWFKiumuvVuvrxM8xtunZxNM4FNUppSdyNm7HEqKjV3ZmENebD4DAf44kbyvq9fKJ61VzNrH3tYpLJgUrY8MEGW",
+  "route": {
+    "id": "hyperlane:solana/sol->aleo/sol",
+    "registryVersion": "2026-08-31.solana-deposits.1"
+  },
+  "source": {
+    "transactionId": "cWFKiumuvVuvrxM8xtunZxNM4FNUppSdyNm7HEqKjV3ZmENebD4DAf44kbyvq9fKJ61VzNrH3tYpLJgUrY8MEGW"
+  },
+  "version": 1
+}
