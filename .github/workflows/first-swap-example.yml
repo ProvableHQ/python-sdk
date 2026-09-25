@@ -22,8 +22,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-      - run: python -m unittest -v test_swap
-        working-directory: shield-swap-sdk/examples/first-swap
       - run: python -m pip wheel --no-deps ./shield-swap-sdk -w /tmp/first-swap-wheel
       - name: Check packaged example and exclude state
         run: |

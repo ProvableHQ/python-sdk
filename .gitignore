@@ -12,6 +12,3 @@ tmp/
 .superpowers/
 docs/superpowers/
 .worktrees/
-
-# Private state for the runnable first-swap example.
-.shield-first-swap/

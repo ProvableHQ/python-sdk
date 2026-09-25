@@ -1,93 +1,60 @@
 # First Shield Swap in Python
 
-Create an account, request test tokens, trade 1.5 USDCx for ETH, and collect
-the purchased ETH. This example uses the SDK's persistent profile and swap
-journal. It runs only on testnet and requires a direct USDCx/ETH pool.
+Create a testnet account, request tokens, trade 1.5 USDCx for ETH, and claim
+the output. [swap.py](./swap.py) calls the Python SDK directly and uses its
+existing profile and journal.
 
-## Run from the SDK checkout
+## Run
 
-Use Python 3.10 or later on macOS or Linux (the SDK journal uses `fcntl`).
-From the root of a checkout containing this example:
+Use Python 3.10 or later on macOS or Linux. From a Python SDK checkout:
 
 ```bash
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install -e ./shield-swap-sdk
+python -m pip install ./shield-swap-sdk
 python shield-swap-sdk/examples/first-swap/swap.py
 ```
 
-Installation requires `aleo-sdk>=0.5.0` with the testnet bindings. If a
-compatible wheel is unavailable for the platform, build this checkout's
-`sdk/` package using its build instructions, then install `shield-swap-sdk`.
-The script calls `ShieldSwap.from_profile`, `onboard`, `swap_many(count=1)`,
-and `collect_all`; the SDK handles authentication, funding, quoting,
-record selection, delegated proving, and recovery handles.
+Installation requires `aleo-sdk>=0.5.0` with testnet bindings. If no compatible
+wheel is available, follow the `sdk/` package's build instructions first.
 
-The run can take several minutes. It writes no console logs. Exit code zero
-means a positive output was recorded by a confirmed claim in the SDK journal.
-Inspect `.shield-first-swap/result.json` in the invoking directory
-for the swap and claim transaction IDs and the exact received ETH amount.
-The result also retains base units and decimals for machine consumers.
-A nonzero exit leaves a sanitized `error.json`; the journal contains further
-local diagnostic information. A concurrent run exits nonzero without changing
-another run's error file.
-
-## Run from an installed release
-
-The wheel also includes the same source and README. After installing a release
-containing this example, run it from a private working directory:
+Releases containing the example also support:
 
 ```bash
 python -m aleo_shield_swap.examples.first_swap.swap
-python -m aleo_shield_swap.examples.first_swap.swap --claim
 ```
 
-Both commands use `.shield-first-swap/` in the current directory. Run recovery
-from that same directory. Source-checkout commands use the same state location.
+## Account and funding
 
-## Account and recovery
+`ShieldSwap.from_profile(network="testnet")` creates or loads the SDK profile
+at its default location, `~/.shield-swap/`. The SDK retains the account and
+swap journal there. The example does not create a separate storage layout.
 
-On the first run, the SDK generates an account and saves it under `.shield-first-swap/` in the invoking directory. To import an account instead, set the optional
-`SHIELD_SWAP_PRIVATE_KEY` in the invoking shell before the first run.
-The SDK stores imported keys in the profile too. An existing profile always
-wins over this variable; use a separate working directory for another account.
-No `.env` file is loaded. The example takes no other environment configuration;
-SDK API, key-file, and onboarding credential overrides are disabled.
+To import an existing account into a new profile, set `SHIELD_SWAP_PRIVATE_KEY`
+before the first run. An existing profile keeps its saved account and network;
+the example stops if that network is mainnet. Keep the profile private and
+retain it for recovery.
 
-Keep `.shield-first-swap/` private and retain its profile and journal: they contain the
-private key, credentials, and secrets needed to collect purchased tokens.
-The script creates owner-only state under a restrictive umask. The directory contains a `.gitignore` excluding all its contents; never force-add it to source control. Hosted scanning shares the view key with the scanner,
-which can decrypt account records. Delegated proving shares transaction
-authorizations with the prover, without sharing the private key.
+`dex.onboard()` handles authentication and testnet funding. The example finds
+a direct USDCx/ETH pool and calls `swap_many(count=1)`, which quotes the trade,
+selects a token record, and records the submitted handle in the SDK journal.
+One unspent record must cover 1.5 USDCx.
 
-Before submitting, the example saves `submission.json`. Any later normal run
-refuses another trade, including after a lost submission response. Recover with:
+## Completion and recovery
 
-```bash
-python shield-swap-sdk/examples/first-swap/swap.py --claim
+A successful run ends after `collect_all()` reports the swap's claim.
+`claim["transaction_id"]` identifies the claim and `claim["amount_out"]`
+contains the received ETH in base units. The example writes no console logs
+or additional result files.
+
+Each run submits a new trade. To recover an interrupted run, load the same
+profile and collect pending outputs instead of rerunning the swap:
+
+```python
+from aleo_shield_swap import ShieldSwap
+
+dex = ShieldSwap.from_profile()
+claims = dex.collect_all()
 ```
 
-Recovery reuses the saved profile and journal; it neither requests funding nor
-submits another swap. It also reconstructs `result.json` if the process stopped
-after a successful claim. Do not delete the submission marker to retry.
-An empty journal or missing claim is not proof that submission failed. A crash
-between broadcast and journal persistence, an incomplete handle, or a rejected
-transaction may require manual SDK/chain inspection. Preserve all state.
-The process lock releases automatically when the process exits.
-
-A funding failure before submission can be retried normally. The balance scan
-may lag behind faucet delivery; one unspent record must cover 1.5 USDCx even
-when several smaller records add up to enough. Missing pools or route quotes
-stop the run; the example never relaxes slippage to force a swap.
-
-## Offline checks
-
-```bash
-cd shield-swap-sdk/examples/first-swap
-python -m unittest -v test_swap
-```
-
-These checks use no network, installed SDK, account, or funds. They exercise
-lost-response protection, recovery after a confirmed claim, absent handles,
-existing journals, and testnet enforcement. They do not establish live service
-availability; only a completed live run verifies the funding-to-claim journey.
+`claims.still_pending` lists swaps whose outputs remain pending. Check the
+journal and transaction status before submitting another trade. `collect_all`
+also collects owed fees from journaled liquidity positions.

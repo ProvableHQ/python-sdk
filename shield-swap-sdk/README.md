@@ -43,16 +43,11 @@ Requires `aleo-sdk>=0.3` (this repo's SDK; imports as `aleo`) and Python 3.10+.
 
 ## First swap example
 
-Create a testnet account, request tokens, swap 1.5 USDCx for ETH, and collect
-the output with the [runnable first-swap example](examples/first-swap/README.md).
-The wheel includes the same example:
-
-```bash
-python -m aleo_shield_swap.examples.first_swap.swap
-```
-
-Run from a private working directory; account and recovery state are saved in
-`.shield-first-swap/`. Use `--claim` from the same directory to resume collection.
+The [first-swap example](./examples/first-swap) creates and funds a testnet
+account, swaps USDCx for ETH, and claims the output using SDK calls directly.
+It uses the SDK's default profile and journal for storage and recovery.
+Releases containing the example support
+`python -m aleo_shield_swap.examples.first_swap.swap`.
 
 ## Agents
 
