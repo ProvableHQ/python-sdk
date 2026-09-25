@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-__version__ = "0.1.0"
+__version__ = "0.5.1"
 
 from .errors import (  # noqa: E402
     AmbiguousRouteError, AttestationError, BridgeError, ChainMismatchError, CheckpointInvalidError,
