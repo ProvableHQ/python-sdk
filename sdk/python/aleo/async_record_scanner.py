@@ -430,7 +430,9 @@ class AsyncRecordScanner:
         if resp.status_code == 422 and self.auto_re_register:
             vk = self._view_keys.get(resolved_uuid)
             if vk is not None:
-                await self.register_encrypted(vk, 0)
+                registration = await self.register_encrypted(vk, 0)
+                if not registration.get("ok"):
+                    return registration
                 resp = await self._send_authed(
                     "POST", f"{self.url}/records/owned", content=body.encode()
                 )

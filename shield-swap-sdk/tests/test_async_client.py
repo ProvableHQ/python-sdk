@@ -367,3 +367,47 @@ async def test_async_public_balances_isolate_one_bad_program(caplog):
     with caplog.at_level("WARNING"):
         out = await AsyncShieldSwap(aleo).get_public_balances(["a.aleo", "gone.aleo"], address="aleo1x")
     assert out == {"a.aleo": 9} and "gone.aleo" in caplog.text
+
+
+async def test_async_swap_converts_token_units(astub):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from decimal import Decimal
+    dex = AsyncShieldSwap(astub)
+    dex.api.get_tokens = AsyncMock(return_value=[
+        SimpleNamespace(id="1field", address="a.aleo", decimals=6),
+        SimpleNamespace(id="2field", address="b.aleo", decimals=8),
+    ])
+    call = await dex.swap(pool_key="5field", token_in_id="1field",
+                          amount_in=Decimal("1.5"), expected_out="0.0005",
+                          token_in_program="tok.aleo")
+    assert astub.last_call[1][5:7] == ["1500000u128", "49750u128"]
+    handle = await call.transact()
+    assert handle.amount_in == 1500000
+
+
+async def test_async_swap_waits_for_scanner(astub, monkeypatch):
+    from unittest.mock import AsyncMock
+    astub.record_provider.find = AsyncMock(side_effect=[[], [{"record_plaintext": RECORD_TEXT}]])
+    sleep = AsyncMock()
+    monkeypatch.setattr("aleo_shield_swap.async_client.asyncio.sleep", sleep)
+    dex = AsyncShieldSwap(astub)
+    await dex.swap(pool_key="5field", token_in_id="1field", amount_in=10**9,
+                   token_in_program="tok.aleo", expected_out=1_000_000,
+                   record_wait_seconds=10)
+    assert astub.record_provider.find.call_count == 2
+    sleep.assert_awaited_once()
+    assert astub.submitted == []
+
+
+async def test_async_record_wait_times_out_without_submission(astub, monkeypatch):
+    from unittest.mock import AsyncMock, Mock
+    from aleo_shield_swap.errors import InsufficientRecordsError
+    astub.record_provider.find = AsyncMock(return_value=[])
+    monkeypatch.setattr("aleo_shield_swap.async_client.time", Mock(monotonic=Mock(side_effect=[0, 10])))
+    dex = AsyncShieldSwap(astub)
+    with pytest.raises(InsufficientRecordsError):
+        await dex.swap(pool_key="5field", token_in_id="1field", amount_in=10**9,
+                       token_in_program="tok.aleo", expected_out=1_000_000,
+                       record_wait_seconds=10)
+    assert astub.submitted == []

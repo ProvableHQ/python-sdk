@@ -75,6 +75,9 @@ class AccountModule:
     def from_private_key(self, private_key: str | Any) -> Any:
         """Derive an :class:`Account` from an existing private key.
 
+        Sets ``aleo.default_account`` when no default is configured. Later
+        imports leave an existing default unchanged. Does not contact the network.
+
         Parameters
         ----------
         private_key:
@@ -96,7 +99,10 @@ class AccountModule:
             pk: Any = net.PrivateKey.from_string(private_key)
         else:
             pk = private_key
-        return net.Account.from_private_key(pk)
+        account = net.Account.from_private_key(pk)
+        if self._client.default_account is None:
+            self._client.default_account = account
+        return account
 
     def from_seed(self, seed: str | Any) -> Any:
         """Derive an :class:`Account` from a seed :class:`Field` element.

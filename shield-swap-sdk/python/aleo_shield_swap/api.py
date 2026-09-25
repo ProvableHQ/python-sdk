@@ -10,6 +10,8 @@ token info is surfaced through :class:`PoolEntry`.
 """
 from __future__ import annotations
 
+import asyncio
+import time
 import dataclasses
 import enum
 import functools
@@ -23,10 +25,44 @@ import requests
 
 from . import _api_models as models
 from .errors import (
+    AirdropPendingError,
     AirdropRateLimitedError,
     DexApiError,
     NotAuthenticatedError,
 )
+
+
+@dataclass
+class ConfirmAirdropResult:
+    """Faucet outcome with per-token results or the request's rate-limit reason.
+
+    ``status`` is ``settled`` with ``job`` populated, or ``rate_limited`` with
+    ``message`` populated. A settled job can still contain failed token transfers.
+    """
+
+    status: typing.Literal["settled", "rate_limited"]
+    job: Optional[models.AirdropJob] = None
+    message: Optional[str] = None
+
+
+def _airdrop_outcome(job: models.AirdropJob, job_id: str,
+                     deadline: float) -> Optional[ConfirmAirdropResult]:
+    """Return a settled job or raise when a running job has timed out."""
+    if job.status != "running":
+        return ConfirmAirdropResult("settled", job=job)
+    if time.monotonic() >= deadline:
+        raise AirdropPendingError(job_id)
+    return None
+
+
+def _token_by_symbol(tokens: list[models.TokenDoc], symbol: str) -> models.TokenDoc:
+    """Find one exact symbol match without choosing between duplicate symbols."""
+    matches = [token for token in tokens if token.symbol == symbol]
+    if not matches:
+        raise ValueError(f"Unknown token symbol: {symbol}")
+    if len(matches) > 1:
+        raise ValueError(f"Ambiguous token symbol: {symbol}")
+    return matches[0]
 
 
 def _check(resp: Any) -> None:
@@ -448,6 +484,35 @@ class ApiClient:
                    for r in (data.get("results") or [])]
         return _build(models.AirdropJob, {**data, "results": results})
 
+    def confirm_airdrop(self, address: str, *, poll_interval: float = 5.0,
+                        timeout: float = 600.0) -> ConfirmAirdropResult:
+        """Request testnet tokens and poll until the faucet job settles.
+
+        Returns ``settled`` with ``job.results`` (including failed transfers),
+        or ``rate_limited`` with a message for an initial HTTP 429. Other API
+        errors propagate. Does not wait for record-scanner indexing.
+
+        Args:
+            address: Receiving Aleo address.
+            poll_interval: Seconds between reads; defaults to 5.
+            timeout: Seconds after starting the job; defaults to 600.
+
+        Raises:
+            AirdropPendingError: Timeout; ``job_id`` identifies the pending job.
+            DexApiError: Request/status failure, except an initial 429.
+        """
+        try:
+            started = self.request_airdrop(address)
+        except AirdropRateLimitedError as error:
+            return ConfirmAirdropResult("rate_limited", message=str(error))
+        deadline = time.monotonic() + timeout
+        while True:
+            job = self.get_airdrop_job(started.job_id)
+            result = _airdrop_outcome(job, started.job_id, deadline)
+            if result is not None:
+                return result
+            time.sleep(poll_interval)
+
     def create_api_token(self, name: str,
                          expires_in_days: "int | None" = None
                          ) -> models.ApiTokenCreatedResponse:
@@ -568,6 +633,29 @@ class ApiClient:
         ``collect`` — conversion to raw base units is necessary.
         """
         return [_build(models.TokenDoc, t) for t in self._get("/tokens")["data"]]
+
+    def get_token(self, symbol: str) -> models.TokenDoc:
+        """Look up one listed token by its exact, case-sensitive symbol.
+
+        Fetches the token registry through ``get_tokens()`` and returns the
+        matching token, including its ID, decimals, and token programs.
+
+        Args:
+            symbol: Listed token symbol, such as ``"ETH"`` or ``"USDCx"``.
+
+        Returns:
+            Metadata for the single matching token.
+
+        Raises:
+            ValueError: The symbol is unknown or matches more than one token.
+            DexApiError: Fetching the token registry fails.
+
+        Example::
+
+            source = api.get_token("USDCx")
+            target = api.get_token("ETH")
+        """
+        return _token_by_symbol(self.get_tokens(), symbol)
 
     def get_pool(self, pool_key: str) -> models.PoolWithStatsDoc:
         """One pool with its token metadata, reserves, display orientation, and
@@ -916,6 +1004,25 @@ class AsyncApiClient:
                    for r in (data.get("results") or [])]
         return _build(models.AirdropJob, {**data, "results": results})
 
+    async def confirm_airdrop(self, address: str, *, poll_interval: float = 5.0,
+                              timeout: float = 600.0) -> ConfirmAirdropResult:
+        """Request and await testnet funding; see :meth:`ApiClient.confirm_airdrop`.
+
+        Uses nonblocking waits with the same timeout, rate-limit result, and
+        per-token outcomes as the synchronous method.
+        """
+        try:
+            started = await self.request_airdrop(address)
+        except AirdropRateLimitedError as error:
+            return ConfirmAirdropResult("rate_limited", message=str(error))
+        deadline = time.monotonic() + timeout
+        while True:
+            job = await self.get_airdrop_job(started.job_id)
+            result = _airdrop_outcome(job, started.job_id, deadline)
+            if result is not None:
+                return result
+            await asyncio.sleep(poll_interval)
+
     async def create_api_token(self, name: str,
                                expires_in_days: "int | None" = None
                                ) -> models.ApiTokenCreatedResponse:
@@ -1027,6 +1134,14 @@ class AsyncApiClient:
         return _build(models.ReferralAddressBatchResponse,
                       (await self._post("/referral/address-batches",
                                         {"code": code, "blinded_addresses": blinded_addresses}))["data"])
+
+    async def get_token(self, symbol: str) -> models.TokenDoc:
+        """Look up a token by exact symbol; see :meth:`ApiClient.get_token`.
+
+        Fetches the registry asynchronously. Raises ``ValueError`` for an
+        unknown or ambiguous symbol and propagates API errors.
+        """
+        return _token_by_symbol(await self.get_tokens(), symbol)
 
     async def get_pool(self, pool_key: str) -> models.PoolWithStatsDoc:
         """One pool with stats — see :meth:`ApiClient.get_pool`."""

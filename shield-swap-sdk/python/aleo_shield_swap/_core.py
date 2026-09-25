@@ -9,14 +9,57 @@ token-record selection — everything both ``client.py`` and
 from __future__ import annotations
 
 import re
+import math
+import time
 import secrets
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
 
 from aleo.codegen.runtime import parse_plaintext
 
 from .errors import InsufficientRecordsError
 from .tick_math import MAX_SQRT_RATIO_X128, MIN_SQRT_RATIO_X128, u256_to_int
+
+
+def _amount_to_base_units(amount: int | str | Decimal, token_id: str,
+                          tokens: list[Any]) -> int:
+    """Convert decimal token units exactly; retain integer base-unit inputs."""
+    if isinstance(amount, bool) or not isinstance(amount, (int, str, Decimal)):
+        raise TypeError("Use an integer for base units or a string/Decimal for token units")
+    if isinstance(amount, int):
+        result = amount
+    else:
+        matches = [token for token in tokens
+                   if token.id == token_id or token.address == token_id]
+        if len(matches) != 1:
+            raise ValueError(f"Missing or ambiguous token metadata: {token_id}")
+        decimals = matches[0].decimals
+        if not isinstance(decimals, int) or isinstance(decimals, bool) or decimals < 0:
+            raise ValueError(f"Invalid token decimals: {token_id}")
+        try:
+            value = Decimal(amount)
+        except InvalidOperation as error:
+            raise ValueError("Invalid decimal token amount") from error
+        if not value.is_finite() or value < 0:
+            raise ValueError("Token amount must be finite and nonnegative")
+        if value.is_zero():
+            return 0
+        _, digits, exponent = value.as_tuple()
+        shift = int(exponent) + decimals
+        # Operate on decimal digits so the caller's Decimal context cannot round.
+        if shift < 0:
+            places = -shift
+            if places >= len(digits) or any(digits[-places:]):
+                raise ValueError(f"Amount exceeds {decimals} decimal places")
+            digits = digits[:-places]
+            shift = 0
+        if len(digits) + shift > 39:
+            raise ValueError("Amount exceeds the u128 range")
+        result = int("".join(str(digit) for digit in digits)) * 10**shift
+    if not 0 <= result < 2**128:
+        raise ValueError("Amount must fit the nonnegative u128 range")
+    return result
 
 
 @dataclass(frozen=True)
@@ -386,6 +429,7 @@ def select_token_record(
     min_amount: int,
     token_id: Optional[str] = None,
     account: Any = None,
+    wait_seconds: float = 0.0,
 ) -> str:
     """One unspent record plaintext from *program* covering *min_amount*.
 
@@ -394,17 +438,21 @@ def select_token_record(
     filters registry-style records; wrapper-program records carry no
     ``token_id`` and match any.
     """
+    if not math.isfinite(wait_seconds) or wait_seconds < 0:
+        raise ValueError("record_wait_seconds must be finite and nonnegative")
     provider = aleo.record_provider
     if provider is None:
         raise InsufficientRecordsError(
-            "No record provider configured (aleo.record_provider is None) — "
-            "pass token_record= explicitly or configure a scanner."
-        )
-    records = provider.find(account, program=program, unspent=True)
-    chosen = pick_covering_record(records, min_amount=min_amount, token_id=token_id)
-    if chosen is None:
-        raise InsufficientRecordsError(
-            f"No unspent {program} record covers {min_amount} "
-            f"(token_id={token_id or 'any'}) — privatize funds or pass token_record=."
-        )
-    return chosen
+            "No record provider configured — pass token_record= explicitly.")
+    deadline = time.monotonic() + wait_seconds
+    while True:
+        records = provider.find(account, program=program, unspent=True)
+        chosen = pick_covering_record(records, min_amount=min_amount, token_id=token_id)
+        if chosen is not None:
+            return chosen
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise InsufficientRecordsError(
+                f"No unspent {program} record covers {min_amount} "
+                f"(token_id={token_id or 'any'}) — privatize funds or pass token_record=.")
+        time.sleep(min(5.0, remaining))
