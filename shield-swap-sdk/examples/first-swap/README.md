@@ -39,12 +39,18 @@ It returns `funding.status == "settled"` with per-token outcomes in
 The helper polls every 5 seconds and times out after 10 minutes by default.
 `AirdropPendingError.job_id` identifies a timed-out job for further status reads.
 A rate-limited account can continue if it already holds enough USDCx.
-The example waits for the scanner to report at least 1.5 USDCx before trading.
 It looks up USDCx and ETH with `get_token(symbol)`, quotes a direct pool
 with `get_route()`, then calls
 `swap(...).delegate(wait=True)` with that quote and a 0.5% slippage limit.
+The example passes `amount_in="1.5"` and the quote's decimal output directly
+to `swap()`. The SDK converts both using token metadata; no unit conversion
+is needed in the example. Strings and `Decimal` values represent token units;
+integers retain their existing base-unit meaning. Excess precision is rejected.
+
 The SDK selects a token record and returns the handle needed to claim.
-One unspent record must cover 1.5 USDCx.
+One unspent record must cover 1.5 USDCx. If the scanner has not indexed a
+covering record yet, preparation raises `InsufficientRecordsError` before
+proving or submitting a swap.
 
 ## Completion and recovery
 

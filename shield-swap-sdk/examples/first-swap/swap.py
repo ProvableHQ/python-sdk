@@ -1,7 +1,5 @@
 """Create and fund a testnet account, swap 1.5 USDCx for ETH, and claim the output."""
 import os
-import time
-from decimal import Decimal
 
 from aleo import Aleo, HTTPProvider, testnet
 
@@ -31,39 +29,26 @@ if __name__ == "__main__":
     # Request testnet tokens and wait for the faucet job to settle.
     funding = dex.api.confirm_airdrop(address)
 
-    # Find a direct USDCx/ETH pool and convert 1.5 USDCx to base units.
+    # Look up USDCx and ETH, then find a direct pool.
     source = dex.api.get_token("USDCx")
     target = dex.api.get_token("ETH")
     pool = next(pool for pool in dex.api.get_pools()
                 if {pool.token0, pool.token1} == {source.id, target.id})
 
-    # Wait for the scanner to report enough USDCx for the swap.
-    amount_in = 15 * 10**source.decimals // 10
-    token_program = source.underlying_program or source.amm_token_program
-    for attempt in range(40):
-        balances = dex.get_private_balances([token_program])
-        if balances.get(token_program, 0) >= amount_in:
-            break
-        time.sleep(15)
-    else:
-        raise RuntimeError("USDCx is not available; inspect funding.job and funding.message and the account balance")
-
-    # Quote the selected pool and convert the expected ETH output to base units.
+    # Quote the selected pool in token units.
+    amount_in = "1.5"
     quote = dex.api.get_route(
-        token_in=source.id, token_out=target.id, amount_in="1.5", pool_key=pool.key,
+        token_in=source.id, token_out=target.id, amount_in=amount_in, pool_key=pool.key,
     )
     if not quote.estimated_amount_out:
         raise RuntimeError("The selected pool returned no quote")
-    expected_out = int(Decimal(quote.estimated_amount_out) * 10**target.decimals)
-    if expected_out <= 0:
-        raise RuntimeError("The quote returned no ETH")
 
     # Submit one swap and wait for confirmation. Keep the returned handle for the claim.
     handle = dex.swap(
         pool_key=pool.key,
         token_in_id=source.id,
         amount_in=amount_in,
-        expected_out=expected_out,
+        expected_out=quote.estimated_amount_out,
         slippage_bps=50,
     ).delegate(wait=True)
 

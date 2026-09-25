@@ -486,32 +486,20 @@ class ApiClient:
 
     def confirm_airdrop(self, address: str, *, poll_interval: float = 5.0,
                         timeout: float = 600.0) -> ConfirmAirdropResult:
-        """Request testnet tokens and wait for the faucet job to settle.
+        """Request testnet tokens and poll until the faucet job settles.
 
-        Calls ``request_airdrop`` once, then polls ``get_airdrop_job``. Returns
-        ``status="rate_limited"`` if the initial request receives HTTP 429;
-        no job starts in that case. Other API errors propagate. A settled job
-        can contain failed transfers; inspect ``result.job.results`` for each
-        token's outcome. This does not wait for record-scanner indexing.
+        Returns ``settled`` with ``job.results`` (including failed transfers),
+        or ``rate_limited`` with a message for an initial HTTP 429. Other API
+        errors propagate. Does not wait for record-scanner indexing.
 
         Args:
-            address: Receiving Aleo account address.
-            poll_interval: Seconds between status reads; defaults to 5.
-            timeout: Seconds to wait after starting the job; defaults to 600.
-
-        Returns:
-            The settled job or the faucet's rate-limit explanation.
+            address: Receiving Aleo address.
+            poll_interval: Seconds between reads; defaults to 5.
+            timeout: Seconds after starting the job; defaults to 600.
 
         Raises:
-            AirdropPendingError: The job is still running at the timeout;
-                ``job_id`` identifies the job to resume polling.
-            DexApiError: The request or status read fails, except an initial 429.
-
-        Example::
-
-            funding = api.confirm_airdrop(address)
-            if funding.status == "settled":
-                results = funding.job.results
+            AirdropPendingError: Timeout; ``job_id`` identifies the pending job.
+            DexApiError: Request/status failure, except an initial 429.
         """
         try:
             started = self.request_airdrop(address)

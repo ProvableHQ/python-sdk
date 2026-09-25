@@ -367,3 +367,20 @@ async def test_async_public_balances_isolate_one_bad_program(caplog):
     with caplog.at_level("WARNING"):
         out = await AsyncShieldSwap(aleo).get_public_balances(["a.aleo", "gone.aleo"], address="aleo1x")
     assert out == {"a.aleo": 9} and "gone.aleo" in caplog.text
+
+
+async def test_async_swap_converts_token_units(astub):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from decimal import Decimal
+    dex = AsyncShieldSwap(astub)
+    dex.api.get_tokens = AsyncMock(return_value=[
+        SimpleNamespace(id="1field", address="a.aleo", decimals=6),
+        SimpleNamespace(id="2field", address="b.aleo", decimals=8),
+    ])
+    call = await dex.swap(pool_key="5field", token_in_id="1field",
+                          amount_in=Decimal("1.5"), expected_out="0.0005",
+                          token_in_program="tok.aleo")
+    assert astub.last_call[1][5:7] == ["1500000u128", "49750u128"]
+    handle = await call.transact()
+    assert handle.amount_in == 1500000

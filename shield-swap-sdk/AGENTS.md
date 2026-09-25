@@ -405,35 +405,30 @@ exhausting it raises — the fail-fast for a systematically wrong program.
 
 ### Chain methods
 
-### `swap(self, *, pool_key: 'str', token_in_id: 'str', amount_in: 'int', slippage_bps: 'int' = 50, expected_out: 'Optional[int]' = None, sqrt_price_limit: 'Optional[int]' = None, deadline_offset_blocks: 'int' = 10000, nonce: 'Optional[int]' = None, identity: 'Optional[BlindedIdentity]' = None, token_in_program: 'Optional[str]' = None, token_record: 'Optional[str]' = None, wrapper_proofs: 'Optional[str]' = None, track: 'bool' = True, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[SwapHandle]'`
+### `swap(self, *, pool_key: 'str', token_in_id: 'str', amount_in: 'int | str | Decimal', slippage_bps: 'int' = 50, expected_out: 'Optional[int | str | Decimal]' = None, sqrt_price_limit: 'Optional[int]' = None, deadline_offset_blocks: 'int' = 10000, nonce: 'Optional[int]' = None, identity: 'Optional[BlindedIdentity]' = None, token_in_program: 'Optional[str]' = None, token_record: 'Optional[str]' = None, wrapper_proofs: 'Optional[str]' = None, track: 'bool' = True, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[SwapHandle]'`
 
-Request a private swap — phase one of the two-transaction flow.
+Prepare one private swap; submit with ``transact()`` or ``delegate()``.
 
-Wrapped inputs route via the swap router automatically; fund them
-with UNDERLYING records — the deposit happens in-transaction.
+Integer ``amount_in`` and ``expected_out`` values are base units.
+Strings and ``Decimal`` values are token units (``"1.5"`` means 1.5
+tokens), converted exactly with registry metadata. Floats, excess
+precision, non-finite values, and amounts outside u128 are rejected.
+Returned handle amounts remain in base units.
 
-Resolves the intent against live pool state, derives a single-use
-blinded identity from the signer's view key, selects an unspent token
-record (or takes *token_record* verbatim), and returns a prepared
-call.  The terminal method (``transact``/``delegate``) returns a
-:class:`~aleo_shield_swap.types.SwapHandle` — persist it if the
-process might die before the claim.
+Quote with ``api.get_route`` and pass ``expected_out``. Without a quote,
+the spot estimate ignores fees and price impact. Wrapped inputs use
+underlying token records and route through the swap router automatically.
+The SDK selects a covering record unless ``token_record`` is supplied.
 
-Quote first (``dex.api.get_route``) and pass *expected_out*: without
-it a spot estimate is used, which ignores fees and price impact.
-**Building is not free with a journal.**  The blinded address is a
-transition input, so a counter is reserved *here*, not at the terminal
-method — discarding the call, or only simulating, still spends it.  That
-reservation is what makes concurrent swaps safe: it serializes under a
-file lock where the probe it replaces could hand two callers the same
-counter.  The handle is journaled once the broadcast is accepted, so a
-crash before the claim keeps the blinding factor.  ``track=False`` builds
-on the racing probe instead; *identity* supplies your own.
+Preparing a call reserves a blinding counter when a journal is attached,
+even if the call is discarded or only simulated. The journal retains the
+handle after submission. Without a journal, retain the returned handle
+for claiming and avoid concurrent swaps: chain probing cannot reserve
+counters atomically. ``identity`` supplies an explicit identity;
+``track=False`` bypasses journal reservation.
 
-The default
-*deadline_offset_blocks* (~8h at ~3s blocks) absorbs delegated-
-proving latency; a tight deadline aborts at finalize when proving
-outlives it.
+``deadline_offset_blocks`` defaults to 10,000 (~8 hours at 3s/block)
+to allow delegated proving; an expired deadline rejects at finalize.
 
 ### `claim_swap_output(self, handle: 'SwapHandle', *, wrapper_proofs: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[ClaimResult]'`
 

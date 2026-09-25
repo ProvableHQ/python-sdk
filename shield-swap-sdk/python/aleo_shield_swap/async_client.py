@@ -8,6 +8,7 @@ shared from ``_core``/``derivations`` — only the I/O differs.
 from __future__ import annotations
 
 import logging
+from decimal import Decimal
 from typing import Any, Callable, Generic, Optional, TypeVar
 
 from aleo import AleoNetworkError, ProgramNotFound
@@ -15,6 +16,7 @@ from aleo import AleoNetworkError, ProgramNotFound
 from . import _generated as g
 from ._calls import extract_tx_id, root_outputs
 from ._core import (
+    _amount_to_base_units,
     decode_position_record,
     default_merkle_proofs,
     find_position_plaintext,
@@ -583,8 +585,8 @@ class AsyncShieldSwap:
 
     # ── Writes ───────────────────────────────────────────────────────────────
 
-    async def swap(self, *, pool_key: str, token_in_id: str, amount_in: int,
-                   slippage_bps: int = 50, expected_out: Optional[int] = None,
+    async def swap(self, *, pool_key: str, token_in_id: str, amount_in: int | str | Decimal,
+                   slippage_bps: int = 50, expected_out: Optional[int | str | Decimal] = None,
                    sqrt_price_limit: Optional[int] = None,
                    deadline_offset_blocks: int = 10_000,
                    nonce: Optional[int] = None,
@@ -606,6 +608,12 @@ class AsyncShieldSwap:
         :class:`~aleo_shield_swap.types.SwapHandle` — persist it if the
         process might die before the claim.
 
+        Integer ``amount_in`` and ``expected_out`` values are base units.
+        Strings and ``Decimal`` values are token units (``"1.5"`` means 1.5
+        tokens), converted using registry decimals. Floats, excess precision,
+        non-finite values, and amounts outside u128 are rejected before proving.
+        Returned handle amounts remain in base units.
+
         Quote first (``dex.api.get_route``) and pass *expected_out*: without
         it a spot estimate is used, which ignores fees and price impact.
         **This client has no journal**, so it cannot reserve blinding counters:
@@ -620,6 +628,13 @@ class AsyncShieldSwap:
         """
         acct = self._account(account)
         pool = await self.get_pool(pool_key)
+        tokens = []
+        if isinstance(amount_in, (str, Decimal)) or isinstance(expected_out, (str, Decimal)):
+            tokens = await self.api.get_tokens()
+        amount_in = _amount_to_base_units(amount_in, token_in_id, tokens)
+        if expected_out is not None:
+            token_out_id = str(pool.token1) if token_in_id == str(pool.token0) else str(pool.token0)
+            expected_out = _amount_to_base_units(expected_out, token_out_id, tokens)
         slot = await self.get_slot(pool_key)
         resolved = resolve_swap_params(
             pool=pool, slot=slot, token_in_id=token_in_id, amount_in=amount_in,

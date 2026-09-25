@@ -21,8 +21,12 @@ handle = dex.swap(pool_key=pools[0].key,
 out = dex.claim_swap_output(handle).delegate()   # broadcasts; spends funds
 ```
 
-Targets the deployed `shield_swap.aleo` stack on testnet. Amounts are raw
+Targets the deployed `shield_swap.aleo` stack on testnet. Integer amounts are raw
 native token units (the AMM does no decimal scaling); prices are Q128.128.
+`swap()` also accepts strings or `Decimal` values for `amount_in` and
+`expected_out` in token units, converting them internally with registry metadata.
+For example, `amount_in="1.5"` means 1.5 input tokens; `amount_in=1500000`
+means 1,500,000 base units. Returned amounts remain in base units.
 Wrapped assets (ALEO/USAD/USDCx) **route automatically** through the swap/LP
 routers — fund them with *underlying* records (`credits.aleo` / stablecoin);
 you never handle wrapper records. `mint` stores an immutable `withdrawal`
@@ -127,7 +131,8 @@ Quote before you swap: pass `expected_out` from `dex.api.get_route(...)` —
 without it a spot estimate is used, which ignores fees and price impact.
 On busy pools leave slippage headroom: prices move between quote and
 finalize, and a too-tight `amount_out_min` rejects safely at finalize.
-Amounts are `u128` base units of the token; fees are microcredits.
+On-chain amounts are `u128` base units; fees are microcredits. `swap()` converts
+string and `Decimal` token amounts internally; integer inputs remain base units.
 
 Two liquidity behaviors worth knowing (both verified live): `mint` walks
 the pool's on-chain tick list to compute its insertion hints
