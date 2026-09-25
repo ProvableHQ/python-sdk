@@ -20,7 +20,9 @@ if __name__ == "__main__":
     private_key = testnet.PrivateKey.from_string(key)
     aleo = Aleo(HTTPProvider("https://edge.provable.com/api", network="testnet"))
     account = aleo.account.from_private_key(private_key)
-    aleo.records.register(account)
+    registration = aleo.records.register(account)
+    if not registration["ok"]:
+        raise RuntimeError(f"Scanner registration failed: {registration['error']}")
     dex = ShieldSwap(aleo)
     address = str(account.address)
 

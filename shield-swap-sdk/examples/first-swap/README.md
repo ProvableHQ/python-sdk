@@ -31,6 +31,9 @@ An existing profile must use testnet. `ShieldSwap(aleo)`
 uses the configured Aleo client. Both journal settings use the same account
 and register it with the record scanner. The first `from_private_key()` call
 sets the default account; later imports preserve an existing default.
+The example stops if initial scanner registration fails. If a later records
+query returns HTTP 422, the SDK re-registers the account and retries that query
+once. A failed re-registration surfaces its error.
 
 `dex.api.authenticate()` signs the API challenge with the account's key.
 `confirm_airdrop()` requests tokens and waits for the faucet job to settle.
