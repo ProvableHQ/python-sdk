@@ -556,6 +556,8 @@ class EthModule:
         rebuilt = _plan_for(self.registry, route, amount_atomic=amount_atomic, recipient=recipient, sender=sender,
                             mint_mode=mint_mode)
         for field in fields(Plan):
+            if field.name == "journal_id":  # Local storage identity does not change the transfer.
+                continue
             mine, theirs = getattr(rebuilt, field.name), getattr(plan, field.name)
             if mine != theirs:
                 raise BridgeError(f"plan does not match the requested transfer: {field.name} is {theirs!r} "

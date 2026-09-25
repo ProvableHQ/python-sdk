@@ -347,7 +347,10 @@ class Bridge:
         Runs approval(s) → deposit / dispatch / burn, emitting a ``Checkpoint`` to
         ``on_checkpoint`` (and the bound store) at every boundary — including
         AFTER proving and BEFORE broadcast for Aleo legs, so a crash there is
-        resumable without proving twice.  ``proving`` is ``"delegate"`` (DPS) or
+        resumable without proving twice. With ``FileCheckpointStore``, a UTC date/counter
+        journal id is reserved before submission and stays fixed through recovery.
+        ``checkpoint.id`` is that local key; ``checkpoint.receipt_id`` remains the
+        changing on-chain receipt identity. ``proving`` is ``"delegate"`` (DPS) or
         ``"local"``; ``mode`` is ``"caller"|"signer"`` (Aleo Hyperlane) or
         ``"private"|"public"|"public-as-signer"`` (Aleo xReserve burn, default
         private; ``record``/``merkle_proof`` optional — the SDK selects a record

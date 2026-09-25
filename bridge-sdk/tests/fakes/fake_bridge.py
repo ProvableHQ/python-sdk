@@ -352,9 +352,9 @@ class FakeEth:
                            DepositReceipt(tx, route_id, message_hash, "0x" + "dd" * 32, receipt),
                            plan=plan, store=self.fake.checkpoints, send_error=self.send_error)
 
-    def balance(self, asset) -> int:
-        self.fake.calls.append(("eth.balance", asset))
-        return self.balances.get(asset, 0)
+    def balance(self, asset, *, address=None) -> int:
+        self.fake.calls.append(("eth.balance", asset) if address is None else ("eth.balance", asset, address))
+        return self.balances.get(asset if address is None else (asset, address), 0)
 
     def is_delivered(self, message_id) -> bool:
         key = message_id if isinstance(message_id, str) else "0x" + bytes(message_id).hex()

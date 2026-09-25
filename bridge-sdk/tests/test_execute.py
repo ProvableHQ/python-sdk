@@ -88,12 +88,13 @@ def test_aleo_hyperlane_captures_destination_balance_baseline_for_own_recipient(
     assert cps[0].delivery_verification == {"balanceBeforeAtomic": "100", "expectedIncreaseAtomic": "1"}
     assert progress.receipt.protocol_state["destinationBalanceBeforeAtomic"] == "100"
     assert progress.receipt.protocol_state["expectedDestinationIncreaseAtomic"] == "1"
-    # a recipient that is not our connection's address gets no baseline (we cannot read its balance)
+    # Baseline the actual recipient even when it differs from the connected wallet.
     b2 = FakeBridge()
     cps2 = []
     execute(b2, _aleo_eth_plan(b2, recipient="0x0000000000000000000000000000000000000002"),
             gas_payment_microcredits=1, on_checkpoint=cps2.append)
-    assert cps2[0].delivery_verification is None and ("eth.balance", "ethereum/eth") not in b2.calls
+    assert cps2[0].delivery_verification == {"balanceBeforeAtomic": "0", "expectedIncreaseAtomic": "1"}
+    assert ("eth.balance", "ethereum/eth", "0x0000000000000000000000000000000000000002") in b2.calls
 
 
 def test_aleo_xreserve_burn_modes_and_private_inputs():
@@ -137,13 +138,14 @@ def test_aleo_xreserve_burn_captures_the_destination_balance_baseline_net_of_the
     assert cps[0].delivery_verification == {"balanceBeforeAtomic": "100", "expectedIncreaseAtomic": "1"}
     assert progress.receipt.protocol_state["destinationBalanceBeforeAtomic"] == "100"
     assert progress.receipt.protocol_state["expectedDestinationIncreaseAtomic"] == "1"
-    # a recipient that is not our connection's address still gets no baseline, and no read at all
+    # An external recipient is read by address, without needing its private key.
     b2 = FakeBridge()
     other = prepare(b2.registry, source_chain="aleo", source_asset="usdcx", destination_chain="ethereum", destination_asset="usdc", amount="2.000001",
                     recipient="0x0000000000000000000000000000000000000002")
     cps2 = []
     execute(b2, other, mode="public", on_checkpoint=cps2.append)
-    assert cps2[0].delivery_verification is None and ("eth.balance", "ethereum/usdc") not in b2.calls
+    assert cps2[0].delivery_verification == {"balanceBeforeAtomic": "0", "expectedIncreaseAtomic": "1"}
+    assert ("eth.balance", "ethereum/usdc", "0x0000000000000000000000000000000000000002") in b2.calls
 
 
 # ── EVM- and Solana-origin legs ───────────────────────────────────────────────
@@ -245,7 +247,8 @@ def test_bound_store_saves_every_checkpoint_and_replaces_superseded_ids(tmp_path
     b.eth.intermediates = [approval]
     execute(b, plan)
     saved = store.list()
-    assert [c.id for c in saved] == ["0x" + "cc" * 32]           # approval file replaced by the deposit's
+    assert [c.receipt_id for c in saved] == ["0x" + "cc" * 32]
+    assert saved[0].id.endswith("_001_ethereum-usdc_to_aleo-usdcx_2")
     assert saved[0].source == {"transactionId": "0x" + "bb" * 32, "hookData": "0x" + "00" * 65}
 
 
@@ -261,10 +264,11 @@ def test_module_and_lifecycle_checkpoint_channels_do_not_double_write(tmp_path):
                                                    "approvalTxIds": ["0x" + "11" * 32]})]
     cps = []
     execute(b, plan, on_checkpoint=cps.append)
-    assert [c.id for c in cps] == ["0x" + "11" * 32, "0x" + "aa" * 32]      # no repeated boundary
+    assert [c.receipt_id for c in cps] == ["0x" + "11" * 32, "0x" + "aa" * 32]      # no repeated boundary
     saved = store.list()
-    assert [c.id for c in saved] == ["0x" + "aa" * 32]
-    assert store.load("0x" + "aa" * 32).source == {"transactionId": "0x" + "aa" * 32}
+    assert [c.receipt_id for c in saved] == ["0x" + "aa" * 32]
+    assert cps[0].id == cps[1].id == saved[0].id
+    assert store.load(saved[0].id).source == {"transactionId": "0x" + "aa" * 32}
 
 
 def test_a_stale_plan_is_refused_before_anything_is_sent():
@@ -302,7 +306,7 @@ def test_persist_never_leaves_the_store_empty_between_checkpoints(tmp_path):
                                                    "approvalTxIds": ["0x" + "11" * 32]})]
     execute(b, plan)
     assert observed and all(n >= 1 for n in observed)                # never empty in between
-    assert [c.id for c in store.list()] == ["0x" + "aa" * 32]         # exactly one record after execute
+    assert [c.receipt_id for c in store.list()] == ["0x" + "aa" * 32]         # exactly one record after execute
 
 
 def test_aleo_hyperlane_leg_refuses_a_sender_mismatch_before_proving():

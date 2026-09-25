@@ -263,3 +263,66 @@ def test_load_checkpoints_empty_store(tmp_path):
     result = FileCheckpointStore(tmp_path).load_checkpoints()
     assert result.checkpoints == []
     assert result.errors == []
+
+
+def test_journal_name_is_readable_and_never_reuses_counter(tmp_path):
+    from datetime import datetime, timezone
+    store = FileCheckpointStore(tmp_path)
+    first = store.reserve(_plan())
+    second = FileCheckpointStore(tmp_path).reserve(_plan())
+    day = datetime.now(timezone.utc).date().isoformat()
+    assert first.startswith(f"{day}_001_")
+    assert second.startswith(f"{day}_002_")
+    assert 'sepolia-usdc_to_aleo-testnet-usdcx_' in first
+    assert not list(tmp_path.glob('*.json'))
+
+
+def test_journal_identity_survives_receipt_changes(tmp_path):
+    from dataclasses import replace
+    store = FileCheckpointStore(tmp_path)
+    plan = replace(_plan(), journal_id=store.reserve(_plan()))
+    def checkpoint(receipt_id):
+        return create_checkpoint(plan, Receipt(id=receipt_id, protocol='xreserve',
+            status=Status.SOURCE_CONFIRMING, source_tx_id=SOURCE,
+            protocol_state={'routeId': plan.route_id}), DEFAULT_REGISTRY)
+    before, after = checkpoint(SOURCE), checkpoint('0x' + 'ab' * 32)
+    store.save(before)
+    store.save(after)
+    assert before.id == after.id == plan.journal_id
+    assert before.receipt_id != after.receipt_id
+    assert len(list(tmp_path.glob('*.json'))) == 1
+    assert FileCheckpointStore(tmp_path).load(plan.journal_id) == after
+    assert Checkpoint.from_json(after.to_json()) == after
+    store.delete(plan.journal_id)
+    assert not list(tmp_path.glob('*.json'))
+
+
+def _reserve_in_process(directory):
+    return FileCheckpointStore(directory).reserve(_plan())
+
+
+def test_counter_allocation_is_atomic_across_processes(tmp_path):
+    from concurrent.futures import ProcessPoolExecutor
+    with ProcessPoolExecutor(max_workers=4) as pool:
+        names = list(pool.map(_reserve_in_process, [str(tmp_path)] * 16))
+    assert len(set(names)) == 16
+    assert sorted(int(name.split('_')[1]) for name in names) == list(range(1, 17))
+
+
+def test_counter_survives_checkpoint_deletion(tmp_path):
+    from dataclasses import replace
+    store = FileCheckpointStore(tmp_path)
+    plan = replace(_plan(), journal_id=store.reserve(_plan()))
+    cp = create_checkpoint(plan, Receipt(id=SOURCE, protocol='xreserve',
+        status=Status.SOURCE_CONFIRMING, source_tx_id=SOURCE,
+        protocol_state={'routeId': plan.route_id}), DEFAULT_REGISTRY)
+    store.save(cp)
+    store.delete(cp.id)
+    assert '_002_' in FileCheckpointStore(tmp_path).reserve(_plan())
+
+
+def test_corrupt_counter_fails_closed(tmp_path):
+    store = FileCheckpointStore(tmp_path)
+    (tmp_path / '.journal-counter').write_text('{"2026-09-25": -1}')
+    with pytest.raises(CheckpointInvalidError, match='counter'):
+        store.reserve(_plan())

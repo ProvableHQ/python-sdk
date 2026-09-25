@@ -329,3 +329,23 @@ def test_solana_message_id_fill_in_raises_on_missing_connection():
                       protocol_state={"routeId": plan.route_id, "messageIdUnavailable": True})
     with pytest.raises(ConfigurationError, match="Solana"):
         get_status(b, plan, receipt)
+
+
+@pytest.mark.parametrize('source,destination,asset,address', [
+    ('usdcx', 'ethereum', 'usdc', EVM_ADDRESS),
+    ('sol', 'solana', 'sol', SOL_ADDRESS),
+])
+def test_destination_balance_reads_recipient_without_destination_signer(source, destination, asset, address):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from aleo_bridge.lifecycle import _read_destination_balance, resolve_route
+    b = FakeBridge(solana=True)
+    setattr(b, destination, SimpleNamespace(address=None))
+    reader = b.eth if destination == 'ethereum' else b.sol
+    reader.balance = Mock(return_value=123)
+    plan = prepare(b.registry, source_chain='aleo', source_asset=source,
+                   destination_chain=destination, destination_asset=asset,
+                   amount='3', recipient=address)
+    resolved = resolve_route(b.registry, plan)
+    assert _read_destination_balance(b, plan, resolved) == 123
+    assert reader.balance.call_args.kwargs == {'address': address}

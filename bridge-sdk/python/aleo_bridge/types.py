@@ -71,6 +71,8 @@ class Plan:
     sender: str | None
     mint_mode: str     # "public" | "record" | "private"
     steps: tuple[Step, ...]
+    #: Local recovery identity, allocated by execute; does not change the quoted transfer.
+    journal_id: str | None = field(default=None, compare=False)
 
     def to_dict(self) -> dict[str, Any]:
         d = dataclasses.asdict(self)

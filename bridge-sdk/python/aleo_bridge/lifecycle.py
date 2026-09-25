@@ -404,8 +404,8 @@ def _connected_aleo_address(bridge) -> str | None:
 def _read_destination_balance(bridge, plan: Plan, resolved: ResolvedRoute) -> int | None:
     """The recipient's destination balance, or None when there is no reader for it.
 
-    Only read when the destination connection IS the recipient (there is no per-address balance
-    read in the module contracts); otherwise return None rather than baseline the wrong account.
+    Read the actual recipient, including with a read-only destination connection.
+    Receiving a transfer never requires the destination private key.
 
     A transport failure is NOT swallowed here (Task 6 review item 8): ``get_status`` branch 6 uses
     this balance as the delivery SIGNAL, and a swallowed RPC error would read as "not delivered
@@ -416,17 +416,16 @@ def _read_destination_balance(bridge, plan: Plan, resolved: ResolvedRoute) -> in
     chain, asset = resolved.destination_chain, resolved.destination_asset
     if chain.family == "evm":
         conn = getattr(bridge, "ethereum", None)
-        if (conn is None or not conn.address
-                or conn.address.lower() != plan.recipient.lower()
-                or asset.locator is None or asset.locator.kind not in ("native", "evm-contract")):
+        if (conn is None or asset.locator is None or asset.locator.kind not in ("native", "evm-contract")):
             return None
-        return int(bridge.eth.balance(asset.id))
+        return int(bridge.eth.balance(asset.id) if conn.address and conn.address.lower() == plan.recipient.lower()
+                   else bridge.eth.balance(asset.id, address=plan.recipient))
     if chain.family == "solana":
         conn = getattr(bridge, "solana", None)
-        if (conn is None or conn.address != plan.recipient
-                or asset.locator is None or asset.locator.kind != "native"):
+        if (conn is None or asset.locator is None or asset.locator.kind != "native"):
             return None
-        return int(bridge.sol.balance())
+        return int(bridge.sol.balance() if conn.address == plan.recipient
+                   else bridge.sol.balance(address=plan.recipient))
     return None            # Aleo private records / token mappings: protocol signal instead
 
 
@@ -559,6 +558,10 @@ def execute(bridge, plan: Plan, *, on_checkpoint: Callable | None = None, provin
     resolved = resolve_route(bridge.registry, plan)
     _require_active(resolved.route)
     family = resolved.source_chain.family
+    store = getattr(bridge, "checkpoints", None)
+    reserve = getattr(store, "reserve", None)
+    if callable(reserve):
+        plan = replace(plan, journal_id=reserve(plan))
     emit = _Emitter(bridge, plan, on_checkpoint)
 
     if plan.protocol == "hyperlane" and family == "evm":
@@ -1198,7 +1201,7 @@ def progress_from_checkpoint(registry: Registry, checkpoint) -> Progress:
     cp = _coerce_checkpoint(checkpoint)
     if cp.version != 1 or not cp.intent or not cp.route:
         raise CheckpointInvalidError("Bridge checkpoint format is invalid or unsupported (version 1 required)")
-    plan = _plan_from_intent(registry, cp.intent)
+    plan = replace(_plan_from_intent(registry, cp.intent), journal_id=cp.journal_id)
     if cp.route.get("registryVersion") != plan.registry_version:
         raise RegistryVersionMismatchError(
             f"Checkpoint was written against registry {cp.route.get('registryVersion')}; this client has "
@@ -1212,7 +1215,7 @@ def progress_from_checkpoint(registry: Registry, checkpoint) -> Progress:
         receipt = _reconstruct_source_receipt(plan, resolved, cp, verification)
         receipt = _apply_destination_overlay(resolved, cp, receipt)
     except BridgeError as exc:
-        receipt = Receipt(id=cp.id, protocol=plan.protocol, status=Status.FAILED,
+        receipt = Receipt(id=cp.receipt_id, protocol=plan.protocol, status=Status.FAILED,
                           protocol_state={"routeId": plan.route_id, "sourceError": str(exc)})
     return to_progress(plan, receipt)
 
@@ -1233,7 +1236,7 @@ def recover(bridge, checkpoint) -> Progress:
     cp = _coerce_checkpoint(checkpoint)
     if cp.version != 1 or not cp.intent or not cp.route:
         raise CheckpointInvalidError("Bridge checkpoint format is invalid or unsupported (version 1 required)")
-    plan = _plan_from_intent(bridge.registry, cp.intent)
+    plan = replace(_plan_from_intent(bridge.registry, cp.intent), journal_id=cp.journal_id)
     if cp.route.get("registryVersion") != plan.registry_version:
         raise RegistryVersionMismatchError(
             f"Checkpoint was written against registry {cp.route.get('registryVersion')}; this client has "

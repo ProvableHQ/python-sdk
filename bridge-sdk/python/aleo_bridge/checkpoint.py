@@ -13,6 +13,8 @@ import json
 import os
 import re
 import tempfile
+from contextlib import contextmanager
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
@@ -36,15 +38,18 @@ class Checkpoint:
     source: dict[str, Any] | None = None
     destination: dict[str, Any] | None = None
     delivery_verification: dict[str, str] | None = None
+    journal_id: str | None = None
 
     @property
     def id(self) -> str:
-        """The receipt id this checkpoint was created from (store key)."""
-        return self.receipt_id
+        """Stable journal key, or the receipt id for a legacy checkpoint."""
+        return self.journal_id or self.receipt_id
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {"version": self.version, "receiptId": self.receipt_id,
                                 "intent": self.intent, "route": self.route}
+        if self.journal_id is not None:
+            out["journalId"] = self.journal_id
         if self.source:
             out["source"] = self.source
         if self.destination:
@@ -63,12 +68,15 @@ class Checkpoint:
             raise CheckpointInvalidError(
                 "Bridge checkpoint format is invalid or unsupported: expected version 1 "
                 "with 'intent' and 'route' objects")
+        journal_id = data.get("journalId")
+        if journal_id is not None and (not isinstance(journal_id, str) or not _JOURNAL_ID.fullmatch(journal_id)):
+            raise CheckpointInvalidError("Invalid journalId: expected a dated transfer filename without .json")
         source = data.get("source") or None
         destination = data.get("destination") or None
         receipt_id = data.get("receiptId") or _derive_id(source, destination)
         return cls(version=1, receipt_id=receipt_id, intent=dict(data["intent"]),
                    route=dict(data["route"]), source=source, destination=destination,
-                   delivery_verification=data.get("deliveryVerification") or None)
+                   delivery_verification=data.get("deliveryVerification") or None, journal_id=journal_id)
 
     @classmethod
     def from_json(cls, text: str) -> "Checkpoint":
@@ -198,7 +206,7 @@ def create_checkpoint(plan: Plan, receipt: Receipt, registry: Registry) -> Check
                     if isinstance(before, str) and isinstance(expected, str) else None)
     return Checkpoint(version=CHECKPOINT_VERSION, receipt_id=receipt.id, intent=intent,
                       route={"id": plan.route_id, "registryVersion": plan.registry_version},
-                      source=source, destination=destination, delivery_verification=verification)
+                      source=source, destination=destination, delivery_verification=verification, journal_id=plan.journal_id)
 
 
 @dataclass(frozen=True)
@@ -241,16 +249,50 @@ class CheckpointStore(Protocol):
     def delete(self, checkpoint_id: str) -> None: ...
 
 
+_JOURNAL_ID = re.compile(r"\d{4}-\d{2}-\d{2}_\d{3,}_[A-Za-z0-9_-]+_to_[A-Za-z0-9_-]+_[0-9]+(?:\.[0-9]+)?")
+
+
+@contextmanager
+def _counter_lock(path: Path):
+    # A separate, persistent lock inode survives atomic replacement of counter data.
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    with os.fdopen(fd, "r+b") as lock:
+        if os.name == "nt":
+            import msvcrt
+            if not path.stat().st_size:
+                lock.write(b"0")
+                lock.flush()
+            lock.seek(0)
+            msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            if os.name == "nt":
+                lock.seek(0)
+                msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
 _UNSAFE = re.compile(r"[^A-Za-z0-9_-]")
 
 
 class FileCheckpointStore:
-    """One ``<id>.json`` per receipt id under *directory*; mode 0600; atomic rename.
+    """One recovery JSON per transfer under *directory*; mode 0600; atomic rename.
+
+    ``Bridge.execute`` reserves a UTC date/counter name before submission, for example
+    ``2026-09-25_001_ethereum-wbtc_to_aleo-wbtc_0.001.json``. This journal id survives
+    receipt changes and recovery. Legacy checkpoints retain their receipt-based filenames.
 
     ``list()`` returns oldest-first by mtime, skipping any file it cannot read
     back as a checkpoint. ``load_checkpoints().errors`` reports those files, so
     one bad file never hides the transfers beside it. ``delete()`` of a missing id is a no-op. Ids are sanitized for the
-    filesystem; the stored ``receiptId`` keeps the original.
+    filesystem; ``receiptId`` remains the on-chain receipt identity, separate from ``journalId``.
+    Keep the hidden ``.journal-counter`` and ``.journal.lock`` files when moving the journal;
+    counters are unique within a directory, not across independent machines.
     """
 
     def __init__(self, directory: Path | str) -> None:
@@ -258,18 +300,55 @@ class FileCheckpointStore:
         self.directory.mkdir(parents=True, exist_ok=True)
 
     def _path(self, checkpoint_id: str) -> Path:
-        safe = _UNSAFE.sub("_", checkpoint_id) or "_"
+        safe = checkpoint_id if _JOURNAL_ID.fullmatch(checkpoint_id) else (_UNSAFE.sub("_", checkpoint_id) or "_")
         return self.directory / f"{safe}.json"
 
+    def reserve(self, plan: Plan) -> str:
+        """Reserve a UTC date/counter name before submission; never reuse deleted entries.
+
+        The hidden counter and lock are journal metadata, not recovery checkpoints. A failed
+        submission can leave a gap in numbering. Custom stores need not implement this method.
+        """
+        source = plan.source_asset_id.replace("/", "-")
+        destination = plan.destination_asset_id.replace("/", "-")
+        day = datetime.now(timezone.utc).date().isoformat()
+        counter_path = self.directory / ".journal-counter"
+        with _counter_lock(self.directory / ".journal.lock"):
+            try:
+                counters = json.loads(counter_path.read_text()) if counter_path.exists() else {}
+            except (ValueError, UnicodeError) as exc:
+                raise CheckpointInvalidError("Journal counter is unreadable; restore it before submitting") from exc
+            if not isinstance(counters, dict) or any(type(v) is not int or v < 0 for v in counters.values()):
+                raise CheckpointInvalidError("Journal counter is invalid; restore it before submitting a transfer")
+            existing = [int(p.name.split("_")[1]) for p in self.directory.glob(f"{day}_*.json")
+                        if _JOURNAL_ID.fullmatch(p.stem)]
+            counter = max(counters.get(day, 0), max(existing, default=0)) + 1
+            name = f"{day}_{counter:03d}_{source}_to_{destination}_{plan.amount}"
+            if not _JOURNAL_ID.fullmatch(name):
+                raise CheckpointInvalidError("Transfer details cannot form a journal filename")
+            counters[day] = counter
+            self._write(counter_path, json.dumps(counters))
+        return name
+
     def save(self, checkpoint: Checkpoint) -> None:
-        target = self._path(checkpoint.id)
+        self._write(self._path(checkpoint.id), checkpoint.to_json())
+
+    def _write(self, target: Path, text: str) -> None:
         fd, tmp = tempfile.mkstemp(dir=self.directory, prefix=".", suffix=".tmp")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                fh.write(checkpoint.to_json())
+                fh.write(text)
                 fh.write("\n")
+                fh.flush()
+                os.fsync(fh.fileno())
             os.chmod(tmp, 0o600)
             os.replace(tmp, target)
+            if os.name != "nt":
+                directory_fd = os.open(self.directory, os.O_RDONLY)
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
         except BaseException:
             try:
                 os.unlink(tmp)

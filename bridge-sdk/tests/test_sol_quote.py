@@ -163,3 +163,12 @@ def test_balance_reads_the_connected_wallet():
     read_only, _ = module()
     with pytest.raises(ConfigurationError, match="read-only"):
         read_only.balance()
+
+
+def test_balance_reads_public_recipient_without_signer():
+    from unittest.mock import Mock
+    mod, _ = module()
+    mod._balance_of = Mock(return_value=42)
+    recipient = str(Keypair().pubkey())
+    assert mod.balance(address=recipient) == 42
+    mod._balance_of.assert_called_once_with(recipient)

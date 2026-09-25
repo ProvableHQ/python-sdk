@@ -9,6 +9,9 @@ funds, and recover an interrupted transfer without making another deposit.
 For USDC, choose between public delivery, a private balance, and a private
 balance that also conceals the Aleo recipient in the Ethereum deposit.
 
+See the [runnable examples](examples/README.md) for step-by-step tutorials on
+bridging to and from Aleo, shielding assets, and recovering interrupted transfers.
+
 ## Install
 
 The bridge package includes the clients needed for Ethereum, Solana, and
@@ -85,9 +88,6 @@ bridge = Bridge(aleo, ethereum=ethereum, checkpoints=store)
 recipient = bridge.aleo_address()  # The configured account's aleo1… address.
 ```
 
-Setup does not move funds. Keys stay in the application's process for
-signing; RPC endpoints provide balances, fees, and confirmation status.
-
 To send or receive SOL through the bridge, include the Solana connection:
 
 ```python
@@ -100,50 +100,7 @@ solana = Solana(
 bridge = Bridge(aleo, ethereum=ethereum, solana=solana, checkpoints=store)
 ```
 
-Solana wallets and command-line tools export account keys in different
-formats. A wallet commonly exports a base58 string, while a Solana CLI keypair
-file contains a JSON array of 64 integers. Both represent signing keys; use
-the key for the account that holds the SOL needed for the transfer and fees,
-rather than its public address. The bridge accepts either format without
-manual conversion.
-
-Applications already using Web3.py or solana-py can reuse their clients and
-signers through `Ethereum(w3=..., signer=...)` or
-`Solana(client=..., signer=...)`. Omit the side-chain signer for an application
-that only reads balances, quotes, or status.
-
-Aleo transactions require a cryptographic proof before they can be submitted.
-The bridge uses Aleo's delegated proving by default: a proving service generates
-the proof, so the application does not need to perform that computation. The
-service receives the transaction contents, but the private key stays with the
-application.
-
-Applications that need to keep transaction contents out of the proving service
-can configure local proving with `proving="local"` on `execute`, `resume`, or
-`complete`. The application's machine then generates the proof and may need
-to download proving parameters.
-
-## Find supported assets and routes
-
-A route identifies an asset pair that can be bridged between two chains.
-Finding routes first helps an application offer transfers supported by the
-configured network.
-
-The example below lists routes from Ethereum to Aleo. It reads the package's
-catalog without contacting a network or requesting a signature.
-
-```python
-routes = bridge.routes(source_chain="ethereum", destination_chain="aleo")
-for route in routes:
-    print(route.id, route.protocol, route.availability)
-    # Example: hyperlane:ethereum/wbtc->aleo/wbtc hyperlane active
-```
-
-Use the chain and asset names from these results when requesting a quote.
-For deployment inspection, `include_unavailable=True` also returns entries
-that cannot yet be used. Offer a transfer only when `route.active` is true.
-
-## Move an asset across chains
+## Bridge assets
 
 The following walkthrough sends 0.001 WBTC from Ethereum to the Aleo
 recipient configured in Setup. It covers the full transfer: reviewing the
@@ -302,13 +259,23 @@ allowing monitoring to continue after a restart. This path loads that record
 and asks the network for the transfer's current progress.
 
 Reopen the journal with the same network and connections. Select the latest
-checkpoint ID from the submission callback or journal listing; the ID can
-change as the transfer advances.
+checkpoint ID from the submission callback or journal listing. New transfers use
+a stable, readable filename such as
+`2026-09-25_001_ethereum-wbtc_to_aleo-wbtc_0.001.json`. The date is UTC; the
+counter distinguishes transfers started that day, even if their details match.
+The name is reserved before submission and stays unchanged through recovery.
+Pass the filename without `.json` to `store.load(...)`.
+
+The journal retains its counter in hidden metadata, so deleting a completed
+checkpoint does not reuse its number. Keep `.journal-counter` and `.journal.lock`
+with the journal. Failed attempts can leave gaps; counters are local to this
+journal, not globally unique.
 
 For a concrete example, the repository includes a [checkpoint from a confirmed
-Solana-to-Aleo transfer](examples/checkpoints/cWFKiumuvVuvrxM8xtunZxNM4FNUppSdyNm7HEqKjV3ZmENebD4DAf44kbyvq9fKJ61VzNrH3tYpLJgUrY8MEGW.json).
+Solana-to-Aleo transfer](examples/checkpoints/2026-09-25_001_solana-sol_to_aleo-sol_676.2.json).
 It was reconstructed from the original transaction and checked against mainnet.
-Its ID is the source transaction's Solana signature. Run this example from the
+Its filename records when the example journal entry was created, not when the
+original transaction was submitted. The Solana signature remains inside the JSON. Run this example from the
 `bridge-sdk` directory; it reads the saved file and network without sending
 funds:
 
@@ -319,7 +286,7 @@ from aleo_bridge import Bridge, FileCheckpointStore, Solana
 example_store = FileCheckpointStore("examples/checkpoints")
 example_bridge = Bridge(Aleo(HTTPProvider()), solana=Solana())
 checkpoint_id = (
-    "cWFKiumuvVuvrxM8xtunZxNM4FNUppSdyNm7HEqKjV3ZmENebD4DAf44kbyvq9fKJ61VzNrH3tYpLJgUrY8MEGW"
+    "2026-09-25_001_solana-sol_to_aleo-sol_676.2"
 )
 checkpoint = example_store.load(checkpoint_id)
 if checkpoint is None:
@@ -332,9 +299,10 @@ print(progress.next, progress.error)  # Observed on 2026-09-25: wait None.
 This checkpoint belongs to an existing transfer, not the account configured in
 Setup. Recovery reported a confirmed source transaction with delivery still
 pending when checked. To recover an application's own transfer, use its
-checkpoint store and the ID returned by that checkpoint. Ethereum checkpoint
-IDs can be `0x` transaction hashes or Hyperlane message IDs; Aleo transaction
-IDs begin with `at1`.
+checkpoint store and the ID returned by that checkpoint. Older checkpoints
+remain loadable by their original transaction or message IDs. `checkpoint.id`
+is the journal key; `checkpoint.receipt_id` identifies the receipt and can change
+as approval, submission, and delivery advance.
 
 Recovery reports whether to keep waiting, finish a submission, or claim the
 funds. It does not authorize those actions. Follow `progress.next`:
@@ -365,7 +333,7 @@ step reads local files without contacting a network:
 result = store.load_checkpoints()
 
 for checkpoint in result.checkpoints:
-    print(checkpoint.id)  # Example format: 0x followed by 64 hex digits.
+    print(checkpoint.id)  # Example: 2026-09-25_001_ethereum-wbtc_to_aleo-wbtc_0.001.
     print(checkpoint.intent["source"])  # {"chain": "ethereum", "asset": "wbtc"}
     print(checkpoint.intent["amount"])  # "0.001" for the WBTC example.
 
@@ -738,3 +706,57 @@ cd bridge-sdk && python -m venv .venv && .venv/bin/pip install -e '.[dev]'
 .venv/bin/python -m pytest -q -m "not live"          # hermetic suite
 .venv/bin/python codegen/gen_context.py --check      # AGENTS.md is generated from docstrings
 ```
+
+## Asset discovery and client configuration
+
+### Find supported assets and routes
+
+A route identifies an asset pair that can be bridged between two chains.
+Finding routes first helps an application offer transfers supported by the
+configured network.
+
+The example below lists routes from Ethereum to Aleo. It reads the package's
+catalog without contacting a network or requesting a signature.
+
+```python
+routes = bridge.routes(source_chain="ethereum", destination_chain="aleo")
+for route in routes:
+    print(route.id, route.protocol, route.availability)
+    # Example: hyperlane:ethereum/wbtc->aleo/wbtc hyperlane active
+```
+
+Use the chain and asset names from these results when requesting a quote.
+For deployment inspection, `include_unavailable=True` also returns entries
+that cannot yet be used. Offer a transfer only when `route.active` is true.
+
+Complete runnable scripts, including error handling and recovery, are in
+[examples](examples/README.md).
+
+### Solana key formats
+
+Solana wallets and command-line tools export account keys in different
+formats. A wallet commonly exports a base58 string, while a Solana CLI keypair
+file contains a JSON array of 64 integers. Both represent signing keys; use
+the key for the account that holds the SOL needed for the transfer and fees,
+rather than its public address. The bridge accepts either format without
+manual conversion.
+
+### Reuse existing clients and signers
+
+Applications already using Web3.py or solana-py can reuse their clients and
+signers through `Ethereum(w3=..., signer=...)` or
+`Solana(client=..., signer=...)`. Omit the side-chain signer for an application
+that only reads balances, quotes, or status.
+
+### Delegated and local proving
+
+Aleo transactions require a cryptographic proof before they can be submitted.
+The bridge uses Aleo's delegated proving by default: a proving service generates
+the proof, so the application does not need to perform that computation. The
+service receives the transaction contents, but the private key stays with the
+application.
+
+Applications that need to keep transaction contents out of the proving service
+can configure local proving with `proving="local"` on `execute`, `resume`, or
+`complete`. The application's machine then generates the proof and may need
+to download proving parameters.

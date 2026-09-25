@@ -213,3 +213,19 @@ def test_a_non_transient_error_propagates_on_the_first_attempt(monkeypatch):
     with pytest.raises(CheckpointInvalidError, match="stale checkpoint"):
         wait(b, progress, poll_seconds=0, timeout_seconds=10)
     assert calls["n"] == 1
+
+
+def test_terminal_wait_removes_stable_journal_key(tmp_path):
+    from dataclasses import replace
+    from aleo_bridge.checkpoint import create_checkpoint
+    store = FileCheckpointStore(tmp_path)
+    b = FakeBridge(solana=True, checkpoints=store)
+    plan, progress = _sol_progress(b)
+    plan = replace(plan, journal_id=store.reserve(plan))
+    progress = to_progress(plan, progress.receipt)
+    store.save(create_checkpoint(plan, progress.receipt, b.registry))
+    b.sol.balance_lamports = 101
+    assert wait(b, progress, poll_seconds=0, timeout_seconds=10).next == 'done'
+    assert store.load(plan.journal_id) is None
+    assert store.list() == []
+    assert '_002_' in store.reserve(plan)

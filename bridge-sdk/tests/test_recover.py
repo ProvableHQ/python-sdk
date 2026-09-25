@@ -228,3 +228,24 @@ def test_recovered_plan_round_trips_through_checkpoint():
 
     aleo_plan, aleo_cp = _aleo_eth_checkpoint(b, transactionId="at1burn")
     assert recover(b, aleo_cp).plan == aleo_plan
+
+
+def test_dated_journal_survives_recovery_and_resume(tmp_path):
+    from aleo_bridge.lifecycle import resume
+    store = FileCheckpointStore(tmp_path)
+    b = FakeBridge(ethereum=False, checkpoints=store)
+    serialized = json.dumps({'type': 'execute', 'id': 'at1prepared', 'fee': {}})
+    plan, data = _aleo_eth_checkpoint(b, preparedTransaction={
+        'transactionId': 'at1prepared', 'serializedTransaction': serialized})
+    data['journalId'] = store.reserve(plan)
+    data['deliveryVerification'] = {'balanceBeforeAtomic': '100', 'expectedIncreaseAtomic': '1'}
+    cp = Checkpoint.from_dict(data)
+    store.save(cp)
+    restored = FileCheckpointStore(tmp_path).load(cp.id)
+    progress = recover(b, restored)
+    assert progress.plan.journal_id == cp.id
+    assert progress.receipt.id == 'at1prepared'
+    progress = resume(b, progress)
+    assert progress.plan.journal_id == cp.id
+    assert [p.stem for p in tmp_path.glob('*.json')] == [cp.id]
+    assert store.load(cp.id).source['transactionId'] == 'at1prepared'

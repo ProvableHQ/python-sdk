@@ -657,9 +657,9 @@ class SolModule:
     def _balance_of(self, address: str) -> int:
         return int(self.client.get_balance(self._pubkey(address), commitment=CONFIRMED).value)
 
-    def balance(self) -> int:
-        """Lamports held by the connected wallet."""
-        address = self.conn.address
+    def balance(self, *, address: str | None = None) -> int:
+        """Lamports held by an explicit public address or the connected wallet."""
+        address = address if address is not None else self.conn.address
         if address is None:
             raise ConfigurationError("Solana connection is read-only: pass signer= or private_key= to Solana() to read the wallet balance")
         return self._balance_of(address)

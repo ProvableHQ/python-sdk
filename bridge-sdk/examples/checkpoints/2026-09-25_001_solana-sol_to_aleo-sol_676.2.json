@@ -14,6 +14,7 @@
       "chain": "solana"
     }
   },
+  "journalId": "2026-09-25_001_solana-sol_to_aleo-sol_676.2",
   "receiptId": "cWFKiumuvVuvrxM8xtunZxNM4FNUppSdyNm7HEqKjV3ZmENebD4DAf44kbyvq9fKJ61VzNrH3tYpLJgUrY8MEGW",
   "route": {
     "id": "hyperlane:solana/sol->aleo/sol",
