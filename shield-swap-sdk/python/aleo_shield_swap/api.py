@@ -10,6 +10,8 @@ token info is surfaced through :class:`PoolEntry`.
 """
 from __future__ import annotations
 
+import asyncio
+import time
 import dataclasses
 import enum
 import functools
@@ -23,10 +25,34 @@ import requests
 
 from . import _api_models as models
 from .errors import (
+    AirdropPendingError,
     AirdropRateLimitedError,
     DexApiError,
     NotAuthenticatedError,
 )
+
+
+@dataclass
+class ConfirmAirdropResult:
+    """Faucet outcome with per-token results or the request's rate-limit reason.
+
+    ``status`` is ``settled`` with ``job`` populated, or ``rate_limited`` with
+    ``message`` populated. A settled job can still contain failed token transfers.
+    """
+
+    status: typing.Literal["settled", "rate_limited"]
+    job: Optional[models.AirdropJob] = None
+    message: Optional[str] = None
+
+
+def _airdrop_outcome(job: models.AirdropJob, job_id: str,
+                     deadline: float) -> Optional[ConfirmAirdropResult]:
+    """Return a settled job or raise when a running job has timed out."""
+    if job.status != "running":
+        return ConfirmAirdropResult("settled", job=job)
+    if time.monotonic() >= deadline:
+        raise AirdropPendingError(job_id)
+    return None
 
 
 def _check(resp: Any) -> None:
@@ -447,6 +473,47 @@ class ApiClient:
         results = [_build(models.AirdropResult, r)
                    for r in (data.get("results") or [])]
         return _build(models.AirdropJob, {**data, "results": results})
+
+    def confirm_airdrop(self, address: str, *, poll_interval: float = 5.0,
+                        timeout: float = 600.0) -> ConfirmAirdropResult:
+        """Request testnet tokens and wait for the faucet job to settle.
+
+        Calls ``request_airdrop`` once, then polls ``get_airdrop_job``. Returns
+        ``status="rate_limited"`` if the initial request receives HTTP 429;
+        no job starts in that case. Other API errors propagate. A settled job
+        can contain failed transfers; inspect ``result.job.results`` for each
+        token's outcome. This does not wait for record-scanner indexing.
+
+        Args:
+            address: Receiving Aleo account address.
+            poll_interval: Seconds between status reads; defaults to 5.
+            timeout: Seconds to wait after starting the job; defaults to 600.
+
+        Returns:
+            The settled job or the faucet's rate-limit explanation.
+
+        Raises:
+            AirdropPendingError: The job is still running at the timeout;
+                ``job_id`` identifies the job to resume polling.
+            DexApiError: The request or status read fails, except an initial 429.
+
+        Example::
+
+            funding = api.confirm_airdrop(address)
+            if funding.status == "settled":
+                results = funding.job.results
+        """
+        try:
+            started = self.request_airdrop(address)
+        except AirdropRateLimitedError as error:
+            return ConfirmAirdropResult("rate_limited", message=str(error))
+        deadline = time.monotonic() + timeout
+        while True:
+            job = self.get_airdrop_job(started.job_id)
+            result = _airdrop_outcome(job, started.job_id, deadline)
+            if result is not None:
+                return result
+            time.sleep(poll_interval)
 
     def create_api_token(self, name: str,
                          expires_in_days: "int | None" = None
@@ -915,6 +982,25 @@ class AsyncApiClient:
         results = [_build(models.AirdropResult, r)
                    for r in (data.get("results") or [])]
         return _build(models.AirdropJob, {**data, "results": results})
+
+    async def confirm_airdrop(self, address: str, *, poll_interval: float = 5.0,
+                              timeout: float = 600.0) -> ConfirmAirdropResult:
+        """Request and await testnet funding; see :meth:`ApiClient.confirm_airdrop`.
+
+        Uses nonblocking waits with the same timeout, rate-limit result, and
+        per-token outcomes as the synchronous method.
+        """
+        try:
+            started = await self.request_airdrop(address)
+        except AirdropRateLimitedError as error:
+            return ConfirmAirdropResult("rate_limited", message=str(error))
+        deadline = time.monotonic() + timeout
+        while True:
+            job = await self.get_airdrop_job(started.job_id)
+            result = _airdrop_outcome(job, started.job_id, deadline)
+            if result is not None:
+                return result
+            await asyncio.sleep(poll_interval)
 
     async def create_api_token(self, name: str,
                                expires_in_days: "int | None" = None

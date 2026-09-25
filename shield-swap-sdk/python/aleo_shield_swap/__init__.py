@@ -17,6 +17,7 @@
 from .client import ShieldSwap as ShieldSwap
 from .async_client import AsyncShieldSwap as AsyncShieldSwap
 from .api import ApiClient as ApiClient, AsyncApiClient as AsyncApiClient
+from .api import ConfirmAirdropResult as ConfirmAirdropResult
 from .rebalance import (
     RebalancePlan as RebalancePlan,
     RebalanceResult as RebalanceResult,
@@ -92,7 +93,7 @@ __all__ = [
     "CredentialsMissingError",
     "OwnedPosition", "OwnedPositionState", "HopFill", "SwapExecution",
     "RebalancePlan", "RebalanceResult",
-    "Profile", "Journal", "REGISTRATION_STAGES",
+    "ConfirmAirdropResult", "Profile", "Journal", "REGISTRATION_STAGES",
     "OnboardReport", "StageOutcome", "SessionStatus", "PositionView",
     "SwapBatchReport", "CollectReport", "blinded_identity_at",
     "shield_swap_tools", "dispatch_tool", "agent_guide",

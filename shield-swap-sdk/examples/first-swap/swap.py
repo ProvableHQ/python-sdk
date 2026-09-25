@@ -17,7 +17,6 @@ if __name__ == "__main__":
     private_key = testnet.PrivateKey.from_string(key) if key else testnet.PrivateKey.random()
     aleo = Aleo(HTTPProvider("https://edge.provable.com/api", network="testnet"))
     account = aleo.account.from_private_key(private_key)
-    aleo.default_account = account
     aleo.records.register(account)
     dex = ShieldSwap(aleo)
     address = str(account.address)
@@ -29,15 +28,8 @@ if __name__ == "__main__":
     # Sign the API challenge with the account's private key.
     dex.api.authenticate(address, lambda message: str(private_key.sign(message.encode())))
 
-    # Request testnet tokens, then wait for the faucet job to finish.
-    airdrop = dex.api.request_airdrop(address)
-    for attempt in range(120):
-        funding = dex.api.get_airdrop_job(airdrop.job_id)
-        if funding.status == "complete":
-            break
-        time.sleep(5)
-    else:
-        raise RuntimeError(f"Airdrop is still pending; inspect job {airdrop.job_id}")
+    # Request testnet tokens and wait for the faucet job to settle.
+    funding = dex.api.confirm_airdrop(address)
 
     # Find a direct USDCx/ETH pool and convert 1.5 USDCx to base units.
     tokens = dex.api.get_tokens()
@@ -55,7 +47,7 @@ if __name__ == "__main__":
             break
         time.sleep(15)
     else:
-        raise RuntimeError("USDCx is not available; inspect funding.results and the account balance")
+        raise RuntimeError("USDCx is not available; inspect funding.job and funding.message and the account balance")
 
     # Quote the selected pool and convert the expected ETH output to base units.
     quote = dex.api.get_route(

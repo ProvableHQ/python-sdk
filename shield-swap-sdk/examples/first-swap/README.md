@@ -13,7 +13,7 @@ python -m pip install ./shield-swap-sdk
 python shield-swap-sdk/examples/first-swap/swap.py
 ```
 
-Installation requires `aleo-sdk>=0.5.0` with testnet bindings. If no compatible
+Installation requires `aleo-sdk>=0.5.1` with testnet bindings. If no compatible
 wheel is available, follow the `sdk/` package's build instructions first.
 
 Releases containing the example also support:
@@ -27,15 +27,18 @@ python -m aleo_shield_swap.examples.first_swap.swap
 `SHIELD_SWAP_PRIVATE_KEY` optionally supplies an existing testnet account.
 Otherwise the example generates a private key in memory. `ShieldSwap(aleo)`
 uses the configured Aleo client. Both journal settings use the same account
-and register it with the record scanner.
+and register it with the record scanner. The first `from_private_key()` call
+sets the default account; later imports preserve an existing default.
 
 `dex.api.authenticate()` signs the API challenge with the account's key.
-`request_airdrop()` starts the testnet faucet job; `get_airdrop_job()` polls it
-until completion. `funding.results` contains each token's outcome and transaction
-ID. Job completion does not guarantee every token transfer succeeded.
+`confirm_airdrop()` requests tokens and waits for the faucet job to settle.
+It returns `funding.status == "settled"` with per-token outcomes in
+`funding.job.results`, or `"rate_limited"` with the faucet's explanation in
+`funding.message`. A settled job can contain failed token transfers.
 
-The faucet allows one request per address per 15 minutes. A rate-limit error
-stops the example; inspect the existing funding before requesting again.
+The helper polls every 5 seconds and times out after 10 minutes by default.
+`AirdropPendingError.job_id` identifies a timed-out job for further status reads.
+A rate-limited account can continue if it already holds enough USDCx.
 The example waits for the scanner to report at least 1.5 USDCx before trading.
 It quotes a direct USDCx/ETH pool with `get_route()`, then calls
 `swap(...).delegate(wait=True)` with that quote and a 0.5% slippage limit.
