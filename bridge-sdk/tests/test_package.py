@@ -54,8 +54,8 @@ def test_readme_covers_the_journey():
     for absent in ("from_env", "BRIDGE_LIVE_", "rehearse", "Co-Authored-By", "Tier 2"):
         assert absent not in readme, absent
     # every active mainnet route appears in the transfer table, named by chain and asset
-    for row in ("| Ethereum USDC | Aleo | USDCx | Circle xReserve |", "| Ethereum ETH | Aleo | ETH | Hyperlane |",
-                "| Aleo SOL | Solana | SOL | Hyperlane |", "| Aleo USDT | Ethereum | USDT | Hyperlane |"):
+    for row in ("| Ethereum | USDC | Aleo | USDCx | Circle xReserve |", "| Ethereum | ETH | Aleo | ETH | Hyperlane |",
+                "| Aleo | SOL | Solana | SOL | Hyperlane |", "| Aleo | USDT | Ethereum | USDT | Hyperlane |"):
         assert row in readme, row
 
 

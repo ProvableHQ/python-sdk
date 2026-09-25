@@ -1,76 +1,90 @@
-# aleo-bridge-sdk
+# Aleo Bridge SDK
 
-Moves assets between Aleo, Ethereum, and Solana through reviewed Hyperlane and
-Circle xReserve deployments.
+Transfer assets between Aleo, Ethereum, and Solana through Hyperlane and Circle
+xReserve. The SDK quotes transfer costs, submits transactions, tracks delivery,
+and recovers interrupted transfers from saved checkpoints.
 
-The package signs with local keys or with signers the caller already holds. It
-does not choose a key, store transfer progress unless the caller binds a
-checkpoint store, or submit a second transaction after an interruption without
-the caller asking for it.
+A transfer starts with `quote`, continues with `execute`, and is followed with
+`wait`. If another transaction is needed, the returned `progress.next` names
+the action: `resume` for an unfinished source transfer or `complete` for a
+private USDCx mint on Aleo.
+
+## Install
+
+Requires Python 3.10 or later. One installation includes support for all three
+chains and delegated Aleo proving.
 
 ```sh
-pip install aleo-bridge-sdk
+python -m pip install aleo-bridge-sdk
 ```
 
-Imports as `aleo_bridge`.
+Import the package as `aleo_bridge`.
 
 ## Supported transfers
 
-| Source | Destination | Asset received | Provider |
-| --- | --- | --- | --- |
-| Ethereum ETH | Aleo | ETH | Hyperlane |
-| Aleo ETH | Ethereum | ETH | Hyperlane |
-| Ethereum WBTC | Aleo | WBTC | Hyperlane |
-| Aleo WBTC | Ethereum | WBTC | Hyperlane |
-| Ethereum USDT | Aleo | USDT | Hyperlane |
-| Aleo USDT | Ethereum | USDT | Hyperlane |
-| Solana SOL | Aleo | SOL | Hyperlane |
-| Aleo SOL | Solana | SOL | Hyperlane |
-| Ethereum USDC | Aleo | USDCx | Circle xReserve |
-| Aleo USDCx | Ethereum | USDC | Circle xReserve |
+| Source chain | Source asset | Destination chain | Destination asset | Provider |
+| --- | --- | --- | --- | --- |
+| Ethereum | ETH | Aleo | ETH | Hyperlane |
+| Aleo | ETH | Ethereum | ETH | Hyperlane |
+| Ethereum | WBTC | Aleo | WBTC | Hyperlane |
+| Aleo | WBTC | Ethereum | WBTC | Hyperlane |
+| Ethereum | USDT | Aleo | USDT | Hyperlane |
+| Aleo | USDT | Ethereum | USDT | Hyperlane |
+| Solana | SOL | Aleo | SOL | Hyperlane |
+| Aleo | SOL | Solana | SOL | Hyperlane |
+| Ethereum | USDC | Aleo | USDCx | Circle xReserve |
+| Aleo | USDCx | Ethereum | USDC | Circle xReserve |
 
-Hyperlane routes accept any positive amount. The xReserve deposit requires at
-least 2 USDC, and the xReserve withdrawal must burn more USDCx than its fee.
-Sepolia USDC to Aleo-testnet USDCx and its reverse are available on testnet.
+## Setup
 
-The registry also lists ALEO and USAD entries for deployment discovery. Those
-entries are marked `metadata-required` and cannot be quoted or executed. Solana
-routes support native SOL, not USDC or other SPL tokens.
-
-## Create a client
-
-A client holds one Aleo account and, for each side chain it will touch, a
-transport and a signer. Reads use the transports only. A signature is requested
-only when a fund-moving action runs.
+Create an Aleo client, attach the Ethereum connection, and configure a
+checkpoint directory so the transfer can be recovered after a restart. Run the
+following sections in the same Python session.
 
 ```python
+import os
 from aleo import Aleo, HTTPProvider
-from aleo_bridge import Bridge, Ethereum, Solana
+from aleo_bridge import Bridge, Ethereum, FileCheckpointStore
 
 aleo = Aleo(HTTPProvider("https://edge.provable.com/api", network="mainnet"))
-aleo.default_account = aleo.account.from_private_key(aleo_private_key)
-
-bridge = Bridge(
-    aleo,
-    ethereum=Ethereum(ethereum_rpc_url, private_key=evm_private_key),
-    solana=Solana(solana_rpc_url, private_key=solana_private_key),
+aleo.default_account = aleo.account.from_private_key(os.environ["ALEO_PRIVATE_KEY"])
+ethereum = Ethereum(
+    "https://ethereum-rpc.publicnode.com",
+    private_key=os.environ["EVM_PRIVATE_KEY"],
 )
+store = FileCheckpointStore("~/.aleo-bridge/checkpoints")
+bridge = Bridge(aleo, ethereum=ethereum, checkpoints=store)
+recipient = bridge.aleo_address()
 ```
 
-Local EVM and Solana keys sign inside the caller's process and broadcast
-through their configured transports. The bridge client never writes a key to
-disk. A side chain the application does not use can be omitted; a transfer
-that needs it then fails at `quote` with a `ConfigurationError`.
+The account signs inside the application's process. Creating this client does
+not submit a transfer. Network reads use the configured RPC and API endpoints;
+transfer submission uses the configured signer.
 
-An existing `web3.Web3` instance or `eth_account` signer can be supplied as
-`Ethereum(w3=..., signer=...)`, and an existing solders `Keypair` or solana-py
-client as `Solana(client=..., signer=...)`. A transport passed without a
-signer gives a read-only connection. A Solana `private_key` accepts the base58
-export of a browser wallet or the 64-integer array of a `solana-cli` `id.json`.
+For Solana transfers, add a connection to the same client:
 
-Aleo transactions prove through the delegated proving service by default
-(`proving="delegate"`), which sees the transaction contents but not the private
-key. Pass `proving="local"` to prove on the caller's machine.
+```python
+from aleo_bridge import Solana
+
+solana = Solana(
+    os.environ["SOLANA_RPC_URL"],
+    private_key=os.environ["SOLANA_PRIVATE_KEY"],
+)
+bridge = Bridge(aleo, ethereum=ethereum, solana=solana, checkpoints=store)
+```
+
+`SOLANA_PRIVATE_KEY` accepts a base58 wallet export or the JSON array of 64
+integers from a Solana CLI keypair file. Only configure the side chains needed
+by the application.
+
+Existing clients and signers can be supplied through
+`Ethereum(w3=..., signer=...)` and `Solana(client=..., signer=...)`.
+A side-chain connection without a signer supports reads.
+
+Aleo transactions use delegated proving by default (`proving="delegate"`).
+The proving service receives the transaction contents, but not the private
+key. Pass `proving="local"` to `execute`, `resume`, or `complete` to prove on
+the application's machine; local proving can download proving parameters.
 
 ## Find supported assets and routes
 
@@ -99,7 +113,7 @@ Every transfer follows the same caller lifecycle:
    another action from the caller.
 4. `resume` or `complete` runs only when `progress.next` requests that action.
 
-### 1. Quote the transfer
+### 1. Get a bridge quote
 
 The caller supplies the source chain and asset, the destination chain, the
 amount in the asset's display units, and the recipient address on the
@@ -112,7 +126,7 @@ quote = bridge.quote(
     source_asset="wbtc",
     destination_chain="aleo",
     amount="0.001",
-    recipient=aleo_address,
+    recipient=recipient,
 )
 
 for fee in quote.fees:
@@ -128,12 +142,16 @@ names.
 `quote.plan` identifies the exact route, amount, recipient, and reviewed
 deployment that produced the quote. Keep this value unchanged for execution.
 
-### 2. Submit the source transfer
+### 2. Submit a bridge transaction from the source chain
 
-Execution may submit more than one transaction. An ERC-20 route sends an
-approval before its bridge deposit, and USDT first resets a non-zero allowance
-to zero. The result carries the receipt of the latest submission and the
-identifiers of every transaction already sent.
+After reviewing the quote, call `execute` to sign and submit the source
+transfer. This step commits funds and pays source-chain transaction fees. An
+ERC-20 route can require an approval before its bridge deposit; USDT resets an
+existing non-zero allowance when another approval is needed.
+
+The returned `Progress` contains the transfer plan, the latest receipt, and
+the next action to take. The configured store saves checkpoints as submission
+advances, including after approvals and around Aleo transaction broadcast.
 
 ```python
 progress = bridge.execute(quote.plan)
@@ -144,7 +162,7 @@ Once a source transaction has been submitted, do not call `execute` again for
 the same transfer. Use the returned progress while the process stays alive, or
 recover from the latest checkpoint after an interruption.
 
-### 3. Follow the transfer
+### 3. Monitor bridge progress
 
 `wait` polls source confirmation, provider processing, and destination
 delivery where the route exposes verifiable evidence. It does not request
@@ -165,162 +183,376 @@ lifecycle action:
 | `resume` | Submit the remaining source operation with `resume`. |
 | `complete` | Authorize the private USDCx mint with `complete`. |
 
-`wait` gives up after `timeout_seconds` (default 1200) by raising
-`PollingTimeoutError`. A timeout is not a failure: the transfer is still in
-flight, the exception carries the latest `progress`, and `wait` can be called
-again. A source transaction that was dropped or replaced by the network before
-it mined is reported as `failed` with an error stating that no funds moved;
-`recover` then confirms from chain history that nothing landed and returns a
-`resume` step for it.
+`wait` raises `PollingTimeoutError` if it reaches `timeout_seconds` (1200 by
+default). The exception carries the latest progress. A timeout leaves the
+transfer's outcome unresolved; continue polling that transfer instead of
+submitting another one.
 
-`resume` applies when work such as an ERC-20 approval succeeded but the
-deposit itself was not submitted. It does not repeat the confirmed approval.
+To retain the latest progress when polling times out, use this in place of the
+`wait` call above:
+
+```python
+from aleo_bridge import PollingTimeoutError
+
+try:
+    progress = bridge.wait(progress, timeout_seconds=1200)
+except PollingTimeoutError as exc:
+    if exc.progress is None:
+        raise
+    progress = exc.progress
+
+print(progress.next, progress.receipt.source_tx_id)
+```
+
+`resume` applies when a source operation remains unfinished, such as a deposit
+following a confirmed ERC-20 approval. It can submit a transaction and does not
+repeat confirmed work. After the caller elects to continue:
 
 ```python
 if progress.next == "resume":
-    progress = bridge.wait(bridge.resume(progress))
+    progress = bridge.resume(progress)
+    progress = bridge.wait(progress)
 ```
 
-`complete` applies only to an Ethereum USDC deposit that selected a private
-USDCx mint. Circle first attests the deposit. The Aleo recipient then submits
-one destination transaction that creates the private record.
+`complete` applies to private USDCx deposits and requires the recipient's Aleo
+account and the secret nonce used for the deposit. See
+[USDC Bridging Guide](#usdc-bridging-guide) before starting that flow.
+
+## Recover Funds
+
+Recover an existing bridge transaction to check whether it has completed or
+needs another action. Recovery does not start a new transfer. A checkpoint
+records the transfer details and transaction identifiers needed to reconstruct
+its progress; a bridge journal stores those checkpoints between sessions.
+
+### Recover with a bridge journal
+
+The `FileCheckpointStore` configured in Setup acts as the bridge journal.
+Restart with the same network, accounts, and checkpoint directory. Load the
+checkpoint for the transfer by its saved checkpoint ID, then refresh its state:
 
 ```python
-if progress.next == "complete":
-    progress = bridge.wait(bridge.complete(progress, secret_nonce=secret_nonce))
+checkpoint_id = os.environ["BRIDGE_CHECKPOINT_ID"]
+checkpoint = store.load(checkpoint_id)
+if checkpoint is None:
+    raise ValueError(f"No saved checkpoint for {checkpoint_id}")
+
+progress = bridge.recover(checkpoint)
+print(progress.next, progress.error)
 ```
 
-## Recover after an interruption
+`recover` checks chain and provider state where needed without signing or
+submitting a transaction. Follow the returned `progress.next`:
 
-A checkpoint contains the public transfer intent and the transaction
-identifiers needed to find the transfer again. It excludes private keys, Aleo
-record plaintext, proofs, Circle attestations, and private-mint secret nonces.
+| `progress.next` | Action |
+| --- | --- |
+| `wait` | Call `bridge.wait(progress)` to continue monitoring. |
+| `resume` | Call `bridge.resume(progress)` to submit the unfinished source operation. |
+| `complete` | Call `bridge.complete(progress, secret_nonce=secret_nonce)` to mint private USDCx on Aleo. |
+| `done` | Delivery is complete; no further action is needed. |
+| `failed` | Inspect `progress.error` before deciding what to do. |
 
-Binding a `FileCheckpointStore` to the client saves a checkpoint at every
-submission boundary: after each approval, after an Aleo transaction is proved
-but before it is broadcast, and after each broadcast. Files are written with
-mode 600 through an atomic rename.
+`resume` and `complete` can submit transactions. A private USDCx mint requires
+the original secret nonce, which must be stored separately from the journal.
+**Do not call `execute` again after an ambiguous submission.** A timeout or lost
+RPC response does not establish that the original transaction failed.
+
+### Find saved bridge transactions
+
+If the checkpoint ID is unknown, load the journal's checkpoints and inspect
+their transfer details:
 
 ```python
-from aleo_bridge import Bridge, FileCheckpointStore
+result = store.load_checkpoints()
 
-store = FileCheckpointStore("~/.aleo-bridge/checkpoints")
-bridge = Bridge(aleo, ethereum=ethereum, solana=solana, checkpoints=store)
+for checkpoint in result.checkpoints:
+    print(checkpoint.id, checkpoint.intent)
+
+for error in result.errors:
+    print(error.path, error.error)
 ```
 
-An application that prefers its own storage passes `on_checkpoint=` to
-`execute`, `resume`, and `complete` instead; the callback receives a
-`Checkpoint` with `to_json()` and `from_json()`.
+`result.checkpoints` contains readable checkpoints, ordered oldest first by
+file modification time. `result.errors` identifies files that could not be
+read or parsed; these are file-loading errors, not failed bridge transactions.
+Select the checkpoint for the intended transfer and pass it to `recover`.
+Loading the journal does not contact a network.
 
-After a restart, `pending()` lists every unfinished transfer in the store
-without contacting a network, and `recover` re-reads chain and provider state
-for one of them. Neither signs, submits, or repeats a transaction.
+### Recover without saved files
+
+A submitted bridge transaction remains on-chain even if the application loses
+its journal. Find the original transaction in the source wallet's history or
+a block explorer. Use the bridge deposit or dispatch transaction, not a token
+approval. Check its status, asset, amount, sender, and destination recipient
+before proceeding.
+
+For a **confirmed Ethereum-to-Aleo Hyperlane transfer**, those details are
+enough to reconstruct the recovery data in memory. The example below recovers
+a WBTC transfer on mainnet. Enter the original transfer's details from the
+explorer; the amount is in WBTC, not its smallest units.
+
+Use the Aleo and Ethereum connections from Setup, but construct the bridge
+without a checkpoint store. This example reads the network and does not load
+or write a journal, sign a transaction, or send funds:
 
 ```python
-for progress in bridge.pending():
-    if progress.next == "wait":
-        progress = bridge.wait(progress)
-    if progress.next == "resume":
-        progress = bridge.wait(bridge.resume(progress))
-    if progress.next == "complete":
-        progress = bridge.wait(bridge.complete(progress, secret_nonce=secret_nonce))
+bridge = Bridge(aleo, ethereum=ethereum)
+source_tx_id = input("Confirmed Ethereum bridge transaction hash: ").strip()
+sender = input("Original Ethereum sender address: ").strip()
+recipient = input("Original Aleo recipient address: ").strip()
+amount = input("Original amount in WBTC: ").strip()
+
+route = bridge.routes(
+    source_chain="ethereum",
+    source_asset="wbtc",
+    destination_chain="aleo",
+    bridge_protocol="hyperlane",
+)[0]
+
+recovery_data = {
+    "version": 1,
+    "intent": {
+        "source": {"chain": "ethereum", "asset": "wbtc"},
+        "destination": {"chain": "aleo", "asset": "wbtc"},
+        "bridgeProtocol": "hyperlane",
+        "amount": amount,
+        "sender": sender,
+        "recipient": recipient,
+    },
+    "route": {"id": route.id, "registryVersion": bridge.registry.version},
+    "source": {"transactionId": source_tx_id},
+}
+progress = bridge.recover(recovery_data)
+print(progress.next, progress.error)
 ```
 
-The application then handles `progress.next` by the same table above. A
-private-mint secret nonce must be stored separately because it is
-intentionally absent from the checkpoint. A finished transfer is removed from
-the store; a transfer whose source transaction was dropped stays listed until
-`resume` replaces it or the application calls `store.delete(progress.receipt.id)`.
+The dictionary uses the SDK's checkpoint format, but is constructed from the
+original transfer details rather than loaded from a file. The installed
+registry must describe the original route. Recovery reads the source receipt
+to recover the Hyperlane message ID; `bridge.wait(progress)` then checks for
+delivery on Aleo. Do not submit another deposit to restart monitoring.
 
-## Choose how USDCx arrives
+Other routes may need additional information:
 
-An Ethereum USDC deposit selects, at quote time, how the USDCx is delivered on
-Aleo:
+- **Private USDCx deposits:** recover the original commitment data from the
+  Ethereum deposit and retain the original secret nonce for the claim. A lost
+  nonce cannot be reconstructed from public chain data; the recipient cannot
+  complete the claim through this flow without it.
+- **Aleo-origin transfers:** recovery can track source confirmation, but some
+  delivery checks depend on the destination balance recorded before submission.
+  Without that information, confirm receipt on the destination chain; the SDK
+  may continue reporting delivery as pending.
+- **Transactions never broadcast:** an unsubmitted proof cannot be recovered
+  from the chain. First establish that no source transfer was submitted before
+  starting another one.
 
-| `mint_mode` | Delivery | Caller action after the deposit |
+The SDK does not yet reconstruct every route from a transaction hash alone.
+The example above applies specifically to confirmed Ethereum-to-Aleo Hyperlane
+transfers; do not reuse its recovery data for a different route.
+
+Checkpoints exclude private keys, record plaintext, Circle attestation bodies,
+and private-mint secret nonces. They can contain a proved Aleo transaction
+awaiting broadcast. `FileCheckpointStore` writes files with mode `600` through
+an atomic rename; applications using another storage system can save the
+`Checkpoint` received by `on_checkpoint` using its `to_json()` method.
+
+## USDC Bridging Guide
+
+USDC sent from Ethereum arrives on Aleo as USDCx. Before bridging, decide
+whether the funds need to be publicly visible, whether the deposit can reveal
+the recipient's Aleo address, and whether the recipient will be available to
+claim them.
+
+### Choose how the recipient will use the funds
+
+**Public Bridge** delivers a public balance for payments and applications that use publicly visible
+balances. Anyone can read the recipient's public USDCx balance. Delivery
+requires no further action from the recipient.
+
+**Public Bridge to Private Balance** delivers a private record for private payments and applications that
+accept private funds. Its contents are encrypted rather than stored in a
+public balance. The bridge can deliver this record without requiring the
+recipient to return and claim it. However, the Ethereum deposit still reveals
+the recipient's Aleo address: receiving funds privately does not, by itself,
+hide who received the deposit.
+
+**Private Bridge** suits transfers where the Ethereum
+deposit should not reveal the recipient's Aleo address. The recipient must
+return to claim the funds and keep a secret needed for that claim. Choose this
+option only when the recipient can complete that extra step.
+
+The Ethereum sender and deposited USDC amount remain public in all three
+cases. Concealing the Aleo address does not conceal the Ethereum transaction.
+
+| Recipient's needs | Delivery choice | Quote setting |
 | --- | --- | --- |
-| `"public"` (default) | public USDCx balance of the recipient | none; `wait` ends at `done` |
-| `"record"` | a private record minted by the relayer | none; `wait` ends at `done` |
-| `"private"` | a private record only the recipient can mint | `complete` with the same `secret_nonce` |
+| A public balance, with no claim step | Public Bridge | `mint_mode="public"` (default) |
+| Funds for private use, with no claim step; the deposit may reveal the Aleo address | Public Bridge to Private Balance | `mint_mode="record"` |
+| Funds for private use without publishing the Aleo address in the deposit; the recipient can claim them later | Private Bridge | `mint_mode="private"` |
 
-A private mint commits to the recipient and a caller-chosen `secret_nonce` on
-Ethereum. Only the recipient's Aleo key, presenting the same nonce, can
-complete it. The package never stores the nonce; the default value `0scalar`
-offers no secrecy, so a caller who wants the commitment to hide the recipient
-must choose and keep a nonce of their own.
+### Bridge Privately: Hide the balance
 
-## Use private assets on Aleo
+The sender needs USDC for the transfer and ETH for Ethereum transaction fees.
+Review the quoted fees and amount the recipient will receive before submitting
+the deposit. Once delivery finishes, the recipient can use the USDCx without
+signing a separate claim transaction.
 
-Hyperlane routes mint wrapped assets into public Aleo balances and spend public
-balances when bridging out of Aleo. Shielding and unshielding move the same
-asset between that public balance and a private record owned by the account.
-
-### Unshield before bridging out through Hyperlane
-
-An outbound Hyperlane transfer cannot spend a private record directly. Convert
-the amount into the account's public balance before quoting and executing the
-bridge transfer.
+Using the client from Setup, request a private record with `mint_mode="record"`.
+Change it to `"public"` to receive a public balance instead:
 
 ```python
-receipt = bridge.unshield("aleo/sol", amount="0.01").delegate()
-print(receipt.transaction_id)
+usdc_quote = bridge.quote(
+    source_chain="ethereum",
+    source_asset="usdc",
+    destination_chain="aleo",
+    destination_asset="usdcx",
+    amount="2",
+    recipient=bridge.aleo_address(),
+    mint_mode="record",  # Use "public" to receive a public balance.
+)
+print(usdc_quote.fees, usdc_quote.amount_out)
 ```
 
-Private USDCx is burned directly by the xReserve withdrawal. It does not need
-to be unshielded first.
+Submit the deposit after accepting the quote, then monitor it until delivery
+finishes. The recipient does not need to take part in this step:
 
-### Shield an asset for private use on Aleo
+```python
+usdc_progress = bridge.execute(usdc_quote.plan)
+usdc_progress = bridge.wait(usdc_progress)
+print(usdc_progress.next, usdc_progress.error)
+```
 
-After a Hyperlane transfer arrives, its Aleo balance is public. Convert any
-amount that should be held or spent privately into a record owned by the
-account.
+### Bridge Privately: Hide the balance and recipient
+
+With Private Bridge, submitting the Ethereum deposit is only the
+first step. The funds become available for use on Aleo after the recipient
+claims them. The recipient needs both their Aleo account and the original
+secret nonce—a random value that conceals the address in the deposit.
+
+**Save the nonce before sending funds and retain it until the claim completes.**
+Losing it prevents the recipient from completing the claim through this flow.
+The bridge journal does not save it, so restoring the journal alone is not
+enough. The default `0scalar` provides no secrecy; use a securely generated
+nonce for this option.
+
+This is an alternative to the automatic delivery example above. Store the
+nonce as an Aleo scalar literal in `BRIDGE_MINT_SECRET_NONCE`. The example uses
+the configured Aleo account as the recipient, so that account can claim the
+funds later. Request a quote with `mint_mode="private"`:
+
+```python
+secret_nonce = os.environ["BRIDGE_MINT_SECRET_NONCE"]
+private_quote = bridge.quote(
+    source_chain="ethereum",
+    source_asset="usdc",
+    destination_chain="aleo",
+    destination_asset="usdcx",
+    amount="2",
+    recipient=bridge.aleo_address(),
+    mint_mode="private",
+    secret_nonce=secret_nonce,
+)
+print(private_quote.fees, private_quote.amount_out)
+```
+
+After the deposit is confirmed and Circle has attested it, the recipient can
+claim the USDCx. `progress.next == "complete"` indicates that the claim is
+ready. Claiming requires the recipient to authorize an Aleo transaction and
+can incur an Aleo fee:
+
+```python
+private_progress = bridge.execute(private_quote.plan, secret_nonce=secret_nonce)
+private_progress = bridge.wait(private_progress)
+
+if private_progress.next == "complete":
+    private_progress = bridge.complete(private_progress, secret_nonce=secret_nonce)
+    private_progress = bridge.wait(private_progress)
+
+print(private_progress.next, private_progress.error)
+```
+
+If the application closes or monitoring times out, the deposit may still be
+in progress. Recover the existing transfer rather than sending USDC again.
+Keep the same nonce for any remaining deposit or claim step; see
+[Recover Funds](#recover-funds).
+
+## Shielding Assets
+
+Shielding moves tokens from a public Aleo balance into an encrypted private
+record for private payments and applications. Unshielding moves them back to
+a public balance. Shielding does not erase the public history of a bridge
+deposit.
+
+- **Hyperlane** delivers assets to public balances and requires public funds
+  for withdrawals. Shield after delivery for private use on Aleo; unshield
+  before bridging back to Ethereum or Solana.
+- **xReserve** can deliver USDCx as a public balance or a private record.
+  Private delivery needs no additional shielding. A private USDCx withdrawal
+  spends the record directly, so it needs no unshielding. Use `mode="public"`
+  when withdrawing from a public balance.
+
+### Shield a public balance
+
+After bridge delivery is confirmed, shield the amount needed for private use.
+This example requires at least 0.01 bridged SOL in the account's public Aleo
+balance:
 
 ```python
 receipt = bridge.shield("aleo/sol", amount="0.01").delegate()
 print(receipt.transaction_id)
 ```
 
-Shielding and unshielding each submit one Aleo transaction and pay an Aleo
-transaction fee. They are separate from bridge delivery: a failed conversion
-does not repeat or reverse the completed cross-chain transfer.
+### Unshield for a Hyperlane withdrawal
 
-### Record selection shares the account's view key
-
-Any action that spends a private record the caller did not name explicitly
-(`unshield`, and the default private xReserve withdrawal) finds the record
-through the hosted record scanner. The scanner returns nothing for an account
-that has not been registered, and registering shares that account's view key
-with the scanning service, which can then decrypt every record the account
-owns. The package never registers an account on its own. Register once,
-explicitly:
+Spending private funds requires an unspent record. Pass `record=` to select
+one explicitly, or use the hosted scanner to find it. **Scanner registration
+shares the account's view key with the service**, allowing it to decrypt the
+account's records. The SDK never registers automatically. If that disclosure
+is acceptable:
 
 ```python
-bridge.aleo.records.register(bridge.aleo.default_account)
+registration = bridge.aleo.records.register(bridge.aleo.default_account)
+if not registration.get("ok"):
+    raise RuntimeError(f"Scanner registration failed: {registration}")
 ```
 
-Until then, record selection raises a `ConfigurationError` that says so. Pass
-`record=` to spend a specific record without the scanner, or use a public
-withdrawal (`mode="public"`) when privacy of the burn is not required.
+Once the scanner has indexed a sufficient unspent record, unshield the amount
+needed for the withdrawal:
 
-## Costs to plan for
+```python
+receipt = bridge.unshield("aleo/sol", amount="0.01").delegate()
+print(receipt.transaction_id)
+```
 
-- **xReserve withdrawal fee.** The registry states 2 USDCx. The fee Circle
-  actually charges has been observed at about 1.0035 USDC on mainnet and
-  testnet, so the quote marks this fee as `estimated` and `amount_out` is a
-  lower bound: the recipient may receive more, never less. The burn minimum
-  still uses the registry value.
-- **Aleo-origin Hyperlane transfers** pay the destination gas in credits, about
-  8 to 9 credits per transfer at current rates, on top of the Aleo transaction
-  fee. The quote reports the exact amount.
-- **Solana-origin transfers** cost about 0.0056 SOL on the source side, of
-  which about 0.0037 SOL is rent for Hyperlane's per-message accounts, so a
-  small transfer still needs that balance.
-- **Ethereum tips.** Public RPC endpoints often suggest a zero priority fee,
-  and a zero-tip transaction can sit unmined for hours. Every EIP-1559 tip is
-  raised to a floor of 0.1 gwei. `Ethereum(..., min_priority_fee_wei=...)`
-  changes the floor. Prefer a dedicated RPC endpoint over a load-balanced
-  public one for transfers, and never run two fund-moving Ethereum transfers
-  from the same key at the same time.
+Wait for the unshielding transaction to confirm before bridging those funds.
+The same record-discovery requirement applies to private xReserve withdrawals;
+supplying `record=` avoids the hosted scanner.
+
+Shielding and unshielding each submit a separate Aleo transaction with a fee.
+A failed conversion does not reverse or repeat the bridge transfer.
+
+## Understand transfer costs
+
+Read `quote.fees` before submitting. Each fee names the asset and chain in
+which it is paid, its amount in display units, and whether it is estimated.
+`quote.amount_out` reports the destination amount when it can be determined.
+Estimates are not a guarantee of the final amount received.
+
+- Ethereum transfers need ETH for gas in addition to the asset being sent.
+  An approval can add a transaction. `Ethereum` applies a minimum EIP-1559
+  priority fee of 0.1 gwei by default; `min_priority_fee_wei` changes it.
+- Aleo-origin Hyperlane transfers pay the relayer in credits as well as paying
+  an Aleo transaction fee. Execution refreshes the relayer payment before
+  proving unless `gas_payment_microcredits` is supplied explicitly. That
+  override is in microcredits: 1,000,000 microcredits equal one credit.
+- Solana transfers need SOL for transaction fees, relay costs, and creation of
+  Hyperlane message accounts, in addition to the amount being transferred.
+- xReserve withdrawal quotes use the registry's configured fee of 2 USDCx and
+  mark it as estimated. The burn must exceed that amount. The actual delivery
+  depends on the provider's fee.
+
+Use a reliable Ethereum RPC endpoint and serialize transfers from the same
+Ethereum account so concurrent submissions do not compete for a nonce.
 
 ## Agents and MCP
 
@@ -332,7 +564,7 @@ from aleo_bridge import bridge_tools, dispatch_tool
 tools = bridge_tools()
 result = dispatch_tool(bridge, "bridge_quote", {
     "source_chain": "ethereum", "source_asset": "usdc", "destination_chain": "aleo",
-    "amount": "2", "recipient": aleo_address,
+    "amount": "2", "recipient": bridge.aleo_address(),
 })
 ```
 

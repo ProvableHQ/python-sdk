@@ -24,7 +24,7 @@ from .types import (  # noqa: E402
     to_progress,
 )
 from ._calls import AleoCall, EvmCall, SolCall  # noqa: E402
-from .checkpoint import (Checkpoint, CheckpointProblem, CheckpointStore, FileCheckpointStore,  # noqa: E402
+from .checkpoint import (Checkpoint, CheckpointLoadResult, CheckpointProblem, CheckpointStore, FileCheckpointStore,  # noqa: E402
                          create_checkpoint)
 from .circle import CircleClient  # noqa: E402
 from .client import Bridge  # noqa: E402
@@ -52,7 +52,7 @@ __all__ = [
     "SolanaHyperlaneQuote", "Status", "Step", "to_progress",
     "AleoCall", "Bridge", "CircleClient", "DEFAULT_ENDPOINT", "EMPTY_MERKLE_PROOF_PAIR", "FreezeList",
     "HyperlaneModule", "PrivacyModule", "Profile", "XReserveModule",
-    "Checkpoint", "CheckpointProblem", "CheckpointStore", "FileCheckpointStore", "create_checkpoint",
+    "Checkpoint", "CheckpointLoadResult", "CheckpointProblem", "CheckpointStore", "FileCheckpointStore", "create_checkpoint",
     "EthModule", "Ethereum", "EvmCall",
     "DEFAULT_SOLANA_RPC_URL", "Solana", "SolCall", "SolModule",
     "lifecycle", "prepare",

@@ -324,8 +324,12 @@ def _h_pending(b, a):
     store = getattr(b, "checkpoints", None)
     if store is None:
         return []
-    lister = getattr(store, "list_with_problems", None)
-    checkpoints, problems = lister() if callable(lister) else (store.list(), [])
+    loader = getattr(store, "load_checkpoints", None)
+    if callable(loader):
+        result = loader()
+        checkpoints, problems = result.checkpoints, result.errors
+    else:
+        checkpoints, problems = store.list(), []
     out: list[dict[str, Any]] = []
     for cp in checkpoints:
         try:

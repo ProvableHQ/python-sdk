@@ -219,6 +219,18 @@ class CheckpointProblem:
         return {"error": self.error, "error_type": self.error_type, "path": self.path}
 
 
+@dataclass(frozen=True)
+class CheckpointLoadResult:
+    """Return readable checkpoints and errors encountered loading saved files.
+
+    ``checkpoints`` are ordered oldest first by modification time. Each entry in
+    ``errors`` identifies an unreadable file and the reason it could not load.
+    """
+
+    checkpoints: list[Checkpoint]
+    errors: list[CheckpointProblem]
+
+
 @runtime_checkable
 class CheckpointStore(Protocol):
     """Where checkpoints live between processes. Implement all four methods."""
@@ -236,9 +248,8 @@ class FileCheckpointStore:
     """One ``<id>.json`` per receipt id under *directory*; mode 0600; atomic rename.
 
     ``list()`` returns oldest-first by mtime, skipping any file it cannot read
-    back as a checkpoint — those come back from ``list_problems()`` /
-    ``list_with_problems()`` instead, so one bad file never hides the transfers
-    beside it. ``delete()`` of a missing id is a no-op. Ids are sanitized for the
+    back as a checkpoint. ``load_checkpoints().errors`` reports those files, so
+    one bad file never hides the transfers beside it. ``delete()`` of a missing id is a no-op. Ids are sanitized for the
     filesystem; the stored ``receiptId`` keeps the original.
     """
 
@@ -276,8 +287,8 @@ class FileCheckpointStore:
         return sorted((p for p in self.directory.glob("*.json") if not p.name.startswith(".")),
                       key=lambda p: (p.stat().st_mtime_ns, p.name))
 
-    def list_with_problems(self) -> tuple[list[Checkpoint], list[CheckpointProblem]]:
-        """Every readable checkpoint, plus a :class:`CheckpointProblem` per file that is not one.
+    def load_checkpoints(self) -> CheckpointLoadResult:
+        """Load saved checkpoints and report files that could not be read or parsed.
 
         One unreadable file must never hide every in-flight transfer: a record this store cannot
         parse (bad JSON, a future version, no transaction to identify it by) or cannot even read
@@ -292,16 +303,11 @@ class FileCheckpointStore:
             except (BridgeError, OSError, UnicodeDecodeError) as exc:
                 problems.append(CheckpointProblem(path=str(path), error=str(exc),
                                                   error_type=type(exc).__name__))
-        return checkpoints, problems
+        return CheckpointLoadResult(checkpoints=checkpoints, errors=problems)
 
     def list(self) -> list[Checkpoint]:
-        """Oldest-first by mtime; files that are not readable checkpoints are skipped (see
-        :meth:`list_problems`)."""
-        return self.list_with_problems()[0]
-
-    def list_problems(self) -> list[CheckpointProblem]:
-        """The files ``list()`` skipped, one entry each."""
-        return self.list_with_problems()[1]
+        """Return readable checkpoints oldest first; use ``load_checkpoints`` for load errors."""
+        return self.load_checkpoints().checkpoints
 
     def delete(self, checkpoint_id: str) -> None:
         try:
@@ -310,4 +316,4 @@ class FileCheckpointStore:
             pass
 
 
-__all__ = ["Checkpoint", "CheckpointProblem", "CheckpointStore", "FileCheckpointStore", "create_checkpoint"]
+__all__ = ["CheckpointLoadResult", "Checkpoint", "CheckpointProblem", "CheckpointStore", "FileCheckpointStore", "create_checkpoint"]

@@ -426,8 +426,12 @@ class Bridge:
         store = self.checkpoints
         if store is None:
             return []
-        lister = getattr(store, "list_with_problems", None)
-        checkpoints, problems = lister() if callable(lister) else (store.list(), [])
+        loader = getattr(store, "load_checkpoints", None)
+        if callable(loader):
+            result = loader()
+            checkpoints, problems = result.checkpoints, result.errors
+        else:
+            checkpoints, problems = store.list(), []
         out: list = []
         for cp in checkpoints:
             try:

@@ -218,7 +218,7 @@ def test_file_store_roundtrip_mode_and_atomic_rename(tmp_path):
 
 def test_file_store_skips_unreadable_files_and_reports_them(tmp_path):
     # I1: one file the store cannot read back must never hide the transfers next to it — list()
-    # returns the healthy records, and the rejects come back through list_with_problems().
+    # returns the healthy records, and the rejects come back through load_checkpoints().
     store = FileCheckpointStore(tmp_path)
     plan = _plan()
     cp = create_checkpoint(plan, Receipt(id=SOURCE, protocol="xreserve", status=Status.SOURCE_CONFIRMING,
@@ -229,12 +229,15 @@ def test_file_store_skips_unreadable_files_and_reports_them(tmp_path):
     (tmp_path / "garbage.json").write_text("{not json at all", encoding="utf-8")
 
     assert store.list() == [cp]
-    checkpoints, problems = store.list_with_problems()
-    assert checkpoints == [cp]
+    from aleo_bridge import CheckpointLoadResult
+
+    result = store.load_checkpoints()
+    assert isinstance(result, CheckpointLoadResult)
+    assert result.checkpoints == [cp]
+    problems = result.errors
     assert {Path(p.path).name for p in problems} == {"future.json", "garbage.json"}
     assert {p.error_type for p in problems} == {"CheckpointInvalidError"}
     assert all(p.error for p in problems)
-    assert [p.to_dict() for p in store.list_problems()] == [p.to_dict() for p in problems]
     assert set(problems[0].to_dict()) == {"error", "error_type", "path"}
 
 
@@ -254,3 +257,9 @@ def test_file_store_sanitizes_ids_and_orders_by_mtime(tmp_path):
     assert names == ["___evil_id.json", "at1a.json"]
     assert [c.id for c in store.list()] == ["at1a", "../evil id"]     # oldest first
     assert store.load("../evil id") == weird
+
+
+def test_load_checkpoints_empty_store(tmp_path):
+    result = FileCheckpointStore(tmp_path).load_checkpoints()
+    assert result.checkpoints == []
+    assert result.errors == []
