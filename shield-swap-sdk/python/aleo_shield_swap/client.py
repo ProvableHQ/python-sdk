@@ -9,6 +9,9 @@ service.
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
+import math
+from decimal import Decimal
 import time
 from typing import Any, Optional
 
@@ -17,6 +20,7 @@ from aleo.codegen.runtime import parse_plaintext
 
 from . import _generated as g
 from ._core import (
+    _amount_to_base_units,
     decode_position_record,
     default_merkle_proofs,
     ensure_programs,
@@ -33,8 +37,9 @@ from ._core import (
     read_mapping_value,
     resolve_swap_params,
     select_token_record,
+    unreadable_airdrop_transactions,
 )
-from .api import ApiClient, api_url_for
+from .api import ApiClient, ConfirmAirdropResult, api_url_for
 from .types import SwapExecution
 from .derivations import (
     BlindedIdentity,
@@ -62,7 +67,9 @@ from .position_math import (
     fee_owed,
     u256_of,
 )
+from ._quotes import quote_request, build_quote, quote_amounts, resolve_quote, multi_hop_inputs
 from .types import (
+    SwapQuote,
     ClaimResult,
     CollectReport,
     MintResult,
@@ -219,6 +226,39 @@ class ShieldSwap:
             account = getattr(self._aleo, "default_account", None)
             if account is not None:
                 records.register(account)
+
+    def confirm_airdrop(self, *, timeout: float = 600.0, poll_interval: float = 5.0,
+                        account: Any = None) -> ConfirmAirdropResult:
+        """Fund the account and wait for its airdrop records to become spendable.
+
+        Requires API authentication and scanner registration. ``timeout`` covers
+        faucet settlement and scanning. Check ``success`` and ``error`` before
+        swapping. A record timeout retains the transfer results; inspect those
+        transactions before requesting another airdrop. Scanner errors propagate.
+        """
+        if any(not math.isfinite(v) or v < 0 for v in (timeout, poll_interval)):
+            raise ValueError("timeout and poll_interval must be finite and nonnegative")
+        acct = self._account(account)
+        provider = self._aleo.record_provider
+        if provider is None:
+            raise InsufficientRecordsError("No record provider configured")
+        deadline = time.monotonic() + timeout
+        funding = self.api.confirm_airdrop(str(acct.address), timeout=timeout, poll_interval=poll_interval)
+        if not funding.success:
+            return funding
+        if any(not result.tx_id for result in funding.job.results):
+            return replace(funding, status="records_pending", message="Airdrop returned no transaction ID for a transfer; cannot confirm its record")
+        transaction_ids = {result.tx_id for result in funding.job.results}
+        while True:
+            records = provider.find(acct, unspent=True)
+            pending = unreadable_airdrop_transactions(transaction_ids, records)
+            if not pending:
+                return funding
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return replace(funding, status="records_pending", message=
+                               f"Airdrop accepted but records are not available for: {', '.join(sorted(pending))}. Inspect these transfers before requesting another airdrop.")
+            time.sleep(min(poll_interval, remaining))
 
     def onboard(self, referral_code: Optional[str] = None) -> OnboardReport:
         """Register this profile end to end — safe to re-run any time.
@@ -634,6 +674,23 @@ class ShieldSwap:
                 _log.warning("get_public_balances: %s is not deployed here — skipped", program)
         return out
 
+    def has_swap_balance(self, token_in_id: str, amount_in: int | str | Decimal,
+                         account: Any = None) -> bool:
+        """Check for one unspent record covering a swap without reserving it.
+
+        Strings and Decimal amounts use token units; integers use base units.
+        Wrapped tokens use their underlying records. Scanner errors propagate.
+        """
+        acct = self._account(account)
+        provider = self._aleo.record_provider
+        if provider is None:
+            raise InsufficientRecordsError("No record provider configured")
+        tokens = self.api.get_tokens() if isinstance(amount_in, (str, Decimal)) else []
+        amount = _amount_to_base_units(amount_in, token_in_id, tokens)
+        program = self._token_program(token_in_id)
+        records = provider.find(acct, program=program, unspent=True)
+        return pick_covering_record(records, min_amount=amount, token_id=token_in_id) is not None
+
     def get_private_balances(self, programs: list[str],
                              account: Any = None) -> dict[str, int]:
         """Sum of unspent record amounts per wrapper program (spendable
@@ -756,14 +813,28 @@ class ShieldSwap:
                     pids.append(wrapper)
         return pids
 
+    def quote(self, *, token_in: str, token_out: str, amount_in: str | Decimal,
+                    slippage_bps: int = 50) -> SwapQuote:
+        """Quote a direct or multi-hop swap from two symbols and a token amount.
+
+        Returns the API's best route and final slippage floor; pass it to
+        ``swap(quote)``. Requires API authentication. Quoting spends no funds
+        and needs no record scanning or transaction signature.
+        """
+        tokens = self.api.get_tokens()
+        source, target, amount = quote_request(tokens, token_in, token_out, amount_in, slippage_bps)
+        route = self.api.get_route(token_in=source.address, token_out=target.address, amount_in=amount)
+        return build_quote(source, target, amount, slippage_bps, route, self._aleo.network_name, self.program)
+
     def swap(
         self,
+        quote: Optional[SwapQuote] = None,
         *,
-        pool_key: str,
-        token_in_id: str,
-        amount_in: int,
-        slippage_bps: int = 50,
-        expected_out: Optional[int] = None,
+        pool_key: Optional[str] = None,
+        token_in_id: Optional[str] = None,
+        amount_in: Optional[int | str | Decimal] = None,
+        slippage_bps: Optional[int] = None,
+        expected_out: Optional[int | str | Decimal] = None,
         sqrt_price_limit: Optional[int] = None,
         deadline_offset_blocks: int = 10_000,
         nonce: Optional[int] = None,
@@ -775,42 +846,61 @@ class ShieldSwap:
         imports: Optional[dict[str, str]] = None,
         account: Any = None,
     ) -> DexCall[SwapHandle]:
-        """Request a private swap — phase one of the two-transaction flow.
+        """Prepare a direct or multi-hop swap; submit with transact/delegate.
 
-        Wrapped inputs route via the swap router automatically; fund them
-        with UNDERLYING records — the deposit happens in-transaction.
+        Pass a ``SwapQuote`` to execute its full route and final slippage floor.
+        Alternatively pass pool_key, token_in_id, and amount_in for one pool;
+        trade parameters cannot override a quote. Legacy strings/Decimal use
+        token units, integers base units. Returned handle amounts are base units.
 
-        Resolves the intent against live pool state, derives a single-use
-        blinded identity from the signer's view key, selects an unspent token
-        record (or takes *token_record* verbatim), and returns a prepared
-        call.  The terminal method (``transact``/``delegate``) returns a
-        :class:`~aleo_shield_swap.types.SwapHandle` — persist it if the
-        process might die before the claim.
-
-        Quote first (``dex.api.get_route``) and pass *expected_out*: without
-        it a spot estimate is used, which ignores fees and price impact.
-        **Building is not free with a journal.**  The blinded address is a
-        transition input, so a counter is reserved *here*, not at the terminal
-        method — discarding the call, or only simulating, still spends it.  That
-        reservation is what makes concurrent swaps safe: it serializes under a
-        file lock where the probe it replaces could hand two callers the same
-        counter.  The handle is journaled once the broadcast is accepted, so a
-        crash before the claim keeps the blinding factor.  ``track=False`` builds
-        on the racing probe instead; *identity* supplies your own.
-
-        The default
-        *deadline_offset_blocks* (~8h at ~3s blocks) absorbs delegated-
-        proving latency; a tight deadline aborts at finalize when proving
-        outlives it.
+        Wrapped inputs spend underlying records. ``token_record`` bypasses scanning.
+        Journaled calls reserve a counter during preparation and retain the
+        submitted handle. Without a journal, save the handle and avoid concurrent
+        swaps; use an explicit identity for concurrency. ``track=False`` bypasses
+        journaling. ``deadline_offset_blocks`` defaults to 10,000 (~8 hours).
         """
+        if quote is not None:
+            if any(v is not None for v in (pool_key, token_in_id, amount_in, expected_out, slippage_bps, sqrt_price_limit)):
+                raise ValueError("A quote cannot be combined with trade parameter overrides")
+            amount_in, expected_out = quote_amounts(quote, self._aleo.network_name, self.program)
+            pool_key, token_in_id, slippage_bps = quote.hops[0].pool_key, quote.token_in_id, quote.slippage_bps
+        elif pool_key is None or token_in_id is None or amount_in is None:
+            raise ValueError("Pass a quote or pool_key, token_in_id, and amount_in")
+        slippage_bps = 50 if slippage_bps is None else slippage_bps
+        multi_hop = quote is not None and len(quote.hops) > 1
         acct = self._account(account)
         pool = self.get_pool(pool_key)
+        tokens = []
+        if isinstance(amount_in, (str, Decimal)) or isinstance(expected_out, (str, Decimal)):
+            tokens = self.api.get_tokens()
+        amount_in = _amount_to_base_units(amount_in, token_in_id, tokens)
+        if expected_out is not None:
+            token_out_id = str(pool.token1) if token_in_id == str(pool.token0) else str(pool.token0)
+            expected_out = _amount_to_base_units(expected_out, token_out_id, tokens)
         slot = self.get_slot(pool_key)
         resolved = resolve_swap_params(
             pool=pool, slot=slot, token_in_id=token_in_id, amount_in=amount_in,
             slippage_bps=slippage_bps, expected_out=expected_out,
             sqrt_price_limit=sqrt_price_limit,
         )
+        hop_literals = []
+        if quote is not None:
+            pools = [pool] + [self.get_pool(h.pool_key) for h in quote.hops[1:]]
+            slots = [slot] + [self.get_slot(h.pool_key) for h in quote.hops[1:]]
+            resolved, hop_literals = resolve_quote(quote, pools, slots, amount_in, expected_out)
+
+        # Resolve the record-funding program lazily: an explicit record
+        # needs no registry lookup (its program registration comes from
+        # token_in_program= or imports=).
+        program = token_in_program
+        record = token_record
+        if record is None:
+            program = program or self._token_program(token_in_id)
+            record = select_token_record(
+                self._aleo, program=program, min_amount=amount_in,
+                token_id=token_in_id, account=acct,
+            )
+
         deadline = get_deadline(self._aleo, deadline_offset_blocks)
         swap_nonce = nonce if nonce is not None else generate_swap_nonce()
         # With a journal, reserve through it: reservation is serialized by the
@@ -826,25 +916,16 @@ class ShieldSwap:
         elif identity is None:
             identity = next_blinded_identity(self._aleo, acct, self.program)
 
-        # Resolve the record-funding program lazily: an explicit record
-        # needs no registry lookup (its program registration comes from
-        # token_in_program= or imports=).
-        program = token_in_program
-        record = token_record
-        if record is None:
-            program = program or self._token_program(token_in_id)
-            record = select_token_record(
-                self._aleo, program=program, min_amount=amount_in,
-                token_id=token_in_id, account=acct,
-            )
-
-        route = swap_route(self._is_wrapped(token_in_id))
+        route = swap_route(self._is_wrapped(token_in_id), multi_hop)
         # Dynamic dispatch: the prover cannot discover token callees
         # statically — register the DEX program, the involved token
         # programs, and (for routed swaps) the router + wrapper with the
         # process before authorization.
         extra = [route.program] if route.program != self.program else []
         wrapper = self._amm_token_program(token_in_id) if extra else None
+        if multi_hop:
+            for hop in quote.hops:
+                extra.extend([self._amm_token_program(hop.token_in), self._amm_token_program(hop.token_out)])
         self._ensure([p for p in (program, wrapper, *extra) if p], imports)
 
         # Core input order per the contract's swap entrypoint:
@@ -872,6 +953,10 @@ class ShieldSwap:
                     "expected_out or a slippage below 100%")
             inputs = [record, wrapper_proofs or default_merkle_proofs(),
                       *inputs[1:]]
+        if multi_hop:
+            inputs = multi_hop_inputs(quote, hop_literals, record, identity, amount_in,
+                                      resolved.amount_out_min, swap_nonce, deadline,
+                                      wrapper_proofs or default_merkle_proofs(), route.program != self.program)
         bound = getattr(self._program(route.program).functions,
                         route.function)(*inputs)
 
@@ -896,6 +981,7 @@ class ShieldSwap:
                 amount_in=amount_in,
                 transaction_id=tx_id,
                 program=self.program,
+                pool_keys=tuple(h.pool_key for h in quote.hops) if multi_hop else (),
             )
             # Journal the handle as soon as the broadcast is accepted: the
             # blinding factor is the only thing that can claim this swap, and a
@@ -906,31 +992,34 @@ class ShieldSwap:
                 self.journal.record_swap(handle, counter)
             return handle
 
-        return DexCall(self._aleo, bound, build_result)
+        return DexCall(self._aleo, bound, build_result, build_before_wait=True)
 
     def claim_swap_output(
         self,
         handle: SwapHandle,
         *,
+        timeout: float = 0.0,
         wrapper_proofs: Optional[str] = None,
         imports: Optional[dict[str, str]] = None,
         account: Any = None,
     ) -> DexCall[ClaimResult]:
-        """Claim a private swap's output — phase two of the lifecycle.
+        """Claim a private swap's output.
+
+        With a journal, ``delegate(wait=True)`` or ``transact(wait=True)``
+        records the confirmed claim automatically.
 
         Reads the chain-computed result from ``swap_outputs`` (never an
         off-chain service — these amounts gate money movement), proves
-        ownership of the blinded identity, and claims.  A wrapped output or
-        refund routes automatically through the router, which unwraps to
-        the signer in the same transaction — even for swaps that started
-        as direct core calls.  The output and any refund arrive as private
-        records owned by the signer (output first, refund second); the
-        mapping entry is consumed.
+        ownership of the blinded identity, and claims. Wrapped tokens unwrap
+        automatically. Output and refunds arrive as private records owned by
+        the signer; claiming consumes the mapping entry.
 
-        Raises :class:`SwapOutputNotFinalizedError` **at prepare time** when
-        the output is not readable yet (retry after a few blocks) or was
-        already claimed.
+        After swap confirmation, ``timeout`` sets the maximum wait in seconds
+        (default 0). Missing output is polled every 2s without submitting. Timeout raises
+        ``SwapOutputNotFinalizedError``; other errors propagate.
         """
+        if not math.isfinite(timeout) or timeout < 0:
+            raise ValueError("timeout must be finite and nonnegative")
         self._account(account)
         if not handle.swap_id:
             raise ValueError(
@@ -944,7 +1033,16 @@ class ShieldSwap:
                 "(set by swap())."
             )
         # Trust-critical read: the amounts the claim moves come from the chain.
-        out = self.get_swap_output(handle.swap_id)
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                out = self.get_swap_output(handle.swap_id)
+                break
+            except SwapOutputNotFinalizedError:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise
+                time.sleep(min(2.0, remaining))
         w_out = self._is_wrapped(str(out.token_out))
         w_in = self._is_wrapped(str(out.token_in))
         no_refund = int(out.amount_remaining) == 0
@@ -992,7 +1090,13 @@ class ShieldSwap:
             """
             return ClaimResult(tx_id, out.amount_out, out.amount_remaining)
 
-        return DexCall(self._aleo, bound, build_result)
+        journal = self.journal
+
+        def on_confirmed(result: ClaimResult) -> None:
+            if journal is not None:
+                journal.record_claim(handle.swap_id, result.transaction_id, result.amount_out)
+
+        return DexCall(self._aleo, bound, build_result, on_confirmed=on_confirmed)
 
     def _blinded_address_used(self, blinded_address: str) -> bool:
         """Chain probe: has this blinded address already anchored a swap?
@@ -1128,7 +1232,6 @@ class ShieldSwap:
         the caller pays for a proof the finalize then rejects. Auth failures
         propagate for that reason.
         """
-        from decimal import Decimal
         dec_in = self._token_decimals(token_in_id)
         dec_out = self._token_decimals(token_out_id)
         if dec_in is None or dec_out is None:
@@ -1296,8 +1399,6 @@ class ShieldSwap:
                 # was not journaled, so the next collect_all retries it.
                 still_pending.append(handle.swap_id or "")
                 continue
-            self.journal.record_claim(handle.swap_id or "", res.transaction_id,
-                                      res.amount_out)
             claimed.append({"swap_id": handle.swap_id,
                             "transaction_id": res.transaction_id,
                             "amount_out": res.amount_out})

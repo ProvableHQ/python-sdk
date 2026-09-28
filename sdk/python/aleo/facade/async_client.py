@@ -249,6 +249,7 @@ class AsyncRecordsModule:
         return AsyncRecordScanner(
             base,
             network=provider.network,
+            auto_re_register=True,
             api_key=provider.api_key,
             consumer_id=getattr(provider, "consumer_id", None),
             transport=getattr(provider, "_transport", None),

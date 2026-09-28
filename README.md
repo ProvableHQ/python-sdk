@@ -434,6 +434,6 @@ assert signature.verify(key.address, b"hello")
 `aleo.testnet` provides the corresponding types when the testnet extension is
 built. Match the types and client to the intended network.
 
-The SDK uses snarkVM 4.9.1. The repository also contains [zkML tooling](zkml/)
+The SDK uses snarkVM 4.10.0. The repository also contains [zkML tooling](zkml/)
 for translating Python machine-learning models into Leo and
 [zkML research](zkml-research/) on model accuracy and constraint costs.

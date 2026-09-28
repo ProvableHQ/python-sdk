@@ -10,6 +10,11 @@ MCP alternative: `python -m aleo_bridge.mcp` exposes the same lifecycle as
 tools; `aleo_bridge.agent.bridge_tools()` gives Claude-shape tool schemas.
 Registry version `2026-08-31.solana-deposits.1`.
 
+Runnable examples ship in the package: start with
+`python -m aleo_bridge.examples.quote_transfer --help`.
+Use `aleo_bridge.examples.<script_name>` for transfers, shielding, and recovery;
+the examples directory includes a README with the available scripts.
+
 ## Tier 1 — the lifecycle (quote → execute → wait, then resume / complete as asked)
 
 ```python

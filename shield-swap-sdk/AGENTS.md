@@ -222,12 +222,8 @@ them):
   input records** — `swap_many` implements the recipe; copy it, don't
   improvise.
 
-Suggested path for a new integrator: (1) `onboard()` a profile — it
-doubles as a test fixture; (2) walk swap → `collect_all()` once with the
-Tier 1 methods so the mechanics are concrete; (3) read the reference below
-for the surface your app needs; (4) `tests/integration/` and
-`scripts/rehearsal.py` in the repo are working reference implementations
-of the full journey.
+For the funding, swap, and claim flow, see
+`examples/first-swap/`.
 
 Every write method returns a prepared `DexCall`: nothing touches the
 network until a terminal method — `.simulate()` (local, free),
@@ -405,52 +401,54 @@ exhausting it raises — the fail-fast for a systematically wrong program.
 
 ### Chain methods
 
-### `swap(self, *, pool_key: 'str', token_in_id: 'str', amount_in: 'int', slippage_bps: 'int' = 50, expected_out: 'Optional[int]' = None, sqrt_price_limit: 'Optional[int]' = None, deadline_offset_blocks: 'int' = 10000, nonce: 'Optional[int]' = None, identity: 'Optional[BlindedIdentity]' = None, token_in_program: 'Optional[str]' = None, token_record: 'Optional[str]' = None, wrapper_proofs: 'Optional[str]' = None, track: 'bool' = True, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[SwapHandle]'`
+### `confirm_airdrop(self, *, timeout: 'float' = 600.0, poll_interval: 'float' = 5.0, account: 'Any' = None) -> 'ConfirmAirdropResult'`
 
-Request a private swap — phase one of the two-transaction flow.
+Fund the account and wait for its airdrop records to become spendable.
 
-Wrapped inputs route via the swap router automatically; fund them
-with UNDERLYING records — the deposit happens in-transaction.
+Requires API authentication and scanner registration. ``timeout`` covers
+faucet settlement and scanning. Check ``success`` and ``error`` before
+swapping. A record timeout retains the transfer results; inspect those
+transactions before requesting another airdrop. Scanner errors propagate.
 
-Resolves the intent against live pool state, derives a single-use
-blinded identity from the signer's view key, selects an unspent token
-record (or takes *token_record* verbatim), and returns a prepared
-call.  The terminal method (``transact``/``delegate``) returns a
-:class:`~aleo_shield_swap.types.SwapHandle` — persist it if the
-process might die before the claim.
+### `quote(self, *, token_in: 'str', token_out: 'str', amount_in: 'str | Decimal', slippage_bps: 'int' = 50) -> 'SwapQuote'`
 
-Quote first (``dex.api.get_route``) and pass *expected_out*: without
-it a spot estimate is used, which ignores fees and price impact.
-**Building is not free with a journal.**  The blinded address is a
-transition input, so a counter is reserved *here*, not at the terminal
-method — discarding the call, or only simulating, still spends it.  That
-reservation is what makes concurrent swaps safe: it serializes under a
-file lock where the probe it replaces could hand two callers the same
-counter.  The handle is journaled once the broadcast is accepted, so a
-crash before the claim keeps the blinding factor.  ``track=False`` builds
-on the racing probe instead; *identity* supplies your own.
+Quote a direct or multi-hop swap from two symbols and a token amount.
 
-The default
-*deadline_offset_blocks* (~8h at ~3s blocks) absorbs delegated-
-proving latency; a tight deadline aborts at finalize when proving
-outlives it.
+Returns the API's best route and final slippage floor; pass it to
+``swap(quote)``. Requires API authentication. Quoting spends no funds
+and needs no record scanning or transaction signature.
 
-### `claim_swap_output(self, handle: 'SwapHandle', *, wrapper_proofs: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[ClaimResult]'`
+### `swap(self, quote: 'Optional[SwapQuote]' = None, *, pool_key: 'Optional[str]' = None, token_in_id: 'Optional[str]' = None, amount_in: 'Optional[int | str | Decimal]' = None, slippage_bps: 'Optional[int]' = None, expected_out: 'Optional[int | str | Decimal]' = None, sqrt_price_limit: 'Optional[int]' = None, deadline_offset_blocks: 'int' = 10000, nonce: 'Optional[int]' = None, identity: 'Optional[BlindedIdentity]' = None, token_in_program: 'Optional[str]' = None, token_record: 'Optional[str]' = None, wrapper_proofs: 'Optional[str]' = None, track: 'bool' = True, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[SwapHandle]'`
 
-Claim a private swap's output — phase two of the lifecycle.
+Prepare a direct or multi-hop swap; submit with transact/delegate.
+
+Pass a ``SwapQuote`` to execute its full route and final slippage floor.
+Alternatively pass pool_key, token_in_id, and amount_in for one pool;
+trade parameters cannot override a quote. Legacy strings/Decimal use
+token units, integers base units. Returned handle amounts are base units.
+
+Wrapped inputs spend underlying records. ``token_record`` bypasses scanning.
+Journaled calls reserve a counter during preparation and retain the
+submitted handle. Without a journal, save the handle and avoid concurrent
+swaps; use an explicit identity for concurrency. ``track=False`` bypasses
+journaling. ``deadline_offset_blocks`` defaults to 10,000 (~8 hours).
+
+### `claim_swap_output(self, handle: 'SwapHandle', *, timeout: 'float' = 0.0, wrapper_proofs: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[ClaimResult]'`
+
+Claim a private swap's output.
+
+With a journal, ``delegate(wait=True)`` or ``transact(wait=True)``
+records the confirmed claim automatically.
 
 Reads the chain-computed result from ``swap_outputs`` (never an
 off-chain service — these amounts gate money movement), proves
-ownership of the blinded identity, and claims.  A wrapped output or
-refund routes automatically through the router, which unwraps to
-the signer in the same transaction — even for swaps that started
-as direct core calls.  The output and any refund arrive as private
-records owned by the signer (output first, refund second); the
-mapping entry is consumed.
+ownership of the blinded identity, and claims. Wrapped tokens unwrap
+automatically. Output and refunds arrive as private records owned by
+the signer; claiming consumes the mapping entry.
 
-Raises :class:`SwapOutputNotFinalizedError` **at prepare time** when
-the output is not readable yet (retry after a few blocks) or was
-already claimed.
+After swap confirmation, ``timeout`` sets the maximum wait in seconds
+(default 0). Missing output is polled every 2s without submitting. Timeout raises
+``SwapOutputNotFinalizedError``; other errors propagate.
 
 ### `create_pool(self, *, token0_id: 'str', token1_id: 'str', fee: 'int', initial_tick: 'int', tick_spacing: 'Optional[int]' = None, initial_sqrt_price: 'Optional[int]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[TxResult]'`
 

@@ -33,12 +33,15 @@ def configure_example(module, bridge, monkeypatch):
     monkeypatch.setattr(module, 'Aleo', Mock())
     if hasattr(module, 'Ethereum'):
         monkeypatch.setattr(module, 'Ethereum', Mock())
+    if hasattr(module, 'Solana'):
+        monkeypatch.setattr(module, 'Solana', Mock())
     monkeypatch.setenv('EVM_PRIVATE_KEY', 'test-only-key')
+    monkeypatch.setenv('SOLANA_PRIVATE_KEY', 'test-only-key')
     monkeypatch.setenv('ALEO_PRIVATE_KEY', 'test-only-key')
     monkeypatch.setenv('BRIDGE_MINT_SECRET_NONCE', '123scalar')
 
 
-@pytest.mark.parametrize('module_name', ['bridge_wbtc', 'bridge_usdc_private_balance', 'bridge_usdc_private_recipient'])
+@pytest.mark.parametrize('module_name', ['bridge_wbtc', 'bridge_sol', 'bridge_usdc_private_balance', 'bridge_usdc_private_recipient'])
 @pytest.mark.parametrize('execute', [False, True])
 def test_transfer_examples_quote_or_submit_once(module_name, execute, monkeypatch, tmp_path):
     module = importlib.import_module(module_name)
@@ -59,6 +62,22 @@ def test_transfer_examples_quote_or_submit_once(module_name, execute, monkeypatc
     else:
         bridge.execute.assert_not_called()
     bridge.resume.assert_not_called()
+
+
+def test_sol_inbound_example_quotes_solana_to_aleo(monkeypatch, tmp_path):
+    module = importlib.import_module('bridge_sol')
+    bridge = Mock()
+    bridge.quote.return_value = SimpleNamespace(amount_out='0.01', fees=[], plan=object())
+    configure_example(module, bridge, monkeypatch)
+    assert module.main(['--sender', 'solana-sender', '--recipient', 'aleo-recipient',
+                        '--amount', '0.01', '--journal', str(tmp_path)]) == 0
+    call = bridge.quote.call_args.kwargs
+    assert (call['source_chain'], call['source_asset'],
+            call['destination_chain'], call['destination_asset']) == (
+                'solana', 'sol', 'aleo', 'sol')
+    assert call['sender'] == 'solana-sender'
+    assert call['recipient'] == 'aleo-recipient'
+    bridge.execute.assert_not_called()
 
 
 def test_private_example_claims_once_when_ready(monkeypatch, tmp_path):

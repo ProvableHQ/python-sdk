@@ -223,3 +223,69 @@ def test_track_false_gives_a_side_effect_free_build(tmp_path, stub_aleo):
     _swap_call_on(dex, track=False)
     assert dex.journal.counter_cursor() == 0
     assert dex.journal.events() == []
+
+
+@pytest.mark.parametrize("full_payload", [False, True])
+def test_confirmation_timeout_preserves_swap_secrets(tmp_path, stub_aleo, full_payload):
+    from unittest.mock import Mock
+    dex = _journalled_dex(tmp_path, stub_aleo)
+    call = _swap_call_on(dex)
+    if full_payload:
+        call._bound.delegate = Mock(return_value={"transaction": {
+            "id": "at1delegated", "execution": {"transitions": [{
+                "program": call._bound.program_id,
+                "function": call._bound.function_name,
+                "outputs": [{"value": "77field"}],
+            }]}}})
+    stub_aleo.network.wait_for_transaction = Mock(side_effect=TimeoutError("pending"))
+    with pytest.raises(TimeoutError):
+        call.delegate(wait=True)
+    saved = [e for e in dex.journal.events() if e["type"] == "swap"]
+    assert len(saved) == 1
+    assert saved[0]["transaction_id"] == "at1delegated"
+    assert saved[0]["blinding_factor"] == BLINDING_FACTOR_0
+    assert saved[0]["blinded_address"] == BLINDED_ADDRESS_0
+    assert saved[0]["swap_id"] == ("77field" if full_payload else None)
+
+
+def test_id_only_confirmation_completes_saved_handle(tmp_path, stub_aleo):
+    dex = _journalled_dex(tmp_path, stub_aleo)
+    handle = _swap_call_on(dex).delegate(wait=True)
+    assert dex.journal.pending_claims() == [handle]
+
+
+def test_missing_record_fails_without_polling_or_reserving(tmp_path, stub_aleo):
+    from unittest.mock import Mock
+    dex = _journalled_dex(tmp_path, stub_aleo)
+    stub_aleo.record_provider.find = Mock(return_value=[])
+    with pytest.raises(InsufficientRecordsError):
+        _swap_call_on(dex)
+    stub_aleo.record_provider.find.assert_called_once()
+    assert stub_aleo.submitted == []
+    assert dex.journal.counter_cursor() == 0
+
+
+def test_missing_record_does_not_reserve_counter(tmp_path, stub_aleo):
+    from unittest.mock import Mock
+    dex = _journalled_dex(tmp_path, stub_aleo)
+    stub_aleo.record_provider.find = Mock(return_value=[])
+    with pytest.raises(InsufficientRecordsError):
+        _swap_call_on(dex)
+    assert dex.journal.events() == []
+    assert stub_aleo.submitted == []
+
+
+def test_record_lookup_propagates_scanner_error(tmp_path, stub_aleo):
+    from unittest.mock import Mock
+    dex = _journalled_dex(tmp_path, stub_aleo)
+    stub_aleo.record_provider.find = Mock(side_effect=RuntimeError("scanner unavailable"))
+    with pytest.raises(RuntimeError, match="scanner unavailable"):
+        _swap_call_on(dex)
+    assert stub_aleo.record_provider.find.call_count == 1
+    assert dex.journal.events() == []
+
+
+@pytest.mark.parametrize("seconds", [-1, float("inf"), float("nan")])
+def test_swap_no_longer_accepts_record_wait(stub_aleo, seconds):
+    with pytest.raises(TypeError, match="record_wait_seconds"):
+        _swap_call(stub_aleo, record_wait_seconds=seconds)

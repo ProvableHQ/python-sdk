@@ -370,3 +370,41 @@ def test_account_module_repr() -> None:
     r = repr(a.account)
     assert "AccountModule" in r
     assert "mainnet" in r
+
+
+@pytest.mark.parametrize("async_client", [False, True])
+@pytest.mark.parametrize("key_object", [False, True])
+def test_first_private_key_sets_default_account(async_client: bool, key_object: bool) -> None:
+    """The first imported key supplies the signer when a call omits one."""
+    from aleo import AsyncAleo
+    from aleo.mainnet import PrivateKey
+    client = AsyncAleo(HTTPProvider(BASE)) if async_client else make_client()
+    key = PrivateKey.from_string(KAT["private_key"]) if key_object else KAT["private_key"]
+    account = client.account.from_private_key(key)
+    assert client.default_account is account
+    assert client.account.verify(account.address, b"default signer", client.account.sign(b"default signer"))
+
+
+def test_later_private_key_preserves_default_account() -> None:
+    """Importing another key leaves the first signer selected."""
+    client = make_client()
+    first = client.account.from_private_key(KAT["private_key"])
+    client.account.from_private_key(client.account.create().private_key)
+    assert client.default_account is first
+
+
+def test_private_key_preserves_explicit_default_account() -> None:
+    """An explicitly selected signer takes precedence over imported keys."""
+    client = make_client()
+    chosen = client.account.create()
+    client.default_account = chosen
+    client.account.from_private_key(KAT["private_key"])
+    assert client.default_account is chosen
+
+
+def test_invalid_private_key_leaves_default_unset() -> None:
+    """A failed import does not select a default signer."""
+    client = make_client()
+    with pytest.raises((ValueError, RuntimeError)):
+        client.account.from_private_key("invalid")
+    assert client.default_account is None

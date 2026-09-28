@@ -4,8 +4,25 @@ Use these scripts to check a transfer's cost, send assets to and from Aleo, or c
 transfer after an interruption. Each script runs independently and reports
 whether the work finished, needs attention, or is still pending.
 
-These examples use **mainnet**. Install the bridge SDK in your Python environment
-and run the commands from `bridge-sdk/`. Quote and status commands do not sign
+These examples use **mainnet**. Install the bridge SDK in a Python environment:
+
+```sh
+python -m pip install aleo-bridge-sdk
+python -m aleo_bridge.examples.quote_transfer --help
+```
+
+Every script in the table below is included in the wheel. Run it with
+`python -m aleo_bridge.examples.<script_name>`, omitting `.py`. For example:
+
+```sh
+python -m aleo_bridge.examples.quote_transfer \
+  --sender 0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A \
+  --recipient aleo1rs6fdxg703s3em27uhxsehhfd8znaly22jt6upggrxc77q8d9yfq33pk28 \
+  --amount 0.001
+```
+
+The checkout commands below also work when run from `bridge-sdk/`.
+Saved checkpoints are not packaged. Quote and status commands do not sign
 transactions. `--execute`, `--action resume`, and `--action complete` can spend
 real funds. Review a quote before submitting a new transfer.
 
@@ -13,6 +30,7 @@ real funds. Review a quote before submitting a new transfer.
 | --- | --- |
 | [quote_transfer.py](quote_transfer.py) | Review the cost of sending WBTC from Ethereum to Aleo. |
 | [bridge_wbtc.py](bridge_wbtc.py) | Send WBTC and monitor its arrival as a public Aleo balance. |
+| [bridge_sol.py](bridge_sol.py) | Send native SOL from Solana to a public Aleo balance. |
 | [bridge_usdc_private_balance.py](bridge_usdc_private_balance.py) | Receive private USDCx automatically; the Ethereum deposit still reveals the Aleo recipient. |
 | [bridge_usdc_private_recipient.py](bridge_usdc_private_recipient.py) | Hide the Aleo recipient in the deposit, then claim private USDCx using the retained nonce. |
 | [bridge_wbtc_to_ethereum.py](bridge_wbtc_to_ethereum.py) | Return public Aleo WBTC to Ethereum. |
@@ -55,9 +73,16 @@ For example, after reviewing the WBTC quote, use your recipient address:
 python examples/bridge_wbtc.py --recipient "$ALEO_RECIPIENT" --amount 0.001 --execute
 ```
 
-`ALEO_RECIPIENT` here is your own shell variable containing a public address.
-When executing, the script takes the Ethereum sender from `EVM_PRIVATE_KEY`.
-It submits once, prints each journal ID, and monitors for up to 120 seconds.
+To send SOL from Solana instead, set `SOLANA_PRIVATE_KEY`, then run:
+
+```sh
+python examples/bridge_sol.py --recipient "$ALEO_RECIPIENT" --amount 0.01 --execute
+```
+
+`ALEO_RECIPIENT` here is a shell variable containing a public address.
+On execution, `bridge_wbtc.py` derives its sender from `EVM_PRIVATE_KEY`, while
+`bridge_sol.py` derives its sender from `SOLANA_PRIVATE_KEY`. Each submits once,
+prints its journal ID, and monitors for up to 120 seconds.
 Use `--timeout 600` to monitor longer. A timeout does not mean the deposit failed:
 recover the existing transfer instead of running the submission command again.
 

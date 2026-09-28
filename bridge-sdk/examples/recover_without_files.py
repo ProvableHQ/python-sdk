@@ -11,7 +11,10 @@ import sys
 from aleo import Aleo, HTTPProvider
 from aleo_bridge import Bridge, Ethereum, PollingTimeoutError
 
-from _arguments import history_parser
+if __package__:
+    from ._arguments import history_parser
+else:
+    from _arguments import history_parser
 
 
 def main(argv=None):

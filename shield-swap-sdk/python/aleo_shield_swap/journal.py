@@ -167,7 +167,7 @@ class Journal:
             counter: The counter this swap's blinded identity consumed, so it is
                 never reissued.
         """
-        self.append("swap", counter=counter,
+        self.append("swap", counter=counter, pool_keys=list(handle.pool_keys),
                     **{k: getattr(handle, k) for k in _HANDLE_FIELDS})
 
     def record_swap_failed(self, counter: int, error: str) -> None:
@@ -242,7 +242,7 @@ class Journal:
                 continue
             if not all(k in e for k in _HANDLE_FIELDS):
                 continue                  # legacy/malformed event — skip
-            out.append(SwapHandle(**{k: e[k] for k in _HANDLE_FIELDS}))
+            out.append(SwapHandle(**{k: e[k] for k in _HANDLE_FIELDS}, pool_keys=tuple(e.get("pool_keys", ()))))
         return out
 
     def open_positions(self) -> list[dict[str, Any]]:

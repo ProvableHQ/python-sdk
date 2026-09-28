@@ -95,6 +95,7 @@ class RecordsModule:
         return RecordScanner(
             base,
             network=provider.network,
+            auto_re_register=True,
             api_key=provider.api_key if credentialed else None,
             consumer_id=getattr(provider, "consumer_id", None) if credentialed else None,
             transport=getattr(provider, "_transport", None),

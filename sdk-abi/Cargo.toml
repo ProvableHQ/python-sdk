@@ -22,10 +22,9 @@ leo-abi = { git = "https://github.com/ProvableHQ/leo", rev = "c82f149e97b8279e3c
 leo-ast = { git = "https://github.com/ProvableHQ/leo", rev = "c82f149e97b8279e3c453cbf98e41eec46aec3e7", package = "leo-ast" }
 leo-disassembler = { git = "https://github.com/ProvableHQ/leo", rev = "c82f149e97b8279e3c453cbf98e41eec46aec3e7", package = "leo-disassembler" }
 leo-span = { git = "https://github.com/ProvableHQ/leo", rev = "c82f149e97b8279e3c453cbf98e41eec46aec3e7", package = "leo-span" }
-# Same crates.io version + feature set the pinned leo rev uses, so
-# `Process<N>`/`Program<N>` are the same types leo-disassembler's signatures
-# expect (leo master c82f149e, 2026-09-09, pins snarkvm 4.9.1).
-snarkvm = { version = "4.9.1", features = ["test_consensus_heights", "dev_skip_checks", "test_targets", "history"] }
+# Unify the crates.io snarkVM version with Leo so Process<N> and Program<N>
+# use the same types. Keep ABI-only features isolated from the main SDK.
+snarkvm = { version = "4.10.0", features = ["test_consensus_heights", "dev_skip_checks", "test_targets", "history"] }
 
 [profile.release]
 opt-level = 3

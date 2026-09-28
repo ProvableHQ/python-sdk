@@ -11,12 +11,53 @@ from __future__ import annotations
 import re
 import secrets
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
 
 from aleo.codegen.runtime import parse_plaintext
 
 from .errors import InsufficientRecordsError
 from .tick_math import MAX_SQRT_RATIO_X128, MIN_SQRT_RATIO_X128, u256_to_int
+
+
+def _amount_to_base_units(amount: int | str | Decimal, token_id: str,
+                          tokens: list[Any]) -> int:
+    """Convert decimal token units exactly; retain integer base-unit inputs."""
+    if isinstance(amount, bool) or not isinstance(amount, (int, str, Decimal)):
+        raise TypeError("Use an integer for base units or a string/Decimal for token units")
+    if isinstance(amount, int):
+        result = amount
+    else:
+        matches = [token for token in tokens
+                   if token.id == token_id or token.address == token_id]
+        if len(matches) != 1:
+            raise ValueError(f"Missing or ambiguous token metadata: {token_id}")
+        decimals = matches[0].decimals
+        if not isinstance(decimals, int) or isinstance(decimals, bool) or decimals < 0:
+            raise ValueError(f"Invalid token decimals: {token_id}")
+        try:
+            value = Decimal(amount)
+        except InvalidOperation as error:
+            raise ValueError("Invalid decimal token amount") from error
+        if not value.is_finite() or value < 0:
+            raise ValueError("Token amount must be finite and nonnegative")
+        if value.is_zero():
+            return 0
+        _, digits, exponent = value.as_tuple()
+        shift = int(exponent) + decimals
+        # Operate on decimal digits so the caller's Decimal context cannot round.
+        if shift < 0:
+            places = -shift
+            if places >= len(digits) or any(digits[-places:]):
+                raise ValueError(f"Amount exceeds {decimals} decimal places")
+            digits = digits[:-places]
+            shift = 0
+        if len(digits) + shift > 39:
+            raise ValueError("Amount exceeds the u128 range")
+        result = int("".join(str(digit) for digit in digits)) * 10**shift
+    if not 0 <= result < 2**128:
+        raise ValueError("Amount must fit the nonnegative u128 range")
+    return result
 
 
 @dataclass(frozen=True)
@@ -205,6 +246,19 @@ def record_plaintext(rec: Any) -> Optional[str]:
     if isinstance(rec, dict):
         return rec.get("record_plaintext")
     return getattr(rec, "record_plaintext", None)
+
+
+def unreadable_airdrop_transactions(transaction_ids: set[str], records: list[Any]) -> set[str]:
+    """Match positive, decrypted token records to the faucet's transactions."""
+    pending = set(transaction_ids)
+    for record in records:
+        tx_id = record.get("transaction_id") if isinstance(record, dict) else getattr(record, "transaction_id", None)
+        # Hosted scanner IDs may be padded with spaces.
+        tx_id = tx_id.strip() if isinstance(tx_id, str) else tx_id
+        info = parse_token_record_info(record_plaintext(record) or "")
+        if info is not None and info["amount"] > 0:
+            pending.discard(tx_id)
+    return pending
 
 
 #: Fields a PositionNFT record carries.  Checked as a set, so a future record

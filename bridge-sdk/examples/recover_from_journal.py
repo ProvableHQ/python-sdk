@@ -10,7 +10,10 @@ import sys
 from aleo import Aleo, HTTPProvider, mainnet
 from aleo_bridge import Bridge, Ethereum, FileCheckpointStore, PollingTimeoutError, Solana
 
-from _arguments import journal_parser
+if __package__:
+    from ._arguments import journal_parser
+else:
+    from _arguments import journal_parser
 
 
 def main(argv=None):

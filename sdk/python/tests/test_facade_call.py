@@ -140,7 +140,8 @@ def test_authorize_uses_default_account() -> None:
 def test_authorize_errors_without_account() -> None:
     a = _client()
     acct = _account(a)
-    bc = _bound(a, acct)  # note: a.default_account is None
+    a.default_account = None
+    bc = _bound(a, acct)
     with pytest.raises(ValueError, match="default_account is not set"):
         bc.authorize()
 

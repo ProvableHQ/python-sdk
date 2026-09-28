@@ -10,7 +10,10 @@ import sys
 from aleo import Aleo, HTTPProvider
 from aleo_bridge import Bridge, Solana, FileCheckpointStore, PollingTimeoutError
 
-from _arguments import outbound_parser
+if __package__:
+    from ._arguments import outbound_parser
+else:
+    from _arguments import outbound_parser
 
 
 def main(argv=None):

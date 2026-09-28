@@ -11,7 +11,10 @@ import sys
 from aleo import Aleo, HTTPProvider
 from aleo_bridge import Bridge, PollingTimeoutError
 
-from _arguments import shield_parser
+if __package__:
+    from ._arguments import shield_parser
+else:
+    from _arguments import shield_parser
 
 
 def main(argv=None):

@@ -75,8 +75,8 @@ jobs:
           args: --release --out dist --features mainnet
           sccache: 'true'
           manylinux: ${{ startsWith(matrix.platform.name, 'linux') && '2_28' || 'auto' }}
-          # The manylinux container needs git (snarkvm is a git dependency)
-          # and cmake + a C toolchain (aws-lc-sys builds C sources).
+          # Install build tools in the manylinux container.
+          # aws-lc-sys needs cmake and a C toolchain.
           before-script-linux: |
             if command -v dnf &> /dev/null; then
               dnf install -y git cmake clang

@@ -7,7 +7,12 @@ shared from ``_core``/``derivations`` — only the I/O differs.
 """
 from __future__ import annotations
 
+import asyncio
+from dataclasses import replace
+import math
+import time
 import logging
+from decimal import Decimal
 from typing import Any, Callable, Generic, Optional, TypeVar
 
 from aleo import AleoNetworkError, ProgramNotFound
@@ -15,6 +20,7 @@ from aleo import AleoNetworkError, ProgramNotFound
 from . import _generated as g
 from ._calls import extract_tx_id, root_outputs
 from ._core import (
+    _amount_to_base_units,
     decode_position_record,
     default_merkle_proofs,
     find_position_plaintext,
@@ -28,6 +34,7 @@ from ._core import (
     record_plaintext,
     register_program_sources,
     resolve_swap_params,
+    unreadable_airdrop_transactions,
 )
 from ._routing import claim_route, swap_route
 from .rebalance import RebalancePlan, plan_rebalance as _plan_rebalance
@@ -37,7 +44,7 @@ from .position_math import (
     fee_owed,
     u256_of,
 )
-from .api import AsyncApiClient, api_url_for
+from .api import AsyncApiClient, ConfirmAirdropResult, api_url_for
 from .tick_math import get_sqrt_price_at_tick_x128, int_to_u256_plaintext
 from .derivations import (
     BlindedIdentity,
@@ -52,7 +59,9 @@ from .errors import (
     PoolNotInitializedError,
     SwapOutputNotFinalizedError,
 )
+from ._quotes import quote_request, build_quote, quote_amounts, resolve_quote, multi_hop_inputs
 from .types import (
+    SwapQuote,
     ClaimResult,
     OwnedPosition,
     OwnedPositionState,
@@ -83,18 +92,22 @@ class AsyncDexCall(Generic[R]):
         """
         return self._bound.simulate(account)
 
-    async def transact(self, account: Any = None, **fee_kwargs: Any) -> R:
+    async def transact(self, account: Any = None, *, wait: bool = False,
+                       wait_timeout: float = 180.0, **fee_kwargs: Any) -> R:
         """Prove locally, broadcast, and build the typed result.
 
         Root-transition outputs are harvested from the built transaction
         before broadcast, so the result is complete without waiting for
-        confirmation.
+        confirmation. Set ``wait=True`` to wait for acceptance on chain.
         """
         tx = await self._bound.build_transaction(account, **fee_kwargs)
         outputs = root_outputs(tx.decoded(), self._bound.program_id,
                                self._bound.function_name)
         await self._aleo.network.submit_transaction(tx.raw)
-        return self._build(tx.id, outputs)
+        result = self._build(tx.id, outputs)
+        if wait:
+            await self._aleo.network.wait_for_transaction(tx.id, timeout=wait_timeout)
+        return result
 
     async def delegate(self, account: Any = None, **fee_kwargs: Any) -> R:
         """Delegate proving to the DPS (fee master pays by default) and build
@@ -274,6 +287,55 @@ class AsyncShieldSwap:
         except LookupError as exc:
             raise ValueError(f"{exc} for {self.program} — wrong program or scan range?") from None
         return identities.at(counter)
+
+    async def confirm_airdrop(self, *, timeout: float = 600.0, poll_interval: float = 5.0,
+                              account: Any = None) -> ConfirmAirdropResult:
+        """Fund the account and wait for its airdrop records to become spendable.
+
+        Requires API authentication and scanner registration. ``timeout`` covers
+        faucet settlement and scanning. Check ``success`` and ``error`` before
+        swapping. A record timeout retains the transfer results; inspect those
+        transactions before requesting another airdrop. Scanner errors propagate.
+        """
+        if any(not math.isfinite(v) or v < 0 for v in (timeout, poll_interval)):
+            raise ValueError("timeout and poll_interval must be finite and nonnegative")
+        acct = self._account(account)
+        provider = self._aleo.record_provider
+        if provider is None:
+            raise InsufficientRecordsError("No record provider configured")
+        deadline = time.monotonic() + timeout
+        funding = await self.api.confirm_airdrop(str(acct.address), timeout=timeout, poll_interval=poll_interval)
+        if not funding.success:
+            return funding
+        if any(not result.tx_id for result in funding.job.results):
+            return replace(funding, status="records_pending", message="Airdrop returned no transaction ID for a transfer; cannot confirm its record")
+        transaction_ids = {result.tx_id for result in funding.job.results}
+        while True:
+            records = await provider.find(acct, unspent=True)
+            pending = unreadable_airdrop_transactions(transaction_ids, records)
+            if not pending:
+                return funding
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return replace(funding, status="records_pending", message=
+                               f"Airdrop accepted but records are not available for: {', '.join(sorted(pending))}. Inspect these transfers before requesting another airdrop.")
+            await asyncio.sleep(min(poll_interval, remaining))
+
+    async def has_swap_balance(self, token_in_id: str, amount_in: int | str | Decimal,
+                               account: Any = None) -> bool:
+        """Check for one covering record; use token units for strings/Decimal.
+
+        Does not reserve records. Scanner errors propagate.
+        """
+        acct = self._account(account)
+        provider = self._aleo.record_provider
+        if provider is None:
+            raise InsufficientRecordsError("No record provider configured")
+        tokens = await self.api.get_tokens() if isinstance(amount_in, (str, Decimal)) else []
+        amount = _amount_to_base_units(amount_in, token_in_id, tokens)
+        program = await self._token_program(token_in_id)
+        records = await provider.find(acct, program=program, unspent=True)
+        return pick_covering_record(records, min_amount=amount, token_id=token_in_id) is not None
 
     async def _select_token_record(self, *, program: str, min_amount: int,
                                    token_id: Optional[str], account: Any) -> str:
@@ -583,14 +645,28 @@ class AsyncShieldSwap:
 
     # ── Writes ───────────────────────────────────────────────────────────────
 
-    async def swap(self, *, pool_key: str, token_in_id: str, amount_in: int,
-                   slippage_bps: int = 50, expected_out: Optional[int] = None,
+    async def quote(self, *, token_in: str, token_out: str, amount_in: str | Decimal,
+                    slippage_bps: int = 50) -> SwapQuote:
+        """Quote a direct or multi-hop swap from two symbols and a token amount.
+
+        Returns the API's best route and final slippage floor; pass it to
+        ``swap(quote)``. Requires API authentication. Quoting spends no funds
+        and needs no record scanning or transaction signature.
+        """
+        tokens = await self.api.get_tokens()
+        source, target, amount = quote_request(tokens, token_in, token_out, amount_in, slippage_bps)
+        route = await self.api.get_route(token_in=source.address, token_out=target.address, amount_in=amount)
+        return build_quote(source, target, amount, slippage_bps, route, self._aleo.network_name, self.program)
+
+    async def swap(self, quote: Optional[SwapQuote] = None, *, pool_key: Optional[str] = None,
+                   token_in_id: Optional[str] = None, amount_in: Optional[int | str | Decimal] = None,
+                   slippage_bps: Optional[int] = None, expected_out: Optional[int | str | Decimal] = None,
                    sqrt_price_limit: Optional[int] = None,
                    deadline_offset_blocks: int = 10_000,
                    nonce: Optional[int] = None,
                    token_in_program: Optional[str] = None,
                    token_record: Optional[str] = None,
-                   identity: Optional[BlindedIdentity] = None,
+                              identity: Optional[BlindedIdentity] = None,
                    wrapper_proofs: Optional[str] = None,
                    imports: Optional[dict[str, str]] = None,
                    account: Any = None) -> AsyncDexCall[SwapHandle]:
@@ -606,6 +682,13 @@ class AsyncShieldSwap:
         :class:`~aleo_shield_swap.types.SwapHandle` — persist it if the
         process might die before the claim.
 
+        Integer ``amount_in`` and ``expected_out`` values are base units.
+        Strings and ``Decimal`` values are token units (``"1.5"`` means 1.5
+        tokens), converted using registry decimals. Floats, excess precision,
+        non-finite values, and amounts outside u128 are rejected before proving.
+        Returned handle amounts remain in base units.
+        ``token_record`` bypasses scanning. Provider errors propagate.
+
         Quote first (``dex.api.get_route``) and pass *expected_out*: without
         it a spot estimate is used, which ignores fees and price impact.
         **This client has no journal**, so it cannot reserve blinding counters:
@@ -618,17 +701,34 @@ class AsyncShieldSwap:
         proving latency; a tight deadline aborts at finalize when proving
         outlives it.
         """
+        if quote is not None:
+            if any(v is not None for v in (pool_key, token_in_id, amount_in, expected_out, slippage_bps, sqrt_price_limit)):
+                raise ValueError("A quote cannot be combined with trade parameter overrides")
+            amount_in, expected_out = quote_amounts(quote, self._aleo.network_name, self.program)
+            pool_key, token_in_id, slippage_bps = quote.hops[0].pool_key, quote.token_in_id, quote.slippage_bps
+        elif pool_key is None or token_in_id is None or amount_in is None:
+            raise ValueError("Pass a quote or pool_key, token_in_id, and amount_in")
+        slippage_bps = 50 if slippage_bps is None else slippage_bps
+        multi_hop = quote is not None and len(quote.hops) > 1
         acct = self._account(account)
         pool = await self.get_pool(pool_key)
+        tokens = []
+        if isinstance(amount_in, (str, Decimal)) or isinstance(expected_out, (str, Decimal)):
+            tokens = await self.api.get_tokens()
+        amount_in = _amount_to_base_units(amount_in, token_in_id, tokens)
+        if expected_out is not None:
+            token_out_id = str(pool.token1) if token_in_id == str(pool.token0) else str(pool.token0)
+            expected_out = _amount_to_base_units(expected_out, token_out_id, tokens)
         slot = await self.get_slot(pool_key)
         resolved = resolve_swap_params(
             pool=pool, slot=slot, token_in_id=token_in_id, amount_in=amount_in,
             slippage_bps=slippage_bps, expected_out=expected_out,
             sqrt_price_limit=sqrt_price_limit)
-        deadline = int(await self._aleo.network.get_latest_height()) + deadline_offset_blocks
-        swap_nonce = nonce if nonce is not None else generate_swap_nonce()
-        if identity is None:
-            identity = await self._next_blinded_identity(acct)
+        hop_literals = []
+        if quote is not None:
+            pools = [pool] + [await self.get_pool(h.pool_key) for h in quote.hops[1:]]
+            slots = [slot] + [await self.get_slot(h.pool_key) for h in quote.hops[1:]]
+            resolved, hop_literals = resolve_quote(quote, pools, slots, amount_in, expected_out)
 
         record = token_record
         if record is None:
@@ -640,13 +740,22 @@ class AsyncShieldSwap:
         else:
             token_programs = [token_in_program] if token_in_program else []
 
-        route = swap_route(await self._is_wrapped(token_in_id))
+        deadline = int(await self._aleo.network.get_latest_height()) + deadline_offset_blocks
+        swap_nonce = nonce if nonce is not None else generate_swap_nonce()
+        if identity is None:
+            identity = await self._next_blinded_identity(acct)
+
+        route = swap_route(await self._is_wrapped(token_in_id), multi_hop)
         if route.program != self.program:
             token_programs.append(route.program)
             wrapper = await self._amm_token_program(token_in_id)
             if wrapper:
                 token_programs.append(wrapper)
-        await self._ensure(token_programs, imports)
+        if multi_hop:
+            for hop in quote.hops:
+                token_programs.append(await self._amm_token_program(hop.token_in))
+                token_programs.append(await self._amm_token_program(hop.token_out))
+        await self._ensure([p for p in token_programs if p], imports)
 
         inputs = [
             record, identity.blinding_factor, identity.blinded_address,
@@ -663,6 +772,10 @@ class AsyncShieldSwap:
                     "expected_out or a slippage below 100%")
             inputs = [record, wrapper_proofs or default_merkle_proofs(),
                       *inputs[1:]]
+        if multi_hop:
+            inputs = multi_hop_inputs(quote, hop_literals, record, identity, amount_in,
+                                      resolved.amount_out_min, swap_nonce, deadline,
+                                      wrapper_proofs or default_merkle_proofs(), route.program != self.program)
         prog = await self._program(route.program)
         bound = getattr(prog.functions, route.function)(*inputs)
 
@@ -681,11 +794,13 @@ class AsyncShieldSwap:
                 blinded_address=identity.blinded_address,
                 token_in_id=token_in_id, token_out_id=resolved.token_out_id,
                 pool_key=pool_key, amount_in=amount_in,
-                transaction_id=tx_id, program=self.program)
+                transaction_id=tx_id, program=self.program,
+                pool_keys=tuple(h.pool_key for h in quote.hops) if multi_hop else ())
 
         return AsyncDexCall(self._aleo, bound, build_result)
 
     async def claim_swap_output(self, handle: SwapHandle, *,
+                                timeout: float = 0.0,
                                 wrapper_proofs: Optional[str] = None,
                                 imports: Optional[dict[str, str]] = None,
                                 account: Any = None) -> AsyncDexCall[ClaimResult]:
@@ -700,10 +815,12 @@ class AsyncShieldSwap:
         records owned by the signer (output first, refund second); the
         mapping entry is consumed.
 
-        Raises :class:`SwapOutputNotFinalizedError` **at prepare time** when
-        the output is not readable yet (retry after a few blocks) or was
-        already claimed.
+        After swap confirmation, ``timeout`` sets the maximum wait in seconds
+        (default 0). Missing output is polled every 2s without submitting. Timeout raises
+        ``SwapOutputNotFinalizedError``; other errors propagate.
         """
+        if not math.isfinite(timeout) or timeout < 0:
+            raise ValueError("timeout must be finite and nonnegative")
         self._account(account)
         if not handle.swap_id:
             raise ValueError("handle.swap_id is not set — recover it from the "
@@ -711,7 +828,16 @@ class AsyncShieldSwap:
         if not handle.blinding_factor or not handle.blinded_address:
             raise ValueError("Claims need handle.blinding_factor and "
                              "handle.blinded_address (set by swap()).")
-        out = await self.get_swap_output(handle.swap_id)
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                out = await self.get_swap_output(handle.swap_id)
+                break
+            except SwapOutputNotFinalizedError:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise
+                await asyncio.sleep(min(2.0, remaining))
         w_out = await self._is_wrapped(str(out.token_out))
         w_in = await self._is_wrapped(str(out.token_in))
         no_refund = int(out.amount_remaining) == 0

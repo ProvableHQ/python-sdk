@@ -469,7 +469,9 @@ class RecordScanner:
             # Re-register if we have a view key for this uuid
             vk = self._view_keys.get(resolved_uuid)
             if vk is not None:
-                self.register_encrypted(vk, 0)
+                registration = self.register_encrypted(vk, 0)
+                if not registration.get("ok"):
+                    return registration
                 resp = self._send_authed(
                     "POST", f"{self.url}/records/owned", data=body
                 )
