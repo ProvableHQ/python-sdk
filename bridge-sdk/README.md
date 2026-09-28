@@ -24,6 +24,18 @@ python -m pip install aleo-bridge-sdk
 
 Import the package as `aleo_bridge`.
 
+## Examples
+
+The installed package includes runnable examples for quotes, transfers,
+shielding, and recovery. Start with a script's command-line help:
+
+```sh
+python -m aleo_bridge.examples.quote_transfer --help
+```
+
+Use any script name from the [examples guide](examples/README.md) after
+`aleo_bridge.examples.`, without the `.py` extension. No checkout is needed.
+
 ## Supported pairs
 
 The bridge supports transfers to and from Aleo, connecting assets on Ethereum
@@ -664,6 +676,11 @@ Ethereum account so concurrent submissions do not compete for a nonce.
 An agent can help a caller find a route, review its costs, and monitor a
 transfer. An application can limit the agent to those read operations or also
 allow it to submit transactions after explicit confirmation.
+
+Agents can use the installed examples as reference flows without cloning the
+repository. Run `python -m aleo_bridge.examples.quote_transfer --help`, or
+choose another script from [Examples](#examples). The packaged scripts show
+argument handling, submission, monitoring, and recovery.
 
 The example below exposes the bridge tools and requests a USDC quote. It does
 not submit a deposit. Afterward, choose whether the application should expose

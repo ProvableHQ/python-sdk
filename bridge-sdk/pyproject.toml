@@ -25,3 +25,20 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["python/aleo_bridge"]
+
+# Include only tutorial sources; local journals and checkpoints stay out.
+[tool.hatch.build.targets.wheel.force-include]
+"examples/__init__.py" = "aleo_bridge/examples/__init__.py"
+"examples/_arguments.py" = "aleo_bridge/examples/_arguments.py"
+"examples/bridge_sol.py" = "aleo_bridge/examples/bridge_sol.py"
+"examples/bridge_sol_to_solana.py" = "aleo_bridge/examples/bridge_sol_to_solana.py"
+"examples/bridge_usdc_private_balance.py" = "aleo_bridge/examples/bridge_usdc_private_balance.py"
+"examples/bridge_usdc_private_recipient.py" = "aleo_bridge/examples/bridge_usdc_private_recipient.py"
+"examples/bridge_usdcx_to_ethereum.py" = "aleo_bridge/examples/bridge_usdcx_to_ethereum.py"
+"examples/bridge_wbtc.py" = "aleo_bridge/examples/bridge_wbtc.py"
+"examples/bridge_wbtc_to_ethereum.py" = "aleo_bridge/examples/bridge_wbtc_to_ethereum.py"
+"examples/quote_transfer.py" = "aleo_bridge/examples/quote_transfer.py"
+"examples/recover_from_journal.py" = "aleo_bridge/examples/recover_from_journal.py"
+"examples/recover_without_files.py" = "aleo_bridge/examples/recover_without_files.py"
+"examples/shield_assets.py" = "aleo_bridge/examples/shield_assets.py"
+"examples/README.md" = "aleo_bridge/examples/README.md"

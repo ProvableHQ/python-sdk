@@ -42,6 +42,12 @@ def test_the_build_config_keeps_agents_md_inside_the_wheel():
         assert not any(".md" in pattern or "AGENTS" in pattern for pattern in wheel.get(key, []))
 
 
+def test_wheel_includes_inbound_sol_example():
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    included = pyproject["tool"]["hatch"]["build"]["targets"]["wheel"]["force-include"]
+    assert included["examples/bridge_sol.py"] == "aleo_bridge/examples/bridge_sol.py"
+
+
 def test_readme_covers_the_journey():
     """The README is written for a caller: explicit client construction, the lifecycle, recovery,
     privacy conversions, and the agent surface. Operator tooling (live tests, rehearsal gates,
