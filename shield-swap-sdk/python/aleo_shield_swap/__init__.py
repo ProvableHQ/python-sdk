@@ -37,6 +37,8 @@ from .types import (
     StageOutcome as StageOutcome,
     SwapBatchReport as SwapBatchReport,
     SwapHandle as SwapHandle,
+    SwapQuote as SwapQuote,
+    SwapQuoteHop as SwapQuoteHop,
     TxResult as TxResult,
 )
 from .profile import Profile as Profile
@@ -82,7 +84,7 @@ __version__ = "0.5.1"
 
 __all__ = [
     "ShieldSwap", "AsyncShieldSwap", "ApiClient", "AsyncApiClient",
-    "SwapHandle", "ClaimResult", "MintResult", "TxResult", "SlotView",
+    "SwapQuote", "SwapQuoteHop", "SwapHandle", "ClaimResult", "MintResult", "TxResult", "SlotView",
     "BlindedIdentity", "derive_blinding_factor", "derive_blinded_address",
     "derive_pool_key", "derive_tick_key",
     "ShieldSwapError", "SwapOutputNotFinalizedError", "PoolNotFoundError",

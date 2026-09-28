@@ -35,6 +35,7 @@ def test_collect_all_claims_finalized_skips_pending(dex, monkeypatch):
             def delegate(inner, account=None):
                 if handle.swap_id == "early":
                     raise SwapOutputNotFinalizedError("early")
+                self.journal.record_claim(handle.swap_id, "txc", 42)
                 return ClaimResult("txc", 42, 0)
         return _Call()
 
@@ -58,6 +59,7 @@ def test_collect_all_rerun_is_idempotent(dex, monkeypatch):
 
         class _Call:
             def delegate(inner, account=None):
+                self.journal.record_claim(handle.swap_id, "txc", 42)
                 return ClaimResult("txc", 42, 0)
         return _Call()
 

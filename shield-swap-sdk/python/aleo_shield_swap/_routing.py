@@ -29,13 +29,15 @@ class Route(NamedTuple):
     function: str
 
 
-def swap_route(input_wrapped: bool) -> Route:
+def swap_route(input_wrapped: bool, multi_hop: bool = False) -> Route:
     """Route a swap by whether the INPUT token is wrapped.
 
     A wrapped input must enter through the router, which unwraps it; a plain
     ARC-20 calls the core directly. The output shape does not matter here — it is
     settled at claim time by :func:`claim_route`.
     """
+    if multi_hop:
+        return Route(ROUTER_ID, "swap_mh_from_wrapped") if input_wrapped else Route(PROGRAM_ID, "swap_multi_hop")
     return (Route(ROUTER_ID, "swap_from_wrapped") if input_wrapped
             else Route(PROGRAM_ID, "swap"))
 

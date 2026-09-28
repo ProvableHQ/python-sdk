@@ -9,8 +9,6 @@ token-record selection — everything both ``client.py`` and
 from __future__ import annotations
 
 import re
-import math
-import time
 import secrets
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
@@ -250,6 +248,19 @@ def record_plaintext(rec: Any) -> Optional[str]:
     return getattr(rec, "record_plaintext", None)
 
 
+def unreadable_airdrop_transactions(transaction_ids: set[str], records: list[Any]) -> set[str]:
+    """Match positive, decrypted token records to the faucet's transactions."""
+    pending = set(transaction_ids)
+    for record in records:
+        tx_id = record.get("transaction_id") if isinstance(record, dict) else getattr(record, "transaction_id", None)
+        # Hosted scanner IDs may be padded with spaces.
+        tx_id = tx_id.strip() if isinstance(tx_id, str) else tx_id
+        info = parse_token_record_info(record_plaintext(record) or "")
+        if info is not None and info["amount"] > 0:
+            pending.discard(tx_id)
+    return pending
+
+
 #: Fields a PositionNFT record carries.  Checked as a set, so a future record
 #: type sharing one of them is not mistaken for a position.
 POSITION_RECORD_FIELDS = ("token_id", "pool", "tick_lower", "tick_upper",
@@ -429,7 +440,6 @@ def select_token_record(
     min_amount: int,
     token_id: Optional[str] = None,
     account: Any = None,
-    wait_seconds: float = 0.0,
 ) -> str:
     """One unspent record plaintext from *program* covering *min_amount*.
 
@@ -438,21 +448,17 @@ def select_token_record(
     filters registry-style records; wrapper-program records carry no
     ``token_id`` and match any.
     """
-    if not math.isfinite(wait_seconds) or wait_seconds < 0:
-        raise ValueError("record_wait_seconds must be finite and nonnegative")
     provider = aleo.record_provider
     if provider is None:
         raise InsufficientRecordsError(
-            "No record provider configured — pass token_record= explicitly.")
-    deadline = time.monotonic() + wait_seconds
-    while True:
-        records = provider.find(account, program=program, unspent=True)
-        chosen = pick_covering_record(records, min_amount=min_amount, token_id=token_id)
-        if chosen is not None:
-            return chosen
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise InsufficientRecordsError(
-                f"No unspent {program} record covers {min_amount} "
-                f"(token_id={token_id or 'any'}) — privatize funds or pass token_record=.")
-        time.sleep(min(5.0, remaining))
+            "No record provider configured (aleo.record_provider is None) — "
+            "pass token_record= explicitly or configure a scanner."
+        )
+    records = provider.find(account, program=program, unspent=True)
+    chosen = pick_covering_record(records, min_amount=min_amount, token_id=token_id)
+    if chosen is None:
+        raise InsufficientRecordsError(
+            f"No unspent {program} record covers {min_amount} "
+            f"(token_id={token_id or 'any'}) — privatize funds or pass token_record=."
+        )
+    return chosen

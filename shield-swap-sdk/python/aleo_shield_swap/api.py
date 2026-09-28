@@ -38,11 +38,37 @@ class ConfirmAirdropResult:
 
     ``status`` is ``settled`` with ``job`` populated, or ``rate_limited`` with
     ``message`` populated. A settled job can still contain failed token transfers.
+    The account-aware client's ``confirm_airdrop()`` also returns
+    ``records_pending`` if accepted transfers remain unavailable to its scanner.
     """
 
-    status: typing.Literal["settled", "rate_limited"]
+    status: typing.Literal["settled", "rate_limited", "records_pending"]
     job: Optional[models.AirdropJob] = None
     message: Optional[str] = None
+
+    @property
+    def success(self) -> bool:
+        """Whether the faucet reported every transfer accepted on chain."""
+        return (self.status == "settled" and self.job is not None
+                and bool(self.job.results)
+                and all(result.status == "accepted" for result in self.job.results))
+
+    @property
+    def error(self) -> Optional[str]:
+        """Failure details, including transaction IDs when available; None on success."""
+        if self.success:
+            return None
+        if self.status == "rate_limited":
+            return f"Airdrop rate limited: {self.message or 'No reason provided'}"
+        if self.status == "records_pending":
+            return self.message or "Airdrop records are not yet available"
+        if self.job is None or not self.job.results:
+            return "Airdrop returned no token results; inspect funding before continuing"
+        return "; ".join(
+            f"Airdrop {result.symbol}: {result.status}; "
+            f"transaction={result.tx_id}, error={result.error}"
+            for result in self.job.results if result.status != "accepted"
+        )
 
 
 def _airdrop_outcome(job: models.AirdropJob, job_id: str,

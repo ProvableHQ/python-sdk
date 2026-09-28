@@ -16,6 +16,51 @@ from .tick_math import Q128, round_tick_to_spacing, u256_to_int
 
 
 @dataclass(frozen=True)
+class SwapQuoteHop:
+    """One pool in route order, with on-chain token addresses and direction."""
+
+    pool_key: str
+    token_in: str
+    token_out: str
+    zero_for_one: bool
+
+
+@dataclass(frozen=True)
+class SwapQuote:
+    """A read-only price and route accepted by ``swap(quote)``.
+
+    Attributes:
+        amount_in: Amount sold in input-token units.
+        estimated_amount_out: Estimated final output in output-token units.
+        minimum_amount_out: Final output floor after slippage, in token units.
+        hops: One to three ordered pools; executed in one swap transaction.
+        token_in_id: On-chain input-token address, not the API's database ID.
+        token_out_id: On-chain final output-token address.
+        network: Network where this quote can be executed.
+        program: Core AMM program used by this quote.
+        slippage_bps: Tolerance applied once to the route's final estimate.
+        token_in_decimals: Precision used for the input amount.
+        token_out_decimals: Precision used for final output amounts.
+        protocol_revision: API protocol revision observed while quoting.
+
+    A quote reserves no funds and does not guarantee execution at its estimate.
+    """
+
+    amount_in: str
+    estimated_amount_out: str
+    minimum_amount_out: str
+    hops: tuple[SwapQuoteHop, ...]
+    token_in_id: str
+    token_out_id: str
+    network: str
+    program: str
+    slippage_bps: int
+    token_in_decimals: int
+    token_out_decimals: int
+    protocol_revision: int
+
+
+@dataclass(frozen=True)
 class SwapHandle:
     """The serializable thread between a private swap's two transactions.
 
@@ -34,6 +79,7 @@ class SwapHandle:
     amount_in: int
     transaction_id: str
     program: str
+    pool_keys: tuple[str, ...] = ()
 
     def to_json(self) -> str:
         """Serialize the handle to JSON for storage or hand-off.
@@ -59,7 +105,9 @@ class SwapHandle:
                 handle is rebuilt strictly, so a partial object fails loudly
                 rather than producing an unclaimable handle.
         """
-        return cls(**json.loads(s))
+        data = json.loads(s)
+        data["pool_keys"] = tuple(data.get("pool_keys", ()))
+        return cls(**data)
 
 
 @dataclass(frozen=True)

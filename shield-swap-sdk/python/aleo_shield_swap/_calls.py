@@ -75,11 +75,13 @@ class DexCall(Generic[R]):
 
     def __init__(self, aleo: Any, bound: Any,
                  build_result: Callable[[str, list[str]], R], *,
-                 build_before_wait: bool = False) -> None:
+                 build_before_wait: bool = False,
+                 on_confirmed: Callable[[R], None] | None = None) -> None:
         self._aleo = aleo
         self._bound = bound
         self._build = build_result
         self._build_before_wait = build_before_wait
+        self._on_confirmed = on_confirmed
 
     def __repr__(self) -> str:
         return f"DexCall({self._bound!r})"
@@ -88,19 +90,25 @@ class DexCall(Generic[R]):
         """Local authorization — no proof, no send; inspect before spending."""
         return self._bound.simulate(account)
 
-    def transact(self, account: Any = None, **fee_kwargs: Any) -> R:
+    def transact(self, account: Any = None, *, wait: bool = False,
+                 wait_timeout: float = 180.0, **fee_kwargs: Any) -> R:
         """Prove locally, broadcast, and build the typed result.
 
         Root-transition outputs are harvested from the built transaction
         before broadcast, so the result is complete without waiting for
-        confirmation.
+        confirmation. Set ``wait=True`` to confirm and update an attached claim journal.
         """
         tx = self._bound.build_transaction(account, **fee_kwargs)
         outputs = root_outputs(tx.decoded(), self._bound.program_id,
                                self._bound.function_name)
         # Same submit path the facade's BoundCall.transact uses.
         self._aleo.network.submit_transaction(tx.raw)
-        return self._build(tx.id, outputs)
+        result = self._build(tx.id, outputs)
+        if wait:
+            self._aleo.network.wait_for_transaction(tx.id, timeout=wait_timeout)
+            if self._on_confirmed is not None:
+                self._on_confirmed(result)
+        return result
 
     def delegate(self, account: Any = None, *, wait: bool = True,
                  wait_timeout: float = 180.0, **fee_kwargs: Any) -> R:
@@ -115,6 +123,7 @@ class DexCall(Generic[R]):
         payload = self._bound.delegate(account, **fee_kwargs)
         tx_id = extract_tx_id(payload)
         decoded = _payload_transitions(payload)
+        confirmed = wait or decoded is None
         # Swap builders retain claim secrets before any confirmation I/O. An
         # ID-only response retains a provisional handle, completed after lookup.
         if self._build_before_wait:
@@ -124,6 +133,8 @@ class DexCall(Generic[R]):
             if decoded is not None:
                 if wait:
                     self._aleo.network.wait_for_transaction(tx_id, timeout=wait_timeout)
+                if wait and self._on_confirmed is not None:
+                    self._on_confirmed(result)
                 return result
         if decoded is None:
             self._aleo.network.wait_for_transaction(tx_id, timeout=wait_timeout)
@@ -137,4 +148,7 @@ class DexCall(Generic[R]):
             self._aleo.network.wait_for_transaction(tx_id, timeout=wait_timeout)
         outputs = root_outputs(decoded, self._bound.program_id,
                                self._bound.function_name)
-        return self._build(tx_id, outputs)
+        result = self._build(tx_id, outputs)
+        if confirmed and self._on_confirmed is not None:
+            self._on_confirmed(result)
+        return result

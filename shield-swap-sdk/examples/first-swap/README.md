@@ -36,32 +36,55 @@ query returns HTTP 422, the SDK re-registers the account and retries that query
 once. A failed re-registration surfaces its error.
 
 `dex.api.authenticate()` signs the API challenge with the account's key.
-`confirm_airdrop()` requests tokens and waits for the faucet job to settle.
+`has_swap_balance(source.address, "1.5")` checks for a covering private USDCx
+record first. An account with enough funds skips the airdrop. Scanner errors
+stop the example rather than triggering funding. Otherwise,
+`shield_swap_client.confirm_airdrop()` requests tokens, waits for the faucet
+job to settle, then waits for decrypted, unspent token records from the
+airdrop's transaction IDs. Older records do not satisfy this check.
 It returns `funding.status == "settled"` with per-token outcomes in
 `funding.job.results`, or `"rate_limited"` with the faucet's explanation in
 `funding.message`. A settled job can contain failed token transfers.
+The example checks `funding.success` and raises `funding.error` on failure.
+Success requires every transfer accepted and its records available; the error
+includes the rate-limit reason or unsuccessful transfers and their transaction IDs.
 
-The helper polls every 5 seconds and times out after 10 minutes by default.
+The helper polls every 5 seconds; its default 10-minute timeout covers both
+settlement and record scanning. If scanning times out, `funding.success` is
+false and `funding.error` lists the pending transaction IDs. The lower-level
+`api.confirm_airdrop(address)` only waits for faucet settlement.
 `AirdropPendingError.job_id` identifies a timed-out job for further status reads.
-A rate-limited account can continue if it already holds enough USDCx.
-It looks up USDCx and ETH with `get_token(symbol)`, quotes a direct pool
-with `get_route()`, then calls
-`swap(...).delegate(wait=True)` with that quote and a 0.5% slippage limit.
-The example passes `amount_in="1.5"` and the quote's decimal output directly
-to `swap()`. The SDK converts both using token metadata; no unit conversion
-is needed in the example. Strings and `Decimal` values represent token units;
-integers retain their existing base-unit meaning. Excess precision is rejected.
+The example stops on a rate-limit response, missing token results, or any
+transfer that was not accepted on chain. For pending transfers, inspect the
+reported transaction before requesting another airdrop. API errors and
+confirmation timeouts also stop the example before it submits a swap.
+`quote(token_in="USDCx", token_out="ETH", amount_in="1.5", slippage_bps=50)`
+resolves the symbols and asks the API for its best route. The result includes
+`estimated_amount_out`, `minimum_amount_out`, and ordered `hops`. Amounts on the
+quote are decimal strings in token units. The slippage floor applies once to
+the final output, including for two- and three-hop routes.
+
+`swap(quote).delegate(wait=True)` executes that route in one transaction. The
+SDK checks its network, token path, and live pool directions before preparing
+it. A quote reserves no records and does not guarantee its estimated price;
+refresh the quote before a later submission if prices have changed.
+The existing `swap(pool_key=..., token_in_id=..., amount_in=...)` form remains
+available. Its integer amounts use base units; strings/Decimal use token units.
 
 The SDK selects a token record and returns the handle needed to claim.
-One unspent record must cover 1.5 USDCx. The example sets `record_wait_seconds=120` to let the SDK poll for a covering
-record every five seconds. If none appears within two minutes, preparation
-raises `InsufficientRecordsError` before proving or submitting a swap. Scanner
-errors propagate immediately. Other callers default to no wait.
+One unspent record must cover 1.5 USDCx. If the scanner does not return a
+covering record, preparation raises `InsufficientRecordsError` before proving
+or submitting a swap. Allow newly funded records to become available before
+trying again. Scanner errors propagate immediately.
 
 ## Completion and recovery
 
-After the swap confirms, `claim_swap_output(handle).delegate(wait=True)`
-submits one claim and waits for confirmation. `claim.transaction_id` identifies
+After the swap confirms, `claim_swap_output(handle, timeout=5)`
+waits up to five seconds for its output mapping, polling missing-output reads
+every two seconds. Then `.delegate(wait=True)` submits one claim and waits
+for confirmation. Timeout stops before submission; preserve the handle and
+inspect the existing swap instead of rerunning the example. Other read errors
+propagate immediately. `claim.transaction_id` identifies
 the claim and `claim.amount_out` contains the received ETH in base units.
 The example writes no console logs. Generated accounts are saved regardless
 of the journal setting.
@@ -79,7 +102,9 @@ Do not rerun the whole script to recover a swap.
 
 Set `ENABLE_JOURNAL = True` in `swap.py` to attach the SDK's `Journal` at
 `testnet-<account-address>.jsonl` in the working directory. The SDK retains swap
-handles there, and the example records the confirmed claim. Keep the file
+handles there and automatically records the claim after confirmation.
+`delegate(wait=True)` and `transact(wait=True)` update the journal; non-waiting
+submissions do not mark a claim confirmed. Keep the file
 private: it contains the blinding information needed to claim.
 
 The flag only controls journal attachment. It does not change the account,

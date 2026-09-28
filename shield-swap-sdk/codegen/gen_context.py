@@ -27,7 +27,7 @@ OUTS = [_ROOT / "AGENTS.md", _ROOT / "python" / "aleo_shield_swap" / "AGENTS.md"
 
 TIER1 = ["from_profile", "onboard", "status", "get_positions",
          "swap_many", "collect_all"]
-TIER2_CLIENT = ["swap", "claim_swap_output", "create_pool", "mint",
+TIER2_CLIENT = ["confirm_airdrop", "quote", "swap", "claim_swap_output", "create_pool", "mint",
                 "increase_liquidity", "decrease_liquidity", "collect", "burn",
                 "plan_rebalance", "rebalance_position",
                 "get_pool", "get_slot", "get_swap_output", "get_swap_execution",
@@ -180,12 +180,8 @@ them):
   input records** — `swap_many` implements the recipe; copy it, don't
   improvise.
 
-Suggested path for a new integrator: (1) `onboard()` a profile — it
-doubles as a test fixture; (2) walk swap → `collect_all()` once with the
-Tier 1 methods so the mechanics are concrete; (3) read the reference below
-for the surface your app needs; (4) `tests/integration/` and
-`scripts/rehearsal.py` in the repo are working reference implementations
-of the full journey."""
+For the funding, swap, and claim flow, see
+`examples/first-swap/`."""
 
 
 def _entry(name: str, fn: object) -> str:
