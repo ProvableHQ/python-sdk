@@ -420,7 +420,13 @@ def build_bridge(environment: str) -> Any:
                         private_key=live_config.evm_private_key(environment))
     solana = Solana.from_env() if environment == "mainnet" else None
     store = FileCheckpointStore(live_config.state_dir() / environment / "checkpoints")
-    bridge = Bridge(aleo, ethereum=ethereum, solana=solana, checkpoints=store)
+    evm = {}
+    if environment == "mainnet":
+        for chain in ("arc", "base", "arbitrum"):
+            url = os.environ.get(f"{chain.upper()}_RPC_URL")
+            if url:
+                evm[chain] = Ethereum(url, private_key=live_config.evm_private_key(environment))
+    bridge = Bridge(aleo, ethereum=ethereum, evm=evm, solana=solana, checkpoints=store)
     assert bridge.environment == environment
     return bridge
 

@@ -14,7 +14,7 @@ FORWARD_HOOK = b"cctp-forward".ljust(24, b"\0") + bytes(8)
 LEGACY_FORWARD_HOOK = b"cctp-forward".ljust(24, b"\0") + (1).to_bytes(4, "big") + bytes(4)
 
 
-def address_bytes(address: str) -> bytes:
+def address_bytes(address: object) -> bytes:
     if not isinstance(address, str) or not re.fullmatch(r"0x[0-9a-fA-F]{40}", address):
         raise ConfigurationError("CCTP requires a 20-byte EVM address")
     value = bytes.fromhex(address[2:])
@@ -44,7 +44,7 @@ class CctpMessage:
     hook: bytes
 
 
-def decode_message(raw: bytes) -> CctpMessage:
+def decode_message(raw: object) -> CctpMessage:
     if not isinstance(raw, bytes) or len(raw) < 376:
         raise AttestationError("CCTP message is truncated")
     def uint(start: int, size: int) -> int:

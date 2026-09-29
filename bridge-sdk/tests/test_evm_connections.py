@@ -68,3 +68,26 @@ def test_explicit_arc_override_wins_over_environment(monkeypatch):
     with patch('aleo_bridge.client.build_aleo', return_value=FakeAleo(mappings=default_mappings())):
         b = Bridge.from_env(ethereum=None, solana=None, evm={'arc': arc})
     assert b.evm('arc').conn is arc
+
+
+def test_explicit_ethereum_map_override_wins_over_environment(monkeypatch):
+    monkeypatch.setenv('BRIDGE_PRIVATE_KEY','fake')
+    monkeypatch.setenv('ETHEREUM_RPC_URL','https://unused.invalid')
+    monkeypatch.setenv('EVM_PRIVATE_KEY',KEY)
+    connection = Ethereum(w3=fake_web3())
+    with patch('aleo_bridge.client.build_aleo',return_value=FakeAleo(mappings=default_mappings())):
+        b = Bridge.from_env(evm={'ethereum':connection},solana=None)
+    assert b.ethereum is connection
+
+
+def test_profile_ethereum_map_override_wins_over_environment(monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setenv('ETHEREUM_RPC_URL','https://unused.invalid')
+    monkeypatch.setenv('EVM_PRIVATE_KEY',KEY)
+    connection = Ethereum(w3=fake_web3())
+    profile = SimpleNamespace(endpoint='https://unused.invalid',network='mainnet',private_key='fake')
+    with patch('aleo_bridge.client.build_aleo',return_value=FakeAleo(mappings=default_mappings())), \
+         patch('aleo_bridge.client.Profile.load_or_create',return_value=profile), \
+         patch('aleo_bridge.client._checkpoints_for_profile',return_value=None):
+        b = Bridge.from_profile(evm={'ethereum':connection})
+    assert b.ethereum is connection

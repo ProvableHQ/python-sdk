@@ -330,5 +330,5 @@ __all__ = [
     "CALLER_BOUNDARIES", "TERMINAL", "AleoHyperlaneQuote", "AleoXReserveQuote", "Attestation", "BridgeStatus",
     "BurnReceipt", "ChainStatus", "DepositReceipt", "DispatchReceipt", "EvmHyperlaneQuote", "EvmXReserveQuote",
     "Fee", "GasQuote", "MintReceipt", "Plan", "PreparedTx", "PrivacyReceipt", "Progress", "Quote", "Receipt",
-    "SolanaHyperlaneQuote", "Status", "Step", "to_progress",
+    "SolanaHyperlaneQuote", "Status", "Step", "to_progress", "CctpOptions", "EvmCctpQuote",
 ]

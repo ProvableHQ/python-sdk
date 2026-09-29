@@ -170,3 +170,59 @@ def test_offline_checkpoint_reconstruction_excludes_attestation():
     assert offline.plan.cctp == p.plan.cctp
     assert 'attestation' not in cp.to_json()
     assert h.source.methods == h.destination.methods == h.circle.urls == []
+
+
+def test_callback_failure_preserves_burn_in_store_and_error(tmp_path):
+    from aleo_bridge import FileCheckpointStore
+    store = FileCheckpointStore(tmp_path)
+    h = Harness(allowance=0,checkpoints=store)
+    def callback(cp):
+        if cp.source.get('transactionId'):
+            raise OSError('callback disk unavailable')
+    with pytest.raises(BridgeError) as caught:
+        h.bridge.execute(h.plan,on_checkpoint=callback,timeout_seconds=0)
+    assert caught.value.broadcast_id == h.source.hash_at(2)
+    assert caught.value.checkpoint.source['transactionId'] == h.source.hash_at(2)
+    assert any(cp.source.get('transactionId') == h.source.hash_at(2) for cp in store.list())
+    assert h.bridge.recover(caught.value.checkpoint).next == 'done'
+    assert len(h.source.sent) == 2
+
+
+def test_stale_approval_recovers_existing_burn_before_resuming():
+    h = Harness(allowance=0)
+    h.execute()
+    approval = h.saved[0]
+    burn = h.source.hash_at(2)
+    h.source.history_logs = h.source_logs(burn)
+    h.source.history_logs[0]['blockNumber'] = hex(101)
+    # Receipt and event providers now share a consistent mined head.
+    h.source.block_number = 101
+    recovered = h.bridge.recover(approval)
+    assert recovered.next == 'done'
+    assert recovered.receipt.source_tx_id == burn
+    assert len(h.source.sent) == 2
+
+
+def test_stale_approval_with_unresolved_later_nonce_cannot_resume():
+    h = Harness(allowance=0)
+    h.source.pending_nth.add(2)
+    h.execute()
+    recovered = h.bridge.recover(h.saved[0])
+    assert recovered.next == 'wait'
+    assert recovered.receipt.status == Status.SOURCE_APPROVAL_PENDING
+    assert len(h.source.sent) == 2
+
+
+def test_approval_does_not_adopt_identical_burn_before_its_nonce():
+    h = Harness(allowance=0)
+    h.execute()
+    cp = h.saved[0]
+    approval,burn = h.source.sent
+    # Model an older identical burn and a subsequent approval in the same block.
+    approval['nonce'],burn['nonce'] = 2,1
+    h.source.nonce_pending = 3
+    h.source.history_logs = h.source_logs(burn['hash'])
+    h.source.history_logs[0]['blockNumber'] = hex(h.source.block_number)
+    result = h.bridge.recover(cp)
+    assert result.next == 'resume'
+    assert result.receipt.source_tx_id is None

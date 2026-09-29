@@ -10,10 +10,15 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Callable, Generic, TypeVar
+from typing import Any, Callable, Generic, TypeVar, TYPE_CHECKING
 
 from .errors import BridgeError, ConfigurationError
 from .types import PreparedTx
+
+if TYPE_CHECKING:
+    from .types import Plan
+    from .registry import Registry
+    from .checkpoint import Checkpoint, CheckpointStore
 
 R = TypeVar("R")
 _DUPLICATE_MARKER = "already exists"

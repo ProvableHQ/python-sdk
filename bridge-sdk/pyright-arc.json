@@ -1,0 +1,5 @@
+{
+  "extends": "pyrightconfig.json",
+  "include": ["python/aleo_bridge/_cctp_abi.py", "python/aleo_bridge/_cctp_message.py", "python/aleo_bridge/_registry_compatibility.py", "python/aleo_bridge/_evm_connections.py", "python/aleo_bridge/cctp.py"],
+  "typeCheckingMode": "strict"
+}

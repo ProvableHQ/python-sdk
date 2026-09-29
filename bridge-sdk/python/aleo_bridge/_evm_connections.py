@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, cast
 
 from .errors import ConfigurationError
 from .eth import Ethereum
@@ -22,7 +22,7 @@ def coerce(value: Any) -> Ethereum:
 
 def normalize(registry: Registry, environment: str, connections: Mapping[str, Any] | None,
               ethereum: Ethereum | None) -> dict[str, Ethereum]:
-    if connections is not None and not isinstance(connections, Mapping):
+    if connections is not None and not isinstance(cast(object, connections), Mapping):
         raise ConfigurationError("evm= must map registry chain IDs to EVM connections")
     out: dict[str, Ethereum] = {}
     for key, value in (connections or {}).items():
@@ -59,4 +59,6 @@ def from_env(overrides: Mapping[str, Any] | None = None) -> dict[str, Any]:
 
 def needs_legacy_environment(connections: Mapping[str, Any]) -> bool:
     """Retain legacy pair validation unless another explicitly named EVM is configured."""
+    if "ethereum" in connections or "sepolia" in connections:
+        return False
     return not connections or bool(os.environ.get("ETHEREUM_RPC_URL") or os.environ.get("BRIDGE_LIVE_ETHEREUM_RPC_URL"))

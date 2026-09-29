@@ -17,7 +17,7 @@ import os
 import threading
 import time
 from dataclasses import dataclass, replace
-from typing import Any, Callable, Mapping, Protocol, Sequence, runtime_checkable
+from typing import Any, Callable, Mapping, Protocol, Sequence, runtime_checkable, TYPE_CHECKING
 
 import requests
 
@@ -40,6 +40,9 @@ from .errors import (
 from .registry import Route
 from .types import DispatchReceipt, Fee, Plan, Receipt, SolanaHyperlaneQuote, Status, Step
 from .units import format_decimal_amount, resolve_amount
+
+if TYPE_CHECKING:
+    from .checkpoint import Checkpoint, CheckpointStore
 
 DEFAULT_SOLANA_RPC_URL = "https://api.mainnet-beta.solana.com"
 CONFIRMED = "confirmed"
@@ -353,11 +356,12 @@ class _AsyncClientAdapter:
         return self._run(self._client._provider.make_request(request, IsBlockhashValidResp))
 
     def send_raw_transaction(self, txn: bytes, opts: Any = None) -> Any:
+        from importlib import import_module
         try:
-            from solana.rpc.models import TxOpts
+            TxOpts = import_module("solana.rpc.models").TxOpts
         except ImportError:  # solana-py < 0.36 kept TxOpts in solana.rpc.types
             try:
-                from solana.rpc.types import TxOpts
+                TxOpts = import_module("solana.rpc.types").TxOpts
             except ImportError as exc:
                 raise MissingExtraError("solana", "solana-py AsyncClient transport") from exc
         opts = opts or SendOptions()

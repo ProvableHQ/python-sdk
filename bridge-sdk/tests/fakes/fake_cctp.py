@@ -28,6 +28,22 @@ class CctpProvider(FakeRpcProvider):
         super().__init__(**kwargs)
         self.used = False
 
+    def _receipt(self, tx_hash):
+        receipt = super()._receipt(tx_hash)
+        if receipt is not None and tx_hash not in self.receipts:
+            # Reconciliation scans only mined blocks. Keep synthetic mined receipts
+            # at the reported head, instead of FakeRpcProvider's head + 1 default.
+            receipt['blockNumber'] = hex(self.block_number)
+        return receipt
+
+    def make_request(self,method,params):
+        response = super().make_request(method,params)
+        if method == 'eth_getTransactionByHash' and response.get('result'):
+            sent = next((tx for tx in self.sent if tx['hash'] == params[0]),None)
+            if sent is not None:
+                response['result']['nonce'] = hex(sent['nonce'])
+        return response
+
     def _call(self, call):
         raw = bytes.fromhex(call.get('data', call.get('input', '0x'))[2:])
         if raw[:4] == keccak(text='usedNonces(bytes32)')[:4]:

@@ -31,7 +31,9 @@ def route_fingerprint(registry: Registry, route_id: str) -> str:
                                     ensure_ascii=False).encode()).hexdigest()
 
 
-def is_registry_version_compatible(registry: Registry, version: str, route_id: str) -> bool:
+def is_registry_version_compatible(registry: Registry, version: str | None, route_id: str | None) -> bool:
+    if route_id is None or version is None:
+        return False
     if version == registry.version:
         return True
     if version != LEGACY_VERSION or route_id not in LEGACY_ROUTE_HASHES:

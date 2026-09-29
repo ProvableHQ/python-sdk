@@ -3,12 +3,19 @@
 > GENERATED from SDK docstrings by `codegen/gen_context.py` — do not
 > edit by hand; edit the docstrings and regenerate.
 
-Typed Python client that moves assets between Aleo, Ethereum and Solana
-over the reviewed Hyperlane warp routes and Circle xReserve deployments
+Typed Python client that moves assets between Aleo, Ethereum, Arc, Base, Arbitrum and Solana
+over reviewed Hyperlane, Circle xReserve and native-USDC CCTP deployments
 (`pip install aleo-bridge-sdk`, imports as `aleo_bridge`).
 MCP alternative: `python -m aleo_bridge.mcp` exposes the same lifecycle as
 tools; `aleo_bridge.agent.bridge_tools()` gives Claude-shape tool schemas.
 Registry version `2026-09-28.cctp-arc.1`.
+CCTP supports Arc ↔ Ethereum/Base/Arbitrum. Pass `cctp={"speed": "fast",
+"forwarding": True, "max_fee": "0.1"}` to quote; execute the returned plan to retain its ceiling.
+Use `Bridge(..., evm={"arc": Ethereum(...), "base": Ethereum(...)})` for route-selected connections.
+Arc native gas uses 18 decimals; ERC-20 USDC uses 6. They spend the same balance.
+CCTP completion requires the exact message and mint receipt; a consumed nonce alone stays pending.
+For stalled forwarding, `complete(progress, manual_mint=True)` explicitly authorizes a destination mint.
+Recovery keeps the approved fee ceiling; never rerun execute after a broadcast.
 
 Runnable examples ship in the package: start with
 `python -m aleo_bridge.examples.quote_transfer --help`.
@@ -109,6 +116,8 @@ Rebuild ``Progress`` from a saved checkpoint (``Checkpoint``, dict or JSON) — 
 Re-resolves the route from the live registry and reads chain state once;
 ``progress.next`` then says what to do: ``wait``, ``resume``, ``complete``,
 ``done`` or ``failed``.
+CCTP can adopt an explicitly selected, confirmed ``approval_replacement``;
+its original transaction must be absent and no burn may be submitted.
 
 ### `resume(self, progress, *, on_checkpoint=None, secret_nonce: 'str | None' = None, poll_seconds: 'float' = 1.0, timeout_seconds: 'float' = 120.0, proving: 'str' = 'delegate')`
 
@@ -120,11 +129,14 @@ missing deposit/dispatch.  Never repeats a confirmed step.
 
 ### `complete(self, progress, *, secret_nonce: 'str | None' = None, on_checkpoint=None, proving: 'str' = 'delegate', manual_mint: 'bool' = False)`
 
-Submit the private USDCx mint (``progress.next == "complete"``).
+Claim a private USDCx or native-USDC CCTP destination mint.
 
 Requires the same ``secret_nonce`` given to ``execute``; the SDK never
 stored it.  Submits exactly one ``private_mint`` and returns
-``DESTINATION_CONFIRMING`` progress to ``wait`` on.
+``DESTINATION_CONFIRMING`` progress to ``wait`` on. CCTP needs no secret
+nonce, but requires a destination signer and gas. Set ``manual_mint=True``
+to explicitly authorize fallback for stalled forwarding; an already
+submitted destination transaction is observed rather than repeated.
 
 ### `pending(self) -> 'list'`
 

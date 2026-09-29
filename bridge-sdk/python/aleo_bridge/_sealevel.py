@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass
-from typing import Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 from ._base58 import b58decode, b58encode
 from .errors import BridgeError, ConfigurationError, InvalidAmountError, InvalidRecipientError, RouteUnavailableError
@@ -235,7 +235,7 @@ def solana_route_metadata(route: Route) -> SolanaRouteMetadata:
             raise RouteUnavailableError(f"Solana Hyperlane route has an invalid {key}: {route.id}")
         return value
 
-    fields = {attr: pubkey(key) for key, attr in _PUBKEY_FIELDS}
+    fields: dict[str, Any] = {attr: pubkey(key) for key, attr in _PUBKEY_FIELDS}
     overhead = metadata.get("igpOverheadAccount")
     fields["igp_overhead_account"] = None if overhead is None else pubkey("igpOverheadAccount")
 

@@ -414,6 +414,8 @@ class Bridge:
         Re-resolves the route from the live registry and reads chain state once;
         ``progress.next`` then says what to do: ``wait``, ``resume``, ``complete``,
         ``done`` or ``failed``.
+        CCTP can adopt an explicitly selected, confirmed ``approval_replacement``;
+        its original transaction must be absent and no burn may be submitted.
         """
         if approval_replacement is not None:
             return _lifecycle.recover(self, checkpoint, approval_replacement=approval_replacement)
@@ -432,11 +434,14 @@ class Bridge:
 
     def complete(self, progress, *, secret_nonce: str | None = None, on_checkpoint=None, proving: str = "delegate",
                  manual_mint: bool = False):
-        """Submit the private USDCx mint (``progress.next == "complete"``).
+        """Claim a private USDCx or native-USDC CCTP destination mint.
 
         Requires the same ``secret_nonce`` given to ``execute``; the SDK never
         stored it.  Submits exactly one ``private_mint`` and returns
-        ``DESTINATION_CONFIRMING`` progress to ``wait`` on.
+        ``DESTINATION_CONFIRMING`` progress to ``wait`` on. CCTP needs no secret
+        nonce, but requires a destination signer and gas. Set ``manual_mint=True``
+        to explicitly authorize fallback for stalled forwarding; an already
+        submitted destination transaction is observed rather than repeated.
         """
         options = {"manual_mint": manual_mint} if manual_mint else {}
         return _lifecycle.complete(self, progress, secret_nonce=secret_nonce, on_checkpoint=on_checkpoint,
@@ -460,7 +465,7 @@ class Bridge:
             return []
         loader = getattr(store, "load_checkpoints", None)
         if callable(loader):
-            result = loader()
+            result: Any = loader()
             checkpoints, problems = result.checkpoints, result.errors
         else:
             checkpoints, problems = store.list(), []

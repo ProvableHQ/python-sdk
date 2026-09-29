@@ -62,7 +62,7 @@ RECOVER_HOW_TO_FIX = ("the source step may already be on the wire: call bridge_g
 #: the proved transaction bytes and the hook commitment (both live in the checkpoint, which is what
 #: the recovery verbs actually consume).
 _REDACTED_STATE_KEYS = frozenset({
-    "payload", "attestation", "secretnonce", "record", "recordplaintext", "privatekey",
+    "payload", "message", "attestation", "secretnonce", "record", "recordplaintext", "privatekey",
     "hookdata", "preparedtransaction", "prepareddestinationtransaction",
 })
 
@@ -211,7 +211,10 @@ _QUOTE_PROPS = {
     "amount": {**_S, "description": "Positive decimal amount in source-asset display units (e.g. '2', '0.001')."},
     "recipient": {**_S, "description": "Destination-chain address that receives the funds."},
     "sender": {**_S, "description": "Optional source-chain address; must be the configured connection's address."},
-    "bridge_protocol": {**_S, "enum": ["xreserve", "hyperlane"], "description": "Only needed when both protocols serve the pair."},
+    "bridge_protocol": {**_S, "enum": ["xreserve", "hyperlane", "cctp"], "description": "Only needed when multiple protocols serve the pair."},
+    "cctp": {"type": "object", "additionalProperties": False, "properties": {
+        "speed": {**_S, "enum": ["standard", "fast"]}, "forwarding": _B,
+        "max_fee": {**_S, "description": "Maximum USDC deduction, preserved through recovery and fee refresh."}}},
     "mint_mode": {**_S, "enum": ["public", "record", "private"],
                   "description": "xReserve into Aleo only. 'private' requires the user to complete the mint later with the same secret_nonce."},
     "secret_nonce": {**_S, "description": "Private-mint commitment secret, REQUIRED when mint_mode is 'private' "
@@ -223,6 +226,9 @@ _CHECKPOINT = {"checkpoint": {"type": "object",
                               "description": "The checkpoint dict returned by bridge_get_progress, by an entry of "
                                              "bridge_pending, or by bridge_execute / bridge_resume / bridge_complete "
                                              "(including the one an interrupted write hands back with next='recover')."}}
+_REPLACEMENT = {"approval_replacement": {"type": "object", "additionalProperties": False,
+    "properties": {"original_transaction_id": _S, "replacement_transaction_id": _S},
+    "required": ["original_transaction_id", "replacement_transaction_id"]}}
 
 
 def _quote_kwargs(args: dict[str, Any]) -> dict[str, Any]:
@@ -234,7 +240,8 @@ def _quote_kwargs(args: dict[str, Any]) -> dict[str, Any]:
                 destination_chain=args["destination_chain"], destination_asset=args.get("destination_asset"),
                 bridge_protocol=args.get("bridge_protocol"), amount=str(args["amount"]),
                 recipient=args["recipient"], sender=args.get("sender"), mint_mode=mint_mode,
-                secret_nonce=secret_nonce if mint_mode == "private" else (secret_nonce or "0scalar"))
+                secret_nonce=secret_nonce if mint_mode == "private" else (secret_nonce or "0scalar"),
+                **({"cctp": args["cctp"]} if "cctp" in args else {}))
 
 
 def _private_nonce_gap(args: dict[str, Any]) -> dict[str, Any] | None:
@@ -268,6 +275,8 @@ def _write(b: Any, call: Callable[[list[Any]], Any]) -> dict[str, Any]:
         payload["how_to_fix"] = RECOVER_HOW_TO_FIX
         if seen:
             payload["checkpoint"] = _serialize(seen[-1], b.registry)
+        elif getattr(exc, "checkpoint", None) is not None:
+            payload["checkpoint"] = _serialize(getattr(exc, "checkpoint"), b.registry)
         return payload
     return _with_checkpoint(b, progress)
 
@@ -302,7 +311,8 @@ def _h_quote(b, a):
 def _h_get_progress(b, a):
     # A checkpoint comes back with the progress: an agent that started from a stale one (or from
     # bridge_pending) can hand this one straight to bridge_resume / bridge_complete.
-    return _with_checkpoint(b, lifecycle.recover(b, a["checkpoint"]))
+    options = {"approval_replacement": a["approval_replacement"]} if "approval_replacement" in a else {}
+    return _with_checkpoint(b, lifecycle.recover(b, a["checkpoint"], **options))
 
 
 def _h_pending(b, a):
@@ -326,7 +336,7 @@ def _h_pending(b, a):
         return []
     loader = getattr(store, "load_checkpoints", None)
     if callable(loader):
-        result = loader()
+        result: Any = loader()
         checkpoints, problems = result.checkpoints, result.errors
     else:
         checkpoints, problems = store.list(), []
@@ -395,12 +405,13 @@ def _has_prepared_destination(progress: Any) -> bool:
 def _h_complete(b, a):
     progress = lifecycle.recover(b, a["checkpoint"])                 # reads only
     secret_nonce = a.get("secret_nonce")
-    if not secret_nonce and not _has_prepared_destination(progress):
+    if progress.plan.protocol != "cctp" and not secret_nonce and not _has_prepared_destination(progress):
         return _missing_nonce("the deposit this mint finishes")
     if not a.get("confirm"):
         return _confirmation(progress=_serialize(progress, b.registry))
+    options = {"manual_mint": a["manual_mint"]} if "manual_mint" in a else {}
     return _write(b, lambda seen: lifecycle.complete(b, progress, on_checkpoint=seen.append,
-                                                     secret_nonce=secret_nonce))
+                                                     secret_nonce=secret_nonce, **options))
 
 
 def _privacy(b, a, direction: str):
@@ -447,7 +458,7 @@ _READ_TOOLS: list[tuple[str, str, dict[str, Any], Callable[[Any, dict[str, Any]]
      "Recover a transfer's state from a checkpoint (reads only). Returns {progress, checkpoint}: progress.next tells "
      "what to do — wait (call again later), resume (bridge_resume), complete (bridge_complete), done, failed — and "
      "the checkpoint is the fresh one to pass to whichever of those you call.",
-     _schema(_CHECKPOINT, ["checkpoint"]), _h_get_progress),
+     _schema({**_CHECKPOINT, **_REPLACEMENT}, ["checkpoint"]), _h_get_progress),
     ("bridge_pending",
      "Every in-flight transfer in this profile's checkpoint store, one {progress, checkpoint} entry each, "
      "reconstructed offline (no chain read, so its progress can lag: bridge_get_progress refreshes one against live "
@@ -473,9 +484,9 @@ _WRITE_TOOLS: list[tuple[str, str, dict[str, Any], Callable[[Any, dict[str, Any]
                                                                     "resume a private-mint xReserve deposit."},
               **_CONFIRM}, ["checkpoint"]), _h_resume),
     ("bridge_complete",
-     "Submit the private USDCx mint (progress.next == 'complete') with the secret_nonce used at execute. "
-     "Requires confirm=true. Submits exactly one Aleo transaction.",
-     _schema({**_CHECKPOINT,
+     "Complete a private USDCx or CCTP mint. Private USDCx requires the original secret_nonce. "
+     "CCTP forwarding fallback requires manual_mint=true. Requires confirm=true.",
+     _schema({**_CHECKPOINT, "manual_mint": {**_B, "description": "Explicitly mint a stalled CCTP forwarded transfer."},
               "secret_nonce": {**_S, "description": "The private-mint secret used at bridge_execute — required "
                                                     "(there is no default); only an already-proved mint can be "
                                                     "rebroadcast without it."},

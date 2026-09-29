@@ -19,7 +19,7 @@ import json
 import re
 import time
 from dataclasses import dataclass, replace
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 from . import _sealevel
 from ._calls import is_duplicate_submission
@@ -175,7 +175,7 @@ def prepare(registry: Registry, *, source_chain: str | None = None, source_asset
 
 # ── Connection helpers ────────────────────────────────────────────────────────
 
-def _module(bridge, name: str, chain_id: str | None = None):
+def _module(bridge: Any, name: str, chain_id: str | None = None) -> Any:
     """``bridge.eth`` / ``bridge.sol`` or a ConfigurationError that says how to fix it.
 
     Checks the ``ethereum``/``solana`` connection attribute FIRST: on the real
@@ -1469,7 +1469,7 @@ def resume(bridge, progress: Progress, *, on_checkpoint: Callable | None = None,
 
     if is_xreserve:
         quoted = eth.quote_deposit_usdc(plan=plan, secret_nonce=nonce)
-        if saved_hook.lower() != ("0x" + quoted.hook_data.hex()).lower():     # always runs: validated above
+        if cast(str, saved_hook).lower() != ("0x" + quoted.hook_data.hex()).lower():     # validated above
             raise NotResumableError(
                 "The re-quoted hook data does not match the hook this transfer's approval committed "
                 "to: the secret nonce differs from the one used at execute(). Pass that same "
@@ -1500,7 +1500,11 @@ def resume(bridge, progress: Progress, *, on_checkpoint: Callable | None = None,
 
 def complete(bridge, progress: Progress, *, secret_nonce: str | None = None,
              on_checkpoint: Callable | None = None, proving: str = "delegate", manual_mint: bool = False) -> Progress:
-    """Submit the one user-signed Aleo transaction a private USDCx mint needs.
+    """Claim a private USDCx or CCTP destination mint after refreshing delivery evidence.
+
+    CCTP completion requires a destination signer and gas, but no secret nonce.
+    ``manual_mint=True`` authorizes fallback when forwarding has stalled. Known
+    destination transactions are observed instead of submitted again.
 
     Requires ``progress.next == "complete"`` — Circle has attested the deposit and the receipt
     carries ``next_action == {"kind": "xreserve-private-mint", "chainId": <aleo chain>}``. The

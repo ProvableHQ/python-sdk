@@ -1,14 +1,16 @@
 """Minimal CCTP V2 interfaces pinned to Veil PR #148."""
 from ._evm_abi import ERC20_ABI
+from collections.abc import Sequence
+from typing import Any
 
 
-def function(name, inputs, outputs=(), view=False):
+def function(name: str, inputs: Sequence[tuple[str, str]], outputs: Sequence[str] = (), view: bool = False) -> dict[str, Any]:
     return {"type": "function", "name": name, "stateMutability": "view" if view else "nonpayable",
             "inputs": [{"name": n, "type": t} for n, t in inputs],
             "outputs": [{"name": "", "type": t} for t in outputs]}
 
 
-def event(name, inputs):
+def event(name: str, inputs: Sequence[tuple[str, str, bool]]) -> dict[str, Any]:
     return {"type": "event", "name": name, "anonymous": False,
             "inputs": [{"name": n, "type": t, "indexed": i} for n, t, i in inputs]}
 
