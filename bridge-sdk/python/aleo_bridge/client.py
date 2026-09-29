@@ -15,6 +15,7 @@ import re
 from typing import TYPE_CHECKING, Any, Callable
 
 from . import lifecycle as _lifecycle
+from . import _evm_connections
 from ._calls import AleoCall
 from .errors import BridgeError, ConfigurationError
 from .eth import Ethereum, EthModule
@@ -122,7 +123,7 @@ class Bridge:
     """Typed bridge client over the Aleo facade (and, from plans 2/3, Ethereum/Solana connections)."""
 
     def __init__(self, aleo: Any, *, ethereum: Any = None, solana: Any = None, environment: str | None = None,
-                 registry: Registry | None = None, checkpoints: Any = None) -> None:
+                 registry: Registry | None = None, checkpoints: Any = None, evm: Any = None) -> None:
         network = getattr(aleo, "network_name", None)
         if network not in NETWORKS:
             raise ConfigurationError(f"The aleo facade must report network_name mainnet or testnet, got {network!r}")
@@ -139,6 +140,9 @@ class Bridge:
             raise ConfigurationError(f"Registry {self.registry.version} has no chains for {environment}")
         self.checkpoints = checkpoints
         self.ethereum: Ethereum | None = _coerce_ethereum(ethereum)
+        self._evm_connections = _evm_connections.normalize(self.registry, environment, evm, self.ethereum)
+        self._evm_modules: dict[str, EthModule] = {}
+        self.ethereum = self._evm_connections.get("ethereum" if environment == "mainnet" else "sepolia")
         self.solana: Solana | None = _coerce_solana(solana)
         solana = self.solana
         self._sol: SolModule | None = SolModule(self, solana) if solana is not None else None
@@ -172,6 +176,22 @@ class Bridge:
                 "Solana is not configured: pass solana=Solana(rpc_url, private_key=...) or a solana-py Client to Bridge(), "
                 "or set SOLANA_PRIVATE_KEY (and optionally SOLANA_RPC_URL) for Bridge.from_env()")
         return self._sol
+
+    def evm(self, chain_id: str) -> EthModule:
+        """Use the configured EVM provider for a registry chain, such as ``arc`` or ``base``.
+
+        Reads need an RPC connection; sending also needs that connection's signer.
+        ``bridge.eth`` remains the Ethereum/Sepolia shortcut.
+        """
+        chain = self.registry.chain(chain_id)
+        if chain.id == ("ethereum" if self.environment == "mainnet" else "sepolia"):
+            return self.eth
+        conn = self._evm_connections.get(chain.id)
+        if conn is None:
+            raise ConfigurationError(f"Configure evm={{'{chain.id}': Ethereum(...)}} or {chain.id.upper()}_RPC_URL")
+        if chain.id not in self._evm_modules:
+            self._evm_modules[chain.id] = EthModule(self, conn, chain_id=chain.id)
+        return self._evm_modules[chain.id]
 
     # ── identity / registry helpers ──
     def aleo_chain(self) -> Chain:
@@ -284,6 +304,9 @@ class Bridge:
         chains = [self._aleo_chain_status()]
         if self.ethereum is not None:
             chains.append(self.eth.chain_status())
+        for chain_id in self._evm_connections:
+            if chain_id not in ("ethereum", "sepolia"):
+                chains.append(self.evm(chain_id).chain_status())
         solana_chain = self.solana_chain()
         if self.solana is not None and solana_chain is not None:
             # Chain id and asset id come from the registry, not literals: a testnet client (no Solana
@@ -451,7 +474,7 @@ class Bridge:
     @classmethod
     def from_env(cls, **overrides: Any) -> "Bridge":
         """Everything from the environment (spec §3.3); writes nothing to disk. Overrides: ethereum, solana, registry, checkpoints."""
-        unexpected = set(overrides) - {"ethereum", "solana", "registry", "checkpoints"}
+        unexpected = set(overrides) - {"ethereum", "solana", "registry", "checkpoints", "evm"}
         if unexpected:
             raise TypeError(f"Bridge.from_env() got unexpected overrides: {sorted(unexpected)}")
         private_key = os.environ.get("BRIDGE_PRIVATE_KEY")
@@ -459,21 +482,25 @@ class Bridge:
             raise ConfigurationError("BRIDGE_PRIVATE_KEY is required (an APrivateKey1... string)")
         aleo = build_aleo(os.environ.get("ALEO_ENDPOINT", DEFAULT_ENDPOINT), os.environ.get("ALEO_NETWORK", "mainnet"),
                           private_key, api_key=os.environ.get("ALEO_API_KEY"), consumer_id=os.environ.get("ALEO_CONSUMER_ID"))
-        ethereum = overrides["ethereum"] if "ethereum" in overrides else ethereum_from_env()
+        evm = _evm_connections.from_env(overrides.get("evm"))
+        ethereum = (overrides["ethereum"] if "ethereum" in overrides else
+                    ethereum_from_env() if _evm_connections.needs_legacy_environment(evm) else None)
         solana = overrides["solana"] if "solana" in overrides else solana_from_env()
         checkpoints = overrides["checkpoints"] if "checkpoints" in overrides else checkpoints_from_env()
-        return cls(aleo, ethereum=ethereum, solana=solana, registry=overrides.get("registry"), checkpoints=checkpoints)
+        return cls(aleo, ethereum=ethereum, solana=solana, registry=overrides.get("registry"), checkpoints=checkpoints, evm=evm)
 
     @classmethod
     def from_profile(cls, home: Any = None, *, network: str | None = None, endpoint: str | None = None,
-                     ethereum: Any = None, solana: Any = None) -> "Bridge":
+                     ethereum: Any = None, solana: Any = None, evm: Any = None) -> "Bridge":
         """The client for the local profile (spec §3.4), created on first use. *network*/*endpoint* apply only when
         creating. Side-chain connections come from the arguments or the same env variables as ``from_env``."""
         kwargs = {k: v for k, v in (("network", network), ("endpoint", endpoint)) if v is not None}
         profile = Profile.load_or_create(home, **kwargs)
         aleo = build_aleo(profile.endpoint, profile.network, profile.private_key,
                           api_key=os.environ.get("ALEO_API_KEY"), consumer_id=os.environ.get("ALEO_CONSUMER_ID"))
-        bridge = cls(aleo, ethereum=ethereum if ethereum is not None else ethereum_from_env(),
+        evm = _evm_connections.from_env(evm)
+        bridge = cls(aleo, ethereum=ethereum if ethereum is not None else
+                     ethereum_from_env() if _evm_connections.needs_legacy_environment(evm) else None, evm=evm,
                      solana=solana if solana is not None else solana_from_env(),
                      checkpoints=_checkpoints_for_profile(profile))
         bridge.profile = profile

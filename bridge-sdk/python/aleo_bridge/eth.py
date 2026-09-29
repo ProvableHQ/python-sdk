@@ -445,12 +445,13 @@ class _XReserveQuote:
 class EthModule:
     """``bridge.eth`` — Ethereum-origin Hyperlane and xReserve actions (reads return values, writes return ``EvmCall``)."""
 
-    def __init__(self, bridge: Any, conn: Ethereum, *, log_scan_chunk_blocks: int = LOG_SCAN_CHUNK_BLOCKS) -> None:
+    def __init__(self, bridge: Any, conn: Ethereum, *, log_scan_chunk_blocks: int = LOG_SCAN_CHUNK_BLOCKS,
+                 chain_id: str | None = None) -> None:
         self.bridge = bridge
         self.conn = conn
         self.registry: Registry = bridge.registry
         self.network: str = bridge.network            # "mainnet" | "testnet" → aleo.<network> for encoders
-        self.chain: Chain = self.registry.chain(EVM_CHAIN_BY_ENVIRONMENT[bridge.environment])
+        self.chain: Chain = self.registry.chain(chain_id or EVM_CHAIN_BY_ENVIRONMENT[bridge.environment])
         self.log_scan_chunk_blocks = log_scan_chunk_blocks        # recovery eth_getLogs span; lower it for strict RPCs
         self.log_scan_head_race_retries = LOG_SCAN_HEAD_RACE_RETRIES
         self.log_scan_head_race_sleep = LOG_SCAN_HEAD_RACE_SLEEP_SECONDS

@@ -79,7 +79,7 @@ def test_from_env_builds_the_solana_connection(monkeypatch):
     key = b58encode(bytes(Keypair()))
     seen = {}
 
-    def capture_init(self, aleo, *, ethereum=None, solana=None, environment=None, registry=None, checkpoints=None):
+    def capture_init(self, aleo, *, ethereum=None, solana=None, environment=None, registry=None, checkpoints=None, evm=None):
         seen["solana"] = solana
 
     monkeypatch.setattr(Bridge, "__init__", capture_init)

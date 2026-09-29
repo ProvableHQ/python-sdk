@@ -175,7 +175,7 @@ def prepare(registry: Registry, *, source_chain: str | None = None, source_asset
 
 # ── Connection helpers ────────────────────────────────────────────────────────
 
-def _module(bridge, name: str):
+def _module(bridge, name: str, chain_id: str | None = None):
     """``bridge.eth`` / ``bridge.sol`` or a ConfigurationError that says how to fix it.
 
     Checks the ``ethereum``/``solana`` connection attribute FIRST: on the real
@@ -184,6 +184,11 @@ def _module(bridge, name: str):
     would never see the ``None`` default — it would let that raise propagate
     with the property's own (less specific) message instead of this one.
     """
+    if name == "eth" and chain_id not in (None, "ethereum", "sepolia"):
+        accessor = getattr(bridge, "evm", None)
+        if callable(accessor):
+            return accessor(chain_id)
+        raise ConfigurationError(f"This transfer needs a configured {chain_id} EVM connection")
     conn = getattr(bridge, "ethereum" if name == "eth" else "solana", None)
     if conn is None:
         chain, extra, env = (("Ethereum", "evm", "ETHEREUM_RPC_URL / EVM_PRIVATE_KEY") if name == "eth"
@@ -233,7 +238,7 @@ def quote(bridge, *, source_chain: str | None = None, source_asset: str | None =
     family = resolved.source_chain.family
 
     if plan.protocol == "hyperlane" and family == "evm":
-        q = _module(bridge, "eth").quote_transfer_remote(plan=plan)
+        q = _module(bridge, "eth", resolved.source_chain.id).quote_transfer_remote(plan=plan)
         return replace(q, plan=plan)
     if plan.protocol == "hyperlane" and family == "solana":
         q = _module(bridge, "sol").quote_transfer_remote(plan=plan)
@@ -248,7 +253,7 @@ def quote(bridge, *, source_chain: str | None = None, source_asset: str | None =
                                   gas_price=gas.gas_price, exchange_rate=gas.exchange_rate,
                                   payment_microcredits=gas.payment_microcredits)
     if plan.protocol == "xreserve" and family == "evm":
-        q = _module(bridge, "eth").quote_deposit_usdc(plan=plan, secret_nonce=secret_nonce)
+        q = _module(bridge, "eth", resolved.source_chain.id).quote_deposit_usdc(plan=plan, secret_nonce=secret_nonce)
         return replace(q, plan=plan)
     if plan.protocol == "xreserve" and family == "aleo":
         fee_atomic = _xreserve_withdrawal_fee_atomic(resolved)
@@ -417,11 +422,15 @@ def _read_destination_balance(bridge, plan: Plan, resolved: ResolvedRoute) -> in
     """
     chain, asset = resolved.destination_chain, resolved.destination_asset
     if chain.family == "evm":
-        conn = getattr(bridge, "ethereum", None)
+        try:
+            module = _module(bridge, "eth", chain.id)
+        except ConfigurationError:
+            return None
+        conn = getattr(module, "conn", None) or getattr(bridge, "ethereum", None)
         if (conn is None or asset.locator is None or asset.locator.kind not in ("native", "evm-contract")):
             return None
-        return int(bridge.eth.balance(asset.id) if conn.address and conn.address.lower() == plan.recipient.lower()
-                   else bridge.eth.balance(asset.id, address=plan.recipient))
+        return int(module.balance(asset.id) if conn.address and conn.address.lower() == plan.recipient.lower()
+                   else module.balance(asset.id, address=plan.recipient))
     if chain.family == "solana":
         conn = getattr(bridge, "solana", None)
         if (conn is None or asset.locator is None or asset.locator.kind != "native"):
@@ -567,8 +576,8 @@ def execute(bridge, plan: Plan, *, on_checkpoint: Callable | None = None, provin
     emit = _Emitter(bridge, plan, on_checkpoint)
 
     if plan.protocol == "hyperlane" and family == "evm":
-        eth = _module(bridge, "eth")
-        _assert_sender(plan, bridge.ethereum.address, family=family)
+        eth = _module(bridge, "eth", resolved.source_chain.id)
+        _assert_sender(plan, (getattr(eth, "conn", None) or bridge.ethereum).address, family=family)
         call = eth.transfer_remote(plan=plan)
         receipt = _send_call(call, emit, poll_seconds, timeout_seconds)
         emit.finalize()
@@ -597,8 +606,8 @@ def execute(bridge, plan: Plan, *, on_checkpoint: Callable | None = None, provin
         return to_progress(plan, receipt)
 
     if plan.protocol == "xreserve" and family == "evm":
-        eth = _module(bridge, "eth")
-        _assert_sender(plan, bridge.ethereum.address, family=family)
+        eth = _module(bridge, "eth", resolved.source_chain.id)
+        _assert_sender(plan, (getattr(eth, "conn", None) or bridge.ethereum).address, family=family)
         nonce = _mint_secret(plan, secret_nonce)
         call = eth.deposit_usdc(plan=plan, secret_nonce=nonce)
         receipt = _send_call(call, emit, poll_seconds, timeout_seconds)
@@ -734,7 +743,7 @@ def get_status(bridge, plan: Plan, receipt: Receipt) -> Receipt:
 
     # 1. EVM approval → wallet boundary
     if receipt.status is Status.SOURCE_APPROVAL_PENDING and src.family == "evm":
-        return _module(bridge, "eth").source_status(plan, receipt)
+        return _module(bridge, "eth", resolved.source_chain.id).source_status(plan, receipt)
 
     # 2. Aleo source acceptance is the irreversible boundary
     if receipt.status is Status.SOURCE_CONFIRMING and src.family == "aleo":
@@ -751,7 +760,7 @@ def get_status(bridge, plan: Plan, receipt: Receipt) -> Receipt:
     # 3/4. Hyperlane source confirmation on EVM / Solana (extracts messageId)
     if receipt.status is Status.SOURCE_CONFIRMING and route.protocol == "hyperlane":
         if src.family == "evm":
-            return _module(bridge, "eth").source_status(plan, receipt)
+            return _module(bridge, "eth", resolved.source_chain.id).source_status(plan, receipt)
         if src.family == "solana":
             return _module(bridge, "sol").source_status(plan, receipt)
 
@@ -775,7 +784,7 @@ def get_status(bridge, plan: Plan, receipt: Receipt) -> Receipt:
     if (receipt.status is Status.DELIVERY_PENDING and route.protocol == "hyperlane"
             and message_id is not None and dst.family in ("aleo", "evm")):
         delivered = (bridge.hyperlane.is_delivered(message_id) if dst.family == "aleo"
-                     else _module(bridge, "eth").is_delivered(message_id))
+                     else _module(bridge, "eth", resolved.destination_chain.id).is_delivered(message_id))
         return _clear_action(receipt, status=Status.COMPLETED) if delivered else receipt
 
     # 6. Aleo-origin Hyperlane without a message id: destination balance baseline
@@ -828,7 +837,7 @@ def get_status(bridge, plan: Plan, receipt: Receipt) -> Receipt:
             return _clear_action(receipt, status=Status.COMPLETED)
 
     if receipt.status is Status.SOURCE_CONFIRMING:
-        return _module(bridge, "eth").source_status(plan, receipt)
+        return _module(bridge, "eth", resolved.source_chain.id).source_status(plan, receipt)
 
     if receipt.status is Status.ATTESTATION_PENDING:
         message_hash = state.get("messageHash")
@@ -1261,13 +1270,13 @@ def recover(bridge, checkpoint) -> Progress:
         if cp.destination:
             raise CheckpointInvalidError(
                 "Bridge checkpoint contains a destination transaction that is invalid for this Hyperlane route")
-        receipt = _module(bridge, "eth").recover_source(plan, cp, required=False)
+        receipt = _module(bridge, "eth", resolved.source_chain.id).recover_source(plan, cp, required=False)
         return _finish(bridge, plan, receipt, cp.id)
 
     if resolved.route.protocol != "xreserve" or src.family != "evm" or dst.family != "aleo":
         raise UnsupportedRouteError("Bridge checkpoint recovery is not implemented for this route")
 
-    receipt = _module(bridge, "eth").recover_source(plan, cp, required=False)
+    receipt = _module(bridge, "eth", resolved.source_chain.id).recover_source(plan, cp, required=False)
     destination = cp.destination or {}
     prepared_dest = destination.get("preparedTransaction")
     if prepared_dest and destination.get("transactionId"):
@@ -1399,8 +1408,8 @@ def resume(bridge, progress: Progress, *, on_checkpoint: Callable | None = None,
     if family != "evm":
         raise UnsupportedRouteError(f"Source resumption is not implemented for {resolved.source_chain.id}")
 
-    eth = _module(bridge, "eth")
-    _assert_sender(plan, bridge.ethereum.address, family="evm")
+    eth = _module(bridge, "eth", resolved.source_chain.id)
+    _assert_sender(plan, (getattr(eth, "conn", None) or bridge.ethereum).address, family="evm")
     is_xreserve = resolved.route.protocol == "xreserve"
     nonce = _mint_secret(plan, secret_nonce) if is_xreserve else None      # before any RPC
     saved_hook = state.get("hookData")

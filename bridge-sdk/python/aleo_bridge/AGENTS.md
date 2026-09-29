@@ -36,7 +36,7 @@ assert progress.next == "done", progress.error
 
 Everything from the environment (spec §3.3); writes nothing to disk. Overrides: ethereum, solana, registry, checkpoints.
 
-### `from_profile(home: 'Any' = None, *, network: 'str | None' = None, endpoint: 'str | None' = None, ethereum: 'Any' = None, solana: 'Any' = None) -> "'Bridge'"`
+### `from_profile(home: 'Any' = None, *, network: 'str | None' = None, endpoint: 'str | None' = None, ethereum: 'Any' = None, solana: 'Any' = None, evm: 'Any' = None) -> "'Bridge'"`
 
 The client for the local profile (spec §3.4), created on first use. *network*/*endpoint* apply only when
 creating. Side-chain connections come from the arguments or the same env variables as ``from_env``.
