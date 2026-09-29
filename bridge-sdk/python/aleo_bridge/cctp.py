@@ -6,15 +6,17 @@ _source: ProvableHQ/veil packages/bridge/src/protocols/cctp/evm.ts @
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass, replace
 from typing import Any
 
 import requests
 
-from ._cctp_message import address_bytes
-from .errors import AttestationError, ConfigurationError, InvalidAmountError
+from ._cctp_message import address_bytes, validate_message, immutable_message, FORWARD_HOOK
+from ._cctp_abi import MESSENGER_ABI, TRANSMITTER_ABI, TOKEN_ABI
+from .errors import AttestationError, ConfigurationError, InvalidAmountError, BridgeError
 from .registry import Route
-from .types import CctpOptions, EvmCctpQuote, Fee, Plan, normalize_cctp
+from .types import CctpOptions, EvmCctpQuote, Fee, Plan, Receipt, Status, TERMINAL, normalize_cctp
 from .units import format_decimal_amount, parse_decimal_amount
 
 
@@ -143,3 +145,338 @@ class CctpModule:
                             format_decimal_amount(forwarding, 6), True))
         return EvmCctpQuote("evm-cctp", plan, tuple(fees), format_decimal_amount(receive, 6), plan.amount_atomic,
                            receive, protocol, forwarding, cap, finality, options.forwarding)
+
+    def _connection(self, chain, expected):
+        conn = self.bridge.evm(chain).conn
+        if conn.chain_id != expected:
+            raise ConfigurationError(f"CCTP transport must use EVM chain {expected}")
+        return conn
+
+    @staticmethod
+    def _contract(conn, address, abi):
+        from web3 import Web3
+        return conn.w3.eth.contract(address=Web3.to_checksum_address(address), abi=abi)
+
+    @staticmethod
+    def _hash(value):
+        if not isinstance(value, str) or not re.fullmatch(r"0x[0-9a-fA-F]{64}", value):
+            raise ConfigurationError("Invalid CCTP transaction hash")
+        return value
+
+    @staticmethod
+    def _hex(value):
+        from web3 import Web3
+        return Web3.to_hex(value) if not isinstance(value, str) else value
+
+    def _success(self, mined, tx_hash):
+        if self._hex(mined["transactionHash"]).lower() != tx_hash.lower() or mined["status"] != 1:
+            raise BridgeError("CCTP transaction reverted or receipt hash differs")
+
+    def _confirm(self, conn, tx_hash, interval, timeout):
+        deadline = time.monotonic() + timeout
+        while True:
+            mined = conn.get_receipt(tx_hash)
+            if mined is not None:
+                self._success(mined, tx_hash)
+                return mined
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None
+            time.sleep(min(max(interval, 0.01), remaining))
+
+    def _broadcast(self, conn, tx, receipt, emit, *, approval=False, destination=False):
+        def submitted(tx_hash):
+            self._hash(tx_hash)
+            state = dict(receipt.protocol_state)
+            if approval:
+                state["approvalTxIds"] = [*state.get("approvalTxIds", []), tx_hash]
+                return receipt.replace(id=tx_hash, status=Status.SOURCE_APPROVAL_PENDING, protocol_state=state)
+            if destination:
+                return receipt.replace(destination_tx_id=tx_hash, status=Status.DESTINATION_CONFIRMING, next_action=None)
+            if conn.last_broadcast_nonce is not None:
+                state["sourceNonce"] = str(conn.last_broadcast_nonce)
+            return receipt.replace(id=tx_hash, source_tx_id=tx_hash, status=Status.SOURCE_CONFIRMING, protocol_state=state)
+        try:
+            tx_hash = conn.send_transaction(tx)
+        except BridgeError as exc:
+            if getattr(exc, "broadcast_id", None):
+                emit(submitted(exc.broadcast_id))
+            raise
+        state = submitted(tx_hash)
+        emit(state)
+        return state
+
+    def _approvals_confirmed(self, conn, m, plan, receipt):
+        from web3.exceptions import TransactionNotFound
+        from eth_abi import decode
+        from eth_utils import keccak
+        values = receipt.protocol_state.get("approvalTxIds")
+        if not isinstance(values, list):
+            raise ConfigurationError("Invalid CCTP approval checkpoint")
+        sender = plan.sender or receipt.protocol_state.get("sourceSender")
+        address_bytes(sender)
+        for tx_hash in values:
+            self._hash(tx_hash)
+            try:
+                tx = conn.w3.eth.get_transaction(tx_hash)
+            except TransactionNotFound:
+                return False
+            mined = conn.get_receipt(tx_hash)
+            if mined is None:
+                return False
+            self._success(mined, tx_hash)
+            if (self._hex(tx["hash"]).lower() != tx_hash.lower() or tx["from"].lower() != sender.lower()
+                    or (tx.get("to") or "").lower() != m.source_token.lower() or tx.get("value", 0) != 0):
+                raise ConfigurationError("CCTP approval does not match the source account and token")
+            raw = bytes(tx["input"])
+            if len(raw) != 68 or raw[:4] != keccak(text="approve(address,uint256)")[:4]:
+                raise ConfigurationError("CCTP approval calldata is invalid")
+            spender, amount = decode(["address", "uint256"], raw[4:])
+            if spender.lower() != m.messenger.lower() or amount != plan.amount_atomic:
+                raise ConfigurationError("CCTP approval does not match the planned allowance")
+        return True
+
+    def execute(self, plan, *, on_checkpoint, poll_seconds=1.0, timeout_seconds=120.0, resume=None):
+        from web3 import Web3
+        m = self._metadata(plan)
+        if resume is not None and resume.source_tx_id:
+            return self.get_status(plan, resume)
+        conn = self._connection(m.source_chain, m.source_chain_id)
+        sender = conn.require_address()
+        if plan.sender and sender.lower() != plan.sender.lower():
+            raise ConfigurationError("CCTP source wallet differs from the planned sender")
+        if resume and sender.lower() != str(resume.protocol_state.get("sourceSender")).lower():
+            raise ConfigurationError("CCTP resumed wallet differs from checkpoint sender")
+        priced = self.quote(replace(plan, sender=sender))
+        state = resume or Receipt(plan.route_id, "cctp", Status.PREPARED,
+                  protocol_state={"routeId": plan.route_id, "sourceSender": sender, "approvalTxIds": []})
+        if resume and not self._approvals_confirmed(conn, m, plan, state):
+            return state.replace(status=Status.SOURCE_APPROVAL_PENDING)
+        token = self._contract(conn, m.source_token, TOKEN_ABI)
+        if token.functions.balanceOf(sender).call() < plan.amount_atomic:
+            raise BridgeError("Insufficient source USDC balance for CCTP burn")
+        if conn.w3.eth.get_balance(sender) <= 0:
+            raise BridgeError("Source wallet requires native gas funds for CCTP approval and burn")
+        if token.functions.allowance(sender, Web3.to_checksum_address(m.messenger)).call() < plan.amount_atomic:
+            data = token.encode_abi("approve", args=[Web3.to_checksum_address(m.messenger), plan.amount_atomic])
+            state = self._broadcast(conn, {"to": token.address, "data": data}, state, on_checkpoint, approval=True)
+            if not self._confirm(conn, state.id, poll_seconds, timeout_seconds):
+                return state
+        priced = self.quote(priced.plan)
+        args = [plan.amount_atomic, m.destination_domain, address_bytes(plan.recipient),
+                Web3.to_checksum_address(m.source_token), bytes(32), priced.max_fee_atomic, priced.min_finality_threshold]
+        function = "depositForBurn"
+        if priced.forwarding:
+            args.append(FORWARD_HOOK)
+            function += "WithHook"
+        messenger = self._contract(conn, m.messenger, MESSENGER_ABI)
+        state = self._broadcast(conn, {"to": messenger.address, "data": messenger.encode_abi(function, args=args)},
+                                state, on_checkpoint)
+        if not self._confirm(conn, state.source_tx_id, poll_seconds, timeout_seconds):
+            return state
+        return self.get_status(priced.plan, state)
+
+    def _check_message(self, raw, m, plan, sender):
+        options = normalize_cctp(plan.cctp)
+        if options.max_fee is None:
+            raise ConfigurationError("CCTP verification requires the approved fee cap")
+        return validate_message(raw, source_domain=m.source_domain, destination_domain=m.destination_domain,
+               messenger=m.messenger, source_token=m.source_token, sender=sender, recipient=plan.recipient,
+               amount_atomic=plan.amount_atomic, max_fee_atomic=parse_decimal_amount(options.max_fee, 6),
+               finality=1000 if options.speed == "fast" else 2000, forwarding=options.forwarding)
+
+    def _events(self, conn, address, abi, name, logs):
+        event = getattr(self._contract(conn, address, abi).events, name)()
+        for log in logs:
+            if log["address"].lower() != address.lower():
+                continue
+            try:
+                decoded = event.process_log(log)
+            except Exception:
+                # Unrelated logs have diverse Web3/eth-abi decoding errors.
+                # This boundary includes no RPC or other network operations.
+                continue
+            yield decoded["args"], log
+
+    def _destination_matches(self, conn, mined, m, message, recipient):
+        received = any(e["sourceDomain"] == m.source_domain and bytes(e["nonce"]) == message.nonce
+                    and bytes(e["sender"]) == message.messenger and bytes(e["messageBody"]) == message.raw[148:]
+                    and e["finalityThresholdExecuted"] == message.finality
+                    for e, _ in self._events(conn, m.transmitter, TRANSMITTER_ABI, "MessageReceived", mined["logs"]))
+        minted = any(int(e["from"], 16) == 0 and e["to"].lower() == recipient.lower()
+                    and e["value"] == message.amount - message.fee
+                    for e, _ in self._events(conn, m.destination_token, TOKEN_ABI, "Transfer", mined["logs"]))
+        return received and minted
+
+    def get_status(self, plan, receipt):
+        from web3 import Web3
+        from eth_utils import keccak
+        m = self._metadata(plan)
+        if receipt.protocol != "cctp" or receipt.protocol_state.get("routeId") != plan.route_id:
+            raise ConfigurationError("CCTP receipt belongs to a different route")
+        if receipt.status in TERMINAL:
+            return receipt
+        source = self._connection(m.source_chain, m.source_chain_id)
+        if not receipt.source_tx_id:
+            confirmed = self._approvals_confirmed(source, m, plan, receipt)
+            return receipt.replace(status=Status.SOURCE_SUBMISSION_PENDING if confirmed else Status.SOURCE_APPROVAL_PENDING)
+        tx_hash = self._hash(receipt.source_tx_id)
+        mined = source.get_receipt(tx_hash)
+        if mined is None:
+            return receipt.replace(status=Status.SOURCE_CONFIRMING)
+        if mined["status"] == 0:
+            return receipt.replace(status=Status.FAILED, protocol_state={**receipt.protocol_state, "error": "CCTP source burn reverted"})
+        self._success(mined, tx_hash)
+        sender = plan.sender or receipt.protocol_state.get("sourceSender")
+        address_bytes(sender)
+        messages = []
+        for event, _ in self._events(source, m.transmitter, TRANSMITTER_ABI, "MessageSent", mined["logs"]):
+            try:
+                messages.append(self._check_message(bytes(event["message"]), m, plan, sender))
+            except AttestationError:
+                continue
+        if len(messages) != 1:
+            raise AttestationError("Source receipt must contain exactly one CCTP message matching the intent")
+        response = self._json(f"{m.attestation_url}/v2/messages/{m.source_domain}?transactionHash={tx_hash}")
+        response = response if isinstance(response, dict) else {}
+        if "sourceTxHash" in response and str(response["sourceTxHash"]).lower() != tx_hash.lower():
+            raise AttestationError("Circle returned messages for a different source transaction")
+        candidates = []
+        entries = response.get("messages", [])
+        for entry in entries if isinstance(entries, list) else []:
+            if not isinstance(entry, dict):
+                continue
+            try:
+                raw = bytes.fromhex(entry["message"][2:])
+                if not entry["message"].startswith("0x") or immutable_message(raw) != immutable_message(messages[0].raw):
+                    continue
+            except (ValueError, KeyError, TypeError, AttestationError):
+                continue
+            candidates.append((entry, raw))
+        if len(candidates) > 1:
+            raise AttestationError("Circle returned ambiguous CCTP messages")
+        if not candidates:
+            return receipt.replace(status=Status.ATTESTATION_PENDING)
+        entry, raw = candidates[0]
+        if entry.get("status") != "complete" or not isinstance(entry.get("attestation"), str) or not re.fullmatch(r"0x(?:[0-9a-fA-F]{2})+", entry["attestation"]):
+            return receipt.replace(status=Status.ATTESTATION_PENDING)
+        message = self._check_message(raw, m, plan, sender)
+        if message.nonce == bytes(32) or message.finality < message.min_finality or message.fee > message.max_fee:
+            raise AttestationError("Invalid Circle CCTP attested nonce, finality, or fee")
+        dest = self._connection(m.destination_chain, m.destination_chain_id)
+        used = self._contract(dest, m.transmitter, TRANSMITTER_ABI).functions.usedNonces(message.nonce).call() != 0
+        state = {**receipt.protocol_state, "message": "0x"+raw.hex(), "attestation": entry["attestation"],
+                 "nonce": "0x"+message.nonce.hex(), "nonceUsed": used, "sourceSender": sender}
+        receipt = receipt.replace(protocol_state=state)
+        forwarded = entry.get("forwardTxHash")
+        dest_hash = receipt.destination_tx_id or (forwarded if isinstance(forwarded, str) and re.fullmatch(r"0x[0-9a-fA-F]{64}", forwarded) else None)
+        if used and not dest_hash:
+            head = dest.w3.eth.block_number
+            floor = max(0, head-9999)
+            end = head
+            topics = ["0x"+keccak(text="MessageReceived(address,uint32,bytes32,bytes32,uint32,bytes)").hex(), None, "0x"+message.nonce.hex()]
+            while end >= floor:
+                start = max(floor, end-999)
+                logs = dest.w3.eth.get_logs({"address": Web3.to_checksum_address(m.transmitter), "topics": topics,
+                                              "fromBlock": start, "toBlock": end})
+                for event, log in self._events(dest, m.transmitter, TRANSMITTER_ABI, "MessageReceived", logs):
+                    if bytes(event["nonce"]) == message.nonce and event["sourceDomain"] == m.source_domain:
+                        dest_hash = self._hash(self._hex(log["transactionHash"]))
+                        break
+                if dest_hash:
+                    break
+                end = start-1
+        failed = False
+        if dest_hash:
+            delivered = dest.get_receipt(self._hash(dest_hash))
+            if delivered is None:
+                return receipt.replace(status=Status.DESTINATION_CONFIRMING, destination_tx_id=dest_hash, next_action=None)
+            if delivered["status"] == 1:
+                self._success(delivered, dest_hash)
+                if not self._destination_matches(dest, delivered, m, message, plan.recipient):
+                    raise AttestationError("CCTP destination receipt does not prove the expected USDC mint")
+                return receipt.replace(status=Status.COMPLETED if used else Status.DESTINATION_CONFIRMING,
+                                       destination_tx_id=dest_hash, next_action=None)
+            failed = True
+            receipt = receipt.replace(destination_tx_id=None, protocol_state={**state, "forwardingFailed": True})
+        if used or (normalize_cctp(plan.cctp).forwarding and not failed):
+            return receipt.replace(status=Status.DELIVERY_PENDING, next_action=None)
+        return receipt.replace(status=Status.DESTINATION_ACTION_REQUIRED,
+                               next_action={"kind": "cctp-mint", "chainId": m.destination_chain})
+
+    def recover(self, plan, checkpoint, *, approval_replacement=None):
+        from web3.exceptions import TransactionNotFound
+        m = self._metadata(plan)
+        receipt = self.from_checkpoint(plan, checkpoint)
+        if approval_replacement is not None:
+            if receipt.source_tx_id:
+                raise ConfigurationError("Cannot replace approvals after a CCTP burn was submitted")
+            if not isinstance(approval_replacement, dict) or set(approval_replacement) != {"original_transaction_id", "replacement_transaction_id"}:
+                raise ConfigurationError("Invalid approval replacement selection")
+            original = self._hash(approval_replacement["original_transaction_id"])
+            replacement = self._hash(approval_replacement["replacement_transaction_id"])
+            active = list(receipt.protocol_state["approvalTxIds"])
+            normalized = [v.lower() for v in active]
+            if original.lower() not in normalized or replacement.lower() in normalized:
+                raise ConfigurationError("Replacement must identify a saved approval and a different transaction")
+            conn = self._connection(m.source_chain, m.source_chain_id)
+            try:
+                original_tx = conn.w3.eth.get_transaction(original)
+            except TransactionNotFound:
+                original_tx = None
+            if original_tx is not None or conn.get_receipt(original) is not None:
+                raise ConfigurationError("Original approval is still visible; reconcile it first")
+            test = receipt.replace(protocol_state={**receipt.protocol_state, "approvalTxIds": [replacement]})
+            if not self._approvals_confirmed(conn, m, plan, test):
+                raise ConfigurationError("Replacement approval must be confirmed before recovery")
+            active[normalized.index(original.lower())] = replacement
+            receipt = receipt.replace(id=active[-1], protocol_state={**receipt.protocol_state, "approvalTxIds": active,
+                     "replacedApprovalTxIds": [*receipt.protocol_state.get("replacedApprovalTxIds", []), original]})
+        return self.get_status(plan, receipt)
+
+    @classmethod
+    def from_checkpoint(cls, plan, checkpoint):
+        source, destination = checkpoint.source or {}, checkpoint.destination or {}
+        if source.get("preparedTransaction") is not None or destination.get("preparedTransaction") is not None:
+            raise ConfigurationError("CCTP checkpoints cannot contain prepared Aleo transactions")
+        active = source.get("approvalTransactionIds", [])
+        replaced = source.get("replacedApprovalTransactionIds", [])
+        for values in (active, replaced):
+            if not isinstance(values, list):
+                raise ConfigurationError("Invalid CCTP approval checkpoint")
+            for value in values:
+                cls._hash(value)
+        tx_hash, dest_hash = source.get("transactionId"), destination.get("transactionId")
+        if tx_hash is not None:
+            cls._hash(tx_hash)
+        if dest_hash is not None:
+            cls._hash(dest_hash)
+        if not tx_hash and (not active or dest_hash):
+            raise ConfigurationError("CCTP checkpoint contains no submitted source transaction")
+        options = normalize_cctp(plan.cctp)
+        if options.max_fee is None:
+            raise ConfigurationError("CCTP checkpoint must preserve its approved fee cap")
+        address_bytes(plan.sender)
+        return Receipt(tx_hash or active[-1], "cctp", Status.SOURCE_CONFIRMING if tx_hash else Status.SOURCE_APPROVAL_PENDING,
+                       source_tx_id=tx_hash, destination_tx_id=dest_hash,
+                       protocol_state={"routeId": plan.route_id, "sourceSender": plan.sender,
+                                       "approvalTxIds": list(active), "replacedApprovalTxIds": list(replaced)})
+
+    def complete(self, plan, receipt, *, manual_mint=False, on_checkpoint):
+        if type(manual_mint) is not bool:
+            raise ConfigurationError("manual_mint must be boolean")
+        m = self._metadata(plan)
+        state = self.get_status(plan, receipt)
+        if state.status in (Status.COMPLETED, Status.DESTINATION_CONFIRMING):
+            return state
+        fallback = manual_mint and state.status == Status.DELIVERY_PENDING and state.protocol_state.get("nonceUsed") is False
+        if state.status != Status.DESTINATION_ACTION_REQUIRED and not fallback:
+            raise ConfigurationError("CCTP transfer is not ready for manual destination minting")
+        conn = self._connection(m.destination_chain, m.destination_chain_id)
+        sender = conn.require_address()
+        if conn.w3.eth.get_balance(sender) <= 0:
+            raise BridgeError("Destination wallet requires native gas funds for CCTP mint")
+        transmitter = self._contract(conn, m.transmitter, TRANSMITTER_ABI)
+        args = [bytes.fromhex(state.protocol_state[k][2:]) for k in ("message", "attestation")]
+        return self._broadcast(conn, {"to": transmitter.address, "data": transmitter.encode_abi("receiveMessage", args=args)},
+                               state, on_checkpoint, destination=True)

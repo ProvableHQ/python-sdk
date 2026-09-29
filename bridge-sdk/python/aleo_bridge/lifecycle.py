@@ -575,10 +575,18 @@ def execute(bridge, plan: Plan, *, on_checkpoint: Callable | None = None, provin
     _require_active(resolved.route)
     family = resolved.source_chain.family
     store = getattr(bridge, "checkpoints", None)
+    if plan.protocol == "cctp":
+        plan = bridge.cctp.quote(plan).plan
     reserve = getattr(store, "reserve", None)
     if callable(reserve):
         plan = replace(plan, journal_id=reserve(plan))
     emit = _Emitter(bridge, plan, on_checkpoint)
+
+    if plan.protocol == "cctp":
+        receipt = bridge.cctp.execute(plan, on_checkpoint=emit, poll_seconds=poll_seconds, timeout_seconds=timeout_seconds)
+        emit(receipt)
+        emit.finalize()
+        return to_progress(plan, receipt)
 
     if plan.protocol == "hyperlane" and family == "evm":
         eth = _module(bridge, "eth", resolved.source_chain.id)
@@ -746,6 +754,8 @@ def get_status(bridge, plan: Plan, receipt: Receipt) -> Receipt:
     if receipt.status in TERMINAL:
         return receipt
     route, src, dst = resolved.route, resolved.source_chain, resolved.destination_chain
+    if plan.protocol == "cctp":
+        return bridge.cctp.get_status(plan, receipt)
     state = receipt.protocol_state
 
     # 1. EVM approval → wallet boundary
@@ -1038,7 +1048,7 @@ def _plan_from_intent(registry: Registry, intent: dict[str, Any]) -> Plan:
                        destination_asset=intent["destination"]["asset"],
                        bridge_protocol=intent.get("bridgeProtocol"),
                        amount=intent["amount"], recipient=intent["recipient"], sender=intent.get("sender"),
-                       mint_mode=intent.get("mintMode", "public"))
+                       mint_mode=intent.get("mintMode", "public"), cctp=intent.get("cctp"))
     except (KeyError, TypeError) as exc:
         raise CheckpointInvalidError(f"Bridge checkpoint intent is incomplete: missing {exc}") from exc
 
@@ -1106,6 +1116,9 @@ def _reconstruct_source_receipt(plan: Plan, resolved: ResolvedRoute, cp: Checkpo
     offline guess here is never unsafe); anything else has nothing to build a receipt from.
     """
     src = resolved.source_chain
+    if plan.protocol == "cctp":
+        from .cctp import CctpModule
+        return CctpModule.from_checkpoint(plan, cp)
     source = cp.source or {}
     approvals = [a for a in (source.get("approvalTransactionIds") or []) if isinstance(a, str)]
 
@@ -1182,6 +1195,8 @@ def _apply_destination_overlay(resolved: ResolvedRoute, cp: Checkpoint, receipt:
     destination = cp.destination or {}
     if not destination:
         return receipt
+    if resolved.route.protocol == "cctp" and not destination.get("preparedTransaction"):
+        return receipt.replace(status=Status.DESTINATION_CONFIRMING, destination_tx_id=destination.get("transactionId"))
     if resolved.route.protocol != "xreserve" or resolved.destination_chain.family != "aleo":
         raise CheckpointInvalidError(
             "Bridge checkpoint contains a destination transaction that is invalid for this route")
@@ -1238,7 +1253,7 @@ def progress_from_checkpoint(registry: Registry, checkpoint) -> Progress:
     return to_progress(plan, receipt)
 
 
-def recover(bridge, checkpoint) -> Progress:
+def recover(bridge, checkpoint, *, approval_replacement=None) -> Progress:
     """Rebuild a transfer's ``Progress`` from a saved checkpoint — reads only, never signs.
 
     Accepts a ``Checkpoint``, its dict, or its JSON.  Re-runs ``prepare`` on the
@@ -1265,6 +1280,13 @@ def recover(bridge, checkpoint) -> Progress:
     resolved = resolve_route(bridge.registry, plan)
     src, dst = resolved.source_chain, resolved.destination_chain
     verification = _verification_from_delivery(cp.delivery_verification or {})
+
+    if plan.protocol == "cctp":
+        receipt = bridge.cctp.recover(plan, cp, approval_replacement=approval_replacement)
+        _persist(bridge, create_checkpoint(plan, receipt, bridge.registry), receipt, previous_id=cp.id)
+        return _finish(bridge, plan, receipt, cp.id)
+    if approval_replacement is not None:
+        raise ConfigurationError("approval_replacement is only supported for CCTP")
 
     if src.family in ("aleo", "solana"):
         receipt = _reconstruct_source_receipt(plan, resolved, cp, verification)
@@ -1387,6 +1409,14 @@ def resume(bridge, progress: Progress, *, on_checkpoint: Callable | None = None,
     state = receipt.protocol_state
     family = resolved.source_chain.family
 
+    if plan.protocol == "cctp":
+        emit.supersede(receipt.id)
+        receipt = bridge.cctp.execute(plan, resume=receipt, on_checkpoint=emit,
+                                      poll_seconds=poll_seconds, timeout_seconds=timeout_seconds)
+        emit(receipt)
+        emit.finalize()
+        return to_progress(plan, receipt)
+
     if family == "aleo":
         serialized = state.get("preparedTransaction")
         if not isinstance(serialized, str) or not serialized:
@@ -1469,7 +1499,7 @@ def resume(bridge, progress: Progress, *, on_checkpoint: Callable | None = None,
 # ── complete ──────────────────────────────────────────────────────────────────
 
 def complete(bridge, progress: Progress, *, secret_nonce: str | None = None,
-             on_checkpoint: Callable | None = None, proving: str = "delegate") -> Progress:
+             on_checkpoint: Callable | None = None, proving: str = "delegate", manual_mint: bool = False) -> Progress:
     """Submit the one user-signed Aleo transaction a private USDCx mint needs.
 
     Requires ``progress.next == "complete"`` — Circle has attested the deposit and the receipt
@@ -1489,6 +1519,15 @@ def complete(bridge, progress: Progress, *, secret_nonce: str | None = None,
     value used at ``execute``; it is required for a private plan on the proving path
     (``ConfigurationError``, raised before any RPC).
     """
+    if progress.plan.protocol == "cctp":
+        plan = progress.plan
+        emit = _Emitter(bridge, plan, on_checkpoint)
+        receipt = bridge.cctp.complete(plan, progress.receipt, manual_mint=manual_mint, on_checkpoint=emit)
+        emit(receipt)
+        emit.finalize()
+        return to_progress(plan, receipt)
+    if manual_mint:
+        raise ConfigurationError("manual_mint is only supported for CCTP")
     if progress.next != "complete":
         raise NotResumableError(
             "Bridge progress has no destination action to complete (next must be 'complete'); call "

@@ -1,0 +1,172 @@
+from dataclasses import replace
+
+import pytest
+from eth_abi import decode
+from eth_utils import keccak
+
+from aleo_bridge import Status, create_checkpoint
+from aleo_bridge.errors import BridgeError
+from tests.fakes.fake_cctp import Harness, SENDER, DEST_HASH
+
+
+def test_pending_burn_checkpoint_roundtrip_never_resends():
+    h = Harness()
+    h.source.pending_nth.add(1)
+    p = h.execute()
+    recovered = h.bridge.recover(h.saved[-1].to_json())
+    assert recovered.plan.cctp == p.plan.cctp
+    assert recovered.receipt.status == Status.SOURCE_CONFIRMING
+    assert len(h.source.sent) == 1
+    h.source.pending.clear()
+    assert h.bridge.recover(h.saved[-1]).next == 'done'
+    assert len(h.source.sent) == 1
+
+
+def test_approval_recovery_and_resume_burn_once():
+    h = Harness(allowance=0)
+    h.source.pending_nth.add(1)
+    h.execute()
+    cp = h.saved[-1]
+    assert h.bridge.recover(cp).receipt.status == Status.SOURCE_APPROVAL_PENDING
+    h.source.pending.clear()
+    from web3 import Web3
+    h.source.allowances[tuple(Web3.to_checksum_address(v) for v in (h.source_token, SENDER, h.messenger))] = 5_000_000
+    recovered = h.bridge.recover(cp)
+    assert recovered.next == 'resume'
+    result = h.bridge.resume(recovered, timeout_seconds=0, on_checkpoint=h.saved.append)
+    assert result.next == 'done'
+    assert len(h.source.sent) == 2
+    assert h.saved[-1].intent['cctp']['max_fee'] == '0.1'
+
+
+def test_manual_completion_and_second_call_do_not_resend():
+    h = Harness(forwarding=False)
+    h.destination.used = False
+    h.circle.forward_hash = None
+    p = h.execute()
+    assert p.next == 'complete'
+    minted = h.bridge.complete(p, on_checkpoint=h.saved.append)
+    assert minted.receipt.status == Status.DESTINATION_CONFIRMING
+    data = bytes.fromhex(h.destination.sent[0]['data'][2:])
+    assert data[:4] == keccak(text='receiveMessage(bytes,bytes)')[:4]
+    assert decode(['bytes','bytes'],data[4:]) == (h.attested, bytes.fromhex('abcd'))
+    assert h.saved[-1].destination['transactionId'] == minted.receipt.destination_tx_id
+    assert 'message' not in h.saved[-1].to_json()
+    h.bridge.complete(minted)
+    assert len(h.destination.sent) == 1
+    h.destination.used = True
+    assert h.bridge.recover(h.saved[-1]).next == 'done'
+
+
+def test_forwarding_fallback_requires_explicit_manual_mint():
+    h = Harness()
+    h.circle.forward_hash = None
+    h.destination.used = False
+    p = h.execute()
+    with pytest.raises(BridgeError): h.bridge.complete(p)
+    assert not h.destination.sent
+    assert h.bridge.complete(p, manual_mint=True).receipt.status == Status.DESTINATION_CONFIRMING
+
+
+def test_used_nonce_cannot_be_manually_minted_without_evidence():
+    h = Harness()
+    h.circle.forward_hash = None
+    with pytest.raises(BridgeError): h.bridge.complete(h.execute(), manual_mint=True)
+    assert not h.destination.sent
+
+
+def test_lost_destination_response_keeps_checkpoint():
+    h = Harness(forwarding=False)
+    h.circle.forward_hash = None
+    h.destination.used = False
+    h.destination.send_errors[1] = 'response lost'
+    with pytest.raises(BridgeError) as caught:
+        h.bridge.complete(h.execute(), on_checkpoint=h.saved.append)
+    assert h.saved[-1].destination['transactionId'] == caught.value.broadcast_id
+
+
+@pytest.mark.parametrize('field', ['sender','amount','spender','value'])
+def test_approval_recovery_rejects_mismatched_transaction(field):
+    h = Harness(allowance=0)
+    h.source.pending_nth.add(1)
+    h.execute()
+    cp = h.saved[-1]
+    h.source.pending.clear()
+    tx = h.source.sent[0]
+    if field == 'sender': tx['from'] = '0x'+'33'*20
+    elif field == 'value': tx['value'] = 1
+    else:
+        from eth_abi import encode
+        tx['data'] = '0x'+(keccak(text='approve(address,uint256)')[:4] + encode(['address','uint256'],
+              ['0x'+'33'*20 if field == 'spender' else h.messenger, 1 if field == 'amount' else 5_000_000])).hex()
+    with pytest.raises(BridgeError): h.bridge.recover(cp)
+    assert len(h.source.sent) == 1
+
+
+def replacement_case():
+    from eth_abi import encode
+    h = Harness(allowance=0)
+    h.source.pending_nth.add(1)
+    h.execute()
+    cp = h.saved[-1]
+    original = cp.source['approvalTransactionIds'][0]
+    replacement = '0x'+'44'*32
+    h.source.tx_not_found.add(original)
+    h.source.add_transaction(replacement, sender=SENDER, to=h.source_token)
+    h.source.transactions[replacement]['input'] = '0x'+(keccak(text='approve(address,uint256)')[:4]+
+                     encode(['address','uint256'], [h.messenger,5_000_000])).hex()
+    h.source.add_receipt(replacement)
+    return h, cp, {'original_transaction_id': original, 'replacement_transaction_id': replacement}
+
+
+def test_explicit_approval_replacement_preserves_history_and_fee_cap():
+    h, cp, selection = replacement_case()
+    recovered = h.bridge.recover(cp, approval_replacement=selection)
+    assert recovered.next == 'resume'
+    saved = create_checkpoint(recovered.plan, recovered.receipt, h.bridge.registry)
+    assert saved.source['approvalTransactionIds'] == [selection['replacement_transaction_id']]
+    assert saved.source['replacedApprovalTransactionIds'] == [selection['original_transaction_id']]
+    assert saved.intent['cctp']['max_fee'] == '0.1'
+    assert len(h.source.sent) == 1
+
+
+@pytest.mark.parametrize('failure',['visible','same','not_saved','pending','bad_amount','after_burn'])
+def test_replacement_requires_absent_original_and_bound_confirmed_approval(failure):
+    h, cp, selection = replacement_case()
+    if failure == 'visible': h.source.tx_not_found.clear()
+    if failure == 'same': selection['replacement_transaction_id'] = selection['original_transaction_id']
+    if failure == 'not_saved': selection['original_transaction_id'] = DEST_HASH
+    if failure == 'pending': h.source.pending.add(selection['replacement_transaction_id'])
+    if failure == 'bad_amount': h.source.transactions[selection['replacement_transaction_id']]['input'] = '0x'
+    if failure == 'after_burn': cp = replace(cp, source={**cp.source,'transactionId':DEST_HASH})
+    with pytest.raises(BridgeError): h.bridge.recover(cp, approval_replacement=selection)
+    assert len(h.source.sent) == 1
+
+
+@pytest.mark.parametrize('failure',['gas','signer'])
+def test_manual_destination_requires_wallet_and_gas(failure):
+    h = Harness(forwarding=False)
+    h.destination.used = False
+    h.circle.forward_hash = None
+    p = h.execute()
+    if failure == 'gas': h.destination.eth_balances.clear()
+    else:
+        from aleo_bridge import Ethereum
+        from web3 import Web3
+        h.bridge.evm('arc').conn = Ethereum(w3=Web3(h.destination))
+    with pytest.raises(BridgeError): h.bridge.complete(p)
+    assert not h.destination.sent
+
+
+def test_offline_checkpoint_reconstruction_excludes_attestation():
+    from aleo_bridge.lifecycle import progress_from_checkpoint
+    h = Harness(forwarding=False)
+    h.circle.forward_hash = None
+    h.destination.used = False
+    p = h.execute()
+    cp = create_checkpoint(p.plan,p.receipt,h.bridge.registry)
+    h.source.methods.clear(); h.destination.methods.clear(); h.circle.urls.clear()
+    offline = progress_from_checkpoint(h.bridge.registry,cp)
+    assert offline.plan.cctp == p.plan.cctp
+    assert 'attestation' not in cp.to_json()
+    assert h.source.methods == h.destination.methods == h.circle.urls == []

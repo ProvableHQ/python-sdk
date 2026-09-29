@@ -408,13 +408,15 @@ class Bridge:
                                timeout_seconds=timeout_seconds, on_update=on_update, on_error=on_error,
                                max_consecutive_errors=max_consecutive_errors)
 
-    def recover(self, checkpoint):
+    def recover(self, checkpoint, *, approval_replacement=None):
         """Rebuild ``Progress`` from a saved checkpoint (``Checkpoint``, dict or JSON) — reads only.
 
         Re-resolves the route from the live registry and reads chain state once;
         ``progress.next`` then says what to do: ``wait``, ``resume``, ``complete``,
         ``done`` or ``failed``.
         """
+        if approval_replacement is not None:
+            return _lifecycle.recover(self, checkpoint, approval_replacement=approval_replacement)
         return _lifecycle.recover(self, checkpoint)
 
     def resume(self, progress, *, on_checkpoint=None, secret_nonce: str | None = None,
@@ -428,15 +430,17 @@ class Bridge:
         return _lifecycle.resume(self, progress, on_checkpoint=on_checkpoint, secret_nonce=secret_nonce,
                                  poll_seconds=poll_seconds, timeout_seconds=timeout_seconds, proving=proving)
 
-    def complete(self, progress, *, secret_nonce: str, on_checkpoint=None, proving: str = "delegate"):
+    def complete(self, progress, *, secret_nonce: str | None = None, on_checkpoint=None, proving: str = "delegate",
+                 manual_mint: bool = False):
         """Submit the private USDCx mint (``progress.next == "complete"``).
 
         Requires the same ``secret_nonce`` given to ``execute``; the SDK never
         stored it.  Submits exactly one ``private_mint`` and returns
         ``DESTINATION_CONFIRMING`` progress to ``wait`` on.
         """
+        options = {"manual_mint": manual_mint} if manual_mint else {}
         return _lifecycle.complete(self, progress, secret_nonce=secret_nonce, on_checkpoint=on_checkpoint,
-                                   proving=proving)
+                                   proving=proving, **options)
 
     def pending(self) -> list:
         """The in-flight transfers of this profile — every checkpoint in the bound store,

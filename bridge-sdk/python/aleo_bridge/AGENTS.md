@@ -102,7 +102,7 @@ each changed ``Progress``.  A transient error (flaky RPC/HTTP transport)
 is retried up to ``max_consecutive_errors`` times, calling ``on_error``
 on each tolerated retry; a non-transient error propagates immediately.
 
-### `recover(self, checkpoint)`
+### `recover(self, checkpoint, *, approval_replacement=None)`
 
 Rebuild ``Progress`` from a saved checkpoint (``Checkpoint``, dict or JSON) — reads only.
 
@@ -118,7 +118,7 @@ Rebroadcasts the identical proved Aleo transaction (a duplicate response is
 success) or, on EVM, re-scans history and only then authorizes the single
 missing deposit/dispatch.  Never repeats a confirmed step.
 
-### `complete(self, progress, *, secret_nonce: 'str', on_checkpoint=None, proving: 'str' = 'delegate')`
+### `complete(self, progress, *, secret_nonce: 'str | None' = None, on_checkpoint=None, proving: 'str' = 'delegate', manual_mint: 'bool' = False)`
 
 Submit the private USDCx mint (``progress.next == "complete"``).
 

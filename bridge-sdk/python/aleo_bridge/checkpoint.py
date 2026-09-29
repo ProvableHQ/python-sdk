@@ -157,6 +157,11 @@ def create_checkpoint(plan: Plan, receipt: Receipt, registry: Registry) -> Check
         source = {}
         if approvals:
             source["approvalTransactionIds"] = approvals
+        replaced = state.get("replacedApprovalTxIds")
+        if replaced is not None:
+            if not isinstance(replaced, list) or any(not isinstance(v, str) or not re.fullmatch(r"0x[0-9a-fA-F]{64}", v) for v in replaced):
+                raise CheckpointInvalidError("Invalid replaced approval transaction identifiers")
+            source["replacedApprovalTransactionIds"] = list(replaced)
         if receipt.source_tx_id:
             source["transactionId"] = receipt.source_tx_id
         if isinstance(state.get("hookData"), str):
@@ -197,6 +202,9 @@ def create_checkpoint(plan: Plan, receipt: Receipt, registry: Registry) -> Check
         "amount": plan.amount,
         "recipient": plan.recipient,
     }
+    if plan.cctp is not None:
+        from dataclasses import asdict
+        intent["cctp"] = asdict(plan.cctp)
     if sender:
         intent["sender"] = sender
     if dst_asset.locator is not None and dst_asset.locator.kind == "aleo-program":
