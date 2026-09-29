@@ -207,10 +207,66 @@ def test_stale_approval_with_unresolved_later_nonce_cannot_resume():
     h = Harness(allowance=0)
     h.source.pending_nth.add(2)
     h.execute()
+    h.source.nonce_latest = 1  # Only the approval is mined; the later burn remains pending.
     recovered = h.bridge.recover(h.saved[0])
     assert recovered.next == 'wait'
     assert recovered.receipt.status == Status.SOURCE_APPROVAL_PENDING
     assert len(h.source.sent) == 2
+
+
+def test_confirmed_unrelated_activity_after_approval_does_not_block_resume():
+    h = Harness(allowance=0)
+    h.source.pending_nth.add(1)
+    h.execute()
+    h.source.pending.clear()
+    h.bridge.evm('ethereum').conn.send_transaction({'to': '0x0000000000000000000000000000000000000022', 'value': 0})
+    h.source.nonce_latest = 2
+    result = h.bridge.recover(h.saved[0])
+    assert result.next == 'resume'
+    assert result.receipt.source_tx_id is None
+    assert len(h.source.sent) == 2  # Recovery itself cannot send a burn.
+
+
+def test_activity_after_scanned_head_still_blocks_approval_resume():
+    h = Harness(allowance=0)
+    h.source.pending_nth.add(1)
+    h.execute()
+    h.source.pending.clear()
+    h.source.nonce_latest = 1
+    h.source.nonce_pending = 2
+    requested_tags = []
+    eth = h.bridge.evm('ethereum').conn.w3.eth
+    original = eth.get_transaction_count
+
+    def track(address, block_identifier='latest'):
+        requested_tags.append(block_identifier)
+        return original(address, block_identifier)
+
+    eth.get_transaction_count = track
+    assert h.bridge.recover(h.saved[0]).next == 'wait'
+    assert h.source.block_number in requested_tags
+
+
+def test_approval_recovery_rejects_a_changed_scanned_head():
+    h = Harness(allowance=0)
+    h.source.pending_nth.add(1)
+    h.execute()
+    h.source.pending.clear()
+    h.source.nonce_latest = h.source.nonce_pending = 2
+    eth = h.bridge.evm('ethereum').conn.w3.eth
+    original = eth.get_block
+    calls = []
+
+    def changed_head(*args, **kwargs):
+        block = dict(original(*args, **kwargs))
+        calls.append(1)
+        block['hash'] = bytes([len(calls)]) * 32
+        return block
+
+    eth.get_block = changed_head
+    with pytest.raises(BridgeError, match='head block changed'):
+        h.bridge.recover(h.saved[0])
+    assert len(h.source.sent) == 1
 
 
 def test_approval_does_not_adopt_identical_burn_before_its_nonce():
@@ -221,6 +277,7 @@ def test_approval_does_not_adopt_identical_burn_before_its_nonce():
     # Model an older identical burn and a subsequent approval in the same block.
     approval['nonce'],burn['nonce'] = 2,1
     h.source.nonce_pending = 3
+    h.source.nonce_latest = 3
     h.source.history_logs = h.source_logs(burn['hash'])
     h.source.history_logs[0]['blockNumber'] = hex(h.source.block_number)
     result = h.bridge.recover(cp)

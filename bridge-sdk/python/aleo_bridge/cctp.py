@@ -461,6 +461,7 @@ class CctpModule:
         head = conn.w3.eth.block_number
         if head < start:
             raise ConfigurationError("CCTP RPC head precedes the confirmed approval; retry recovery on a consistent provider")
+        head_hash = self._hex(conn.w3.eth.get_block(head)["hash"])
         sender = plan.sender or str(receipt.protocol_state["sourceSender"])
         last_nonce = max(int(conn.w3.eth.get_transaction(h)["nonce"]) for h in approvals)
         found: set[str] = set()
@@ -483,10 +484,18 @@ class CctpModule:
             start = end+1
         if len(found) > 1:
             raise ConfigurationError("Multiple CCTP burns match this approval; recover the intended source transaction explicitly")
+        confirmed_nonce = conn.w3.eth.get_transaction_count(sender, head)
+        pending_nonce = conn.w3.eth.get_transaction_count(sender, "pending")
+        if self._hex(conn.w3.eth.get_block(head)["hash"]) != head_hash:
+            raise ConfigurationError("CCTP head block changed during recovery; retry on a consistent provider")
         if found:
             tx_hash = next(iter(found))
             return self.get_status(plan,receipt.replace(id=tx_hash,source_tx_id=tx_hash,status=Status.SOURCE_CONFIRMING))
-        if conn.w3.eth.get_transaction_count(sender,"pending") > last_nonce+1:
+        # The scan covers confirmed activity through this exact head, including
+        # unrelated transfers after the approval. Only later activity is unresolved.
+        if confirmed_nonce < last_nonce+1:
+            raise ConfigurationError("CCTP RPC nonce precedes the confirmed approval; retry on a consistent provider")
+        if pending_nonce > confirmed_nonce:
             return receipt.replace(status=Status.SOURCE_APPROVAL_PENDING,
                   protocol_state={**receipt.protocol_state,"sourceError":"Later source activity is unresolved; recover its burn hash before resuming"})
         return receipt.replace(status=Status.SOURCE_SUBMISSION_PENDING)

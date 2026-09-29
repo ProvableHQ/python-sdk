@@ -919,6 +919,10 @@ def _is_transient_error(exc: Exception) -> bool:
         import requests
         if isinstance(exc, requests.RequestException):
             return True
+        # CCTP keeps a sanitized AttestationError at the API boundary. Its
+        # transport cause is retryable; malformed or mismatched evidence is not.
+        if isinstance(exc, AttestationError) and isinstance(exc.__cause__, (requests.ConnectionError, requests.Timeout)):
+            return True
     except ImportError:
         pass
     try:

@@ -97,3 +97,43 @@ def test_reverted_forwarding_permits_manual_action():
     p = h.execute()
     assert p.next == 'complete'
     assert p.receipt.destination_tx_id is None
+
+
+@pytest.mark.parametrize('failure', ['connection', 'timeout'])
+def test_wait_retries_circle_transport_failure_without_resubmission(failure):
+    import requests
+    h = Harness()
+    h.circle.attestation_status = 'pending'
+    progress = h.execute()
+    h.circle.attestation_status = 'complete'
+    original = h.circle.get
+    calls = []
+
+    def get(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            cls = requests.ConnectionError if failure == 'connection' else requests.Timeout
+            raise cls('temporary transport failure')
+        return original(*args, **kwargs)
+
+    h.circle.get = get
+    result = h.bridge.wait(progress, poll_seconds=0.001, timeout_seconds=2)
+    assert result.next == 'done'
+    assert len(calls) == 2 and len(h.source.sent) == 1
+
+
+def test_wait_does_not_retry_malformed_circle_json():
+    import requests
+    h = Harness()
+    h.circle.attestation_status = 'pending'
+    progress = h.execute()
+    calls = []
+
+    def invalid_json():
+        calls.append(1)
+        raise requests.exceptions.JSONDecodeError('invalid JSON', 'not json', 0)
+
+    h.circle.json = invalid_json
+    with pytest.raises(BridgeError, match='Circle CCTP request failed'):
+        h.bridge.wait(progress, poll_seconds=0.001, timeout_seconds=2)
+    assert len(calls) == 1 and len(h.source.sent) == 1
