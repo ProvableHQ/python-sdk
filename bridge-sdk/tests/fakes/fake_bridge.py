@@ -178,11 +178,11 @@ class FakeXReserve:
                 else "xreserve:aleo-testnet/usdcx->sepolia/usdc")
 
     def burn(self, recipient, *, amount=None, amount_atomic=None, mode="private",
-             record=None, merkle_proof=None) -> FakeAleoCall:
+             record=None, merkle_proof=None, route=None) -> FakeAleoCall:
         kw = dict(recipient=recipient, amount=amount, amount_atomic=amount_atomic, mode=mode,
                   record=record, merkle_proof=merkle_proof)
         self.fake.calls.append(("xreserve.burn", kw))
-        route_id = self._route()
+        route_id = route.id if route is not None else self._route()
         program = "shielded_usdcx_wrapper.aleo" if mode == "private" else "usdcx_bridge_v2.aleo"
         fn = {"private": "private_burn", "public": "burn_public",
               "public-as-signer": "burn_public_as_signer"}[mode]

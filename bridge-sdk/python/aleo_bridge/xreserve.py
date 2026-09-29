@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+import requests
+
 from . import encoding as enc
 from ._calls import AleoCall
 from ._keccak import keccak256
@@ -64,9 +66,42 @@ class XReserveModule:
             raise UnsupportedRouteError(f"USDCx burn requires an Aleo-to-Ethereum route, got {route.id}")
         if direction == "mint" and (source, destination) != ("evm", "aleo"):
             raise UnsupportedRouteError(f"private_mint requires an Ethereum-to-Aleo route, got {route.id}")
-        if route.meta_int("ethereumDestinationDomain") != ETHEREUM_DESTINATION_DOMAIN:
-            raise ConfigurationError(f"xReserve Ethereum destination domain must be {ETHEREUM_DESTINATION_DOMAIN}: {route.id}")
+        evm_asset = registry.asset(route.destination_asset_id if direction == "burn" else route.source_asset_id)
+        expected = registry.chain(evm_asset.chain_id).protocol_domains.get("xreserve")
+        key = "arcDestinationDomain" if expected == 26 else "ethereumDestinationDomain"
+        if type(expected) is not int or expected not in (0, 26) or route.meta_int(key) != expected:
+            raise ConfigurationError(f"xReserve destination domain must match its EVM chain: {route.id}")
         return route
+
+    def read_withdrawal_fee(self, route: Route, amount_atomic: int) -> tuple[int, bool]:
+        """Estimate the USDCx withdrawal deduction and reject a burn that cannot cover it.
+
+        A live estimate is rechecked before proving, but the Aleo burn has no on-chain fee cap.
+        """
+        self.build_burn_inputs(route, mode="public", amount_atomic=amount_atomic,
+                               recipient="0x" + "00" * 19 + "01", record=None, merkle_proof=None)
+        fee = int(route.meta_str("withdrawalFeeAtomic"))
+        url = route.metadata.get("withdrawalFeeUrl")
+        if url is None:
+            return fee, False
+        if not isinstance(url, str) or not url.startswith("https://"):
+            raise ConfigurationError("xReserve withdrawal fee URL must use HTTPS")
+        session = self.circle_session or requests.Session()
+        try:
+            response = session.post(url, json={"evmChain": route.meta_str("withdrawalFeeChain"),
+                "amountUsdc": format_decimal_amount(amount_atomic, 6)}, timeout=30)
+            if response.status_code != 200:
+                raise AttestationError(f"xReserve withdrawal fee request failed: HTTP {response.status_code}")
+            body = response.json()
+        except (requests.RequestException, ValueError) as exc:
+            raise AttestationError("xReserve withdrawal fee request failed") from exc
+        raw = body.get("withdrawalFeeBaseUnits") if isinstance(body, dict) else None
+        if not isinstance(raw, str) or not raw.isascii() or not raw.isdigit():
+            raise AttestationError("xReserve withdrawal fee response is invalid")
+        fee = int(raw)
+        if fee >= amount_atomic:
+            raise InvalidAmountError("USDCx burn amount must exceed the live withdrawal fee")
+        return fee, True
 
     # ── burn ──
     def build_burn_inputs(self, route: Route, *, mode: str, amount_atomic: int, recipient: str,
@@ -79,11 +114,18 @@ class XReserveModule:
         if amount_atomic <= 0:
             raise InvalidAmountError("USDCx burn amount must be greater than zero")
         fee = int(route.meta_str("withdrawalFeeAtomic"))
+        minimum = route.metadata.get("minimumBurnAmountAtomic")
+        if minimum is not None:
+            if not isinstance(minimum, str) or not minimum.isascii() or not minimum.isdigit():
+                raise ConfigurationError("xReserve minimum burn amount is invalid")
+            if amount_atomic < int(minimum):
+                raise InvalidAmountError(f"USDCx burn amount is below the configured minimum: {minimum} base units")
         if amount_atomic <= fee:
             raise InvalidAmountError(
                 f"USDCx burn amount must exceed the {format_decimal_amount(fee, source.decimals)} {source.symbol} withdrawal fee")
         recipient32 = enc.evm_address_to_bytes32(recipient)          # InvalidRecipientError
-        amount_lit, domain_lit, recipient_lit = f"{amount_atomic}u128", f"{ETHEREUM_DESTINATION_DOMAIN}u32", enc.u8_array_literal(recipient32)
+        domain = self._bridge.registry.chain(self._bridge.registry.asset(route.destination_asset_id).chain_id).protocol_domains["xreserve"]
+        amount_lit, domain_lit, recipient_lit = f"{amount_atomic}u128", f"{domain}u32", enc.u8_array_literal(recipient32)
         if mode == "private":
             if not isinstance(record, str) or not record.strip():
                 raise ConfigurationError(f"private_burn requires a USDCx Token record from {route.meta_str('remoteToken')}")
@@ -94,8 +136,8 @@ class XReserveModule:
         return route.meta_str("bridgeProgram"), function, [amount_lit, domain_lit, recipient_lit]
 
     def burn(self, recipient: str, *, amount: Any = None, amount_atomic: int | None = None, mode: str = "private",
-             record: str | None = None, merkle_proof: str | None = None) -> AleoCall[BurnReceipt]:
-        """Burn USDCx for USDC on Ethereum. ``private`` (default) spends a Token record via the wrapper and needs a
+             record: str | None = None, merkle_proof: str | None = None, route: Route | None = None) -> AleoCall[BurnReceipt]:
+        """Burn USDCx for USDC on the selected EVM route (Ethereum by default). ``private`` spends a Token record via the wrapper and needs a
         freeze-list exclusion proof — both are resolved from chain state when not supplied. Minimum: more than
         the 2 USDCx withdrawal fee. The Aleo burn-attestation service forwards accepted burns to Circle."""
         if mode not in BURN_MODES:
@@ -103,9 +145,11 @@ class XReserveModule:
         if mode != "private" and (record is not None or merkle_proof is not None):
             raise ConfigurationError(
                 f"mode={mode!r} burns the public balance; record=/merkle_proof= only apply to mode='private'")
-        route = self._validated(self.outbound_route(), direction="burn")
+        route = self._validated(self._bridge.registry.route(route.id) if route is not None else self.outbound_route(), direction="burn")
         source = self._bridge.registry.asset(route.source_asset_id)
         atomic = resolve_amount(amount=amount, amount_atomic=amount_atomic, decimals=source.decimals)
+        if route.metadata.get("withdrawalFeeUrl") is not None:
+            self.read_withdrawal_fee(route, atomic)
         if mode == "private":
             token_program = route.meta_str("remoteToken")
             if record is None:
@@ -128,7 +172,7 @@ class XReserveModule:
         def build(tx_id: str, _outputs: list[str]) -> BurnReceipt:
             receipt = Receipt(id=tx_id, protocol="xreserve", status=Status.SOURCE_CONFIRMING, source_tx_id=tx_id,
                               protocol_state={"routeId": route.id, "burnMode": mode, "amountAtomic": str(atomic),
-                                              "nativeDomain": ETHEREUM_DESTINATION_DOMAIN, "nativeRecipientBytes32": recipient_hex,
+                                              "nativeDomain": self._bridge.registry.chain(self._bridge.registry.asset(route.destination_asset_id).chain_id).protocol_domains["xreserve"], "nativeRecipientBytes32": recipient_hex,
                                               "sourceProgram": program, "sourceFunction": function,
                                               "forwardingService": "aleo-burn-attestation"})
             return BurnReceipt(transaction_id=tx_id, route_id=route.id, mode=mode, amount_atomic=atomic, receipt=receipt)

@@ -255,9 +255,9 @@ lifecycle layer (plan 4) re-quotes at the last responsible moment by calling thi
 
 Live relayer payment for the route (the exact u64 the hook asserts); quote right before proving.
 
-### `xreserve.burn(self, recipient: 'str', *, amount: 'Any' = None, amount_atomic: 'int | None' = None, mode: 'str' = 'private', record: 'str | None' = None, merkle_proof: 'str | None' = None) -> 'AleoCall[BurnReceipt]'`
+### `xreserve.burn(self, recipient: 'str', *, amount: 'Any' = None, amount_atomic: 'int | None' = None, mode: 'str' = 'private', record: 'str | None' = None, merkle_proof: 'str | None' = None, route: 'Route | None' = None) -> 'AleoCall[BurnReceipt]'`
 
-Burn USDCx for USDC on Ethereum. ``private`` (default) spends a Token record via the wrapper and needs a
+Burn USDCx for USDC on the selected EVM route (Ethereum by default). ``private`` spends a Token record via the wrapper and needs a
 freeze-list exclusion proof — both are resolved from chain state when not supplied. Minimum: more than
 the 2 USDCx withdrawal fee. The Aleo burn-attestation service forwards accepted burns to Circle.
 

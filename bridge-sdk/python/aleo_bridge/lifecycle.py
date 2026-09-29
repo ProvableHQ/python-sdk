@@ -257,6 +257,9 @@ def quote(bridge, *, source_chain: str | None = None, source_asset: str | None =
         return replace(q, plan=plan)
     if plan.protocol == "xreserve" and family == "aleo":
         fee_atomic = _xreserve_withdrawal_fee_atomic(resolved)
+        live_fee = resolved.route.metadata.get("withdrawalFeeUrl") is not None
+        if live_fee:
+            fee_atomic, _ = bridge.xreserve.read_withdrawal_fee(resolved.route, plan.amount_atomic)
         if fee_atomic is None:
             raise RouteUnavailableError(f"xReserve withdrawal fee is missing or invalid: {plan.route_id}")
         decimals = resolved.source_asset.decimals
@@ -274,7 +277,7 @@ def quote(bridge, *, source_chain: str | None = None, source_asset: str | None =
             fees=(Fee(kind="protocol", chain_id=resolved.source_chain.id, asset_id=resolved.source_asset.id,
                       amount=fee_human, estimated=True),),
             amount_out=format_decimal_amount(plan.amount_atomic - fee_atomic, decimals),
-            withdrawal_fee_atomic=fee_atomic)
+            withdrawal_fee_atomic=fee_atomic, status="quoted" if live_fee else "not-queried")
     raise UnsupportedRouteError(
         f"Unsupported {plan.protocol} source chain family: {family} ({plan.route_id})")
 
@@ -624,11 +627,13 @@ def execute(bridge, plan: Plan, *, on_checkpoint: Callable | None = None, provin
         # the full amount would wait for a delivery that can never arrive. With no readable fee
         # there is no honest expectation to record, and the branch degrades to veil's passthrough.
         fee_atomic = _xreserve_withdrawal_fee_atomic(resolved)
+        if resolved.route.metadata.get("withdrawalFeeUrl") is not None:
+            fee_atomic, _ = bridge.xreserve.read_withdrawal_fee(resolved.route, plan.amount_atomic)
         verification = ({} if fee_atomic is None else
                         _delivery_verification(bridge, plan, resolved,
                                                expected_atomic=plan.amount_atomic - fee_atomic))
         call = bridge.xreserve.burn(plan.recipient, amount_atomic=plan.amount_atomic, mode=burn_mode,
-                                    record=record, merkle_proof=merkle_proof)
+                                    record=record, merkle_proof=merkle_proof, route=resolved.route)
         receipt = _run_aleo_leg(bridge, plan, call, proving=proving, emit=emit, extra_state=verification)
         emit.finalize()
         return to_progress(plan, receipt)

@@ -133,6 +133,7 @@ class EvmXReserveQuote(Quote):
 @dataclass(frozen=True)
 class AleoXReserveQuote(Quote):
     withdrawal_fee_atomic: int
+    status: str = "not-queried"
 
 
 @dataclass
