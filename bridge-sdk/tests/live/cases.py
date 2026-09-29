@@ -65,6 +65,8 @@ class CaseSpec:
 
 
 CASES: dict[str, CaseSpec] = {
+    "evm-cctp": CaseSpec(name="evm-cctp", protocol="cctp", source_family="evm", amount="2",
+                         veil_source="mainnet/cctp-roundtrip.live.test.ts"),
     "evm-hyperlane": CaseSpec(
         name="evm-hyperlane", protocol="hyperlane", source_family="evm",
         veil_source="mainnet/evm-hyperlane.live.test.ts:21-115"),

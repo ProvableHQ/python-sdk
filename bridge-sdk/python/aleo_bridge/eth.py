@@ -6,6 +6,8 @@ without the ``evm`` extra; the first call that needs them raises
 """
 from __future__ import annotations
 
+from ._registry_compatibility import is_registry_version_compatible
+
 import os
 import re
 import time
@@ -514,7 +516,7 @@ class EthModule:
 
     def _route_for_plan(self, plan: Plan) -> Route:
         """Re-resolve the route from the live registry (invariant 1); never trust plan-carried addresses."""
-        if plan.registry_version != self.registry.version:
+        if not is_registry_version_compatible(self.registry, plan.registry_version, plan.route_id):
             raise RegistryVersionMismatchError(
                 f"Plan uses registry {plan.registry_version}; this client has {self.registry.version}")
         route = self.registry.route(plan.route_id)
@@ -526,7 +528,7 @@ class EthModule:
 
     def _plan_route(self, plan: Plan, protocol: str) -> Route:
         """Re-resolve a caller-supplied ``Plan``'s route by id (never trust plan-carried addresses)."""
-        if plan.registry_version != self.registry.version:
+        if not is_registry_version_compatible(self.registry, plan.registry_version, plan.route_id):
             raise RegistryVersionMismatchError(
                 f"Plan uses registry {plan.registry_version}; this client has {self.registry.version}")
         try:
@@ -557,6 +559,9 @@ class EthModule:
                             mint_mode=mint_mode)
         for field in fields(Plan):
             if field.name == "journal_id":  # Local storage identity does not change the transfer.
+                continue
+            if field.name == "registry_version" and is_registry_version_compatible(
+                    self.registry, plan.registry_version, plan.route_id):
                 continue
             mine, theirs = getattr(rebuilt, field.name), getattr(plan, field.name)
             if mine != theirs:
@@ -1712,7 +1717,7 @@ class EthModule:
         """
         if checkpoint.version != 1 or checkpoint.intent.get("bridgeProtocol") != plan.protocol or checkpoint.route.get("id") != plan.route_id:
             raise CheckpointInvalidError("Bridge checkpoint does not match the prepared route")
-        if checkpoint.route.get("registryVersion") != self.registry.version:
+        if not is_registry_version_compatible(self.registry, checkpoint.route.get("registryVersion"), checkpoint.route.get("id")):
             raise RegistryVersionMismatchError(
                 f"Checkpoint uses registry {checkpoint.route.get('registryVersion')}; this client has {self.registry.version}")
         if plan.protocol == "hyperlane" and checkpoint.destination:

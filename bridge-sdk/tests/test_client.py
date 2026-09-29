@@ -239,9 +239,9 @@ def test_from_profile_uses_profile_and_wires_no_side_chains(tmp_path, monkeypatc
 def test_cli_lists_routes_and_assets(capsys):
     assert cli.main(["routes"]) == 0
     routes = json.loads(capsys.readouterr().out)
-    assert len(routes) == 22 and routes[0] == "xreserve:ethereum/usdc->aleo/usdcx"
+    assert len(routes) == 30 and routes[0] == "xreserve:ethereum/usdc->aleo/usdcx"
     assert cli.main(["assets"]) == 0
-    assert len(json.loads(capsys.readouterr().out)) == 19
+    assert len(json.loads(capsys.readouterr().out)) == 22
     assert cli.main(["bogus"]) == 2
 
 
@@ -261,7 +261,7 @@ def test_routes_filters_the_registry_for_this_environment(fake_aleo):
     assert [r.id for r in bridge.routes(source_chain="solana", destination_chain="aleo")] == \
         ["hyperlane:solana/sol->aleo/sol", "hyperlane:solana/aleo->aleo/aleo"]
     assert [r.id for r in bridge.routes(source_chain="ethereum", source_asset="usdc")] == \
-        ["xreserve:ethereum/usdc->aleo/usdcx"]
+        ["xreserve:ethereum/usdc->aleo/usdcx", "cctp:ethereum/usdc->arc/usdc"]
     assert bridge.routes() == REG.routes(environment="mainnet")
     assert bridge.routes(bridge_protocol="xreserve", include_unavailable=True) == \
         REG.routes(bridge_protocol="xreserve", include_unavailable=True, environment="mainnet")

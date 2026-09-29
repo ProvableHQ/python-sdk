@@ -3,7 +3,7 @@
 Every key keeps veil's camelCase spelling so the brief and veil tests stay the source of truth."""
 from __future__ import annotations
 
-REGISTRY_VERSION = "2026-08-31.solana-deposits.1"
+REGISTRY_VERSION = "2026-09-28.cctp-arc.1"
 
 EVM_ADDRESS = "^0x[0-9a-fA-F]{40}$"
 SOLANA_ADDRESS = "^[1-9A-HJ-NP-Za-km-z]{32,44}$"
@@ -13,15 +13,20 @@ CHAINS = [
     {"id": "aleo", "displayName": "Aleo", "family": "aleo", "environment": "mainnet", "nativeCurrencySymbol": "ALEO",
      "protocolDomains": {"xreserve": 10002, "hyperlane": 1634493807}},
     {"id": "ethereum", "displayName": "Ethereum", "family": "evm", "environment": "mainnet", "nativeCurrencySymbol": "ETH",
-     "protocolDomains": {"xreserve": 0, "hyperlane": 1}},
+     "protocolDomains": {"xreserve": 0, "hyperlane": 1, "cctp": 0}},
+    {"id": "arc", "displayName": "Arc", "family": "evm", "environment": "mainnet", "nativeCurrencySymbol": "USDC",
+     "protocolDomains": {"xreserve": 26, "cctp": 26}},
     {"id": "solana", "displayName": "Solana", "family": "solana", "environment": "mainnet", "nativeCurrencySymbol": "SOL",
      "protocolDomains": {"hyperlane": 1399811149}},
-    {"id": "base", "displayName": "Base", "family": "evm", "environment": "mainnet", "nativeCurrencySymbol": "ETH"},
+    {"id": "base", "displayName": "Base", "family": "evm", "environment": "mainnet", "nativeCurrencySymbol": "ETH",
+     "protocolDomains": {"cctp": 6}},
+    {"id": "arbitrum", "displayName": "Arbitrum", "family": "evm", "environment": "mainnet", "nativeCurrencySymbol": "ETH",
+     "protocolDomains": {"cctp": 3}},
     {"id": "hyperevm", "displayName": "HyperEVM", "family": "evm", "environment": "mainnet", "nativeCurrencySymbol": "HYPE"},
     {"id": "aleo-testnet", "displayName": "Aleo Testnet", "family": "aleo", "environment": "testnet", "nativeCurrencySymbol": "ALEO",
      "protocolDomains": {"xreserve": 10002, "hyperlane": 1617853565}},
     {"id": "sepolia", "displayName": "Ethereum Sepolia", "family": "evm", "environment": "testnet", "nativeCurrencySymbol": "ETH",
-     "protocolDomains": {"hyperlane": 11155111}},
+     "protocolDomains": {"hyperlane": 11155111, "xreserve": 0}},
 ]
 
 ASSETS = [
@@ -75,6 +80,25 @@ ASSETS = [
      "locator": {"kind": "evm-contract", "value": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"}, "addressValidationRegex": EVM_ADDRESS},
 ]
 
+# _source: ProvableHQ/veil packages/bridge/src/registry/default.ts @
+# 3c3b457bd5f63620657321893a2487e489750d24 (PR #148).
+for _chain, _token in (
+    ("arc", "0x3600000000000000000000000000000000000000"),
+    ("base", "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"),
+    ("arbitrum", "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"),
+):
+    ASSETS.append({"id": f"{_chain}/usdc", "key": "usdc", "chainId": _chain, "symbol": "USDC",
+                   "name": "USD Coin", "decimals": 6, "kind": "token",
+                   "locator": {"kind": "evm-contract", "value": _token}, "addressValidationRegex": EVM_ADDRESS})
+
+CCTP_SOURCE = "https://developers.circle.com/cctp/references/contract-addresses"
+CCTP_MAINNET_METADATA = {
+    "tokenMessenger": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
+    "messageTransmitter": "0x81D40F21F12A8F0E3252Bccb954D722d4c464B64",
+    "attestationBaseUrl": "https://iris-api.circle.com",
+    "deploymentReviewedAt": "2026-09-29",
+    "tokenSource": "https://developers.circle.com/stablecoins/usdc-contract-addresses",
+}
 XRESERVE_SOURCE = "https://developers.circle.com/xreserve/references/supported-blockchains-and-domains"
 HYPERLANE_REGISTRY_COMMIT = "2621c16f2db1ccb46643265c110dac5ca2c7c51a"
 HYPERLANE_SOURCE = f"https://github.com/hyperlane-xyz/hyperlane-registry/tree/{HYPERLANE_REGISTRY_COMMIT}/deployments/warp_routes"
@@ -332,6 +356,17 @@ XRESERVE_TESTNET_METADATA = {
     "attestationBaseUrl": "https://xreserve-api-testnet.circle.com/v1/attestations",
 }
 
+XRESERVE_ARC_METADATA = {
+    **XRESERVE_MAINNET_METADATA,
+    "sourceChainId": 5042, "sourceDomain": 26,
+    "minimumBurnAmountAtomic": "2000000", "withdrawalFeeAtomic": "16400",
+    "withdrawalFeeUrl": "https://api.usdcx.aleo.org/api/estimate-burn-fee",
+    "withdrawalFeeChain": "arc",
+    "withdrawalFeeSource": "https://usdcx.aleo.org/assets/index-C4YEghH3.js",
+    "deploymentSource": "https://docs.aleo.org/build/common-uses/usdcx_bridge",
+    "onchainReviewedAt": "2026-09-28",
+}
+
 
 def _route(id: str, protocol: str, environment: str, source_asset_id: str, destination_asset_id: str,
            availability: str, deployment_id: str, metadata: dict) -> dict:
@@ -339,7 +374,7 @@ def _route(id: str, protocol: str, environment: str, source_asset_id: str, desti
         "id": id, "protocol": protocol, "environment": environment,
         "sourceAssetId": source_asset_id, "destinationAssetId": destination_asset_id,
         "availability": availability, "deploymentId": deployment_id,
-        "source": XRESERVE_SOURCE if protocol == "xreserve" else HYPERLANE_SOURCE,
+        "source": XRESERVE_SOURCE if protocol == "xreserve" else CCTP_SOURCE if protocol == "cctp" else HYPERLANE_SOURCE,
         "metadata": dict(metadata),
     }
 
@@ -384,3 +419,14 @@ ROUTES = [
     _route("hyperlane:aleo/usad->ethereum/usad", "hyperlane", "mainnet", "aleo/usad", "ethereum/usad", "metadata-required", "USAD/aleo",
            _aleo_hyperlane_placeholders("hyp_warp_token_usad_v2.aleo", 1)),
 ]
+
+ROUTES.extend(_pair("xreserve", "mainnet", "arc/usdc", "aleo/usdcx", "active",
+                    "xreserve-usdcx-aleo-arc", XRESERVE_ARC_METADATA))
+for _chain, _chain_id, _domain in (("ethereum", 1, 0), ("base", 8453, 6), ("arbitrum", 42161, 3)):
+    for _src, _dst, _sid, _did, _sd, _dd in (
+        (_chain, "arc", _chain_id, 5042, _domain, 26), ("arc", _chain, 5042, _chain_id, 26, _domain),
+    ):
+        ROUTES.append(_route(f"cctp:{_src}/usdc->{_dst}/usdc", "cctp", "mainnet", f"{_src}/usdc",
+                             f"{_dst}/usdc", "active", f"cctp-v2-{_src}-{_dst}",
+                             {**CCTP_MAINNET_METADATA, "sourceChainId": _sid, "destinationChainId": _did,
+                              "sourceDomain": _sd, "destinationDomain": _dd}))

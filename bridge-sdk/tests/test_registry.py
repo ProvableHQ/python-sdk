@@ -20,25 +20,25 @@ MAILBOX = {
 
 
 def test_shape_and_version():
-    assert REG.version == "2026-08-31.solana-deposits.1"
-    assert len(REG.chains()) == 7 and len(REG.assets()) == 19
-    assert len(REG.routes(include_unavailable=True)) == 22
-    assert len(REG.routes()) == 22  # nothing is 'disabled' in this snapshot; metadata-required stays visible
+    assert REG.version == "2026-09-28.cctp-arc.1"
+    assert len(REG.chains()) == 9 and len(REG.assets()) == 22
+    assert len(REG.routes(include_unavailable=True)) == 30
+    assert len(REG.routes()) == 30  # nothing is 'disabled' in this snapshot; metadata-required stays visible
     assert validate_registry(REG) is REG
     assert REG.routes(include_unavailable=True)[0].metadata["xReserveContract"] == "0x8888888199b2Df864bf678259607d6D5EBb4e3Ce"
 
 
 def test_chains():
-    assert [c.id for c in REG.chains()] == ["aleo", "ethereum", "solana", "base", "hyperevm", "aleo-testnet", "sepolia"]
+    assert [c.id for c in REG.chains()] == ["aleo", "ethereum", "arc", "solana", "base", "arbitrum", "hyperevm", "aleo-testnet", "sepolia"]
     assert [c.id for c in REG.chains(environment="testnet")] == ["aleo-testnet", "sepolia"]
     aleo = REG.chain("aleo")
     assert (aleo.display_name, aleo.family, aleo.environment, aleo.native_symbol) == ("Aleo", "aleo", "mainnet", "ALEO")
     assert aleo.protocol_domains == {"xreserve": 10002, "hyperlane": 1634493807}
-    assert REG.chain("ethereum").protocol_domains == {"xreserve": 0, "hyperlane": 1}
+    assert REG.chain("ethereum").protocol_domains == {"xreserve": 0, "hyperlane": 1, "cctp": 0}
     assert REG.chain("solana").protocol_domains == {"hyperlane": 1399811149}
-    assert REG.chain("base").protocol_domains == {} and REG.chain("hyperevm").native_symbol == "HYPE"
+    assert REG.chain("base").protocol_domains == {"cctp": 6} and REG.chain("hyperevm").native_symbol == "HYPE"
     assert REG.chain("aleo-testnet").protocol_domains == {"xreserve": 10002, "hyperlane": 1617853565}
-    assert REG.chain("sepolia").protocol_domains == {"hyperlane": 11155111}
+    assert REG.chain("sepolia").protocol_domains == {"hyperlane": 11155111, "xreserve": 0}
     with pytest.raises(RouteNotFoundError):
         REG.chain("bitcoin")
 
@@ -87,7 +87,8 @@ def test_usdcx_only_via_xreserve_and_others_via_hyperlane():
 def test_xreserve_routes():
     xr = REG.routes(bridge_protocol="xreserve", include_unavailable=True)
     assert [r.id for r in xr] == ["xreserve:ethereum/usdc->aleo/usdcx", "xreserve:aleo/usdcx->ethereum/usdc",
-                                  "xreserve:sepolia/usdc->aleo-testnet/usdcx", "xreserve:aleo-testnet/usdcx->sepolia/usdc"]
+                                  "xreserve:sepolia/usdc->aleo-testnet/usdcx", "xreserve:aleo-testnet/usdcx->sepolia/usdc",
+                                  "xreserve:arc/usdc->aleo/usdcx", "xreserve:aleo/usdcx->arc/usdc"]
     assert all(r.availability == "active" and r.active for r in xr)
     assert all(r.metadata["ethereumDestinationDomain"] == 0 and r.metadata["arcDestinationDomain"] == 26 for r in xr)
     assert all(r.source == "https://developers.circle.com/xreserve/references/supported-blockchains-and-domains" for r in xr)
@@ -245,14 +246,14 @@ def test_metadata_required_routes():
 
 def test_route_filters_follow_veil_get_routes():
     # veil getRoutes: protocol / sourceChainId / destinationChainId / symbol — chain ids, never asset refs.
-    assert [r.id for r in REG.routes(source_chain="aleo", bridge_protocol="xreserve")] == ["xreserve:aleo/usdcx->ethereum/usdc"]
+    assert [r.id for r in REG.routes(source_chain="aleo", bridge_protocol="xreserve")] == ["xreserve:aleo/usdcx->ethereum/usdc", "xreserve:aleo/usdcx->arc/usdc"]
     assert [r.id for r in REG.routes(destination_chain="aleo", symbol="wbtc")] == ["hyperlane:ethereum/wbtc->aleo/wbtc"]
-    assert len(REG.routes(environment="testnet")) == 2 and len(REG.routes(environment="mainnet")) == 20
+    assert len(REG.routes(environment="testnet")) == 2 and len(REG.routes(environment="mainnet")) == 28
     assert len(REG.routes(source_chain="solana")) == 2  # SOL deposit + metadata-required ALEO
     assert len(REG.routes(source_chain="SOLANA", destination_chain="Aleo")) == 2   # case-insensitive
     # the asset filters narrow a chain pair to one asset on either side
     assert [r.id for r in REG.routes(source_chain="aleo", source_asset="wbtc")] == ["hyperlane:aleo/wbtc->ethereum/wbtc"]
-    assert [r.id for r in REG.routes(destination_chain="ethereum", destination_asset="usdc")] == ["xreserve:aleo/usdcx->ethereum/usdc"]
+    assert [r.id for r in REG.routes(destination_chain="ethereum", destination_asset="usdc")] == ["xreserve:aleo/usdcx->ethereum/usdc", "cctp:arc/usdc->ethereum/usdc"]
     with pytest.raises(TypeError):
         REG.routes("aleo")                                    # keyword-only: no positional selectors
 
@@ -344,6 +345,6 @@ def test_validation_failures():
 
 def test_data_module_is_plain_literals():
     assert data.REGISTRY_VERSION == REG.version
-    assert len(data.CHAINS) == 7 and len(data.ASSETS) == 19 and len(data.ROUTES) == 22
+    assert len(data.CHAINS) == 9 and len(data.ASSETS) == 22 and len(data.ROUTES) == 30
     assert all(isinstance(c, dict) for c in data.CHAINS) and all(isinstance(r["metadata"], dict) for r in data.ROUTES)
     assert re.compile(data.ALEO_ADDRESS).match("aleo1kypwp5m7qtk9mwazgcpg0tq8aal23mnrvwfvug65qgcg9xvsrqgspyjm6n")

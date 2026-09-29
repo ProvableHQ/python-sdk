@@ -7,6 +7,8 @@ raises :class:`MissingExtraError` at the point of use, never at import. Layouts 
 """
 from __future__ import annotations
 
+from ._registry_compatibility import is_registry_version_compatible
+
 import asyncio
 import base64
 import inspect
@@ -705,7 +707,7 @@ class SolModule:
         if plan is not None:
             if sender is not None:
                 raise ValueError("Pass plan= or sender=, not both: the plan carries its own sender")
-            if plan.registry_version != self.registry.version:
+            if not is_registry_version_compatible(self.registry, plan.registry_version, plan.route_id):
                 raise RegistryVersionMismatchError(
                     f"plan was prepared against registry {plan.registry_version}; this client runs {self.registry.version} — re-run quote()")
             if plan.route_id != route.id:

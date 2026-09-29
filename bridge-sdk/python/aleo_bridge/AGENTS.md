@@ -8,7 +8,7 @@ over the reviewed Hyperlane warp routes and Circle xReserve deployments
 (`pip install aleo-bridge-sdk`, imports as `aleo_bridge`).
 MCP alternative: `python -m aleo_bridge.mcp` exposes the same lifecycle as
 tools; `aleo_bridge.agent.bridge_tools()` gives Claude-shape tool schemas.
-Registry version `2026-08-31.solana-deposits.1`.
+Registry version `2026-09-28.cctp-arc.1`.
 
 Runnable examples ship in the package: start with
 `python -m aleo_bridge.examples.quote_transfer --help`.
@@ -374,6 +374,14 @@ re-stating the plan's own amount is harmless). Without a plan, ``recipient`` is 
 | `hyperlane:hyperevm/aleo->aleo/aleo` | hyperlane | mainnet | metadata-required |
 | `hyperlane:ethereum/usad->aleo/usad` | hyperlane | mainnet | metadata-required |
 | `hyperlane:aleo/usad->ethereum/usad` | hyperlane | mainnet | metadata-required |
+| `xreserve:arc/usdc->aleo/usdcx` | xreserve | mainnet | active |
+| `xreserve:aleo/usdcx->arc/usdc` | xreserve | mainnet | active |
+| `cctp:ethereum/usdc->arc/usdc` | cctp | mainnet | active |
+| `cctp:arc/usdc->ethereum/usdc` | cctp | mainnet | active |
+| `cctp:base/usdc->arc/usdc` | cctp | mainnet | active |
+| `cctp:arc/usdc->base/usdc` | cctp | mainnet | active |
+| `cctp:arbitrum/usdc->arc/usdc` | cctp | mainnet | active |
+| `cctp:arc/usdc->arbitrum/usdc` | cctp | mainnet | active |
 
 `metadata-required` routes are listed but refused by `quote`/`execute`
 until their deployments are reviewed upstream.

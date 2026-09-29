@@ -114,8 +114,8 @@ def test_gates_only_read_the_environment(monkeypatch):
     assert dict(os.environ) == before
 
 
-def test_case_names_are_veils_five_mainnet_cases():
-    assert live_config.CASE_NAMES == ("evm-hyperlane", "evm-xreserve", "aleo-hyperlane",
+def test_case_names_include_cctp():
+    assert live_config.CASE_NAMES == ("evm-cctp", "evm-hyperlane", "evm-xreserve", "aleo-hyperlane",
                                       "aleo-xreserve", "solana-hyperlane")
 
 
@@ -487,8 +487,8 @@ def test_every_mainnet_route_is_covered_by_exactly_one_case():
     assert ETH_ROUTE in by_case["evm-hyperlane"] and "hyperlane:ethereum/wbtc->aleo/wbtc" in by_case["evm-hyperlane"]
     assert "hyperlane:aleo/sol->solana/sol" in by_case["aleo-hyperlane"]
     assert by_case["solana-hyperlane"] & active == {"hyperlane:solana/sol->aleo/sol"}
-    assert by_case["evm-xreserve"] & active == {USDC_ROUTE}
-    assert by_case["aleo-xreserve"] & active == {"xreserve:aleo/usdcx->ethereum/usdc"}
+    assert by_case["evm-xreserve"] & active == {USDC_ROUTE, "xreserve:arc/usdc->aleo/usdcx"}
+    assert by_case["aleo-xreserve"] & active == {"xreserve:aleo/usdcx->ethereum/usdc", "xreserve:aleo/usdcx->arc/usdc"}
 
 
 def test_default_amount_is_one_atomic_unit_or_veils_literal():
@@ -1010,7 +1010,7 @@ def test_only_the_aleo_to_evm_withdrawal_measures_delivery_by_balance():
     """The one leg with no delivery query anywhere: `wait` on it could only ever time out."""
     rise = {route.id for route in DEFAULT_REGISTRY.routes()
             if live_cases.delivery_is_a_balance_rise(route, DEFAULT_REGISTRY)}
-    assert rise == {"xreserve:aleo/usdcx->ethereum/usdc", "xreserve:aleo-testnet/usdcx->sepolia/usdc"}
+    assert rise == {"xreserve:aleo/usdcx->ethereum/usdc", "xreserve:aleo-testnet/usdcx->sepolia/usdc", "xreserve:aleo/usdcx->arc/usdc"}
     assert not live_cases.delivery_is_a_balance_rise(DEFAULT_REGISTRY.route(USDC_ROUTE), DEFAULT_REGISTRY)
     assert not live_cases.delivery_is_a_balance_rise(DEFAULT_REGISTRY.route(ETH_ROUTE), DEFAULT_REGISTRY)
 

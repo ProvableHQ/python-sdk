@@ -13,6 +13,8 @@ only adds ``prepare`` and the ``resolve_route`` helper every later verb shares.
 """
 from __future__ import annotations
 
+from ._registry_compatibility import is_registry_version_compatible
+
 import json
 import re
 import time
@@ -67,7 +69,7 @@ def resolve_route(registry: Registry, plan: Plan) -> ResolvedRoute:
     different registry version (re-quote to fix) and
     :class:`CheckpointInvalidError` when its route topology no longer matches.
     """
-    if plan.registry_version != registry.version:
+    if not is_registry_version_compatible(registry, plan.registry_version, plan.route_id):
         raise RegistryVersionMismatchError(
             f"Plan uses registry {plan.registry_version}; this client has "
             f"{registry.version}. Re-run quote() to rebuild the plan.")
@@ -1202,7 +1204,7 @@ def progress_from_checkpoint(registry: Registry, checkpoint) -> Progress:
     if cp.version != 1 or not cp.intent or not cp.route:
         raise CheckpointInvalidError("Bridge checkpoint format is invalid or unsupported (version 1 required)")
     plan = replace(_plan_from_intent(registry, cp.intent), journal_id=cp.journal_id)
-    if cp.route.get("registryVersion") != plan.registry_version:
+    if not is_registry_version_compatible(registry, cp.route.get("registryVersion"), plan.route_id):
         raise RegistryVersionMismatchError(
             f"Checkpoint was written against registry {cp.route.get('registryVersion')}; this client has "
             f"{plan.registry_version}. Upgrade/downgrade aleo-bridge-sdk to the version that wrote it.")
@@ -1237,7 +1239,7 @@ def recover(bridge, checkpoint) -> Progress:
     if cp.version != 1 or not cp.intent or not cp.route:
         raise CheckpointInvalidError("Bridge checkpoint format is invalid or unsupported (version 1 required)")
     plan = replace(_plan_from_intent(bridge.registry, cp.intent), journal_id=cp.journal_id)
-    if cp.route.get("registryVersion") != plan.registry_version:
+    if not is_registry_version_compatible(bridge.registry, cp.route.get("registryVersion"), plan.route_id):
         raise RegistryVersionMismatchError(
             f"Checkpoint was written against registry {cp.route.get('registryVersion')}; this client has "
             f"{plan.registry_version}. Upgrade/downgrade aleo-bridge-sdk to the version that wrote it.")
