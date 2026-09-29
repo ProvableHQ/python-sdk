@@ -5,6 +5,7 @@ import dataclasses
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
+from collections.abc import Mapping
 
 from .errors import ConfigurationError
 
@@ -58,6 +59,46 @@ class Fee:
 
 
 @dataclass(frozen=True)
+class CctpOptions:
+    """Choose CCTP delivery speed, forwarding, and the maximum deduction in USDC.
+
+    Forwarding delivers without a destination signer and can spend the full fee
+    ceiling. Manual delivery requires destination gas and a call to ``complete``.
+    An omitted ceiling is fixed by the quote, never raised during execution.
+    """
+    speed: str = "standard"
+    forwarding: bool = True
+    max_fee: str | None = None
+
+    def __post_init__(self) -> None:
+        from .units import parse_decimal_amount, format_decimal_amount
+        if self.speed not in ("standard", "fast"):
+            raise ConfigurationError("CCTP speed must be standard or fast")
+        if type(self.forwarding) is not bool:
+            raise ConfigurationError("CCTP forwarding must be a boolean")
+        if self.max_fee is not None:
+            if not isinstance(self.max_fee, str):
+                raise ConfigurationError("CCTP max_fee must be a decimal USDC string")
+            atomic = parse_decimal_amount(self.max_fee, 6)
+            if atomic >= 2**256:
+                raise ConfigurationError("CCTP max_fee must fit uint256")
+            object.__setattr__(self, "max_fee", format_decimal_amount(atomic, 6))
+
+
+def normalize_cctp(value: Any) -> CctpOptions:
+    if value is None:
+        return CctpOptions()
+    if isinstance(value, CctpOptions):
+        return value
+    if isinstance(value, Mapping):
+        try:
+            return CctpOptions(**value)
+        except TypeError as exc:
+            raise ConfigurationError("Invalid CCTP options; use speed, forwarding, max_fee") from exc
+    raise ConfigurationError("CCTP options must be CctpOptions or a mapping")
+
+
+@dataclass(frozen=True)
 class Plan:
     route_id: str
     registry_version: str
@@ -73,6 +114,7 @@ class Plan:
     steps: tuple[Step, ...]
     #: Local recovery identity, allocated by execute; does not change the quoted transfer.
     journal_id: str | None = field(default=None, compare=False)
+    cctp: CctpOptions | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d = dataclasses.asdict(self)
@@ -83,6 +125,8 @@ class Plan:
     def from_dict(cls, d: dict[str, Any]) -> "Plan":
         data = dict(d)
         data["steps"] = tuple(Step(**s) for s in data.get("steps", ()))
+        if data.get("cctp") is not None:
+            data["cctp"] = normalize_cctp(data["cctp"])
         return cls(**data)
 
 
@@ -92,6 +136,18 @@ class Quote:
     plan: Plan
     fees: tuple[Fee, ...]
     amount_out: str | None
+
+
+@dataclass(frozen=True)
+class EvmCctpQuote(Quote):
+    """Report the CCTP deduction and receive amount in exact USDC base units."""
+    amount_atomic: int
+    amount_out_atomic: int
+    protocol_fee_atomic: int
+    forwarding_fee_atomic: int
+    max_fee_atomic: int
+    min_finality_threshold: int
+    forwarding: bool
 
 
 @dataclass(frozen=True)

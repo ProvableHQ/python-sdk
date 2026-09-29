@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, Callable
 from . import lifecycle as _lifecycle
 from . import _evm_connections
 from ._calls import AleoCall
+from .cctp import CctpModule
 from .errors import BridgeError, ConfigurationError
 from .eth import Ethereum, EthModule
 from .freezelist import FreezeList
@@ -151,6 +152,7 @@ class Bridge:
         self._programs: dict[str, Any] = {}
         self.hyperlane = HyperlaneModule(self)
         self.xreserve = XReserveModule(self)
+        self.cctp = CctpModule(self)
         self.freezelist = FreezeList(self)
         self.privacy = PrivacyModule(self)
 
@@ -338,7 +340,7 @@ class Bridge:
     def quote(self, *, source_chain: str | None = None, source_asset: str | None = None,
               destination_chain: str | None = None, destination_asset: str | None = None,
               bridge_protocol: str | None = None, route=None, amount=None, amount_atomic=None, recipient: str,
-              sender: str | None = None, mint_mode: str = "public", secret_nonce: str = "0scalar"):
+              sender: str | None = None, mint_mode: str = "public", secret_nonce: str = "0scalar", cctp=None):
         """Price a transfer and get the plan that ``execute`` takes. Nothing is signed.
 
         Name the route the way veil's ``quote`` does: ``source_chain`` + ``source_asset``
@@ -359,7 +361,7 @@ class Bridge:
                                 destination_chain=destination_chain, destination_asset=destination_asset,
                                 bridge_protocol=bridge_protocol, route=route, amount=amount,
                                 amount_atomic=amount_atomic, recipient=recipient, sender=sender,
-                                mint_mode=mint_mode, secret_nonce=secret_nonce)
+                                mint_mode=mint_mode, secret_nonce=secret_nonce, **({"cctp": cctp} if cctp is not None else {}))
 
     def execute(self, plan, *, on_checkpoint=None, proving: str = "delegate", mode: str | None = None,
                 record: str | None = None, merkle_proof: str | None = None,

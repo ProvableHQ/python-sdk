@@ -126,7 +126,7 @@ def prepare(registry: Registry, *, source_chain: str | None = None, source_asset
             destination_chain: str | None = None, destination_asset: str | None = None,
             bridge_protocol: str | None = None, route: "Route | str | None" = None,
             amount=None, amount_atomic=None, recipient: str, sender: str | None = None,
-            mint_mode: str = "public") -> Plan:
+            mint_mode: str = "public", cctp=None) -> Plan:
     """Describe how *amount* moves along one route — pure, no network.
 
     The route is named the way veil's ``quote`` names it: ``source_chain`` /
@@ -170,7 +170,7 @@ def prepare(registry: Registry, *, source_chain: str | None = None, source_asset
             f"({dst.address_regex})")
 
     return build_plan(registry, route, amount_atomic=atomic, recipient=recipient,
-                      sender=sender, mint_mode=mint_mode)
+                      sender=sender, mint_mode=mint_mode, cctp=cctp)
 
 
 # ── Connection helpers ────────────────────────────────────────────────────────
@@ -210,7 +210,7 @@ def quote(bridge, *, source_chain: str | None = None, source_asset: str | None =
           destination_chain: str | None = None, destination_asset: str | None = None,
           bridge_protocol: str | None = None, route: "Route | str | None" = None,
           amount=None, amount_atomic=None, recipient: str, sender: str | None = None,
-          mint_mode: str = "public", secret_nonce: str = "0scalar") -> Quote:
+          mint_mode: str = "public", secret_nonce: str = "0scalar", cctp=None) -> Quote:
     """Price a transfer: ``prepare`` + the source-side live read for the route kind.
 
     Returns one of ``EvmHyperlaneQuote`` / ``SolanaHyperlaneQuote`` /
@@ -232,11 +232,13 @@ def quote(bridge, *, source_chain: str | None = None, source_asset: str | None =
     plan = prepare(bridge.registry, source_chain=source_chain, source_asset=source_asset,
                    destination_chain=destination_chain, destination_asset=destination_asset,
                    bridge_protocol=bridge_protocol, route=route, amount=amount, amount_atomic=amount_atomic,
-                   recipient=recipient, sender=sender, mint_mode=mint_mode)
+                   recipient=recipient, sender=sender, mint_mode=mint_mode, cctp=cctp)
     resolved = resolve_route(bridge.registry, plan)
     _require_active(resolved.route)
     family = resolved.source_chain.family
 
+    if plan.protocol == "cctp":
+        return bridge.cctp.quote(plan)
     if plan.protocol == "hyperlane" and family == "evm":
         q = _module(bridge, "eth", resolved.source_chain.id).quote_transfer_remote(plan=plan)
         return replace(q, plan=plan)

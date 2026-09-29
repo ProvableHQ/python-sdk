@@ -54,7 +54,7 @@ back are dict entries instead — ``{"next": "failed", "error", "error_type"}`` 
 when no store is bound. Finish any entry with ``recover`` → ``wait`` / ``resume`` / ``complete``,
 never by starting a new transfer.
 
-### `quote(self, *, source_chain: 'str | None' = None, source_asset: 'str | None' = None, destination_chain: 'str | None' = None, destination_asset: 'str | None' = None, bridge_protocol: 'str | None' = None, route=None, amount=None, amount_atomic=None, recipient: 'str', sender: 'str | None' = None, mint_mode: 'str' = 'public', secret_nonce: 'str' = '0scalar')`
+### `quote(self, *, source_chain: 'str | None' = None, source_asset: 'str | None' = None, destination_chain: 'str | None' = None, destination_asset: 'str | None' = None, bridge_protocol: 'str | None' = None, route=None, amount=None, amount_atomic=None, recipient: 'str', sender: 'str | None' = None, mint_mode: 'str' = 'public', secret_nonce: 'str' = '0scalar', cctp=None)`
 
 Price a transfer and get the plan that ``execute`` takes. Nothing is signed.
 
