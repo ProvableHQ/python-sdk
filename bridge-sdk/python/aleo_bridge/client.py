@@ -493,7 +493,7 @@ class Bridge:
             raise ConfigurationError("BRIDGE_PRIVATE_KEY is required (an APrivateKey1... string)")
         aleo = build_aleo(os.environ.get("ALEO_ENDPOINT", DEFAULT_ENDPOINT), os.environ.get("ALEO_NETWORK", "mainnet"),
                           private_key, api_key=os.environ.get("ALEO_API_KEY"), consumer_id=os.environ.get("ALEO_CONSUMER_ID"))
-        evm = _evm_connections.from_env(overrides.get("evm"))
+        evm = _evm_connections.from_env(overrides.get("evm"), environment=aleo.network_name)
         ethereum = (overrides["ethereum"] if "ethereum" in overrides else
                     ethereum_from_env() if _evm_connections.needs_legacy_environment(evm) else None)
         solana = overrides["solana"] if "solana" in overrides else solana_from_env()
@@ -509,7 +509,7 @@ class Bridge:
         profile = Profile.load_or_create(home, **kwargs)
         aleo = build_aleo(profile.endpoint, profile.network, profile.private_key,
                           api_key=os.environ.get("ALEO_API_KEY"), consumer_id=os.environ.get("ALEO_CONSUMER_ID"))
-        evm = _evm_connections.from_env(evm)
+        evm = _evm_connections.from_env(evm, environment=aleo.network_name)
         bridge = cls(aleo, ethereum=ethereum if ethereum is not None else
                      ethereum_from_env() if _evm_connections.needs_legacy_environment(evm) else None, evm=evm,
                      solana=solana if solana is not None else solana_from_env(),

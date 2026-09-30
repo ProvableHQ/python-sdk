@@ -137,3 +137,75 @@ def test_wait_does_not_retry_malformed_circle_json():
     with pytest.raises(BridgeError, match='Circle CCTP request failed'):
         h.bridge.wait(progress, poll_seconds=0.001, timeout_seconds=2)
     assert len(calls) == 1 and len(h.source.sent) == 1
+
+
+@pytest.mark.parametrize('failure', [429, 500, 503, 'chunked'])
+def test_wait_retries_circle_service_failures(failure):
+    import requests
+    h = Harness()
+    h.circle.attestation_status = 'pending'
+    progress = h.execute()
+    h.circle.attestation_status = 'complete'
+    original = h.circle.get
+    calls = []
+    def get(*args, **kwargs):
+        calls.append(1)
+        h.circle.status_code = 200
+        if len(calls) == 1:
+            if failure == 'chunked':
+                raise requests.exceptions.ChunkedEncodingError('truncated')
+            h.circle.status_code = failure
+        return original(*args, **kwargs)
+    h.circle.get = get
+    result = h.bridge.wait(progress, poll_seconds=0.001, timeout_seconds=2)
+    assert result.next == 'done'
+    assert len(calls) == 2 and len(h.source.sent) == 1
+
+
+def test_old_delivery_is_found_across_bounded_polls():
+    h = Harness()
+    h.circle.forward_hash = None
+    h.destination.block_number = 25000
+    h.destination.history_logs = h.destination_logs()
+    p = h.execute()
+    assert p.next == 'wait'
+    assert len(h.destination.log_filters) <= 10
+    for _ in range(3):
+        before = len(h.destination.log_filters)
+        receipt = h.bridge.get_status(p.plan, p.receipt)
+        assert len(h.destination.log_filters) - before <= 10
+        if receipt.status == Status.COMPLETED:
+            break
+    assert receipt.status == Status.COMPLETED
+    assert receipt.destination_tx_id == DEST_HASH
+    assert len(h.source.sent) == 1 and not h.destination.sent
+
+
+def test_partial_destination_scan_discards_progress_after_reorg():
+    h = Harness()
+    h.circle.forward_hash = None
+    h.destination.block_number = 25000
+    p = h.execute()
+    eth = h.bridge.evm('arc').conn.w3.eth
+    original = eth.get_block
+    def reorg(*args, **kwargs):
+        block = dict(original(*args, **kwargs))
+        block['hash'] = b'\xcd' * 32
+        return block
+    eth.get_block = reorg
+    with pytest.raises(BridgeError, match='head block changed'):
+        h.bridge.get_status(p.plan, p.receipt)
+    before = len(h.destination.log_filters)
+    assert h.bridge.get_status(p.plan, p.receipt).status == Status.DELIVERY_PENDING
+    assert int(h.destination.log_filters[before]['toBlock'], 16) == 25000
+    assert not h.destination.sent
+
+
+@pytest.mark.parametrize('code', [400, 401, 403])
+def test_circle_client_errors_are_not_retried(code):
+    from aleo_bridge.lifecycle import _is_transient_error
+    h = Harness()
+    h.circle.status_code = code
+    with pytest.raises(BridgeError) as caught:
+        h.bridge.cctp._json('https://unused.invalid')
+    assert not _is_transient_error(caught.value)

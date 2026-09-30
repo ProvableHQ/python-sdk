@@ -41,8 +41,10 @@ def normalize(registry: Registry, environment: str, connections: Mapping[str, An
     return out
 
 
-def from_env(overrides: Mapping[str, Any] | None = None) -> dict[str, Any]:
+def from_env(overrides: Mapping[str, Any] | None = None, *, environment: str = "mainnet") -> dict[str, Any]:
     out = {str(k).lower(): v for k, v in (overrides or {}).items()}
+    if environment != "mainnet":
+        return out
     key = os.environ.get("EVM_PRIVATE_KEY") or os.environ.get("BRIDGE_EVM_PRIVATE_KEY")
     floor = os.environ.get("BRIDGE_MIN_PRIORITY_FEE_WEI")
     kwargs: dict[str, Any] = {}

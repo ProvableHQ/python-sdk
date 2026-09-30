@@ -140,6 +140,13 @@ class XReserveModule:
         """Burn USDCx for USDC on the selected EVM route (Ethereum by default). ``private`` spends a Token record via the wrapper and needs a
         freeze-list exclusion proof — both are resolved from chain state when not supplied. Minimum: more than
         the 2 USDCx withdrawal fee. The Aleo burn-attestation service forwards accepted burns to Circle."""
+        return self._burn(recipient, amount=amount, amount_atomic=amount_atomic, mode=mode,
+                          record=record, merkle_proof=merkle_proof, route=route)
+
+    def _burn(self, recipient: str, *, amount: Any = None, amount_atomic: int | None = None,
+              mode: str = "private", record: str | None = None, merkle_proof: str | None = None,
+              route: Route | None = None, withdrawal_fee_atomic: int | None = None) -> AleoCall[BurnReceipt]:
+        """Build a burn with the lifecycle's validated execution-time estimate, if supplied."""
         if mode not in BURN_MODES:
             raise ConfigurationError(f"Unsupported USDCx burn mode {mode!r}; expected one of {BURN_MODES}")
         if mode != "private" and (record is not None or merkle_proof is not None):
@@ -148,8 +155,11 @@ class XReserveModule:
         route = self._validated(self._bridge.registry.route(route.id) if route is not None else self.outbound_route(), direction="burn")
         source = self._bridge.registry.asset(route.source_asset_id)
         atomic = resolve_amount(amount=amount, amount_atomic=amount_atomic, decimals=source.decimals)
-        if route.metadata.get("withdrawalFeeUrl") is not None:
-            self.read_withdrawal_fee(route, atomic)
+        if route.metadata.get("withdrawalFeeUrl") is not None and withdrawal_fee_atomic is None:
+            withdrawal_fee_atomic, _ = self.read_withdrawal_fee(route, atomic)
+        if withdrawal_fee_atomic is not None and (type(withdrawal_fee_atomic) is not int
+                or withdrawal_fee_atomic < 0 or withdrawal_fee_atomic >= atomic):
+            raise InvalidAmountError("USDCx burn amount must exceed the live withdrawal fee")
         if mode == "private":
             token_program = route.meta_str("remoteToken")
             if record is None:

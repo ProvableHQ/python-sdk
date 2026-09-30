@@ -642,8 +642,13 @@ def execute(bridge, plan: Plan, *, on_checkpoint: Callable | None = None, provin
         verification = ({} if fee_atomic is None else
                         _delivery_verification(bridge, plan, resolved,
                                                expected_atomic=plan.amount_atomic - fee_atomic))
-        call = bridge.xreserve.burn(plan.recipient, amount_atomic=plan.amount_atomic, mode=burn_mode,
-                                    record=record, merkle_proof=merkle_proof, route=resolved.route)
+        burn = bridge.xreserve.burn
+        fee_options = {}
+        if resolved.route.metadata.get("withdrawalFeeUrl") is not None:
+            burn = bridge.xreserve._burn
+            fee_options["withdrawal_fee_atomic"] = fee_atomic
+        call = burn(plan.recipient, amount_atomic=plan.amount_atomic, mode=burn_mode,
+                    record=record, merkle_proof=merkle_proof, route=resolved.route, **fee_options)
         receipt = _run_aleo_leg(bridge, plan, call, proving=proving, emit=emit, extra_state=verification)
         emit.finalize()
         return to_progress(plan, receipt)
@@ -921,7 +926,7 @@ def _is_transient_error(exc: Exception) -> bool:
             return True
         # CCTP keeps a sanitized AttestationError at the API boundary. Its
         # transport cause is retryable; malformed or mismatched evidence is not.
-        if isinstance(exc, AttestationError) and isinstance(exc.__cause__, (requests.ConnectionError, requests.Timeout)):
+        if isinstance(exc, AttestationError) and isinstance(exc.__cause__, (requests.ConnectionError, requests.Timeout, requests.exceptions.ChunkedEncodingError)):
             return True
     except ImportError:
         pass

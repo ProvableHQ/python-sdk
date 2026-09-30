@@ -283,3 +283,121 @@ def test_approval_does_not_adopt_identical_burn_before_its_nonce():
     result = h.bridge.recover(cp)
     assert result.next == 'resume'
     assert result.receipt.source_tx_id is None
+
+
+def test_old_approval_recovery_batches_history_before_allowing_resume():
+    h = Harness(allowance=0)
+    h.source.pending_nth.add(1)
+    h.execute()
+    cp = h.saved[0]
+    h.source.pending.clear()
+    # Pin the mined approval so advancing the provider head does not move it.
+    h.source.receipts[h.source.hash_at(1)] = h.source._receipt(h.source.hash_at(1))
+    h.source.block_number = 25100
+    result = h.bridge.recover(cp)
+    assert result.next == 'wait'
+    assert len(h.source.log_filters) <= 10
+    for _ in range(3):
+        before = len(h.source.log_filters)
+        result = h.bridge.recover(cp)
+        assert len(h.source.log_filters) - before <= 10
+        if result.next == 'resume':
+            break
+    assert result.next == 'resume'
+    assert len(h.source.sent) == 1
+    spans = [(int(f['fromBlock'],16),int(f['toBlock'],16)) for f in h.source.log_filters]
+    assert spans[0][0] == 16 and spans[-1][1] == 25100
+    assert all(spans[i+1][0] == spans[i][1]+1 for i in range(len(spans)-1))
+
+
+def test_old_approval_finds_later_burn_without_repeating_it():
+    h = Harness(allowance=0)
+    h.execute()
+    cp = h.saved[0]
+    h.source.receipts[h.source.hash_at(1)] = h.source._receipt(h.source.hash_at(1))
+    burn = h.source.hash_at(2)
+    h.source.history_logs = h.source_logs(burn)
+    h.source.history_logs[0]['blockNumber'] = hex(20100)
+    h.source.block_number = 25100
+    result = h.bridge.recover(cp)
+    assert result.next == 'wait'
+    for _ in range(3):
+        result = h.bridge.recover(cp)
+        if result.next == 'done':
+            break
+    assert result.next == 'done' and result.receipt.source_tx_id == burn
+    assert len(h.source.sent) == 2
+
+
+def test_partial_source_scan_discards_progress_after_reorg():
+    h = Harness(allowance=0)
+    h.source.pending_nth.add(1)
+    h.execute()
+    cp = h.saved[0]
+    h.source.pending.clear()
+    h.source.receipts[h.source.hash_at(1)] = h.source._receipt(h.source.hash_at(1))
+    h.source.block_number = 25100
+    assert h.bridge.recover(cp).next == 'wait'
+    eth = h.bridge.evm('ethereum').conn.w3.eth
+    original = eth.get_block
+    def reorg(*args, **kwargs):
+        block = dict(original(*args, **kwargs))
+        block['hash'] = b'\xcd' * 32
+        return block
+    eth.get_block = reorg
+    with pytest.raises(BridgeError, match='head block changed'):
+        h.bridge.recover(cp)
+    before = len(h.source.log_filters)
+    assert h.bridge.recover(cp).next == 'wait'
+    assert int(h.source.log_filters[before]['fromBlock'], 16) == 16
+    assert len(h.source.sent) == 1
+
+
+def test_new_client_restarts_partial_source_scan_safely():
+    from aleo_bridge.cctp import CctpModule
+    h = Harness(allowance=0)
+    h.source.pending_nth.add(1)
+    h.execute()
+    cp = h.saved[0]
+    h.source.pending.clear()
+    h.source.receipts[h.source.hash_at(1)] = h.source._receipt(h.source.hash_at(1))
+    h.source.block_number = 25100
+    assert h.bridge.recover(cp).next == 'wait'
+    # Exercise a new protocol module directly: no in-memory scan can be trusted
+    # merely because a caller claims to have scanned earlier blocks.
+    module = CctpModule(h.bridge)
+    before = len(h.source.log_filters)
+    state = module.recover(h.plan, cp)
+    assert state.status == Status.SOURCE_APPROVAL_PENDING
+    assert int(h.source.log_filters[before]['fromBlock'], 16) == 16
+    assert len(h.source.sent) == 1
+
+
+def test_extending_source_scan_rechecks_previous_anchor_before_resuming():
+    h = Harness(allowance=0)
+    h.execute()
+    cp = h.saved[0]
+    h.source.receipts[h.source.hash_at(1)] = h.source._receipt(h.source.hash_at(1))
+    h.source.block_number = 100
+    assert h.bridge.recover(cp).next == 'resume'
+    h.source.block_number = 101
+    eth = h.bridge.evm('ethereum').conn.w3.eth
+    original = eth.get_block
+    switched = [False]
+    def reorg_on_extension(number, *args, **kwargs):
+        block = dict(original(number, *args, **kwargs))
+        if number > 100:
+            switched[0] = True
+            # The replacement chain contains a burn inside the cached prefix.
+            h.source.history_logs = h.source_logs(h.source.hash_at(2))
+            h.source.history_logs[0]['blockNumber'] = hex(90)
+        if switched[0]:
+            block['hash'] = b'\xcd' * 32
+        return block
+    eth.get_block = reorg_on_extension
+    with pytest.raises(BridgeError, match='head block changed'):
+        h.bridge.recover(cp)
+    recovered = h.bridge.recover(cp)
+    assert recovered.next == 'done'
+    assert recovered.receipt.source_tx_id == h.source.hash_at(2)
+    assert len(h.source.sent) == 2

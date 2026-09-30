@@ -800,15 +800,27 @@ progress = bridge.execute(quote.plan, on_checkpoint=save_checkpoint)
 ```
 
 `cctp` defaults to standard finality and forwarding. `max_fee` is a decimal USDC
-ceiling. When omitted, the quote resolves it from current protocol and forwarding
-fees. Execute the returned plan to preserve that ceiling. Fees are refreshed
-before approval and burn; an increase beyond the ceiling refuses submission.
+ceiling. When omitted, the quote adds 10% headroom to current protocol and forwarding
+fees, rounded up to the next USDC atomic unit and capped below the transfer amount.
+Execute the returned plan to preserve that visible ceiling. Explicit caps are never
+increased. Fees are refreshed before approval and burn. If fees exceed the cap after
+approval, execution returns `SOURCE_SUBMISSION_PENDING` (`next="resume"`) with a
+`sourceError` explanation. Resume that progress when fees fall within its saved cap;
+no burn is submitted while fees exceed it. A restart can recover the approval checkpoint
+and resume the same transfer. Do not execute a new transfer to retry a submitted one.
 For forwarded delivery, `amount_out` deducts the full approved budget, while the
 verified destination mint may deduct less. CCTP transfers and addresses are public.
 
+CCTP recovery scans at most ten 1,000-block log batches per status call. Keep polling
+the same client to reconcile older approvals or backfill older destination receipts.
+Scan progress is held in memory and anchored to a checked block hash; restarting the
+client safely restarts the scan. Incomplete source scans never authorize another burn,
+and a used destination nonce alone never substitutes for mint receipt verification.
+
 Use `bridge.evm("arc")` to read the Arc connection. Environment-based setup recognizes
 `ARC_RPC_URL`, `BASE_RPC_URL`, and `ARBITRUM_RPC_URL`, sharing `EVM_PRIVATE_KEY`
-when present. Explicit `evm` connections take precedence. Read-only connections
+when present. These mainnet-only RPC variables are ignored for testnet clients.
+Explicit `evm` connections take precedence and must match the client's network. Read-only connections
 do not need a key. Arc gas balances use 18 decimals; the USDC token interface uses
 6 decimals. These are two views of the same funds, so keep a gas reserve rather
 than counting them as separate assets.

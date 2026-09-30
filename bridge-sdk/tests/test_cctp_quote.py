@@ -53,7 +53,7 @@ def test_standard_defaults_and_plan_serialization():
     b = bridge()
     q = b.quote(route=ROUTES[0], amount='5', recipient=RECIPIENT)
     assert q.plan.cctp.speed == 'standard' and q.plan.cctp.forwarding is True
-    assert q.plan.cctp.max_fee == '0.001' and q.amount_out == '4.999'
+    assert q.plan.cctp.max_fee == '0.0011' and q.amount_out == '4.9989'
     assert Plan.from_dict(q.plan.to_dict()) == q.plan
     assert b.cctp.circle_session.urls[-1].endswith('/fees/0/26?forward=true')
 

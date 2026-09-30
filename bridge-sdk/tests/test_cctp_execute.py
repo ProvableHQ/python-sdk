@@ -58,3 +58,54 @@ def test_lost_burn_response_keeps_signed_hash_in_checkpoint():
     with pytest.raises(BridgeError) as caught: h.execute()
     assert h.saved[-1].source['transactionId'] == caught.value.broadcast_id
     assert h.saved[-1].intent['sender'] == SENDER
+
+
+def test_default_fee_budget_tolerates_a_tick_after_approval():
+    from dataclasses import replace
+    from aleo_bridge import CctpOptions
+    h = Harness(allowance=0)
+    h.plan = replace(h.plan, cctp=CctpOptions('fast', True))
+    h.source.pending_nth.add(2)
+    original = h.circle.json
+    reads = []
+    def fee_tick():
+        if '/fees/' in h.circle.urls[-1]:
+            reads.append(1)
+            if len(reads) == 3:
+                h.circle.forward += 1
+        return original()
+    h.circle.json = fee_tick
+    p = h.execute()
+    assert p.receipt.status == Status.SOURCE_CONFIRMING
+    assert len(h.source.sent) == 2
+    assert p.plan.cctp.max_fee == '0.001815'
+    assert h.saved[-1].intent['cctp']['max_fee'] == '0.001815'
+
+
+def test_fee_above_approved_cap_returns_resumable_progress_without_reapproval():
+    from dataclasses import replace
+    from aleo_bridge import CctpOptions
+    h = Harness(allowance=0)
+    h.plan = replace(h.plan, cctp=CctpOptions('fast', True, '0.00165'))
+    original = h.circle.json
+    def fee_tick():
+        if len(h.source.sent) == 1:
+            h.circle.forward = 1001
+        return original()
+    h.circle.json = fee_tick
+    p = h.execute()
+    assert p.next == 'resume'
+    assert p.receipt.source_tx_id is None and len(h.source.sent) == 1
+    assert 'max_fee' in p.receipt.protocol_state['sourceError']
+    from web3 import Web3
+    h.source.allowances[tuple(Web3.to_checksum_address(v) for v in (h.source_token, SENDER, h.messenger))] = 5_000_000
+    still_blocked = h.bridge.resume(p, timeout_seconds=0)
+    assert still_blocked.next == 'resume' and len(h.source.sent) == 1
+    assert still_blocked.plan.cctp.max_fee == '0.00165'
+    h.circle.json = original
+    h.circle.forward = 1000
+    h.source.pending_nth.add(2)
+    result = h.bridge.resume(still_blocked, timeout_seconds=0)
+    assert result.receipt.status == Status.SOURCE_CONFIRMING
+    assert len(h.source.sent) == 2
+    assert h.saved[0].intent['cctp']['max_fee'] == '0.00165'

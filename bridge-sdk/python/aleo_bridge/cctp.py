@@ -41,6 +41,10 @@ class Metadata:
     attestation_url: str
 
 
+class _FeeCapExceeded(InvalidAmountError):
+    """Current fees exceed a fixed quote; no burn may be submitted."""
+
+
 class CctpCheckpointError(BridgeError):
     """A transaction may be submitted; recover using ``checkpoint``, never execute again."""
 
@@ -65,12 +69,24 @@ def _basis_points(amount: int, value: Any) -> int:
     return (amount * int(whole + fraction) + denominator - 1) // denominator
 
 
+@dataclass
+class _ApprovalScan:
+    head: int
+    head_hash: str
+    next_block: int
+    found: set[str]
+
+
 class CctpModule:
     """Quote CCTP fees and track delivery through the bridge's shared lifecycle."""
 
     def __init__(self, bridge: Any) -> None:
         self.bridge = bridge
         self.circle_session: Any = None
+        # Process-local progress only: checkpoint-supplied cursors must never authorize
+        # skipping history. A new process safely starts reconciliation from the beginning.
+        self._approval_scans: dict[tuple[int, str, tuple[str, ...]], _ApprovalScan] = {}
+        self._delivery_scans: dict[tuple[int, str, bytes], tuple[int, str, int]] = {}
 
     def _metadata(self, plan: Plan) -> Metadata:
         from .lifecycle import resolve_route
@@ -119,7 +135,7 @@ class CctpModule:
             if response.status_code == 404:
                 return None
             if response.status_code != 200:
-                raise AttestationError(f"Circle CCTP API returned HTTP {response.status_code}")
+                raise AttestationError(f"Circle CCTP API returned HTTP status {response.status_code}")
             return response.json()
         except (requests.RequestException, ValueError) as exc:
             raise AttestationError("Circle CCTP request failed") from exc
@@ -148,9 +164,12 @@ class CctpModule:
             forward = cast(dict[str, Any], forward)
             forwarding = _uint(forward.get("medium", forward.get("med")), "forwarding fee")
         required = protocol + forwarding
-        cap = required if options.max_fee is None else parse_decimal_amount(options.max_fee, 6)
+        # Ten percent headroom, rounded up in USDC atomic units, is visible in
+        # the quoted ceiling. Never grow an explicit or checkpointed budget.
+        cap = (min(plan.amount_atomic - 1, required + (required + 9) // 10)
+               if options.max_fee is None else parse_decimal_amount(options.max_fee, 6))
         if required > cap:
-            raise InvalidAmountError("Live CCTP fees exceed the approved max_fee; request a new quote")
+            raise _FeeCapExceeded("Live CCTP fees exceed the approved max_fee; resume the saved transfer when fees fall within its cap")
         if cap >= plan.amount_atomic:
             raise InvalidAmountError("CCTP fees must be less than the burn amount")
         receive = plan.amount_atomic - (cap if options.forwarding else required)
@@ -280,7 +299,6 @@ class CctpModule:
             raise ConfigurationError("CCTP source wallet differs from the planned sender")
         if resume and sender.lower() != str(resume.protocol_state.get("sourceSender")).lower():
             raise ConfigurationError("CCTP resumed wallet differs from checkpoint sender")
-        priced = self.quote(replace(plan, sender=sender))
         state = resume or Receipt(plan.route_id, "cctp", Status.PREPARED,
                   protocol_state={"routeId": plan.route_id, "sourceSender": sender, "approvalTxIds": []})
         if resume and not self._approvals_confirmed(conn, m, plan, state):
@@ -289,6 +307,15 @@ class CctpModule:
             reconciled = self.get_status(plan, state)
             if reconciled.status != Status.SOURCE_SUBMISSION_PENDING:
                 return reconciled
+            state = reconciled
+        try:
+            priced = self.quote(replace(plan, sender=sender))
+        except _FeeCapExceeded as exc:
+            if resume is None:
+                raise
+            return state.replace(status=Status.SOURCE_SUBMISSION_PENDING,
+                                 protocol_state={**state.protocol_state, "sourceError": str(exc)})
+        state = state.replace(protocol_state={k: v for k, v in state.protocol_state.items() if k != "sourceError"})
         token = self._contract(conn, m.source_token, TOKEN_ABI)
         if token.functions.balanceOf(sender).call() < plan.amount_atomic:
             raise BridgeError("Insufficient source USDC balance for CCTP burn")
@@ -299,7 +326,13 @@ class CctpModule:
             state = self._broadcast(conn, {"to": token.address, "data": data}, state, on_checkpoint, plan=priced.plan, approval=True)
             if not self._confirm(conn, state.id, poll_seconds, timeout_seconds):
                 return state
-        priced = self.quote(priced.plan)
+        try:
+            priced = self.quote(priced.plan)
+        except _FeeCapExceeded as exc:
+            if not state.protocol_state.get("approvalTxIds"):
+                raise
+            return state.replace(status=Status.SOURCE_SUBMISSION_PENDING,
+                                 protocol_state={**state.protocol_state, "sourceError": str(exc)})
         args: list[Any] = [plan.amount_atomic, m.destination_domain, address_bytes(plan.recipient),
                 Web3.to_checksum_address(m.source_token), bytes(32), priced.max_fee_atomic, priced.min_finality_threshold]
         function = "depositForBurn"
@@ -416,8 +449,17 @@ class CctpModule:
         dest_hash = receipt.destination_tx_id or (forwarded if isinstance(forwarded, str) and re.fullmatch(r"0x[0-9a-fA-F]{64}", forwarded) else None)
         if used and not dest_hash:
             head = dest.w3.eth.block_number
-            floor = max(0, head-9999)
-            end = head
+            key = (id(dest), m.transmitter.lower(), message.nonce)
+            prior = self._delivery_scans.get(key)
+            if prior is not None:
+                anchor, anchor_hash, end = prior
+                if head < anchor or self._hex(dest.w3.eth.get_block(anchor)["hash"]) != anchor_hash:
+                    self._delivery_scans.pop(key, None)
+                    raise ConfigurationError("CCTP destination head block changed during recovery; retry")
+            else:
+                anchor, end = head, head
+                anchor_hash = self._hex(dest.w3.eth.get_block(anchor)["hash"])
+            floor = max(0, end-9999)
             topics = ["0x"+keccak(text="MessageReceived(address,uint32,bytes32,bytes32,uint32,bytes)").hex(), None, "0x"+message.nonce.hex()]
             while end >= floor:
                 start = max(floor, end-999)
@@ -430,6 +472,12 @@ class CctpModule:
                 if dest_hash:
                     break
                 end = start-1
+                self._delivery_scans[key] = (anchor, anchor_hash, end)
+            if self._hex(dest.w3.eth.get_block(anchor)["hash"]) != anchor_hash:
+                self._delivery_scans.pop(key, None)
+                raise ConfigurationError("CCTP destination head block changed during recovery; retry")
+            if dest_hash or end < 0:
+                self._delivery_scans.pop(key, None)
         failed = False
         if dest_hash:
             delivered = dest.get_receipt(self._hash(dest_hash))
@@ -461,12 +509,30 @@ class CctpModule:
         head = conn.w3.eth.block_number
         if head < start:
             raise ConfigurationError("CCTP RPC head precedes the confirmed approval; retry recovery on a consistent provider")
-        head_hash = self._hex(conn.w3.eth.get_block(head)["hash"])
+        key = (id(conn), repr(plan), tuple(approvals))
+        scan = self._approval_scans.get(key)
+        if scan is not None:
+            if head < scan.head or self._hex(conn.w3.eth.get_block(scan.head)["hash"]) != scan.head_hash:
+                self._approval_scans.pop(key, None)
+                raise ConfigurationError("CCTP head block changed during recovery; retry on a consistent provider")
+            if scan.next_block > scan.head:
+                new_hash = self._hex(conn.w3.eth.get_block(head)["hash"])
+                # A reorg while capturing the new anchor can change an already
+                # scanned prefix. Validate the old anchor before discarding it.
+                if self._hex(conn.w3.eth.get_block(scan.head)["hash"]) != scan.head_hash:
+                    self._approval_scans.pop(key, None)
+                    raise ConfigurationError("CCTP head block changed during recovery; retry on a consistent provider")
+                scan.head, scan.head_hash = head, new_hash
+        else:
+            scan = _ApprovalScan(head, self._hex(conn.w3.eth.get_block(head)["hash"]), start, set())
+            self._approval_scans[key] = scan
+        head, head_hash, start = scan.head, scan.head_hash, scan.next_block
         sender = plan.sender or str(receipt.protocol_state["sourceSender"])
         last_nonce = max(int(conn.w3.eth.get_transaction(h)["nonce"]) for h in approvals)
-        found: set[str] = set()
-        while start <= head:
-            end = min(head, start+999)
+        found = scan.found
+        batch_end = min(head, start + 9999)
+        while start <= batch_end:
+            end = min(batch_end, start+999)
             logs = conn.w3.eth.get_logs({"address": Web3.to_checksum_address(m.transmitter),
                     "topics": ["0x"+keccak(text="MessageSent(bytes)").hex()], "fromBlock": start, "toBlock": end})
             for event, log in self._events(conn,m.transmitter,TRANSMITTER_ABI,"MessageSent",logs):
@@ -482,11 +548,19 @@ class CctpModule:
                     continue
                 found.add(candidate)
             start = end+1
+            scan.next_block = start
+        if self._hex(conn.w3.eth.get_block(head)["hash"]) != head_hash:
+            self._approval_scans.pop(key, None)
+            raise ConfigurationError("CCTP head block changed during recovery; retry on a consistent provider")
+        if start <= head:
+            return receipt.replace(status=Status.SOURCE_APPROVAL_PENDING,
+                protocol_state={**receipt.protocol_state, "sourceError": "Reconciling source history; continue polling before resuming"})
         if len(found) > 1:
             raise ConfigurationError("Multiple CCTP burns match this approval; recover the intended source transaction explicitly")
         confirmed_nonce = conn.w3.eth.get_transaction_count(sender, head)
         pending_nonce = conn.w3.eth.get_transaction_count(sender, "pending")
         if self._hex(conn.w3.eth.get_block(head)["hash"]) != head_hash:
+            self._approval_scans.pop(key, None)
             raise ConfigurationError("CCTP head block changed during recovery; retry on a consistent provider")
         if found:
             tx_hash = next(iter(found))

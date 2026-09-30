@@ -91,3 +91,19 @@ def test_profile_ethereum_map_override_wins_over_environment(monkeypatch):
          patch('aleo_bridge.client._checkpoints_for_profile',return_value=None):
         b = Bridge.from_profile(evm={'ethereum':connection})
     assert b.ethereum is connection
+
+
+@pytest.mark.parametrize('factory', ['env', 'profile'])
+@pytest.mark.parametrize('variable', ['ARC_RPC_URL', 'BASE_RPC_URL', 'ARBITRUM_RPC_URL'])
+def test_testnet_ignores_automatically_loaded_mainnet_connections(factory, variable):
+    import os
+    from types import SimpleNamespace
+    with patch.dict(os.environ, {'BRIDGE_PRIVATE_KEY': 'fake', 'ALEO_NETWORK': 'testnet',
+                                  variable: 'https://unused.invalid'}, clear=True), \
+         patch('aleo_bridge.client.build_aleo', return_value=FakeAleo(network_name='testnet')), \
+         patch('aleo_bridge.client.Profile.load_or_create', return_value=SimpleNamespace(
+             endpoint='https://unused.invalid', network='testnet', private_key='fake')), \
+         patch('aleo_bridge.client._checkpoints_for_profile', return_value=None):
+        b = Bridge.from_env() if factory == 'env' else Bridge.from_profile()
+    assert b.environment == 'testnet'
+    assert b._evm_connections == {}

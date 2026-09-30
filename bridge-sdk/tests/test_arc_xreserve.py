@@ -90,3 +90,24 @@ def test_missing_destination_domain_refuses_arc_burn():
     with pytest.raises(ConfigurationError, match='domain'):
         b.xreserve.build_burn_inputs(OUT, mode='public', amount_atomic=2_000_000,
                                      recipient='0x'+'11'*20, record=None, merkle_proof=None)
+
+
+def test_execute_uses_one_live_fee_for_validation_and_delivery(monkeypatch):
+    from aleo_bridge import Receipt, Status
+    from aleo_bridge import lifecycle
+    recipient = '0x' + '11' * 20
+    b = make_bridge(evm={'arc': Ethereum(w3=fake_web3(chain_id=5042,
+        token_balances={(ARC_TOKEN, recipient): 100}))})
+    session = FeeSession()
+    b.xreserve.circle_session = session
+    plan = b.quote(route=OUT, amount='2', recipient=recipient).plan
+    session.calls.clear()
+    captured = {}
+    def prove(bridge, plan, call, *, extra_state, **kwargs):
+        captured.update(extra_state)
+        return Receipt('test-burn', 'xreserve', Status.SOURCE_CONFIRMING,
+                       source_tx_id='test-burn', protocol_state={'routeId': OUT.id, **extra_state})
+    monkeypatch.setattr(lifecycle, '_run_aleo_leg', prove)
+    b.execute(plan, mode='public')
+    assert len(session.calls) == 1
+    assert captured['expectedDestinationIncreaseAtomic'] == '1983600'
