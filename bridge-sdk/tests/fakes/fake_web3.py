@@ -345,7 +345,7 @@ def fake_web3(**config: Any) -> Web3:
     return Web3(FakeRpcProvider(**config))
 
 
-def make_bridge(*, ethereum: Any = None, environment: str | None = None, checkpoints: Any = None,
+def make_bridge(*, ethereum: Any = None, environment: str | None = None, checkpoints: Any = None, evm: Any = None,
                **aleo_kwargs: Any) -> Any:
     """A ``Bridge`` over a fresh ``FakeAleo`` (mainnet unless *environment* says otherwise), wired
     with *ethereum* so ``bridge.eth`` works.
@@ -363,4 +363,4 @@ def make_bridge(*, ethereum: Any = None, environment: str | None = None, checkpo
     aleo_kwargs.setdefault("mappings", default_mappings())
     if environment is not None:
         aleo_kwargs.setdefault("network_name", environment)
-    return Bridge(FakeAleo(**aleo_kwargs), ethereum=ethereum, environment=environment, checkpoints=checkpoints)
+    return Bridge(FakeAleo(**aleo_kwargs), ethereum=ethereum, environment=environment, checkpoints=checkpoints, evm=evm)

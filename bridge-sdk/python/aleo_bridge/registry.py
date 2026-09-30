@@ -275,6 +275,12 @@ def validate_registry(registry: Registry) -> Registry:
         destination_chain = registry._chain_by_id[registry._asset_by_id[route.destination_asset_id].chain_id]
         if source_chain.environment != route.environment or destination_chain.environment != route.environment:
             raise ConfigurationError(f"Bridge route {route.id} crosses registry environments")
+        if route.protocol == "cctp":
+            for chain, key in ((source_chain, "sourceDomain"), (destination_chain, "destinationDomain")):
+                domain = chain.protocol_domains.get("cctp")
+                if (chain.family != "evm" or type(domain) is not int or not 0 <= domain <= 0xFFFFFFFF
+                        or type(route.metadata.get(key)) is not int or route.metadata.get(key) != domain):
+                    raise ConfigurationError(f"CCTP route domains must match configured chain domains: {route.id}")
         if route.protocol == "hyperlane" and route.availability == "active" and source_chain.family == "solana":
             for key in _SOLANA_REQUIRED_METADATA:
                 value = route.metadata.get(key)

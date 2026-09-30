@@ -3,12 +3,19 @@
 > GENERATED from SDK docstrings by `codegen/gen_context.py` — do not
 > edit by hand; edit the docstrings and regenerate.
 
-Typed Python client that moves assets between Aleo, Ethereum and Solana
-over the reviewed Hyperlane warp routes and Circle xReserve deployments
+Typed Python client that moves assets between Aleo, Ethereum, Arc, Base, Arbitrum and Solana
+over reviewed Hyperlane, Circle xReserve and native-USDC CCTP deployments
 (`pip install aleo-bridge-sdk`, imports as `aleo_bridge`).
 MCP alternative: `python -m aleo_bridge.mcp` exposes the same lifecycle as
 tools; `aleo_bridge.agent.bridge_tools()` gives Claude-shape tool schemas.
-Registry version `2026-08-31.solana-deposits.1`.
+Registry version `2026-09-28.cctp-arc.1`.
+CCTP supports Arc ↔ Ethereum/Base/Arbitrum. Pass `cctp={"speed": "fast",
+"forwarding": True, "max_fee": "0.1"}` to quote; execute the returned plan to retain its ceiling.
+Use `Bridge(..., evm={"arc": Ethereum(...), "base": Ethereum(...)})` for route-selected connections.
+Arc native gas uses 18 decimals; ERC-20 USDC uses 6. They spend the same balance.
+CCTP completion requires the exact message and mint receipt; a consumed nonce alone stays pending.
+For stalled forwarding, `complete(progress, manual_mint=True)` explicitly authorizes a destination mint.
+Recovery keeps the approved fee ceiling; never rerun execute after a broadcast.
 
 Runnable examples ship in the package: start with
 `python -m aleo_bridge.examples.quote_transfer --help`.
@@ -36,7 +43,7 @@ assert progress.next == "done", progress.error
 
 Everything from the environment (spec §3.3); writes nothing to disk. Overrides: ethereum, solana, registry, checkpoints.
 
-### `from_profile(home: 'Any' = None, *, network: 'str | None' = None, endpoint: 'str | None' = None, ethereum: 'Any' = None, solana: 'Any' = None) -> "'Bridge'"`
+### `from_profile(home: 'Any' = None, *, network: 'str | None' = None, endpoint: 'str | None' = None, ethereum: 'Any' = None, solana: 'Any' = None, evm: 'Any' = None) -> "'Bridge'"`
 
 The client for the local profile (spec §3.4), created on first use. *network*/*endpoint* apply only when
 creating. Side-chain connections come from the arguments or the same env variables as ``from_env``.
@@ -54,7 +61,7 @@ back are dict entries instead — ``{"next": "failed", "error", "error_type"}`` 
 when no store is bound. Finish any entry with ``recover`` → ``wait`` / ``resume`` / ``complete``,
 never by starting a new transfer.
 
-### `quote(self, *, source_chain: 'str | None' = None, source_asset: 'str | None' = None, destination_chain: 'str | None' = None, destination_asset: 'str | None' = None, bridge_protocol: 'str | None' = None, route=None, amount=None, amount_atomic=None, recipient: 'str', sender: 'str | None' = None, mint_mode: 'str' = 'public', secret_nonce: 'str' = '0scalar')`
+### `quote(self, *, source_chain: 'str | None' = None, source_asset: 'str | None' = None, destination_chain: 'str | None' = None, destination_asset: 'str | None' = None, bridge_protocol: 'str | None' = None, route=None, amount=None, amount_atomic=None, recipient: 'str', sender: 'str | None' = None, mint_mode: 'str' = 'public', secret_nonce: 'str' = '0scalar', cctp=None)`
 
 Price a transfer and get the plan that ``execute`` takes. Nothing is signed.
 
@@ -102,13 +109,15 @@ each changed ``Progress``.  A transient error (flaky RPC/HTTP transport)
 is retried up to ``max_consecutive_errors`` times, calling ``on_error``
 on each tolerated retry; a non-transient error propagates immediately.
 
-### `recover(self, checkpoint)`
+### `recover(self, checkpoint, *, approval_replacement=None)`
 
 Rebuild ``Progress`` from a saved checkpoint (``Checkpoint``, dict or JSON) — reads only.
 
 Re-resolves the route from the live registry and reads chain state once;
 ``progress.next`` then says what to do: ``wait``, ``resume``, ``complete``,
 ``done`` or ``failed``.
+CCTP can adopt an explicitly selected, confirmed ``approval_replacement``;
+its original transaction must be absent and no burn may be submitted.
 
 ### `resume(self, progress, *, on_checkpoint=None, secret_nonce: 'str | None' = None, poll_seconds: 'float' = 1.0, timeout_seconds: 'float' = 120.0, proving: 'str' = 'delegate')`
 
@@ -118,13 +127,16 @@ Rebroadcasts the identical proved Aleo transaction (a duplicate response is
 success) or, on EVM, re-scans history and only then authorizes the single
 missing deposit/dispatch.  Never repeats a confirmed step.
 
-### `complete(self, progress, *, secret_nonce: 'str', on_checkpoint=None, proving: 'str' = 'delegate')`
+### `complete(self, progress, *, secret_nonce: 'str | None' = None, on_checkpoint=None, proving: 'str' = 'delegate', manual_mint: 'bool' = False)`
 
-Submit the private USDCx mint (``progress.next == "complete"``).
+Claim a private USDCx or native-USDC CCTP destination mint.
 
 Requires the same ``secret_nonce`` given to ``execute``; the SDK never
 stored it.  Submits exactly one ``private_mint`` and returns
-``DESTINATION_CONFIRMING`` progress to ``wait`` on.
+``DESTINATION_CONFIRMING`` progress to ``wait`` on. CCTP needs no secret
+nonce, but requires a destination signer and gas. Set ``manual_mint=True``
+to explicitly authorize fallback for stalled forwarding; an already
+submitted destination transaction is observed rather than repeated.
 
 ### `pending(self) -> 'list'`
 
@@ -255,9 +267,9 @@ lifecycle layer (plan 4) re-quotes at the last responsible moment by calling thi
 
 Live relayer payment for the route (the exact u64 the hook asserts); quote right before proving.
 
-### `xreserve.burn(self, recipient: 'str', *, amount: 'Any' = None, amount_atomic: 'int | None' = None, mode: 'str' = 'private', record: 'str | None' = None, merkle_proof: 'str | None' = None) -> 'AleoCall[BurnReceipt]'`
+### `xreserve.burn(self, recipient: 'str', *, amount: 'Any' = None, amount_atomic: 'int | None' = None, mode: 'str' = 'private', record: 'str | None' = None, merkle_proof: 'str | None' = None, route: 'Route | None' = None) -> 'AleoCall[BurnReceipt]'`
 
-Burn USDCx for USDC on Ethereum. ``private`` (default) spends a Token record via the wrapper and needs a
+Burn USDCx for USDC on the selected EVM route (Ethereum by default). ``private`` spends a Token record via the wrapper and needs a
 freeze-list exclusion proof — both are resolved from chain state when not supplied. Minimum: more than
 the 2 USDCx withdrawal fee. The Aleo burn-attestation service forwards accepted burns to Circle.
 
@@ -374,6 +386,14 @@ re-stating the plan's own amount is harmless). Without a plan, ``recipient`` is 
 | `hyperlane:hyperevm/aleo->aleo/aleo` | hyperlane | mainnet | metadata-required |
 | `hyperlane:ethereum/usad->aleo/usad` | hyperlane | mainnet | metadata-required |
 | `hyperlane:aleo/usad->ethereum/usad` | hyperlane | mainnet | metadata-required |
+| `xreserve:arc/usdc->aleo/usdcx` | xreserve | mainnet | active |
+| `xreserve:aleo/usdcx->arc/usdc` | xreserve | mainnet | active |
+| `cctp:ethereum/usdc->arc/usdc` | cctp | mainnet | active |
+| `cctp:arc/usdc->ethereum/usdc` | cctp | mainnet | active |
+| `cctp:base/usdc->arc/usdc` | cctp | mainnet | active |
+| `cctp:arc/usdc->base/usdc` | cctp | mainnet | active |
+| `cctp:arbitrum/usdc->arc/usdc` | cctp | mainnet | active |
+| `cctp:arc/usdc->arbitrum/usdc` | cctp | mainnet | active |
 
 `metadata-required` routes are listed but refused by `quote`/`execute`
 until their deployments are reviewed upstream.

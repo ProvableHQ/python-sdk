@@ -15,7 +15,9 @@ import re
 from typing import TYPE_CHECKING, Any, Callable
 
 from . import lifecycle as _lifecycle
+from . import _evm_connections
 from ._calls import AleoCall
+from .cctp import CctpModule
 from .errors import BridgeError, ConfigurationError
 from .eth import Ethereum, EthModule
 from .freezelist import FreezeList
@@ -122,7 +124,7 @@ class Bridge:
     """Typed bridge client over the Aleo facade (and, from plans 2/3, Ethereum/Solana connections)."""
 
     def __init__(self, aleo: Any, *, ethereum: Any = None, solana: Any = None, environment: str | None = None,
-                 registry: Registry | None = None, checkpoints: Any = None) -> None:
+                 registry: Registry | None = None, checkpoints: Any = None, evm: Any = None) -> None:
         network = getattr(aleo, "network_name", None)
         if network not in NETWORKS:
             raise ConfigurationError(f"The aleo facade must report network_name mainnet or testnet, got {network!r}")
@@ -139,6 +141,9 @@ class Bridge:
             raise ConfigurationError(f"Registry {self.registry.version} has no chains for {environment}")
         self.checkpoints = checkpoints
         self.ethereum: Ethereum | None = _coerce_ethereum(ethereum)
+        self._evm_connections = _evm_connections.normalize(self.registry, environment, evm, self.ethereum)
+        self._evm_modules: dict[str, EthModule] = {}
+        self.ethereum = self._evm_connections.get("ethereum" if environment == "mainnet" else "sepolia")
         self.solana: Solana | None = _coerce_solana(solana)
         solana = self.solana
         self._sol: SolModule | None = SolModule(self, solana) if solana is not None else None
@@ -147,6 +152,7 @@ class Bridge:
         self._programs: dict[str, Any] = {}
         self.hyperlane = HyperlaneModule(self)
         self.xreserve = XReserveModule(self)
+        self.cctp = CctpModule(self)
         self.freezelist = FreezeList(self)
         self.privacy = PrivacyModule(self)
 
@@ -172,6 +178,22 @@ class Bridge:
                 "Solana is not configured: pass solana=Solana(rpc_url, private_key=...) or a solana-py Client to Bridge(), "
                 "or set SOLANA_PRIVATE_KEY (and optionally SOLANA_RPC_URL) for Bridge.from_env()")
         return self._sol
+
+    def evm(self, chain_id: str) -> EthModule:
+        """Use the configured EVM provider for a registry chain, such as ``arc`` or ``base``.
+
+        Reads need an RPC connection; sending also needs that connection's signer.
+        ``bridge.eth`` remains the Ethereum/Sepolia shortcut.
+        """
+        chain = self.registry.chain(chain_id)
+        if chain.id == ("ethereum" if self.environment == "mainnet" else "sepolia"):
+            return self.eth
+        conn = self._evm_connections.get(chain.id)
+        if conn is None:
+            raise ConfigurationError(f"Configure evm={{'{chain.id}': Ethereum(...)}} or {chain.id.upper()}_RPC_URL")
+        if chain.id not in self._evm_modules:
+            self._evm_modules[chain.id] = EthModule(self, conn, chain_id=chain.id)
+        return self._evm_modules[chain.id]
 
     # ── identity / registry helpers ──
     def aleo_chain(self) -> Chain:
@@ -284,6 +306,9 @@ class Bridge:
         chains = [self._aleo_chain_status()]
         if self.ethereum is not None:
             chains.append(self.eth.chain_status())
+        for chain_id in self._evm_connections:
+            if chain_id not in ("ethereum", "sepolia"):
+                chains.append(self.evm(chain_id).chain_status())
         solana_chain = self.solana_chain()
         if self.solana is not None and solana_chain is not None:
             # Chain id and asset id come from the registry, not literals: a testnet client (no Solana
@@ -315,7 +340,7 @@ class Bridge:
     def quote(self, *, source_chain: str | None = None, source_asset: str | None = None,
               destination_chain: str | None = None, destination_asset: str | None = None,
               bridge_protocol: str | None = None, route=None, amount=None, amount_atomic=None, recipient: str,
-              sender: str | None = None, mint_mode: str = "public", secret_nonce: str = "0scalar"):
+              sender: str | None = None, mint_mode: str = "public", secret_nonce: str = "0scalar", cctp=None):
         """Price a transfer and get the plan that ``execute`` takes. Nothing is signed.
 
         Name the route the way veil's ``quote`` does: ``source_chain`` + ``source_asset``
@@ -336,7 +361,7 @@ class Bridge:
                                 destination_chain=destination_chain, destination_asset=destination_asset,
                                 bridge_protocol=bridge_protocol, route=route, amount=amount,
                                 amount_atomic=amount_atomic, recipient=recipient, sender=sender,
-                                mint_mode=mint_mode, secret_nonce=secret_nonce)
+                                mint_mode=mint_mode, secret_nonce=secret_nonce, **({"cctp": cctp} if cctp is not None else {}))
 
     def execute(self, plan, *, on_checkpoint=None, proving: str = "delegate", mode: str | None = None,
                 record: str | None = None, merkle_proof: str | None = None,
@@ -383,13 +408,17 @@ class Bridge:
                                timeout_seconds=timeout_seconds, on_update=on_update, on_error=on_error,
                                max_consecutive_errors=max_consecutive_errors)
 
-    def recover(self, checkpoint):
+    def recover(self, checkpoint, *, approval_replacement=None):
         """Rebuild ``Progress`` from a saved checkpoint (``Checkpoint``, dict or JSON) — reads only.
 
         Re-resolves the route from the live registry and reads chain state once;
         ``progress.next`` then says what to do: ``wait``, ``resume``, ``complete``,
         ``done`` or ``failed``.
+        CCTP can adopt an explicitly selected, confirmed ``approval_replacement``;
+        its original transaction must be absent and no burn may be submitted.
         """
+        if approval_replacement is not None:
+            return _lifecycle.recover(self, checkpoint, approval_replacement=approval_replacement)
         return _lifecycle.recover(self, checkpoint)
 
     def resume(self, progress, *, on_checkpoint=None, secret_nonce: str | None = None,
@@ -403,15 +432,20 @@ class Bridge:
         return _lifecycle.resume(self, progress, on_checkpoint=on_checkpoint, secret_nonce=secret_nonce,
                                  poll_seconds=poll_seconds, timeout_seconds=timeout_seconds, proving=proving)
 
-    def complete(self, progress, *, secret_nonce: str, on_checkpoint=None, proving: str = "delegate"):
-        """Submit the private USDCx mint (``progress.next == "complete"``).
+    def complete(self, progress, *, secret_nonce: str | None = None, on_checkpoint=None, proving: str = "delegate",
+                 manual_mint: bool = False):
+        """Claim a private USDCx or native-USDC CCTP destination mint.
 
         Requires the same ``secret_nonce`` given to ``execute``; the SDK never
         stored it.  Submits exactly one ``private_mint`` and returns
-        ``DESTINATION_CONFIRMING`` progress to ``wait`` on.
+        ``DESTINATION_CONFIRMING`` progress to ``wait`` on. CCTP needs no secret
+        nonce, but requires a destination signer and gas. Set ``manual_mint=True``
+        to explicitly authorize fallback for stalled forwarding; an already
+        submitted destination transaction is observed rather than repeated.
         """
+        options = {"manual_mint": manual_mint} if manual_mint else {}
         return _lifecycle.complete(self, progress, secret_nonce=secret_nonce, on_checkpoint=on_checkpoint,
-                                   proving=proving)
+                                   proving=proving, **options)
 
     def pending(self) -> list:
         """The in-flight transfers of this profile — every checkpoint in the bound store,
@@ -431,7 +465,7 @@ class Bridge:
             return []
         loader = getattr(store, "load_checkpoints", None)
         if callable(loader):
-            result = loader()
+            result: Any = loader()
             checkpoints, problems = result.checkpoints, result.errors
         else:
             checkpoints, problems = store.list(), []
@@ -451,7 +485,7 @@ class Bridge:
     @classmethod
     def from_env(cls, **overrides: Any) -> "Bridge":
         """Everything from the environment (spec §3.3); writes nothing to disk. Overrides: ethereum, solana, registry, checkpoints."""
-        unexpected = set(overrides) - {"ethereum", "solana", "registry", "checkpoints"}
+        unexpected = set(overrides) - {"ethereum", "solana", "registry", "checkpoints", "evm"}
         if unexpected:
             raise TypeError(f"Bridge.from_env() got unexpected overrides: {sorted(unexpected)}")
         private_key = os.environ.get("BRIDGE_PRIVATE_KEY")
@@ -459,21 +493,25 @@ class Bridge:
             raise ConfigurationError("BRIDGE_PRIVATE_KEY is required (an APrivateKey1... string)")
         aleo = build_aleo(os.environ.get("ALEO_ENDPOINT", DEFAULT_ENDPOINT), os.environ.get("ALEO_NETWORK", "mainnet"),
                           private_key, api_key=os.environ.get("ALEO_API_KEY"), consumer_id=os.environ.get("ALEO_CONSUMER_ID"))
-        ethereum = overrides["ethereum"] if "ethereum" in overrides else ethereum_from_env()
+        evm = _evm_connections.from_env(overrides.get("evm"), environment=aleo.network_name)
+        ethereum = (overrides["ethereum"] if "ethereum" in overrides else
+                    ethereum_from_env() if _evm_connections.needs_legacy_environment(evm) else None)
         solana = overrides["solana"] if "solana" in overrides else solana_from_env()
         checkpoints = overrides["checkpoints"] if "checkpoints" in overrides else checkpoints_from_env()
-        return cls(aleo, ethereum=ethereum, solana=solana, registry=overrides.get("registry"), checkpoints=checkpoints)
+        return cls(aleo, ethereum=ethereum, solana=solana, registry=overrides.get("registry"), checkpoints=checkpoints, evm=evm)
 
     @classmethod
     def from_profile(cls, home: Any = None, *, network: str | None = None, endpoint: str | None = None,
-                     ethereum: Any = None, solana: Any = None) -> "Bridge":
+                     ethereum: Any = None, solana: Any = None, evm: Any = None) -> "Bridge":
         """The client for the local profile (spec §3.4), created on first use. *network*/*endpoint* apply only when
         creating. Side-chain connections come from the arguments or the same env variables as ``from_env``."""
         kwargs = {k: v for k, v in (("network", network), ("endpoint", endpoint)) if v is not None}
         profile = Profile.load_or_create(home, **kwargs)
         aleo = build_aleo(profile.endpoint, profile.network, profile.private_key,
                           api_key=os.environ.get("ALEO_API_KEY"), consumer_id=os.environ.get("ALEO_CONSUMER_ID"))
-        bridge = cls(aleo, ethereum=ethereum if ethereum is not None else ethereum_from_env(),
+        evm = _evm_connections.from_env(evm, environment=aleo.network_name)
+        bridge = cls(aleo, ethereum=ethereum if ethereum is not None else
+                     ethereum_from_env() if _evm_connections.needs_legacy_environment(evm) else None, evm=evm,
                      solana=solana if solana is not None else solana_from_env(),
                      checkpoints=_checkpoints_for_profile(profile))
         bridge.profile = profile

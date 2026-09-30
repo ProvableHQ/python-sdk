@@ -13,11 +13,13 @@ only adds ``prepare`` and the ``resolve_route`` helper every later verb shares.
 """
 from __future__ import annotations
 
+from ._registry_compatibility import is_registry_version_compatible
+
 import json
 import re
 import time
 from dataclasses import dataclass, replace
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 from . import _sealevel
 from ._calls import is_duplicate_submission
@@ -67,7 +69,7 @@ def resolve_route(registry: Registry, plan: Plan) -> ResolvedRoute:
     different registry version (re-quote to fix) and
     :class:`CheckpointInvalidError` when its route topology no longer matches.
     """
-    if plan.registry_version != registry.version:
+    if not is_registry_version_compatible(registry, plan.registry_version, plan.route_id):
         raise RegistryVersionMismatchError(
             f"Plan uses registry {plan.registry_version}; this client has "
             f"{registry.version}. Re-run quote() to rebuild the plan.")
@@ -124,7 +126,7 @@ def prepare(registry: Registry, *, source_chain: str | None = None, source_asset
             destination_chain: str | None = None, destination_asset: str | None = None,
             bridge_protocol: str | None = None, route: "Route | str | None" = None,
             amount=None, amount_atomic=None, recipient: str, sender: str | None = None,
-            mint_mode: str = "public") -> Plan:
+            mint_mode: str = "public", cctp=None) -> Plan:
     """Describe how *amount* moves along one route — pure, no network.
 
     The route is named the way veil's ``quote`` names it: ``source_chain`` /
@@ -168,12 +170,12 @@ def prepare(registry: Registry, *, source_chain: str | None = None, source_asset
             f"({dst.address_regex})")
 
     return build_plan(registry, route, amount_atomic=atomic, recipient=recipient,
-                      sender=sender, mint_mode=mint_mode)
+                      sender=sender, mint_mode=mint_mode, cctp=cctp)
 
 
 # ── Connection helpers ────────────────────────────────────────────────────────
 
-def _module(bridge, name: str):
+def _module(bridge: Any, name: str, chain_id: str | None = None) -> Any:
     """``bridge.eth`` / ``bridge.sol`` or a ConfigurationError that says how to fix it.
 
     Checks the ``ethereum``/``solana`` connection attribute FIRST: on the real
@@ -182,6 +184,11 @@ def _module(bridge, name: str):
     would never see the ``None`` default — it would let that raise propagate
     with the property's own (less specific) message instead of this one.
     """
+    if name == "eth" and chain_id not in (None, "ethereum", "sepolia"):
+        accessor = getattr(bridge, "evm", None)
+        if callable(accessor):
+            return accessor(chain_id)
+        raise ConfigurationError(f"This transfer needs a configured {chain_id} EVM connection")
     conn = getattr(bridge, "ethereum" if name == "eth" else "solana", None)
     if conn is None:
         chain, extra, env = (("Ethereum", "evm", "ETHEREUM_RPC_URL / EVM_PRIVATE_KEY") if name == "eth"
@@ -203,7 +210,7 @@ def quote(bridge, *, source_chain: str | None = None, source_asset: str | None =
           destination_chain: str | None = None, destination_asset: str | None = None,
           bridge_protocol: str | None = None, route: "Route | str | None" = None,
           amount=None, amount_atomic=None, recipient: str, sender: str | None = None,
-          mint_mode: str = "public", secret_nonce: str = "0scalar") -> Quote:
+          mint_mode: str = "public", secret_nonce: str = "0scalar", cctp=None) -> Quote:
     """Price a transfer: ``prepare`` + the source-side live read for the route kind.
 
     Returns one of ``EvmHyperlaneQuote`` / ``SolanaHyperlaneQuote`` /
@@ -225,13 +232,15 @@ def quote(bridge, *, source_chain: str | None = None, source_asset: str | None =
     plan = prepare(bridge.registry, source_chain=source_chain, source_asset=source_asset,
                    destination_chain=destination_chain, destination_asset=destination_asset,
                    bridge_protocol=bridge_protocol, route=route, amount=amount, amount_atomic=amount_atomic,
-                   recipient=recipient, sender=sender, mint_mode=mint_mode)
+                   recipient=recipient, sender=sender, mint_mode=mint_mode, cctp=cctp)
     resolved = resolve_route(bridge.registry, plan)
     _require_active(resolved.route)
     family = resolved.source_chain.family
 
+    if plan.protocol == "cctp":
+        return bridge.cctp.quote(plan)
     if plan.protocol == "hyperlane" and family == "evm":
-        q = _module(bridge, "eth").quote_transfer_remote(plan=plan)
+        q = _module(bridge, "eth", resolved.source_chain.id).quote_transfer_remote(plan=plan)
         return replace(q, plan=plan)
     if plan.protocol == "hyperlane" and family == "solana":
         q = _module(bridge, "sol").quote_transfer_remote(plan=plan)
@@ -246,10 +255,13 @@ def quote(bridge, *, source_chain: str | None = None, source_asset: str | None =
                                   gas_price=gas.gas_price, exchange_rate=gas.exchange_rate,
                                   payment_microcredits=gas.payment_microcredits)
     if plan.protocol == "xreserve" and family == "evm":
-        q = _module(bridge, "eth").quote_deposit_usdc(plan=plan, secret_nonce=secret_nonce)
+        q = _module(bridge, "eth", resolved.source_chain.id).quote_deposit_usdc(plan=plan, secret_nonce=secret_nonce)
         return replace(q, plan=plan)
     if plan.protocol == "xreserve" and family == "aleo":
         fee_atomic = _xreserve_withdrawal_fee_atomic(resolved)
+        live_fee = resolved.route.metadata.get("withdrawalFeeUrl") is not None
+        if live_fee:
+            fee_atomic, _ = bridge.xreserve.read_withdrawal_fee(resolved.route, plan.amount_atomic)
         if fee_atomic is None:
             raise RouteUnavailableError(f"xReserve withdrawal fee is missing or invalid: {plan.route_id}")
         decimals = resolved.source_asset.decimals
@@ -267,7 +279,7 @@ def quote(bridge, *, source_chain: str | None = None, source_asset: str | None =
             fees=(Fee(kind="protocol", chain_id=resolved.source_chain.id, asset_id=resolved.source_asset.id,
                       amount=fee_human, estimated=True),),
             amount_out=format_decimal_amount(plan.amount_atomic - fee_atomic, decimals),
-            withdrawal_fee_atomic=fee_atomic)
+            withdrawal_fee_atomic=fee_atomic, status="quoted" if live_fee else "not-queried")
     raise UnsupportedRouteError(
         f"Unsupported {plan.protocol} source chain family: {family} ({plan.route_id})")
 
@@ -415,11 +427,15 @@ def _read_destination_balance(bridge, plan: Plan, resolved: ResolvedRoute) -> in
     """
     chain, asset = resolved.destination_chain, resolved.destination_asset
     if chain.family == "evm":
-        conn = getattr(bridge, "ethereum", None)
+        try:
+            module = _module(bridge, "eth", chain.id)
+        except ConfigurationError:
+            return None
+        conn = getattr(module, "conn", None) or getattr(bridge, "ethereum", None)
         if (conn is None or asset.locator is None or asset.locator.kind not in ("native", "evm-contract")):
             return None
-        return int(bridge.eth.balance(asset.id) if conn.address and conn.address.lower() == plan.recipient.lower()
-                   else bridge.eth.balance(asset.id, address=plan.recipient))
+        return int(module.balance(asset.id) if conn.address and conn.address.lower() == plan.recipient.lower()
+                   else module.balance(asset.id, address=plan.recipient))
     if chain.family == "solana":
         conn = getattr(bridge, "solana", None)
         if (conn is None or asset.locator is None or asset.locator.kind != "native"):
@@ -559,14 +575,22 @@ def execute(bridge, plan: Plan, *, on_checkpoint: Callable | None = None, provin
     _require_active(resolved.route)
     family = resolved.source_chain.family
     store = getattr(bridge, "checkpoints", None)
+    if plan.protocol == "cctp":
+        plan = bridge.cctp.quote(plan).plan
     reserve = getattr(store, "reserve", None)
     if callable(reserve):
         plan = replace(plan, journal_id=reserve(plan))
     emit = _Emitter(bridge, plan, on_checkpoint)
 
+    if plan.protocol == "cctp":
+        receipt = bridge.cctp.execute(plan, on_checkpoint=emit, poll_seconds=poll_seconds, timeout_seconds=timeout_seconds)
+        emit(receipt)
+        emit.finalize()
+        return to_progress(plan, receipt)
+
     if plan.protocol == "hyperlane" and family == "evm":
-        eth = _module(bridge, "eth")
-        _assert_sender(plan, bridge.ethereum.address, family=family)
+        eth = _module(bridge, "eth", resolved.source_chain.id)
+        _assert_sender(plan, (getattr(eth, "conn", None) or bridge.ethereum).address, family=family)
         call = eth.transfer_remote(plan=plan)
         receipt = _send_call(call, emit, poll_seconds, timeout_seconds)
         emit.finalize()
@@ -595,8 +619,8 @@ def execute(bridge, plan: Plan, *, on_checkpoint: Callable | None = None, provin
         return to_progress(plan, receipt)
 
     if plan.protocol == "xreserve" and family == "evm":
-        eth = _module(bridge, "eth")
-        _assert_sender(plan, bridge.ethereum.address, family=family)
+        eth = _module(bridge, "eth", resolved.source_chain.id)
+        _assert_sender(plan, (getattr(eth, "conn", None) or bridge.ethereum).address, family=family)
         nonce = _mint_secret(plan, secret_nonce)
         call = eth.deposit_usdc(plan=plan, secret_nonce=nonce)
         receipt = _send_call(call, emit, poll_seconds, timeout_seconds)
@@ -613,11 +637,18 @@ def execute(bridge, plan: Plan, *, on_checkpoint: Callable | None = None, provin
         # the full amount would wait for a delivery that can never arrive. With no readable fee
         # there is no honest expectation to record, and the branch degrades to veil's passthrough.
         fee_atomic = _xreserve_withdrawal_fee_atomic(resolved)
+        if resolved.route.metadata.get("withdrawalFeeUrl") is not None:
+            fee_atomic, _ = bridge.xreserve.read_withdrawal_fee(resolved.route, plan.amount_atomic)
         verification = ({} if fee_atomic is None else
                         _delivery_verification(bridge, plan, resolved,
                                                expected_atomic=plan.amount_atomic - fee_atomic))
-        call = bridge.xreserve.burn(plan.recipient, amount_atomic=plan.amount_atomic, mode=burn_mode,
-                                    record=record, merkle_proof=merkle_proof)
+        burn = bridge.xreserve.burn
+        fee_options = {}
+        if resolved.route.metadata.get("withdrawalFeeUrl") is not None:
+            burn = bridge.xreserve._burn
+            fee_options["withdrawal_fee_atomic"] = fee_atomic
+        call = burn(plan.recipient, amount_atomic=plan.amount_atomic, mode=burn_mode,
+                    record=record, merkle_proof=merkle_proof, route=resolved.route, **fee_options)
         receipt = _run_aleo_leg(bridge, plan, call, proving=proving, emit=emit, extra_state=verification)
         emit.finalize()
         return to_progress(plan, receipt)
@@ -728,11 +759,13 @@ def get_status(bridge, plan: Plan, receipt: Receipt) -> Receipt:
     if receipt.status in TERMINAL:
         return receipt
     route, src, dst = resolved.route, resolved.source_chain, resolved.destination_chain
+    if plan.protocol == "cctp":
+        return bridge.cctp.get_status(plan, receipt)
     state = receipt.protocol_state
 
     # 1. EVM approval → wallet boundary
     if receipt.status is Status.SOURCE_APPROVAL_PENDING and src.family == "evm":
-        return _module(bridge, "eth").source_status(plan, receipt)
+        return _module(bridge, "eth", resolved.source_chain.id).source_status(plan, receipt)
 
     # 2. Aleo source acceptance is the irreversible boundary
     if receipt.status is Status.SOURCE_CONFIRMING and src.family == "aleo":
@@ -749,7 +782,7 @@ def get_status(bridge, plan: Plan, receipt: Receipt) -> Receipt:
     # 3/4. Hyperlane source confirmation on EVM / Solana (extracts messageId)
     if receipt.status is Status.SOURCE_CONFIRMING and route.protocol == "hyperlane":
         if src.family == "evm":
-            return _module(bridge, "eth").source_status(plan, receipt)
+            return _module(bridge, "eth", resolved.source_chain.id).source_status(plan, receipt)
         if src.family == "solana":
             return _module(bridge, "sol").source_status(plan, receipt)
 
@@ -773,7 +806,7 @@ def get_status(bridge, plan: Plan, receipt: Receipt) -> Receipt:
     if (receipt.status is Status.DELIVERY_PENDING and route.protocol == "hyperlane"
             and message_id is not None and dst.family in ("aleo", "evm")):
         delivered = (bridge.hyperlane.is_delivered(message_id) if dst.family == "aleo"
-                     else _module(bridge, "eth").is_delivered(message_id))
+                     else _module(bridge, "eth", resolved.destination_chain.id).is_delivered(message_id))
         return _clear_action(receipt, status=Status.COMPLETED) if delivered else receipt
 
     # 6. Aleo-origin Hyperlane without a message id: destination balance baseline
@@ -826,7 +859,7 @@ def get_status(bridge, plan: Plan, receipt: Receipt) -> Receipt:
             return _clear_action(receipt, status=Status.COMPLETED)
 
     if receipt.status is Status.SOURCE_CONFIRMING:
-        return _module(bridge, "eth").source_status(plan, receipt)
+        return _module(bridge, "eth", resolved.source_chain.id).source_status(plan, receipt)
 
     if receipt.status is Status.ATTESTATION_PENDING:
         message_hash = state.get("messageHash")
@@ -890,6 +923,10 @@ def _is_transient_error(exc: Exception) -> bool:
     try:
         import requests
         if isinstance(exc, requests.RequestException):
+            return True
+        # CCTP keeps a sanitized AttestationError at the API boundary. Its
+        # transport cause is retryable; malformed or mismatched evidence is not.
+        if isinstance(exc, AttestationError) and isinstance(exc.__cause__, (requests.ConnectionError, requests.Timeout, requests.exceptions.ChunkedEncodingError)):
             return True
     except ImportError:
         pass
@@ -1020,7 +1057,7 @@ def _plan_from_intent(registry: Registry, intent: dict[str, Any]) -> Plan:
                        destination_asset=intent["destination"]["asset"],
                        bridge_protocol=intent.get("bridgeProtocol"),
                        amount=intent["amount"], recipient=intent["recipient"], sender=intent.get("sender"),
-                       mint_mode=intent.get("mintMode", "public"))
+                       mint_mode=intent.get("mintMode", "public"), cctp=intent.get("cctp"))
     except (KeyError, TypeError) as exc:
         raise CheckpointInvalidError(f"Bridge checkpoint intent is incomplete: missing {exc}") from exc
 
@@ -1088,6 +1125,9 @@ def _reconstruct_source_receipt(plan: Plan, resolved: ResolvedRoute, cp: Checkpo
     offline guess here is never unsafe); anything else has nothing to build a receipt from.
     """
     src = resolved.source_chain
+    if plan.protocol == "cctp":
+        from .cctp import CctpModule
+        return CctpModule.from_checkpoint(plan, cp)
     source = cp.source or {}
     approvals = [a for a in (source.get("approvalTransactionIds") or []) if isinstance(a, str)]
 
@@ -1164,6 +1204,8 @@ def _apply_destination_overlay(resolved: ResolvedRoute, cp: Checkpoint, receipt:
     destination = cp.destination or {}
     if not destination:
         return receipt
+    if resolved.route.protocol == "cctp" and not destination.get("preparedTransaction"):
+        return receipt.replace(status=Status.DESTINATION_CONFIRMING, destination_tx_id=destination.get("transactionId"))
     if resolved.route.protocol != "xreserve" or resolved.destination_chain.family != "aleo":
         raise CheckpointInvalidError(
             "Bridge checkpoint contains a destination transaction that is invalid for this route")
@@ -1202,7 +1244,7 @@ def progress_from_checkpoint(registry: Registry, checkpoint) -> Progress:
     if cp.version != 1 or not cp.intent or not cp.route:
         raise CheckpointInvalidError("Bridge checkpoint format is invalid or unsupported (version 1 required)")
     plan = replace(_plan_from_intent(registry, cp.intent), journal_id=cp.journal_id)
-    if cp.route.get("registryVersion") != plan.registry_version:
+    if not is_registry_version_compatible(registry, cp.route.get("registryVersion"), plan.route_id):
         raise RegistryVersionMismatchError(
             f"Checkpoint was written against registry {cp.route.get('registryVersion')}; this client has "
             f"{plan.registry_version}. Upgrade/downgrade aleo-bridge-sdk to the version that wrote it.")
@@ -1220,7 +1262,7 @@ def progress_from_checkpoint(registry: Registry, checkpoint) -> Progress:
     return to_progress(plan, receipt)
 
 
-def recover(bridge, checkpoint) -> Progress:
+def recover(bridge, checkpoint, *, approval_replacement=None) -> Progress:
     """Rebuild a transfer's ``Progress`` from a saved checkpoint — reads only, never signs.
 
     Accepts a ``Checkpoint``, its dict, or its JSON.  Re-runs ``prepare`` on the
@@ -1237,7 +1279,7 @@ def recover(bridge, checkpoint) -> Progress:
     if cp.version != 1 or not cp.intent or not cp.route:
         raise CheckpointInvalidError("Bridge checkpoint format is invalid or unsupported (version 1 required)")
     plan = replace(_plan_from_intent(bridge.registry, cp.intent), journal_id=cp.journal_id)
-    if cp.route.get("registryVersion") != plan.registry_version:
+    if not is_registry_version_compatible(bridge.registry, cp.route.get("registryVersion"), plan.route_id):
         raise RegistryVersionMismatchError(
             f"Checkpoint was written against registry {cp.route.get('registryVersion')}; this client has "
             f"{plan.registry_version}. Upgrade/downgrade aleo-bridge-sdk to the version that wrote it.")
@@ -1247,6 +1289,13 @@ def recover(bridge, checkpoint) -> Progress:
     resolved = resolve_route(bridge.registry, plan)
     src, dst = resolved.source_chain, resolved.destination_chain
     verification = _verification_from_delivery(cp.delivery_verification or {})
+
+    if plan.protocol == "cctp":
+        receipt = bridge.cctp.recover(plan, cp, approval_replacement=approval_replacement)
+        _persist(bridge, create_checkpoint(plan, receipt, bridge.registry), receipt, previous_id=cp.id)
+        return _finish(bridge, plan, receipt, cp.id)
+    if approval_replacement is not None:
+        raise ConfigurationError("approval_replacement is only supported for CCTP")
 
     if src.family in ("aleo", "solana"):
         receipt = _reconstruct_source_receipt(plan, resolved, cp, verification)
@@ -1259,13 +1308,13 @@ def recover(bridge, checkpoint) -> Progress:
         if cp.destination:
             raise CheckpointInvalidError(
                 "Bridge checkpoint contains a destination transaction that is invalid for this Hyperlane route")
-        receipt = _module(bridge, "eth").recover_source(plan, cp, required=False)
+        receipt = _module(bridge, "eth", resolved.source_chain.id).recover_source(plan, cp, required=False)
         return _finish(bridge, plan, receipt, cp.id)
 
     if resolved.route.protocol != "xreserve" or src.family != "evm" or dst.family != "aleo":
         raise UnsupportedRouteError("Bridge checkpoint recovery is not implemented for this route")
 
-    receipt = _module(bridge, "eth").recover_source(plan, cp, required=False)
+    receipt = _module(bridge, "eth", resolved.source_chain.id).recover_source(plan, cp, required=False)
     destination = cp.destination or {}
     prepared_dest = destination.get("preparedTransaction")
     if prepared_dest and destination.get("transactionId"):
@@ -1369,6 +1418,14 @@ def resume(bridge, progress: Progress, *, on_checkpoint: Callable | None = None,
     state = receipt.protocol_state
     family = resolved.source_chain.family
 
+    if plan.protocol == "cctp":
+        emit.supersede(receipt.id)
+        receipt = bridge.cctp.execute(plan, resume=receipt, on_checkpoint=emit,
+                                      poll_seconds=poll_seconds, timeout_seconds=timeout_seconds)
+        emit(receipt)
+        emit.finalize()
+        return to_progress(plan, receipt)
+
     if family == "aleo":
         serialized = state.get("preparedTransaction")
         if not isinstance(serialized, str) or not serialized:
@@ -1397,8 +1454,8 @@ def resume(bridge, progress: Progress, *, on_checkpoint: Callable | None = None,
     if family != "evm":
         raise UnsupportedRouteError(f"Source resumption is not implemented for {resolved.source_chain.id}")
 
-    eth = _module(bridge, "eth")
-    _assert_sender(plan, bridge.ethereum.address, family="evm")
+    eth = _module(bridge, "eth", resolved.source_chain.id)
+    _assert_sender(plan, (getattr(eth, "conn", None) or bridge.ethereum).address, family="evm")
     is_xreserve = resolved.route.protocol == "xreserve"
     nonce = _mint_secret(plan, secret_nonce) if is_xreserve else None      # before any RPC
     saved_hook = state.get("hookData")
@@ -1421,7 +1478,7 @@ def resume(bridge, progress: Progress, *, on_checkpoint: Callable | None = None,
 
     if is_xreserve:
         quoted = eth.quote_deposit_usdc(plan=plan, secret_nonce=nonce)
-        if saved_hook.lower() != ("0x" + quoted.hook_data.hex()).lower():     # always runs: validated above
+        if cast(str, saved_hook).lower() != ("0x" + quoted.hook_data.hex()).lower():     # validated above
             raise NotResumableError(
                 "The re-quoted hook data does not match the hook this transfer's approval committed "
                 "to: the secret nonce differs from the one used at execute(). Pass that same "
@@ -1451,8 +1508,12 @@ def resume(bridge, progress: Progress, *, on_checkpoint: Callable | None = None,
 # ── complete ──────────────────────────────────────────────────────────────────
 
 def complete(bridge, progress: Progress, *, secret_nonce: str | None = None,
-             on_checkpoint: Callable | None = None, proving: str = "delegate") -> Progress:
-    """Submit the one user-signed Aleo transaction a private USDCx mint needs.
+             on_checkpoint: Callable | None = None, proving: str = "delegate", manual_mint: bool = False) -> Progress:
+    """Claim a private USDCx or CCTP destination mint after refreshing delivery evidence.
+
+    CCTP completion requires a destination signer and gas, but no secret nonce.
+    ``manual_mint=True`` authorizes fallback when forwarding has stalled. Known
+    destination transactions are observed instead of submitted again.
 
     Requires ``progress.next == "complete"`` — Circle has attested the deposit and the receipt
     carries ``next_action == {"kind": "xreserve-private-mint", "chainId": <aleo chain>}``. The
@@ -1471,6 +1532,15 @@ def complete(bridge, progress: Progress, *, secret_nonce: str | None = None,
     value used at ``execute``; it is required for a private plan on the proving path
     (``ConfigurationError``, raised before any RPC).
     """
+    if progress.plan.protocol == "cctp":
+        plan = progress.plan
+        emit = _Emitter(bridge, plan, on_checkpoint)
+        receipt = bridge.cctp.complete(plan, progress.receipt, manual_mint=manual_mint, on_checkpoint=emit)
+        emit(receipt)
+        emit.finalize()
+        return to_progress(plan, receipt)
+    if manual_mint:
+        raise ConfigurationError("manual_mint is only supported for CCTP")
     if progress.next != "complete":
         raise NotResumableError(
             "Bridge progress has no destination action to complete (next must be 'complete'); call "

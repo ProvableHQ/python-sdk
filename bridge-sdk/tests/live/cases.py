@@ -65,6 +65,8 @@ class CaseSpec:
 
 
 CASES: dict[str, CaseSpec] = {
+    "evm-cctp": CaseSpec(name="evm-cctp", protocol="cctp", source_family="evm", amount="2",
+                         veil_source="mainnet/cctp-roundtrip.live.test.ts"),
     "evm-hyperlane": CaseSpec(
         name="evm-hyperlane", protocol="hyperlane", source_family="evm",
         veil_source="mainnet/evm-hyperlane.live.test.ts:21-115"),
@@ -136,7 +138,8 @@ def sender_for(bridge: Any, route: Route) -> str | None:
     family = bridge.registry.chain(bridge.registry.asset(route.source_asset_id).chain_id).family
     if family == "aleo":
         return bridge.aleo_address()
-    connection = bridge.ethereum if family == "evm" else bridge.solana
+    chain = bridge.registry.asset(route.source_asset_id).chain_id
+    connection = (bridge.evm(chain).conn if chain not in ("ethereum", "sepolia") else bridge.ethereum) if family == "evm" else bridge.solana
     if connection is None:
         raise LiveCaseError(f"No {family} connection is configured for {route.id}")
     return connection.address
@@ -148,7 +151,8 @@ def default_recipient(bridge: Any, route: Route) -> str:
     if family == "aleo":
         return bridge.aleo_address()
     # Ruling: probe the CONNECTION, never the bridge.eth/bridge.sol properties — those raise.
-    connection = bridge.ethereum if family == "evm" else bridge.solana
+    chain = bridge.registry.asset(route.destination_asset_id).chain_id
+    connection = (bridge.evm(chain).conn if chain not in ("ethereum", "sepolia") else bridge.ethereum) if family == "evm" else bridge.solana
     if connection is None or connection.address is None:
         raise LiveCaseError(f"No {family} address is configured to receive {route.id}")
     return connection.address
@@ -177,7 +181,8 @@ def print_quote(bridge: Any, quote: Any, *, case: str, route_id: str, log: Calla
     # An EvmXReserveQuote carries no `fees`: its protocol cost is the max fee the deposit authorizes.
     max_fee = getattr(quote, "max_fee_atomic", None)
     if max_fee is not None:
-        log(f"  fee        {_human(bridge, max_fee, source.id)} [xReserve max fee]")
+        label = "CCTP max fee" if quote.kind == "evm-cctp" else "xReserve max fee"
+        log(f"  fee        {_human(bridge, max_fee, source.id)} [{label}]")
     for name in ("native_value_atomic", "native_fee_atomic", "approval_required", "total_lamports",
                  "igp_lamports", "rent_lamports", "payment_microcredits", "balance_atomic",
                  "allowance_atomic", "withdrawal_fee_atomic", "max_fee_atomic"):
@@ -243,6 +248,8 @@ def precheck(bridge: Any, quote: Any, *, case: str, log: Callable[[str], None] =
         if quote.balance_atomic < plan.amount_atomic:
             raise Underfunded(asset_id=source.id, needed=plan.amount_atomic, have=quote.balance_atomic)
         log(f"  balance    {source.id}: {quote.balance_atomic} atomic (need {plan.amount_atomic})")
+    elif quote.kind == "evm-cctp":
+        _require(balances, source.id, plan.amount_atomic, log=log)
     elif quote.kind == "aleo-xreserve":
         pass            # the private record is selected (and checked) right before the burn
     return balances
@@ -392,7 +399,8 @@ def _evm_transfer_tx(bridge: Any, asset: Asset, recipient: str, amount_atomic: i
     log range (or returns nothing) leaves ``destinationTxId`` unset rather than failing a leg whose
     funds have demonstrably arrived.
     """
-    connection = getattr(bridge, "ethereum", None)
+    connection = (bridge.evm(asset.chain_id).conn if asset.chain_id not in ("ethereum", "sepolia")
+                  else getattr(bridge, "ethereum", None))
     if connection is None or asset.locator.kind != "evm-contract":
         return None
     try:

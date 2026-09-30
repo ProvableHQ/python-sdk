@@ -6,11 +6,13 @@ without the ``evm`` extra; the first call that needs them raises
 """
 from __future__ import annotations
 
+from ._registry_compatibility import is_registry_version_compatible
+
 import os
 import re
 import time
 from dataclasses import dataclass, fields
-from typing import Any, Mapping
+from typing import Any, Mapping, cast
 
 from . import encoding
 from ._calls import EvmCall, EvmOutcome, EvmStep
@@ -230,7 +232,7 @@ class Ethereum:
                 "or set w3.eth.default_account with signing middleware")
         return address
 
-    def send_transaction(self, tx: dict) -> str:
+    def send_transaction(self, tx: dict[str, Any]) -> str:
         """Broadcast one transaction and return its ``0x`` hash.
 
         Fills ``from``/``chainId``/``value`` when missing. Local signer: also fills
@@ -322,7 +324,7 @@ class Ethereum:
         except TimeExhausted:
             return None
 
-    def get_receipt(self, tx_hash: str) -> dict | None:
+    def get_receipt(self, tx_hash: str) -> dict[str, Any] | None:
         """One ``eth_getTransactionReceipt`` read; ``None`` while the transaction is unmined or unknown."""
         from web3.exceptions import TransactionNotFound
 
@@ -443,12 +445,13 @@ class _XReserveQuote:
 class EthModule:
     """``bridge.eth`` — Ethereum-origin Hyperlane and xReserve actions (reads return values, writes return ``EvmCall``)."""
 
-    def __init__(self, bridge: Any, conn: Ethereum, *, log_scan_chunk_blocks: int = LOG_SCAN_CHUNK_BLOCKS) -> None:
+    def __init__(self, bridge: Any, conn: Ethereum, *, log_scan_chunk_blocks: int = LOG_SCAN_CHUNK_BLOCKS,
+                 chain_id: str | None = None) -> None:
         self.bridge = bridge
         self.conn = conn
         self.registry: Registry = bridge.registry
         self.network: str = bridge.network            # "mainnet" | "testnet" → aleo.<network> for encoders
-        self.chain: Chain = self.registry.chain(EVM_CHAIN_BY_ENVIRONMENT[bridge.environment])
+        self.chain: Chain = self.registry.chain(chain_id or EVM_CHAIN_BY_ENVIRONMENT[bridge.environment])
         self.log_scan_chunk_blocks = log_scan_chunk_blocks        # recovery eth_getLogs span; lower it for strict RPCs
         self.log_scan_head_race_retries = LOG_SCAN_HEAD_RACE_RETRIES
         self.log_scan_head_race_sleep = LOG_SCAN_HEAD_RACE_SLEEP_SECONDS
@@ -514,7 +517,7 @@ class EthModule:
 
     def _route_for_plan(self, plan: Plan) -> Route:
         """Re-resolve the route from the live registry (invariant 1); never trust plan-carried addresses."""
-        if plan.registry_version != self.registry.version:
+        if not is_registry_version_compatible(self.registry, plan.registry_version, plan.route_id):
             raise RegistryVersionMismatchError(
                 f"Plan uses registry {plan.registry_version}; this client has {self.registry.version}")
         route = self.registry.route(plan.route_id)
@@ -526,7 +529,7 @@ class EthModule:
 
     def _plan_route(self, plan: Plan, protocol: str) -> Route:
         """Re-resolve a caller-supplied ``Plan``'s route by id (never trust plan-carried addresses)."""
-        if plan.registry_version != self.registry.version:
+        if not is_registry_version_compatible(self.registry, plan.registry_version, plan.route_id):
             raise RegistryVersionMismatchError(
                 f"Plan uses registry {plan.registry_version}; this client has {self.registry.version}")
         try:
@@ -557,6 +560,9 @@ class EthModule:
                             mint_mode=mint_mode)
         for field in fields(Plan):
             if field.name == "journal_id":  # Local storage identity does not change the transfer.
+                continue
+            if field.name == "registry_version" and is_registry_version_compatible(
+                    self.registry, plan.registry_version, plan.route_id):
                 continue
             mine, theirs = getattr(rebuilt, field.name), getattr(plan, field.name)
             if mine != theirs:
@@ -691,7 +697,7 @@ class EthModule:
         token_amount = sum(int(q[1]) for q in quotes if Web3.to_checksum_address(q[0]) == meta.token)
         if token_amount < amount_atomic:
             raise BridgeError("Collateral Hyperlane quote does not cover the transfer amount")
-        allowance = int(self._erc20(meta.token).functions.allowance(owner, meta.router).call()) if owner else None
+        allowance = int(self._erc20(cast(str, meta.token)).functions.allowance(owner, meta.router).call()) if owner else None
         return _HyperlaneQuote(meta.router, "collateral", meta.token, meta.destination_domain, recipient_bytes32,
                                amount_atomic, native_value, native_value, token_amount, allowance,
                                meta.requires_approval_reset)
@@ -726,6 +732,7 @@ class EthModule:
             if route.protocol != "hyperlane":
                 raise BridgeError(f"{route.id} is not a Hyperlane route; use quote_deposit_usdc for xReserve")
             atomic = self._amount_atomic(route, amount, amount_atomic)
+            recipient = cast(str, recipient)  # required above when no plan supplies it
             recipient32 = self._recipient_bytes32(route, recipient)
             owner = self._owner(sender)
         q = self._quote_hyperlane(route, recipient32, atomic, owner)
@@ -882,6 +889,7 @@ class EthModule:
             mint_mode = "public" if mint_mode is None else mint_mode
             atomic = self._amount_atomic(route, amount, amount_atomic)
             owner = self._owner(sender)
+        recipient = cast(str, recipient)  # required above or supplied by the validated plan
         q = self._quote_xreserve(route, recipient, atomic, owner, mint_mode, secret_nonce)
         destination = self.registry.asset(route.destination_asset_id)
         plan = _plan_for(self.registry, route, amount_atomic=atomic, recipient=recipient, sender=owner, mint_mode=mint_mode)
@@ -937,7 +945,7 @@ class EthModule:
             native_value_atomic=q.native_value_atomic, amount_atomic=q.amount_atomic,
             approval_tx_ids=approvals, sender=outcome.sender, message_id=message_id,
             source_nonce=outcome.source_nonce)
-        receipt = Receipt(id=rid, protocol="hyperlane", status=status, source_tx_id=outcome.source_tx_id, protocol_state=state)
+        receipt = Receipt(id=cast(str, rid), protocol="hyperlane", status=status, source_tx_id=outcome.source_tx_id, protocol_state=state)
         return DispatchReceipt(transaction_id=outcome.source_tx_id or approvals[-1], route_id=route.id,
                                message_id=message_id, amount_atomic=q.amount_atomic, receipt=receipt)
 
@@ -969,6 +977,7 @@ class EthModule:
             route = self._hyperlane_route(self._asset(asset))
             sender = self.conn.require_address()
             atomic = self._amount_atomic(route, amount, amount_atomic)
+            recipient = cast(str, recipient)  # required above when plan is absent
             plan = _plan_for(self.registry, route, amount_atomic=atomic, recipient=recipient, sender=sender)
         recipient32 = self._recipient_bytes32(route, recipient)
         latest: dict[str, _HyperlaneQuote] = {}
@@ -978,10 +987,11 @@ class EthModule:
             latest["q"] = q
             out: list[EvmStep] = []
             if q.router_type == "collateral" and (q.allowance_atomic or 0) < q.token_amount_atomic:
-                token = self._erc20(q.token)
+                token_address = cast(str, q.token)  # collateral quotes always have a token
+                token = self._erc20(token_address)
                 if (q.allowance_atomic or 0) > 0 and q.requires_approval_reset:
-                    out.append(EvmStep("approve", q.token, token.encode_abi("approve", args=[q.router, 0])))
-                out.append(EvmStep("approve", q.token, token.encode_abi("approve", args=[q.router, q.token_amount_atomic])))
+                    out.append(EvmStep("approve", token_address, token.encode_abi("approve", args=[q.router, 0])))
+                out.append(EvmStep("approve", token_address, token.encode_abi("approve", args=[q.router, q.token_amount_atomic])))
             warp = self._contract(q.router, WARP_ROUTE_ABI)
             out.append(EvmStep("main", q.router,
                                warp.encode_abi("transferRemote", args=[q.destination_domain, recipient32, atomic]),
@@ -1068,9 +1078,9 @@ class EthModule:
         approvals = list(outcome.approval_tx_ids)
         if outcome.status == "CONFIRMED":
             receipt = self._confirmed_deposit_receipt(route, q, owner=outcome.sender, approval_tx_ids=approvals,
-                                                      source_tx_id=outcome.source_tx_id, receipt=outcome.receipt,
+                                                      source_tx_id=cast(str, outcome.source_tx_id), receipt=outcome.receipt,
                                                       mint_mode=mint_mode, intended_recipient=intended_recipient)
-            return DepositReceipt(transaction_id=outcome.source_tx_id, route_id=route.id, message_hash=receipt.id,
+            return DepositReceipt(transaction_id=cast(str, outcome.source_tx_id), route_id=route.id, message_hash=receipt.id,
                                   nonce=receipt.protocol_state["nonce"], receipt=receipt)
         rid = outcome.source_tx_id or approvals[-1]
         receipt = Receipt(id=rid, protocol="xreserve", status=Status(outcome.status), source_tx_id=outcome.source_tx_id,
@@ -1108,6 +1118,7 @@ class EthModule:
             mint_mode = "public" if mint_mode is None else mint_mode
             sender = self.conn.require_address()
             atomic = self._amount_atomic(route, amount, amount_atomic)
+            recipient = cast(str, recipient)  # required above when plan is absent
             plan = _plan_for(self.registry, route, amount_atomic=atomic, recipient=recipient, sender=sender, mint_mode=mint_mode)
         latest: dict[str, _XReserveQuote] = {}
 
@@ -1712,7 +1723,7 @@ class EthModule:
         """
         if checkpoint.version != 1 or checkpoint.intent.get("bridgeProtocol") != plan.protocol or checkpoint.route.get("id") != plan.route_id:
             raise CheckpointInvalidError("Bridge checkpoint does not match the prepared route")
-        if checkpoint.route.get("registryVersion") != self.registry.version:
+        if not is_registry_version_compatible(self.registry, checkpoint.route.get("registryVersion"), checkpoint.route.get("id")):
             raise RegistryVersionMismatchError(
                 f"Checkpoint uses registry {checkpoint.route.get('registryVersion')}; this client has {self.registry.version}")
         if plan.protocol == "hyperlane" and checkpoint.destination:

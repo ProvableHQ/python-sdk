@@ -777,3 +777,81 @@ Applications that need to keep transaction contents out of the proving service
 can configure local proving with `proving="local"` on `execute`, `resume`, or
 `complete`. The application's machine then generates the proof and may need
 to download proving parameters.
+# Arc and native USDC
+
+Bridge USDC between Arc and Aleo with xReserve, or between Arc and Ethereum,
+Base, or Arbitrum with CCTP V2. All eight directions are mainnet routes.
+Existing Ethereum and Solana calls keep their defaults.
+
+```python
+from aleo_bridge import Bridge, Ethereum
+
+bridge = Bridge(aleo, evm={
+    "ethereum": Ethereum(ethereum_rpc, private_key=evm_key),
+    "arc": Ethereum(arc_rpc),  # Reads destination delivery; forwarding needs no destination signer.
+})
+quote = bridge.quote(
+    source_chain="ethereum", source_asset="usdc", destination_chain="arc",
+    amount="5", recipient=recipient,
+    cctp={"speed": "fast", "forwarding": True, "max_fee": "0.1"},
+)
+# After reviewing quote.amount_out and quote.fees:
+progress = bridge.execute(quote.plan, on_checkpoint=save_checkpoint)
+```
+
+`cctp` defaults to standard finality and forwarding. `max_fee` is a decimal USDC
+ceiling. When omitted, the quote adds 10% headroom to current protocol and forwarding
+fees, rounded up to the next USDC atomic unit and capped below the transfer amount.
+Execute the returned plan to preserve that visible ceiling. Explicit caps are never
+increased. Fees are refreshed before approval and burn. If fees exceed the cap after
+approval, execution returns `SOURCE_SUBMISSION_PENDING` (`next="resume"`) with a
+`sourceError` explanation. Resume that progress when fees fall within its saved cap;
+no burn is submitted while fees exceed it. A restart can recover the approval checkpoint
+and resume the same transfer. Do not execute a new transfer to retry a submitted one.
+For forwarded delivery, `amount_out` deducts the full approved budget, while the
+verified destination mint may deduct less. CCTP transfers and addresses are public.
+
+CCTP recovery scans at most ten 1,000-block log batches per status call. Keep polling
+the same client to reconcile older approvals or backfill older destination receipts.
+Scan progress is held in memory and anchored to a checked block hash; restarting the
+client safely restarts the scan. Incomplete source scans never authorize another burn,
+and a used destination nonce alone never substitutes for mint receipt verification.
+
+Use `bridge.evm("arc")` to read the Arc connection. Environment-based setup recognizes
+`ARC_RPC_URL`, `BASE_RPC_URL`, and `ARBITRUM_RPC_URL`, sharing `EVM_PRIVATE_KEY`
+when present. These mainnet-only RPC variables are ignored for testnet clients.
+Explicit `evm` connections take precedence and must match the client's network. Read-only connections
+do not need a key. Arc gas balances use 18 decimals; the USDC token interface uses
+6 decimals. These are two views of the same funds, so keep a gas reserve rather
+than counting them as separate assets.
+
+Recover every interrupted transfer from its checkpoint. CCTP checkpoints retain
+the source sender, options, fee ceiling, and submitted transaction identifiers;
+they exclude message and attestation bodies. Recovery reads chain evidence and
+does not sign. An approval with no visible transaction or receipt stays pending.
+If you selected a confirmed replacement after verifying that the original is no
+longer visible, pass `approval_replacement={"original_transaction_id": old_hash,
+"replacement_transaction_id": new_hash}` to `recover`. The original hash remains
+in the saved history. Replacement is refused after a burn has been submitted.
+
+Set `forwarding=False` to submit the destination mint yourself with
+`bridge.complete(progress)`. For stalled forwarding, explicitly authorize fallback
+with `bridge.complete(progress, manual_mint=True)`. This requires a destination
+signer and native gas. Completion refreshes the attestation and nonce first and
+does not repeat a known pending destination transaction. A consumed nonce alone
+does not prove delivery: the matching message event and exact USDC mint are required.
+
+For Arc → Aleo, select `source_chain="arc"`, `source_asset="usdc"`, and
+`destination_chain="aleo"`; public, record, and private mint modes work as on
+Ethereum. Private mint completion still requires the original secret nonce.
+Aleo → Arc burns use domain 26, enforce a two-USDCx minimum, and fetch a live
+withdrawal fee estimate again before proving. Provider errors are surfaced instead
+of presenting a static estimate as current. Public outbound xReserve delivery is
+observed through the recipient balance; it has no CCTP-style transaction proof.
+
+Checkpoints from registry `2026-08-31.solana-deposits.1` remain recoverable only
+for the 22 original routes whose pinned deployment fingerprints still match.
+Unknown versions and old version labels attached to new routes are rejected.
+
+Runnable Arc examples and explicit live-test gates are described in
+[examples/README.md](examples/README.md). No live test runs by default.

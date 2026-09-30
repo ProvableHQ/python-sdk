@@ -293,6 +293,12 @@ def test_evm_xreserve(route, mainnet_client, record_property):
     _mainnet("evm-xreserve", route, mainnet_client, record_property)
 
 
+@_params("evm-cctp")
+def test_evm_cctp(route, mainnet_client, record_property):
+    """Native USDC on all six Arc CCTP directions, with persisted recovery."""
+    _mainnet("evm-cctp", route, mainnet_client, record_property)
+
+
 @_params("aleo-hyperlane")
 def test_aleo_hyperlane(route, mainnet_client, record_property):
     """veil mainnet/aleo-hyperlane.live.test.ts: aleo → ethereum and aleo → solana, `mode="signer"`."""

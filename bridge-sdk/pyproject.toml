@@ -1,7 +1,7 @@
 [project]
 name = "aleo-bridge-sdk"
 version = "0.5.1"
-description = "Python SDK for bridging assets between Aleo, Ethereum and Solana over Hyperlane warp routes and Circle xReserve"
+description = "Bridge Aleo, Ethereum, Arc, Base, Arbitrum and Solana assets with Hyperlane, Circle xReserve and CCTP"
 readme = "README.md"
 requires-python = ">=3.10"
 # PyNaCl is NOT optional: every Aleo-side execution goes through delegated proving
@@ -28,6 +28,10 @@ packages = ["python/aleo_bridge"]
 
 # Include only tutorial sources; local journals and checkpoints stay out.
 [tool.hatch.build.targets.wheel.force-include]
+"examples/_arc_workflow.py" = "aleo_bridge/examples/_arc_workflow.py"
+"examples/bridge_arc_to_aleo.py" = "aleo_bridge/examples/bridge_arc_to_aleo.py"
+"examples/bridge_ethereum_arc_aleo.py" = "aleo_bridge/examples/bridge_ethereum_arc_aleo.py"
+"examples/l2_arc_aleo_roundtrip.py" = "aleo_bridge/examples/l2_arc_aleo_roundtrip.py"
 "examples/__init__.py" = "aleo_bridge/examples/__init__.py"
 "examples/_arguments.py" = "aleo_bridge/examples/_arguments.py"
 "examples/bridge_sol.py" = "aleo_bridge/examples/bridge_sol.py"

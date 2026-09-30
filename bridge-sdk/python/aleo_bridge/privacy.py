@@ -73,7 +73,7 @@ class PrivacyModule:
         for row in rows:
             plaintext = row.get("record_plaintext") if isinstance(row, dict) else getattr(row, "record_plaintext", None)
             value = record_amount(plaintext) if plaintext else None
-            if value is not None:
+            if value is not None and isinstance(plaintext, str):
                 amounts.append((value, plaintext))
         covering = [entry for entry in amounts if entry[0] >= amount_atomic]
         if not covering:

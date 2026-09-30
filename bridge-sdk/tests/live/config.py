@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Mapping
 
 #: The five mainnet cases veil ships, in the order the funding table lists them.
-CASE_NAMES = ("evm-hyperlane", "evm-xreserve", "aleo-hyperlane", "aleo-xreserve", "solana-hyperlane")
+CASE_NAMES = ("evm-cctp", "evm-hyperlane", "evm-xreserve", "aleo-hyperlane", "aleo-xreserve", "solana-hyperlane")
 
 FUNDS_VAR = "BRIDGE_LIVE_FUNDS"
 STATE_DIR_VAR = "BRIDGE_LIVE_STATE_DIR"

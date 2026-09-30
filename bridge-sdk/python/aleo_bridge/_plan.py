@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from .errors import BridgeError, UnsupportedRouteError
 from .registry import Asset, Registry, Route
-from .types import Plan, Step
+from .types import Plan, Step, CctpOptions, normalize_cctp
 from .units import format_decimal_amount
 
 WALLET_EXECUTOR_BY_FAMILY = {"evm": "evm-wallet", "solana": "solana-wallet", "aleo": "aleo-wallet"}
@@ -26,7 +26,7 @@ def _wallet_executor(registry: Registry, source: Asset) -> str:
 
 
 def build_plan(registry: Registry, route: Route, *, amount_atomic: int, recipient: str, sender: str | None,
-               mint_mode: str = "public") -> Plan:
+               mint_mode: str = "public", cctp=None) -> Plan:
     """Build the ``Plan`` for one bridge route (mirrors veil ``prepare`` steps, brief §2.1)."""
     source: Asset = registry.asset(route.source_asset_id)
     destination: Asset = registry.asset(route.destination_asset_id)
@@ -39,6 +39,9 @@ def build_plan(registry: Registry, route: Route, *, amount_atomic: int, recipien
     wallet = _wallet_executor(registry, source)
     source_family = registry.chain(source.chain_id).family
     destination_family = registry.chain(destination.chain_id).family
+    if cctp is not None and route.protocol != "cctp":
+        raise BridgeError("CCTP options only apply to CCTP routes")
+    options: CctpOptions | None = None
     if route.protocol == "xreserve":
         if source_family == "evm" and destination_family == "aleo":
             steps = (Step("source-approval", "approve", wallet, False),
@@ -52,6 +55,14 @@ def build_plan(registry: Registry, route: Route, *, amount_atomic: int, recipien
                      Step("destination-confirmation", "confirm-delivery", "protocol", False))
         else:
             raise UnsupportedRouteError(f"Unsupported xReserve route direction: {route.id}")
+    elif route.protocol == "cctp":
+        if (source_family, destination_family) != ("evm", "evm"):
+            raise BridgeError("CCTP requires two EVM chains")
+        options = normalize_cctp(cctp)
+        steps = (Step("source-approval", "approve", wallet, False),
+                 Step("source-burn", "burn", wallet, True),
+                 Step("burn-attestation", "wait-attestation", "protocol", False),
+                 Step("destination-mint", "mint", "protocol" if options.forwarding else "evm-wallet", False))
     else:
         # Aleo ARC-20 tokens need no on-chain approval; only a non-Aleo token source does.
         needs_approval = source.kind == "token" and source_family != "aleo"
@@ -62,7 +73,7 @@ def build_plan(registry: Registry, route: Route, *, amount_atomic: int, recipien
     return Plan(route_id=route.id, registry_version=registry.version, protocol=route.protocol,
                 environment=route.environment, source_asset_id=source.id, destination_asset_id=destination.id,
                 amount=format_decimal_amount(amount_atomic, source.decimals), amount_atomic=amount_atomic,
-                recipient=recipient, sender=sender, mint_mode=mint_mode, steps=steps)
+                recipient=recipient, sender=sender, mint_mode=mint_mode, steps=steps, cctp=options)
 
 
 __all__ = ["WALLET_EXECUTOR_BY_FAMILY", "build_plan"]

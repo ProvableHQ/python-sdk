@@ -217,3 +217,45 @@ Each script presents the transfer as a tutorial, with inline comments explaining
 what happens to the funds and when another action is needed. Client setup, quotes,
 submission, progress, and error handling remain explicit in each script. Only
 command-line argument definitions are shared in [_arguments.py](_arguments.py).
+# Arc journeys
+
+The following commands preview by default. Supply the RPC variables for each EVM
+chain involved (`ARC_RPC_URL`, `ETHEREUM_RPC_URL`, `BASE_RPC_URL`,
+`ARBITRUM_RPC_URL`). `--execute` loads `EVM_PRIVATE_KEY`; an Aleo-origin public
+burn also needs `ALEO_PRIVATE_KEY`. Keep Aleo credits and native EVM gas funded.
+
+```sh
+python -m aleo_bridge.examples.bridge_arc_to_aleo --sender 0xYOUR_ADDRESS --recipient aleo1YOUR_ADDRESS --amount 5
+python -m aleo_bridge.examples.bridge_ethereum_arc_aleo --sender 0xYOUR_ADDRESS --recipient aleo1YOUR_ADDRESS --amount 5
+python -m aleo_bridge.examples.l2_arc_aleo_roundtrip --l2 base --step 1 --sender 0xYOUR_ADDRESS --recipient aleo1YOUR_ADDRESS --amount 5
+```
+
+The four-step example runs one explicit leg per invocation: L2 → Arc, Arc → Aleo,
+Aleo → Arc, and Arc → L2. Use `--l2 arbitrum` for Arbitrum. Each later step reads
+the previous completed leg's net receipt budget; it never spends a pre-existing
+balance as return principal. Use your own Aleo recipient when you intend to return
+the public USDCx. The xReserve withdrawal's balance observation is labeled as such.
+
+All examples save each leg under `--journal` (default `~/.aleo-bridge/arc-journey`).
+Rerun with the same arguments to recover, never a new journal to retry uncertain
+submissions. Keep the state files. Run one process per journey. If submission
+started but no checkpoint was saved, the example refuses another transfer and
+requires inspection of source history. A provider handoff, pending attestation,
+or timeout does not advance to the next leg.
+
+`--arc-gas-reserve 0.10` leaves that much received USDC on Arc before spending
+the remainder. This is a configurable budget, not a guarantee of future gas cost.
+`--manual-mint` explicitly authorizes CCTP fallback if forwarding stalls; it needs
+a funded destination signer.
+
+Read-only integration checks require `BRIDGE_LIVE_READS=1` and the relevant RPC
+variables. Funded checks additionally require the existing `BRIDGE_LIVE_FUNDS=1`,
+an external `BRIDGE_LIVE_STATE_DIR`, and `BRIDGE_LIVE_MAINNET_ACK` acknowledgment.
+Choose `evm-cctp`, `evm-xreserve`, or `aleo-xreserve` in
+`BRIDGE_LIVE_MAINNET_CASES` for individual routes; choose `cctp-roundtrip` or
+`arc-journey` for received-only roundtrips or four-leg public journeys. The
+`aleo-arc` case burns a two-USDCx private record with a 0.10-USDC fee budget and
+requires `BRIDGE_LIVE_ARC_RECIPIENT`; its Arc connection has no signer and it
+verifies the exact destination transfer receipt and balance delta.
+Without the explicit `BRIDGE_LIVE_MAINNET_EXECUTE` acknowledgment they only quote.
+The tests never set any gate variables themselves.
