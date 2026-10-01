@@ -175,11 +175,12 @@ def test_prove_and_verify_execution(process, proven_execution):
     assert finalize >= 0
     assert total == storage + finalize
     # The consensus version comes from the network's activation table, not a
-    # hardcoded literal: the default is the newest scheduled version, which
-    # a far-future height also resolves to; a height before V2 uses the v1
-    # formula and prices differently.
-    assert process.execution_cost(execution, block_height=2**32 - 1) == (total, (storage, finalize))
-    assert process.verify_execution(execution, block_height=2**32 - 1) is None
+    # hardcoded literal: the default is the newest *scheduled* version, which
+    # a far-future height also resolves to (snarkvm parks unscheduled versions
+    # at u32::MAX itself, so stay one block below); a height before V2 uses
+    # the v1 formula and prices differently.
+    assert process.execution_cost(execution, block_height=2**32 - 2) == (total, (storage, finalize))
+    assert process.verify_execution(execution, block_height=2**32 - 2) is None
     genesis_total, _ = process.execution_cost(execution, block_height=0)
     assert genesis_total > 0
 

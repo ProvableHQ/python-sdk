@@ -101,6 +101,8 @@ fn register(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Value>()?;
     m.add_class::<VerifyingKey>()?;
     m.add_class::<ViewKey>()?;
+    m.add_function(wrap_pyfunction!(consensus_version, m)?)?;
+    m.add_function(wrap_pyfunction!(varuna_version, m)?)?;
     Ok(())
 }
 

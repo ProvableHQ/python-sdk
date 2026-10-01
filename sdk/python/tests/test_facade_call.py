@@ -216,7 +216,7 @@ def test_delegate_pay_own_fee_attaches_fee_authorization() -> None:
         def prepare(self, _query: Any) -> None:
             return None
 
-        def prove_execution(self, _locator: str) -> Any:
+        def prove_execution(self, _locator: str, block_height: Any = None) -> Any:
             return _FakeExecution()
 
     class _ProcessShim:
