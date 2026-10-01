@@ -27,6 +27,22 @@ def test_interrupted_leg_recovers_checkpoint_without_executing_again(tmp_path):
     assert workflow.run_leg(h.bridge, **kwargs) == 4_990_000
 
 
+def test_arc_examples_use_public_rpc_providers_unless_a_variable_names_one(monkeypatch):
+    module = importlib.import_module('_arc_workflow')
+    for chain in ('ethereum','arc','base','arbitrum','solana'):
+        monkeypatch.delenv(f'{chain.upper()}_RPC_URL', raising=False)
+    assert module.rpc_url('arc') == 'https://rpc.mainnet.arc.io'
+    assert module.rpc_url('ethereum') == 'https://ethereum-rpc.publicnode.com'
+    assert module.rpc_url('base') == 'https://base-rpc.publicnode.com'
+    assert module.rpc_url('arbitrum') == 'https://arbitrum-one-rpc.publicnode.com'
+    monkeypatch.setenv('ARC_RPC_URL', 'https://arc.example')
+    monkeypatch.setenv('BASE_RPC_URL', '')                      # blank means unset
+    assert module.rpc_url('arc') == 'https://arc.example'
+    assert module.rpc_url('base') == 'https://base-rpc.publicnode.com'
+    with pytest.raises(KeyError):
+        module.rpc_url('solana')
+
+
 def test_arc_reserve_is_integer_and_cannot_exhaust_receipts():
     workflow = importlib.import_module('_arc_workflow')
     assert workflow.spendable(4_990_000,'0.10') == '4.89'

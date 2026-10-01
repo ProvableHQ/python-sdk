@@ -12,6 +12,19 @@ from aleo_bridge import Bridge, Ethereum, create_checkpoint
 from aleo_bridge.errors import BridgeError
 from aleo_bridge.units import format_decimal_amount, parse_decimal_amount
 
+#: Public, keyless providers used when ``<CHAIN>_RPC_URL`` is not set.
+DEFAULT_RPC_URLS = {
+    'ethereum': 'https://ethereum-rpc.publicnode.com',
+    'arc': 'https://rpc.mainnet.arc.io',
+    'base': 'https://base-rpc.publicnode.com',
+    'arbitrum': 'https://arbitrum-one-rpc.publicnode.com',
+}
+
+
+def rpc_url(chain: str) -> str:
+    """``<CHAIN>_RPC_URL`` from the environment, else the public default for *chain*."""
+    return os.environ.get(f'{chain.upper()}_RPC_URL') or DEFAULT_RPC_URLS[chain]
+
 
 def spendable(received: int, reserve: str = '0.10') -> str:
     """Leave an explicit USDC gas budget on Arc; this is not a gas estimate."""
@@ -140,7 +153,7 @@ def build_bridge(chains: tuple[str, ...], *, execute: bool, aleo_signer: bool = 
     aleo = Aleo(HTTPProvider(os.environ.get('ALEO_RPC_URL', 'https://edge.provable.com/api'), network='mainnet'))
     if execute and aleo_signer:
         aleo.default_account = aleo.account.from_private_key(os.environ['ALEO_PRIVATE_KEY'])
-    evm = {chain: Ethereum(os.environ[f'{chain.upper()}_RPC_URL'],
+    evm = {chain: Ethereum(rpc_url(chain),
                            private_key=os.environ['EVM_PRIVATE_KEY'] if execute else None) for chain in chains}
     return Bridge(aleo, evm=evm)
 

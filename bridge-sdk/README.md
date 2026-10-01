@@ -835,6 +835,9 @@ and a used destination nonce alone never substitutes for mint receipt verificati
 Use `bridge.evm("arc")` to read the Arc connection. Environment-based setup recognizes
 `ARC_RPC_URL`, `BASE_RPC_URL`, and `ARBITRUM_RPC_URL`, sharing `EVM_PRIVATE_KEY`
 when present. These mainnet-only RPC variables are ignored for testnet clients.
+The shipped examples and the live suite fall back to public providers when a
+variable is unset (`https://rpc.mainnet.arc.io`, `https://base-rpc.publicnode.com`,
+`https://arbitrum-one-rpc.publicnode.com`).
 Explicit `evm` connections take precedence and must match the client's network. Read-only connections
 do not need a key. Arc gas balances use 18 decimals; the USDC token interface uses
 6 decimals. These are two views of the same funds, so keep a gas reserve rather

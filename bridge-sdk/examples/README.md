@@ -252,10 +252,12 @@ submission, progress, and error handling remain explicit in each script. Only
 command-line argument definitions are shared in [_arguments.py](_arguments.py).
 # Arc journeys
 
-The following commands preview by default. Supply the RPC variables for each EVM
-chain involved (`ARC_RPC_URL`, `ETHEREUM_RPC_URL`, `BASE_RPC_URL`,
-`ARBITRUM_RPC_URL`). `--execute` loads `EVM_PRIVATE_KEY`; an Aleo-origin public
-burn also needs `ALEO_PRIVATE_KEY`. Keep Aleo credits and native EVM gas funded.
+The following commands preview by default. Each EVM chain involved uses a public
+provider (`rpc.mainnet.arc.io`, `ethereum-rpc.publicnode.com`,
+`base-rpc.publicnode.com`, `arbitrum-one-rpc.publicnode.com`) unless its variable
+names another (`ARC_RPC_URL`, `ETHEREUM_RPC_URL`, `BASE_RPC_URL`, `ARBITRUM_RPC_URL`).
+`--execute` loads `EVM_PRIVATE_KEY`; an Aleo-origin public burn also needs
+`ALEO_PRIVATE_KEY`. Keep Aleo credits and native EVM gas funded.
 
 ```sh
 python -m aleo_bridge.examples.bridge_arc_to_aleo --sender 0xYOUR_ADDRESS --recipient aleo1YOUR_ADDRESS --amount 5

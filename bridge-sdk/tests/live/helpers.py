@@ -422,10 +422,11 @@ def build_bridge(environment: str) -> Any:
     store = FileCheckpointStore(live_config.state_dir() / environment / "checkpoints")
     evm = {}
     if environment == "mainnet":
-        for chain in ("arc", "base", "arbitrum"):
-            url = os.environ.get(f"{chain.upper()}_RPC_URL")
-            if url:
-                evm[chain] = Ethereum(url, private_key=live_config.evm_private_key(environment))
+        # Arc / Base / Arbitrum ride the same public providers veil's live suite does unless
+        # ``<CHAIN>_RPC_URL`` names another; the CCTP and Arc xReserve cases need no extra setup.
+        for chain in live_config.EVM_CHAIN_RPC_VARS:
+            evm[chain] = Ethereum(live_config.evm_chain_rpc_url(chain),
+                                  private_key=live_config.evm_private_key(environment))
     bridge = Bridge(aleo, ethereum=ethereum, evm=evm, solana=solana, checkpoints=store)
     assert bridge.environment == environment
     return bridge

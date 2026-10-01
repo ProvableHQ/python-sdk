@@ -955,6 +955,26 @@ def test_rpc_urls_fall_back_to_the_public_defaults(monkeypatch):
     assert live_config.first_value(("ABSENT_A", "ABSENT_B")) is None
 
 
+def test_arc_base_and_arbitrum_rpc_urls_default_to_public_providers(monkeypatch):
+    """The CCTP / Arc xReserve cases need no RPC setup: ``<CHAIN>_RPC_URL`` (or its BRIDGE_LIVE_ alias)
+    overrides veil's public providers, which are the fallback."""
+    for chain, names in live_config.EVM_CHAIN_RPC_VARS.items():
+        for name in names:
+            monkeypatch.delenv(name, raising=False)
+    assert live_config.evm_chain_rpc_url("arc") == "https://rpc.mainnet.arc.io"
+    assert live_config.evm_chain_rpc_url("base") == "https://base-rpc.publicnode.com"
+    assert live_config.evm_chain_rpc_url("arbitrum") == "https://arbitrum-one-rpc.publicnode.com"
+    assert set(live_config.EVM_CHAIN_RPC_VARS) == set(live_config.DEFAULT_EVM_CHAIN_RPC_URL) == {"arc", "base", "arbitrum"}
+
+    monkeypatch.setenv("ARC_RPC_URL", "https://arc.example")
+    monkeypatch.setenv("BRIDGE_LIVE_BASE_RPC_URL", "https://base.example")
+    assert live_config.evm_chain_rpc_url("arc") == "https://arc.example"
+    assert live_config.evm_chain_rpc_url("base") == "https://base.example"
+    assert live_config.evm_chain_rpc_url("arbitrum") == live_config.DEFAULT_ARBITRUM_RPC_URL
+    with pytest.raises(live_config.LiveConfigError, match="ethereum"):
+        live_config.evm_chain_rpc_url("ethereum")      # Ethereum keeps evm_rpc_url(environment)
+
+
 def test_amount_overrides_are_per_case_with_an_xreserve_shorthand(monkeypatch):
     monkeypatch.delenv("BRIDGE_LIVE_XRESERVE_AMOUNT", raising=False)
     assert live_config.case_amount_override("evm-xreserve") is None
