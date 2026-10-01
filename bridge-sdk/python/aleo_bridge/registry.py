@@ -18,11 +18,23 @@ AssetRef = "str | tuple[str, str] | Asset"
 FAMILIES = ("aleo", "evm", "solana")
 AVAILABILITIES = ("active", "metadata-required", "disabled")
 PRIVACY_KINDS = ("arc20", "arc22")
+# Common Solana Hyperlane fields an active Solana-source route must carry; the collateral-specific
+# ones (``nativeCollateralPda`` for native SOL, token program / mint / escrow for ``spl-collateral``)
+# are checked by ``_solana_collateral_metadata_complete``. ``igpOverheadAccount`` is optional.
 _SOLANA_REQUIRED_METADATA = (
-    "warpProgramAddress", "tokenPda", "nativeCollateralPda", "dispatchAuthorityPda", "mailboxProgramAddress",
+    "warpProgramAddress", "tokenPda", "dispatchAuthorityPda", "mailboxProgramAddress",
     "mailboxOutboxPda", "igpProgramAddress", "igpProgramDataPda", "igpAccount", "splNoopProgramAddress",
     "destinationDomain", "destinationGasAmount", "registryCommit", "solanaReviewedAt", "solanaConfigSource",
 )
+_SOLANA_SPL_COLLATERAL_METADATA = ("splTokenProgramAddress", "collateralMintAddress", "escrowPda")
+
+
+def _solana_collateral_metadata_complete(metadata: Mapping[str, Any]) -> bool:
+    router_type = metadata.get("routerType")
+    if router_type == "spl-collateral":
+        return all(isinstance(metadata.get(k), str) and bool(metadata.get(k)) for k in _SOLANA_SPL_COLLATERAL_METADATA)
+    return router_type in (None, "native") and isinstance(metadata.get("nativeCollateralPda"), str) \
+        and bool(metadata.get("nativeCollateralPda"))
 
 
 @dataclass(frozen=True)
@@ -288,6 +300,8 @@ def validate_registry(registry: Registry) -> Registry:
                     else isinstance(value, str) and bool(value)
                 if not ok:
                     raise ConfigurationError(f"Bridge route {route.id} is active but missing required Solana Hyperlane metadata")
+            if not _solana_collateral_metadata_complete(route.metadata):
+                raise ConfigurationError(f"Bridge route {route.id} is active but missing required Solana Hyperlane metadata")
         route_ids.add(route.id)
     return registry
 

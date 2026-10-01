@@ -20,10 +20,10 @@ MAILBOX = {
 
 
 def test_shape_and_version():
-    assert REG.version == "2026-09-28.cctp-arc.1"
-    assert len(REG.chains()) == 9 and len(REG.assets()) == 22
-    assert len(REG.routes(include_unavailable=True)) == 30
-    assert len(REG.routes()) == 30  # nothing is 'disabled' in this snapshot; metadata-required stays visible
+    assert REG.version == "2026-09-30.hyperlane-bat-usdg-zec.1"
+    assert len(REG.chains()) == 9 and len(REG.assets()) == 30
+    assert len(REG.routes(include_unavailable=True)) == 40
+    assert len(REG.routes()) == 40  # nothing is 'disabled' in this snapshot; metadata-required stays visible
     assert validate_registry(REG) is REG
     assert REG.routes(include_unavailable=True)[0].metadata["xReserveContract"] == "0x8888888199b2Df864bf678259607d6D5EBb4e3Ce"
 
@@ -68,7 +68,7 @@ def test_assets_and_lookups():
     assert not REG.asset("aleo/usdcx").matches_address("0xabc")
     # re.fullmatch, not re.search: a trailing newline must not sneak past the "$" anchor
     assert not REG.asset("ethereum/usdc").matches_address("0x0000000000000000000000000000000000000001\n")
-    assert [a.id for a in REG.assets(chain="aleo")] == ["aleo/aleo", "aleo/usdcx", "aleo/eth", "aleo/wbtc", "aleo/usdt", "aleo/sol", "aleo/usad"]
+    assert [a.id for a in REG.assets(chain="aleo")] == ["aleo/aleo", "aleo/usdcx", "aleo/eth", "aleo/wbtc", "aleo/usdt", "aleo/sol", "aleo/bat", "aleo/usdg", "aleo/zec", "aleo/usad"]
     assert [a.id for a in REG.assets(symbol="aleo")] == ["aleo/aleo", "ethereum/aleo", "solana/aleo", "base/aleo", "hyperevm/aleo"]
     assert [a.id for a in REG.assets(environment="testnet")] == ["aleo-testnet/usdcx", "sepolia/usdc"]
     for bad in ("aleo/doge", "doge", ("aleo", "doge"), "a/b/c"):
@@ -79,7 +79,7 @@ def test_assets_and_lookups():
 def test_usdcx_only_via_xreserve_and_others_via_hyperlane():
     usdcx = [r for r in REG.routes(include_unavailable=True) if "usdcx" in r.source_asset_id or "usdcx" in r.destination_asset_id]
     assert usdcx and all(r.protocol == "xreserve" for r in usdcx)
-    for symbol in ("ETH", "WBTC", "USDT", "SOL", "ALEO", "USAD"):
+    for symbol in ("ETH", "WBTC", "USDT", "SOL", "BAT", "USDG", "ZEC", "ALEO", "USAD"):
         routes = REG.routes(symbol=symbol, include_unavailable=True)
         assert routes and all(r.protocol == "hyperlane" for r in routes), symbol
 
@@ -248,9 +248,9 @@ def test_route_filters_follow_veil_get_routes():
     # veil getRoutes: protocol / sourceChainId / destinationChainId / symbol — chain ids, never asset refs.
     assert [r.id for r in REG.routes(source_chain="aleo", bridge_protocol="xreserve")] == ["xreserve:aleo/usdcx->ethereum/usdc", "xreserve:aleo/usdcx->arc/usdc"]
     assert [r.id for r in REG.routes(destination_chain="aleo", symbol="wbtc")] == ["hyperlane:ethereum/wbtc->aleo/wbtc"]
-    assert len(REG.routes(environment="testnet")) == 2 and len(REG.routes(environment="mainnet")) == 28
-    assert len(REG.routes(source_chain="solana")) == 2  # SOL deposit + metadata-required ALEO
-    assert len(REG.routes(source_chain="SOLANA", destination_chain="Aleo")) == 2   # case-insensitive
+    assert len(REG.routes(environment="testnet")) == 2 and len(REG.routes(environment="mainnet")) == 38
+    assert len(REG.routes(source_chain="solana")) == 5  # SOL + BAT/USDG/ZEC deposits + metadata-required ALEO
+    assert len(REG.routes(source_chain="SOLANA", destination_chain="Aleo")) == 5   # case-insensitive
     # the asset filters narrow a chain pair to one asset on either side
     assert [r.id for r in REG.routes(source_chain="aleo", source_asset="wbtc")] == ["hyperlane:aleo/wbtc->ethereum/wbtc"]
     assert [r.id for r in REG.routes(destination_chain="ethereum", destination_asset="usdc")] == ["xreserve:aleo/usdcx->ethereum/usdc", "cctp:arc/usdc->ethereum/usdc"]
@@ -345,6 +345,118 @@ def test_validation_failures():
 
 def test_data_module_is_plain_literals():
     assert data.REGISTRY_VERSION == REG.version
-    assert len(data.CHAINS) == 9 and len(data.ASSETS) == 22 and len(data.ROUTES) == 30
+    assert len(data.CHAINS) == 9 and len(data.ASSETS) == 30 and len(data.ROUTES) == 40
     assert all(isinstance(c, dict) for c in data.CHAINS) and all(isinstance(r["metadata"], dict) for r in data.ROUTES)
     assert re.compile(data.ALEO_ADDRESS).match("aleo1kypwp5m7qtk9mwazgcpg0tq8aal23mnrvwfvug65qgcg9xvsrqgspyjm6n")
+
+
+NEW_WARP_COMMIT = "dd03567baf2a7c0a336c12a1e2b97272ca51ee9a"
+ZEC_SAMPLE = "https://explorer.hyperlane.xyz/message/0x5f0236faa02b61ea3e8f4406bbd43b7b5b74cc4010574a1fcda47d1d092e3a3e"
+
+
+def test_bat_usdg_zec_assets_are_pinned():
+    """veil PR #169 default.test.ts: 'registers BAT, USDG, and ZEC against their pinned Aleo and collateral deployments'."""
+    assert REG.asset("aleo/bat") == Asset("aleo/bat", "bat", "aleo", "BAT", "Hyperlane BAT", 18, "token",
+                                          Locator("aleo-program", "hyp_warp_token_bat_v2.aleo", "aleo1n6kjmle3t0prrwjgpwc87zytasmjdeud5rrwuuawk57ex85qr5fqcv8xzg"),
+                                          "^aleo1[0-9a-z]{58}$", Privacy("arc22", "shield_arc22_bat.aleo"))
+    assert REG.asset("aleo/usdg").decimals == 6 and REG.asset("aleo/usdg").privacy == Privacy("arc22", "shield_arc22_usdg.aleo")
+    assert REG.asset("aleo/usdg").locator == Locator("aleo-program", "hyp_warp_token_usdg_v2.aleo", "aleo1s4r80dv7pcggdnzsavjv45r54zjydl2jn64dejerpk6pgnfj5cysj7zzuu")
+    assert REG.asset("aleo/zec").decimals == 8 and REG.asset("aleo/zec").privacy == Privacy("arc22", "shield_arc22_zec.aleo")
+    assert REG.asset("aleo/zec").locator == Locator("aleo-program", "hyp_warp_token_zec_v2.aleo", "aleo1m3z3en2msfdk62yje9ty7fqydxeakgx0ec6ze672q86p2yxq0sqqyjr9jd")
+    assert REG.asset("ethereum/bat").locator == Locator("evm-contract", "0x0D8775F648430679A709E98d2b0Cb6250d2887EF") and REG.asset("ethereum/bat").decimals == 18
+    assert REG.asset("ethereum/usdg").locator == Locator("evm-contract", "0xe343167631d89B6Ffc58B88d6b7fB0228795491D") and REG.asset("ethereum/usdg").decimals == 6
+    assert (REG.asset("solana/bat").decimals, REG.asset("solana/bat").locator) == (8, Locator("solana-mint", "EPeUFDgHRxs9xxEPVaL6kfGQvCon7jmAWKVUHuux1Tpz"))
+    assert (REG.asset("solana/usdg").decimals, REG.asset("solana/usdg").locator) == (6, Locator("solana-mint", "2u1tszSeqZ3qBWF3uNGPFc8TzMk2tdiwknnRMWGWjGWH"))
+    assert (REG.asset("solana/zec").decimals, REG.asset("solana/zec").locator) == (8, Locator("solana-mint", "A7bdiYdS5GjqGFtxf17ppRHtDKPkkRqbKtR27dxvQXaS"))
+    assert REG.asset("solana/zec").name == "Zcash" and REG.asset("ethereum/usdg").name == "Global Dollar"
+
+
+def test_bat_usdg_zec_routes_are_active_and_pinned_from_the_new_registry_commit():
+    ethereum = [REG.route(i) for i in ("hyperlane:ethereum/bat->aleo/bat", "hyperlane:ethereum/usdg->aleo/usdg")]
+    assert all(r.active and r.metadata["registryCommit"] == NEW_WARP_COMMIT and r.metadata["routerType"] == "collateral" for r in ethereum)
+    assert [r.metadata["routerAddress"] for r in ethereum] == ["0x516e156e987175d74614cc2bC960f148A610f0b3", "0xe5A2cCf532919f93855F324c1F8a7996065f53Da"]
+    assert [r.metadata["tokenAddress"] for r in ethereum] == ["0x0D8775F648430679A709E98d2b0Cb6250d2887EF", "0xe343167631d89B6Ffc58B88d6b7fB0228795491D"]
+    for r in ethereum:
+        assert r.metadata["sourceChainId"] == 1 and r.metadata["mailboxAddress"] == "0xc005dc82818d67AF737725bD4bf75435d065D239"
+        assert "requiresApprovalReset" not in r.metadata
+        for k, v in MAILBOX.items():
+            assert r.metadata[k] == v
+
+    additional = [r for r in REG.routes(include_unavailable=True)
+                  if re.search(r"/(bat|usdg|zec)(?:->|$)", r.id) and r not in ethereum]
+    assert len(additional) == 8 and all(r.active for r in additional)
+    assert all(NEW_WARP_COMMIT in (r.source or "") for r in additional)
+    assert all(r.source == r.metadata["hyperlaneConfigSource"] for r in additional)
+
+    solana_sources = {r.id: r.metadata for r in additional if r.source_asset_id.startswith("solana/")}
+    assert set(solana_sources) == {"hyperlane:solana/bat->aleo/bat", "hyperlane:solana/usdg->aleo/usdg", "hyperlane:solana/zec->aleo/zec"}
+    bat, usdg, zec = (solana_sources[f"hyperlane:solana/{k}->aleo/{k}"] for k in ("bat", "usdg", "zec"))
+    assert (bat["routerType"], bat["collateralMintAddress"], bat["splTokenProgramAddress"], bat["escrowPda"]) == \
+        ("spl-collateral", "EPeUFDgHRxs9xxEPVaL6kfGQvCon7jmAWKVUHuux1Tpz", "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "NdEwkjA2w7cJ3EREVDPATJfqnEotdSMhJAJicv4Qni5")
+    assert (usdg["routerType"], usdg["collateralMintAddress"], usdg["splTokenProgramAddress"], usdg["warpProgramAddress"]) == \
+        ("spl-collateral", "2u1tszSeqZ3qBWF3uNGPFc8TzMk2tdiwknnRMWGWjGWH", "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb", "AhNVa6VpZwDwgD3U66CGUwCMRcFSFiTfBse2D495SPxW")
+    assert (zec["routerType"], zec["collateralMintAddress"], zec["solanaSampleTransferSource"], zec["warpProgramAddress"]) == \
+        ("spl-collateral", "A7bdiYdS5GjqGFtxf17ppRHtDKPkkRqbKtR27dxvQXaS", ZEC_SAMPLE, "2RBzic8nUNJ8KngRRbsCEjkeM9CtpQN2CCqU1cs1n2y5")
+    for m in (bat, usdg, zec):
+        assert "nativeCollateralPda" not in m
+        assert m["destinationGasAmount"] == "460000" and m["destinationDomain"] == 1634493807 and m["solanaReviewedAt"] == "2026-09-30T00:00:00Z"
+        assert m["igpOverheadAccount"] == "AkeHBbE5JkwVppujCQQ6WuxsVsJtruBAjUo6fDCFp6fF" and m["igpAccount"] == "JAvHW21tYXE9dtdG83DReqU2b4LUexFuCbtJT5tF8X6M"
+        assert m["mailboxProgramAddress"] == "E588QtVUvresuXq2KoNEwAmoifCzYGpRBdHByN9KQMbi"
+        for k, v in MAILBOX.items():
+            assert m[k] == v
+
+
+def test_bat_usdg_zec_aleo_withdrawals_are_reviewed_not_placeholders():
+    expected = {
+        "hyperlane:aleo/bat->ethereum/bat": ("hyp_warp_token_bat_v2.aleo", 1, "68000", "8193754087214450113583165652573869677861364321518267024225788045720787201438field", (18, 18)),
+        "hyperlane:aleo/usdg->ethereum/usdg": ("hyp_warp_token_usdg_v2.aleo", 1, "68000", "4364459415416156846201796031612641041087412365006702457109915656601258641029field", (6, 6)),
+        "hyperlane:aleo/bat->solana/bat": ("hyp_warp_token_bat_v2.aleo", 1399811149, "300000", "8193754087214450113583165652573869677861364321518267024225788045720787201438field", (18, 18)),
+        "hyperlane:aleo/usdg->solana/usdg": ("hyp_warp_token_usdg_v2.aleo", 1399811149, "300000", "4364459415416156846201796031612641041087412365006702457109915656601258641029field", (6, 6)),
+        "hyperlane:aleo/zec->solana/zec": ("hyp_warp_token_zec_v2.aleo", 1399811149, "300000", "220414605002186903241059728372192608429362177759171998609092499027319866844field", (8, 8)),
+    }
+    for route_id, (program, domain, gas, token_id, decimals) in expected.items():
+        m = REG.route(route_id).metadata
+        assert REG.route(route_id).active
+        assert m["aleoRouterProgram"] == program and m["aleoDestinationDomain"] == domain and m["aleoRemoteRouterGas"] == gas
+        assert m["aleoTokenId"] == token_id and (m["aleoLocalDecimals"], m["aleoRemoteDecimals"]) == decimals
+        assert m["aleoPlaceholderConfiguration"] is False and m["aleoWithdrawalReviewedAt"] == "2026-09-30"
+        assert m["aleoAppMetadataReviewedAt"] == m["aleoRemoteRouterReviewedAt"] == "2026-09-30"
+        assert m["aleoTokenOwner"] == "aleo1mx0tldt5qsqymn5a3whnmf9rx2whp837jjn0tvqgxqf86zg6dvyqnc8spm"
+        assert m["aleoRemoteRouterSource"] == f"https://api.explorer.provable.com/v2/mainnet/program/{program}/mapping/remote_routers/{domain}u32"
+        assert m["aleoProgramEdition"] == 0 and m["aleoTokenType"] == "1"
+        assert m["aleoAllowanceSpender0"] == "aleo194tz0jmyq8rd9htvnqppqw4jqerk2p2zd8plzn3sxl06wcgsm5pq9fka74"
+        assert m["aleoHyperlaneConfigSource"].endswith(f"/warp_routes/{program.split('_')[3].upper()}/aleo-config.yaml")
+    assert REG.route("hyperlane:aleo/bat->ethereum/bat").metadata["aleoRemoteRouterEvmAddress"] == "0x516e156e987175d74614cc2bC960f148A610f0b3"
+    assert REG.route("hyperlane:aleo/usdg->ethereum/usdg").metadata["aleoRemoteRouterEvmAddress"] == "0xe5A2cCf532919f93855F324c1F8a7996065f53Da"
+    assert REG.route("hyperlane:aleo/bat->solana/bat").metadata["aleoRemoteRouterSolanaAddress"] == "7CJFBsNC49upnVfMga2gj53deAjuuVchdceJQrJg5oA5"
+    assert REG.route("hyperlane:aleo/usdg->solana/usdg").metadata["aleoRemoteRouterSolanaAddress"] == "AhNVa6VpZwDwgD3U66CGUwCMRcFSFiTfBse2D495SPxW"
+    zec = REG.route("hyperlane:aleo/zec->solana/zec").metadata
+    assert zec["aleoRemoteRouterSolanaAddress"] == "2RBzic8nUNJ8KngRRbsCEjkeM9CtpQN2CCqU1cs1n2y5" and zec["aleoSampleTransferSource"] == ZEC_SAMPLE
+    # the remote-router recipient literal is the 32-byte warp program / router address, little-endian u8 list
+    from aleo_bridge._base58 import b58decode
+    assert zec["aleoRemoteRouterRecipient"] == "[" + ", ".join(f"{b}u8" for b in b58decode("2RBzic8nUNJ8KngRRbsCEjkeM9CtpQN2CCqU1cs1n2y5")) + "]"
+    bat_eth = REG.route("hyperlane:aleo/bat->ethereum/bat").metadata
+    assert bat_eth["aleoRemoteRouterRecipient"] == "[" + ", ".join(f"{b}u8" for b in bytes(12) + bytes.fromhex("516e156e987175d74614cc2bC960f148A610f0b3")) + "]"
+
+
+def test_solana_spl_collateral_routes_need_their_collateral_fields_to_be_active():
+    base = dict(version=REG.version, chains=REG.chains(), assets=REG.assets())
+    zec = REG.route("hyperlane:solana/zec->aleo/zec")
+    for missing in ("splTokenProgramAddress", "collateralMintAddress", "escrowPda"):
+        broken = Route(zec.id, zec.protocol, zec.environment, zec.source_asset_id, zec.destination_asset_id, zec.availability,
+                       zec.deployment_id, zec.source, {k: v for k, v in zec.metadata.items() if k != missing})
+        with pytest.raises(ConfigurationError, match="missing required Solana Hyperlane metadata"):
+            validate_registry(Registry(base["version"], base["chains"], base["assets"], [broken]))
+    unknown = Route(zec.id, zec.protocol, zec.environment, zec.source_asset_id, zec.destination_asset_id, zec.availability,
+                    zec.deployment_id, zec.source, {**zec.metadata, "routerType": "synthetic"})
+    with pytest.raises(ConfigurationError, match="missing required Solana Hyperlane metadata"):
+        validate_registry(Registry(base["version"], base["chains"], base["assets"], [unknown]))
+    sol = REG.route("hyperlane:solana/sol->aleo/sol")
+    no_native_pda = Route(sol.id, sol.protocol, sol.environment, sol.source_asset_id, sol.destination_asset_id, sol.availability,
+                          sol.deployment_id, sol.source, {k: v for k, v in sol.metadata.items() if k != "nativeCollateralPda"})
+    with pytest.raises(ConfigurationError, match="missing required Solana Hyperlane metadata"):
+        validate_registry(Registry(base["version"], base["chains"], base["assets"], [no_native_pda]))
+    # a metadata-required SPL route without collateral fields is fine: the gate applies to active routes only
+    inactive = Route(zec.id, zec.protocol, zec.environment, zec.source_asset_id, zec.destination_asset_id, "metadata-required",
+                     zec.deployment_id, zec.source, {})
+    validate_registry(Registry(base["version"], base["chains"], base["assets"], [inactive]))

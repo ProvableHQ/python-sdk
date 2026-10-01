@@ -40,7 +40,9 @@ def test_configured_connection_reports_sol_balance_in_status():
     assert bridge.solana.address == str(keypair.pubkey())
     solana_status = [c for c in bridge.status().chains if c.chain_id == "solana"][0]
     assert solana_status.address == str(keypair.pubkey()) and solana_status.can_sign is True
-    assert solana_status.balances == {"solana/sol": 1_234}
+    # SOL from getBalance; every SPL-collateral mint from the wallet's associated token account (uncreated → 0)
+    assert solana_status.balances == {"solana/sol": 1_234, "solana/bat": 0, "solana/usdg": 0, "solana/zec": 0}
+    assert fake.calls.count("get_balance") == 1 and fake.calls.count("get_account_info") == 3
 
 
 def test_an_rpc_url_string_becomes_a_read_only_connection():
@@ -72,7 +74,8 @@ def test_status_derives_the_solana_chain_and_native_asset_from_the_registry():
     chain = [c for c in bridge.registry.chains(environment="mainnet") if c.family == "solana"][0]
     native = [a for a in bridge.registry.assets(chain=chain.id) if a.kind == "native"][0]
     row = [c for c in bridge.status().chains if c.chain_id == chain.id][0]
-    assert row.balances == {native.id: 7}
+    assert row.balances[native.id] == 7
+    assert set(row.balances) == {a.id for a in bridge.registry.assets(chain=chain.id) if a.locator is not None}
 
 
 def test_from_env_builds_the_solana_connection(monkeypatch):

@@ -132,6 +132,15 @@ def test_hyperlane_steps_approval_only_on_non_aleo_token_sources():
     assert [s.id for s in sol.steps] == ["source-dispatch", "message-delivery", "destination-confirmation"]
     assert sol.steps[0].executor == "solana-wallet" and sol.sender == "11111111111111111111111111111111"
 
+    # an SPL-collateral token source (Solana ZEC) debits the sender's token account inside TransferRemote: no approval
+    zec = prepare(DEFAULT_REGISTRY, source_chain="solana", source_asset="zec", destination_chain="aleo", destination_asset="zec",
+                  amount="0.0001", recipient=ALEO)
+    assert [s.kind for s in zec.steps] == ["dispatch", "wait-delivery", "confirm-delivery"]
+    assert zec.steps[0].executor == "solana-wallet" and zec.amount_atomic == 10_000
+    bat = prepare(DEFAULT_REGISTRY, source_chain="ethereum", source_asset="bat", destination_chain="aleo", destination_asset="bat",
+                  amount="0.0001", recipient=ALEO)
+    assert [s.kind for s in bat.steps] == ["approve", "dispatch", "wait-delivery", "confirm-delivery"]
+
 
 def test_amount_forms_and_precision():
     by_atomic = prepare(DEFAULT_REGISTRY, source_chain="ethereum", source_asset="wbtc", destination_chain="aleo", destination_asset="wbtc",
@@ -214,6 +223,8 @@ def test_prepare_equals_build_plan_for_every_active_route():
         destination = DEFAULT_REGISTRY.asset(route.destination_asset_id)
         destination_chain = DEFAULT_REGISTRY.chain(destination.chain_id)
         recipient = _recipient_for(destination_chain.family)
-        prepared = prepare(DEFAULT_REGISTRY, route=route, amount_atomic=1, recipient=recipient)
-        expected = build_plan(DEFAULT_REGISTRY, route, amount_atomic=1, recipient=recipient, sender=None)
+        # the smallest source amount the destination can represent (BAT: 18 decimals on Aleo, 8 on Solana)
+        atomic = 10 ** max(DEFAULT_REGISTRY.asset(route.source_asset_id).decimals - destination.decimals, 0)
+        prepared = prepare(DEFAULT_REGISTRY, route=route, amount_atomic=atomic, recipient=recipient)
+        expected = build_plan(DEFAULT_REGISTRY, route, amount_atomic=atomic, recipient=recipient, sender=None)
         assert prepared == expected, route.id

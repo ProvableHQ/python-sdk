@@ -64,8 +64,10 @@ def build_plan(registry: Registry, route: Route, *, amount_atomic: int, recipien
                  Step("burn-attestation", "wait-attestation", "protocol", False),
                  Step("destination-mint", "mint", "protocol" if options.forwarding else "evm-wallet", False))
     else:
-        # Aleo ARC-20 tokens need no on-chain approval; only a non-Aleo token source does.
-        needs_approval = source.kind == "token" and source_family != "aleo"
+        # Only an EVM ERC-20 source needs an on-chain approval: Aleo warp tokens are spent by the
+        # router directly, and a Solana SPL-collateral transfer debits the sender's own associated
+        # token account inside the TransferRemote instruction (no delegate approval step).
+        needs_approval = source.kind == "token" and source_family == "evm"
         steps = tuple([Step("source-approval", "approve", wallet, False)] if needs_approval else []) + (
             Step("source-dispatch", "dispatch", wallet, True),
             Step("message-delivery", "wait-delivery", "protocol", False),

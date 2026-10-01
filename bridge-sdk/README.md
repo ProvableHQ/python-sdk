@@ -2,7 +2,7 @@
 
 Bring assets from Ethereum or Solana to Aleo for payments and applications,
 or withdraw them back to their source chain. Hyperlane carries ETH, WBTC,
-USDT, and SOL; Circle xReserve connects Ethereum USDC with Aleo USDCx.
+USDT, SOL, BAT, USDG, and ZEC; Circle xReserve connects Ethereum USDC with Aleo USDCx.
 
 Review the cost before sending, monitor whether the recipient received the
 funds, and recover an interrupted transfer without making another deposit.
@@ -53,12 +53,25 @@ Choose the source chain and asset first, then find the corresponding destination
 | Aleo | WBTC | Ethereum | WBTC | Hyperlane |
 | Aleo | USDT | Ethereum | USDT | Hyperlane |
 | Aleo | SOL | Solana | SOL | Hyperlane |
+| Aleo | BAT | Ethereum | BAT | Hyperlane |
+| Aleo | USDG | Ethereum | USDG | Hyperlane |
+| Aleo | BAT, USDG, or ZEC | Solana | BAT, USDG, or ZEC | Hyperlane |
 | Aleo | USDCx | Ethereum | USDC | Circle xReserve |
 | Ethereum | ETH | Aleo | ETH | Hyperlane |
 | Ethereum | WBTC | Aleo | WBTC | Hyperlane |
 | Ethereum | USDT | Aleo | USDT | Hyperlane |
+| Ethereum | BAT | Aleo | BAT | Hyperlane |
+| Ethereum | USDG | Aleo | USDG | Hyperlane |
 | Ethereum | USDC | Aleo | USDCx | Circle xReserve |
 | Solana | SOL | Aleo | SOL | Hyperlane |
+| Solana | BAT, USDG, or ZEC | Aleo | BAT, USDG, or ZEC | Hyperlane |
+
+BAT, USDG, and ZEC use SPL-collateral warp routes on Solana: BAT and ZEC are
+classic SPL Token mints, USDG is Token-2022. The SDK builds both directions and
+tracks Aleo-to-Solana delivery through the recipient's associated token account.
+BAT has 18 decimals on Ethereum and Aleo but 8 on Solana, so amounts on a Solana
+route must fit 8 decimals. On Aleo these three are ARC-22 tokens with their own
+shield programs, so `shield` and `unshield` work for them like USDCx.
 
 ## Setup
 
@@ -663,7 +676,9 @@ Estimated costs and received amounts can change before the transfer completes.
   proving unless `gas_payment_microcredits` is supplied explicitly. That
   override is in microcredits: 1,000,000 microcredits equal one credit.
 - Solana transfers need SOL for transaction fees, relay costs, and creation of
-  Hyperlane message accounts, in addition to the amount being transferred.
+  Hyperlane message accounts, in addition to the amount being transferred. For
+  BAT, USDG, and ZEC the amount leaves the sender's token account and the
+  quote's `total_lamports` covers the SOL fees only; the sender needs both.
 - xReserve withdrawal quotes use the registry's configured fee of 2 USDCx and
   mark it as estimated. The burn must exceed that amount. The actual delivery
   depends on the provider's fee.

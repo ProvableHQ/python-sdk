@@ -59,3 +59,16 @@ def outbound_parser(description, *, amount):
     parser.add_argument('--journal', default='~/.aleo-bridge/checkpoints')
     parser.add_argument('--timeout', type=float, default=120, help='Seconds to monitor delivery.')
     return parser
+
+
+def route_parser(description, *, routes, amount):
+    parser = argparse.ArgumentParser(description=description)
+    parser.add_argument('--route', required=True, choices=routes, metavar='ROUTE_ID',
+                        help='Directed route id, one of: ' + ', '.join(routes))
+    parser.add_argument('--recipient', required=True, help='Public address on the destination chain.')
+    parser.add_argument('--sender', help='Public address on the source chain for a read-only quote.')
+    parser.add_argument('--amount', default=amount, help='Source asset in display units; Solana routes must fit 8 decimals.')
+    parser.add_argument('--execute', action='store_true', help='Submit a NEW MAINNET transfer; costs real funds.')
+    parser.add_argument('--journal', default='~/.aleo-bridge/checkpoints')
+    parser.add_argument('--timeout', type=float, default=120, help='Seconds to monitor delivery.')
+    return parser

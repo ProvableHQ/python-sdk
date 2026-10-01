@@ -486,7 +486,8 @@ def test_every_mainnet_route_is_covered_by_exactly_one_case():
     active = {route.id for route in routes if route.active}
     assert ETH_ROUTE in by_case["evm-hyperlane"] and "hyperlane:ethereum/wbtc->aleo/wbtc" in by_case["evm-hyperlane"]
     assert "hyperlane:aleo/sol->solana/sol" in by_case["aleo-hyperlane"]
-    assert by_case["solana-hyperlane"] & active == {"hyperlane:solana/sol->aleo/sol"}
+    assert by_case["solana-hyperlane"] & active == {"hyperlane:solana/sol->aleo/sol", "hyperlane:solana/bat->aleo/bat",
+                                                     "hyperlane:solana/usdg->aleo/usdg", "hyperlane:solana/zec->aleo/zec"}
     assert by_case["evm-xreserve"] & active == {USDC_ROUTE, "xreserve:arc/usdc->aleo/usdcx"}
     assert by_case["aleo-xreserve"] & active == {"xreserve:aleo/usdcx->ethereum/usdc", "xreserve:aleo/usdcx->arc/usdc"}
 

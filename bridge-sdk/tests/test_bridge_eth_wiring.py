@@ -75,7 +75,8 @@ def test_chain_status_reads_native_and_erc20_balances():
     eth = make_bridge(ethereum=Ethereum(w3=w3, private_key=KEY)).eth
     status = eth.chain_status()
     assert isinstance(status, ChainStatus) and status.chain_id == "ethereum" and status.address == ACCT.address and status.can_sign
-    assert status.balances == {"ethereum/eth": 5, "ethereum/usdc": 2_000_000, "ethereum/wbtc": 7, "ethereum/usdt": 0}
+    assert status.balances == {"ethereum/eth": 5, "ethereum/usdc": 2_000_000, "ethereum/wbtc": 7, "ethereum/usdt": 0,
+                               "ethereum/bat": 0, "ethereum/usdg": 0}
     read_only = make_bridge(ethereum=Ethereum(w3=fake_web3())).eth.chain_status()
     assert read_only.address is None and not read_only.can_sign and read_only.balances == {}
 

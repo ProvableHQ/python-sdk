@@ -349,3 +349,29 @@ def test_destination_balance_reads_recipient_without_destination_signer(source, 
     resolved = resolve_route(b.registry, plan)
     assert _read_destination_balance(b, plan, resolved) == 123
     assert reader.balance.call_args.kwargs == {'address': address}
+
+
+def test_destination_balance_reads_an_spl_recipient_through_its_associated_token_account():
+    """veil PR #169 readDestinationBalance.test.ts: Aleo→Solana ZEC is tracked by the recipient's ATA balance."""
+    from aleo_bridge.lifecycle import _read_destination_balance, resolve_route
+    b = FakeBridge(solana=True)
+    b.sol.token_balances["solana/zec"] = 166_575
+    plan = prepare(b.registry, source_chain="aleo", source_asset="zec", destination_chain="solana", destination_asset="zec",
+                   amount="0.0001", recipient=SOL_ADDRESS)
+    resolved = resolve_route(b.registry, plan)
+    assert _read_destination_balance(b, plan, resolved) == 166_575
+    assert b.calls[-1] == ("sol.balance", "solana/zec", SOL_ADDRESS)
+    # an uncreated recipient token account reads as zero, never as "no reader"
+    b.sol.token_balances.clear()
+    assert _read_destination_balance(b, plan, resolved) == 0
+
+
+def test_destination_balance_has_no_reader_for_a_solana_mint_without_a_reviewed_spl_route():
+    from dataclasses import replace
+    from aleo_bridge.lifecycle import _read_destination_balance, resolve_route
+    b = FakeBridge(solana=True)
+    plan = prepare(b.registry, source_chain="aleo", source_asset="zec", destination_chain="solana", destination_asset="zec",
+                   amount="0.0001", recipient=SOL_ADDRESS)
+    resolved = resolve_route(b.registry, plan)
+    native_only = replace(resolved, route=replace(resolved.route, metadata={k: v for k, v in resolved.route.metadata.items() if k != "routerType"}))
+    assert _read_destination_balance(b, plan, native_only) is None

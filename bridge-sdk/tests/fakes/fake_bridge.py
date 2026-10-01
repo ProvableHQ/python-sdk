@@ -23,7 +23,7 @@ from aleo.facade.errors import TransactionNotFound
 from aleo_bridge.checkpoint import Checkpoint, create_checkpoint
 from aleo_bridge.errors import (AttestationError, ConfigurationError, InvalidRecipientError,
                                 RegistryVersionMismatchError)
-from aleo_bridge.registry import DEFAULT_REGISTRY
+from aleo_bridge.registry import DEFAULT_REGISTRY, Route
 from aleo_bridge.types import (Attestation, BridgeStatus, BurnReceipt, ChainStatus, DepositReceipt,
                                DispatchReceipt, EvmHyperlaneQuote, EvmXReserveQuote, GasQuote,
                                MintReceipt, PreparedTx, PrivacyReceipt, Receipt,
@@ -137,16 +137,28 @@ class FakeHyperlane:
                             payment_microcredits=8_174_147)
         self.delivered: dict[str, bool] = {}
 
+    @staticmethod
+    def _asset_and_route(asset_or_route) -> tuple[str, str]:
+        """The real module accepts an asset ref, a Route or a route id; the lifecycle passes the resolved
+        Route. Calls are recorded by ASSET ID so the existing assertions keep reading naturally."""
+        if isinstance(asset_or_route, Route):
+            return asset_or_route.source_asset_id, asset_or_route.id
+        if isinstance(asset_or_route, str) and ":" in asset_or_route:
+            route = DEFAULT_REGISTRY.route(asset_or_route)
+            return route.source_asset_id, route.id
+        return asset_or_route, f"hyperlane:{asset_or_route}->{OUTBOUND[asset_or_route]}"
+
     def quote_gas_payment(self, asset) -> GasQuote:
+        asset, route_id = self._asset_and_route(asset)
         self.fake.calls.append(("hyperlane.quote_gas_payment", asset))
-        return replace(self.gas, route_id=f"hyperlane:{asset}->{OUTBOUND[asset]}")
+        return replace(self.gas, route_id=route_id)
 
     def transfer_remote(self, asset, recipient, *, amount=None, amount_atomic=None,
                         as_signer=False, gas_payment_microcredits=None) -> FakeAleoCall:
+        asset, route_id = self._asset_and_route(asset)
         kw = dict(asset=asset, recipient=recipient, amount=amount, amount_atomic=amount_atomic,
                   as_signer=as_signer, gas_payment_microcredits=gas_payment_microcredits)
         self.fake.calls.append(("hyperlane.transfer_remote", kw))
-        route_id = f"hyperlane:{asset}->{OUTBOUND[asset]}"
         program = f"hyp_warp_token_{asset.split('/')[1]}_v2.aleo"
         fn = "transfer_remote_as_signer" if as_signer else "transfer_remote"
 
@@ -389,6 +401,7 @@ class FakeSol:
     def __init__(self, fake: "FakeBridge", address: str) -> None:
         self.fake, self.address = fake, address
         self.balance_lamports = 0
+        self.token_balances: dict[str, int] = {}          # "solana/zec" → associated-token-account atomic units
         self.source_status_result: Receipt | None = None
         self.intermediates: list[Receipt] = []
         self.transaction_logs_result: list[str] | None = None
@@ -437,8 +450,10 @@ class FakeSol:
                            DispatchReceipt(sig, route_id, None, amount_atomic or 0, receipt),
                            plan=plan, store=self.fake.checkpoints)
 
-    def balance(self) -> int:
-        self.fake.calls.append(("sol.balance",))
+    def balance(self, asset=None, *, address=None) -> int:
+        self.fake.calls.append(("sol.balance",) if asset is None and address is None else ("sol.balance", asset, address))
+        if asset is not None and not str(asset).endswith("/sol"):
+            return self.token_balances.get(str(asset), 0)
         return self.balance_lamports
 
     def source_status(self, plan, receipt) -> Receipt:

@@ -160,6 +160,11 @@ class EvmHyperlaneQuote(Quote):
 
 @dataclass(frozen=True)
 class SolanaHyperlaneQuote(Quote):
+    """What a Solana-origin Hyperlane transfer costs. ``plan.amount_atomic`` is the source amount in the
+    source asset's atomic units (lamports for SOL, mint units for an SPL-collateral token); the four
+    lamport fields are always SOL. ``total_lamports`` is the SOL the sender must hold: it includes the
+    amount on the native SOL route and excludes it on an SPL-collateral route (BAT, USDG, ZEC), whose
+    amount leaves the sender's associated token account instead."""
     igp_lamports: int
     network_fee_lamports: int
     rent_lamports: int
