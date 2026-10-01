@@ -15,13 +15,10 @@ pytestmark = [pytest.mark.live, pytest.mark.slow,
 
 def readonly(chains):
     from aleo import Aleo, HTTPProvider
-    evm = {}
-    for chain in chains:
-        url = os.environ.get(f'{chain.upper()}_RPC_URL')
-        if not url:
-            pytest.skip(f'set {chain.upper()}_RPC_URL')
-        evm[chain] = Ethereum(url)
-    return Bridge(Aleo(HTTPProvider('https://edge.provable.com/api',network='mainnet')),evm=evm)
+    from . import config
+    evm = {chain: Ethereum(config.evm_rpc_url('mainnet') if chain == 'ethereum' else config.evm_chain_rpc_url(chain))
+           for chain in chains}
+    return Bridge(Aleo(HTTPProvider(config.aleo_endpoint(),network='mainnet')),evm=evm)
 
 
 @pytest.mark.parametrize('other', ['ethereum','base','arbitrum'])

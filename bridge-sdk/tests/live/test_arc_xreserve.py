@@ -77,7 +77,7 @@ def test_aleo_private_burn_to_arc(record_property):
     state = json.loads(path.read_text()) if path.exists() else {}
     route = DEFAULT_REGISTRY.route('xreserve:aleo/usdcx->arc/usdc')
     recipient = config.required('BRIDGE_LIVE_ARC_RECIPIENT')
-    arc = Ethereum(config.required('ARC_RPC_URL'))  # No destination signer is created.
+    arc = Ethereum(config.evm_chain_rpc_url('arc'))  # No destination signer is created.
     assert arc.chain_id == 5042 and not arc.can_sign
     aleo = build_aleo(config.aleo_endpoint(),'mainnet',config.aleo_private_key('mainnet'))
     bridge = Bridge(aleo,evm={'arc':arc})

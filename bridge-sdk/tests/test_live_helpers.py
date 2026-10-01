@@ -486,7 +486,8 @@ def test_every_mainnet_route_is_covered_by_exactly_one_case():
     active = {route.id for route in routes if route.active}
     assert ETH_ROUTE in by_case["evm-hyperlane"] and "hyperlane:ethereum/wbtc->aleo/wbtc" in by_case["evm-hyperlane"]
     assert "hyperlane:aleo/sol->solana/sol" in by_case["aleo-hyperlane"]
-    assert by_case["solana-hyperlane"] & active == {"hyperlane:solana/sol->aleo/sol"}
+    assert by_case["solana-hyperlane"] & active == {"hyperlane:solana/sol->aleo/sol", "hyperlane:solana/bat->aleo/bat",
+                                                     "hyperlane:solana/usdg->aleo/usdg", "hyperlane:solana/zec->aleo/zec"}
     assert by_case["evm-xreserve"] & active == {USDC_ROUTE, "xreserve:arc/usdc->aleo/usdcx"}
     assert by_case["aleo-xreserve"] & active == {"xreserve:aleo/usdcx->ethereum/usdc", "xreserve:aleo/usdcx->arc/usdc"}
 
@@ -952,6 +953,26 @@ def test_rpc_urls_fall_back_to_the_public_defaults(monkeypatch):
     assert live_config.aleo_endpoint() == "https://aleo.example/api"
     assert live_config.first_value(("ABSENT_A", "SEPOLIA_RPC_URL")) == ("SEPOLIA_RPC_URL", "https://sepolia.example")
     assert live_config.first_value(("ABSENT_A", "ABSENT_B")) is None
+
+
+def test_arc_base_and_arbitrum_rpc_urls_default_to_public_providers(monkeypatch):
+    """The CCTP / Arc xReserve cases need no RPC setup: ``<CHAIN>_RPC_URL`` (or its BRIDGE_LIVE_ alias)
+    overrides veil's public providers, which are the fallback."""
+    for chain, names in live_config.EVM_CHAIN_RPC_VARS.items():
+        for name in names:
+            monkeypatch.delenv(name, raising=False)
+    assert live_config.evm_chain_rpc_url("arc") == "https://rpc.mainnet.arc.io"
+    assert live_config.evm_chain_rpc_url("base") == "https://base-rpc.publicnode.com"
+    assert live_config.evm_chain_rpc_url("arbitrum") == "https://arbitrum-one-rpc.publicnode.com"
+    assert set(live_config.EVM_CHAIN_RPC_VARS) == set(live_config.DEFAULT_EVM_CHAIN_RPC_URL) == {"arc", "base", "arbitrum"}
+
+    monkeypatch.setenv("ARC_RPC_URL", "https://arc.example")
+    monkeypatch.setenv("BRIDGE_LIVE_BASE_RPC_URL", "https://base.example")
+    assert live_config.evm_chain_rpc_url("arc") == "https://arc.example"
+    assert live_config.evm_chain_rpc_url("base") == "https://base.example"
+    assert live_config.evm_chain_rpc_url("arbitrum") == live_config.DEFAULT_ARBITRUM_RPC_URL
+    with pytest.raises(live_config.LiveConfigError, match="ethereum"):
+        live_config.evm_chain_rpc_url("ethereum")      # Ethereum keeps evm_rpc_url(environment)
 
 
 def test_amount_overrides_are_per_case_with_an_xreserve_shorthand(monkeypatch):

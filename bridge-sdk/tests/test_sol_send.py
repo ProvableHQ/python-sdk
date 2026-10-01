@@ -19,6 +19,7 @@ from aleo_bridge.errors import (
     RegistryVersionMismatchError,
     UnsupportedRouteError,
 )
+from aleo_bridge.registry import Registry
 from aleo_bridge.sol import SolModule, Solana
 from aleo_bridge.types import DispatchReceipt, Status
 from tests.fakes.fake_solana import BLOCKHASH, STUB_SIGNATURE, FakeSignatureStatus, FakeSolanaClient, stub_bridge
@@ -354,7 +355,9 @@ def test_build_compiles_against_the_re_resolved_route_not_the_one_snapshotted_at
     original = mod.outbound_route()
     moved = dataclasses.replace(original, metadata={**original.metadata,
                                                     "warpProgramAddress": OTHER_WARP_PROGRAM_ADDRESS})
-    mod.outbound_route = lambda: moved                             # the live registry now says otherwise
+    registry = mod.registry                                        # the live registry now says otherwise
+    mod._bridge.registry = Registry(registry.version, registry.chains(), registry.assets(),
+                                    [moved if r.id == original.id else r for r in registry.routes(include_unavailable=True)])
     transaction = call.build()
     programs = [str(transaction.message.account_keys[ix.program_id_index]) for ix in transaction.message.instructions]
     assert OTHER_WARP_PROGRAM_ADDRESS in programs and WARP_PROGRAM_ADDRESS not in programs
@@ -431,3 +434,84 @@ def test_a_node_signature_that_differs_from_the_signed_one_is_refused_without_ch
     message = str(excinfo.value)
     assert fake.sent_signature() in message and str(STUB_SIGNATURE) in message
     assert seen == [] and "get_signature_statuses" not in fake.calls
+
+
+# --- SPL collateral (veil PR #169) ---------------------------------------------------------------
+
+ZEC_MINT = "A7bdiYdS5GjqGFtxf17ppRHtDKPkkRqbKtR27dxvQXaS"
+ZEC_TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+ZEC_WARP_PROGRAM = "2RBzic8nUNJ8KngRRbsCEjkeM9CtpQN2CCqU1cs1n2y5"
+ZEC_ESCROW = "8oir78sC2Xej3gfb57wfthTUPPYkAmGRnWYZ8k9DudiS"
+
+
+def _token_account(amount: int) -> bytes:
+    data = bytearray(165)
+    data[64:72] = amount.to_bytes(8, "little")
+    return bytes(data)
+
+
+def _spl_module(token_balance: int | None, *, lamports: int = 800_000_000_000):
+    from tests.fakes.sealevel_fixtures import IGP, igp_account_data
+    keypair = Keypair()
+    ata = sl.derive_associated_token_address(str(keypair.pubkey()), ZEC_MINT, ZEC_TOKEN_PROGRAM)
+    accounts = {IGP["address"]: igp_account_data()}
+    if token_balance is not None:
+        accounts[ata] = _token_account(token_balance)
+    fake = FakeSolanaClient(balance=lamports, accounts=accounts)
+    mod, fake, keypair = module(fake, signer=keypair)
+    return mod, fake, keypair, ata
+
+
+def test_spl_send_checks_the_sender_token_account_before_submitting():
+    """veil executeSolanaHyperlaneTransfer.test.ts: 'checks the sender associated token account before submitting
+    SPL collateral' — the SOL balance covers the fees, the ZEC balance does not cover the amount."""
+    mod, fake, _, _ = _spl_module(9_999)
+    with pytest.raises(InsufficientBalanceError) as excinfo:
+        mod.transfer_remote(RECIPIENT, amount="0.0001", asset="solana/zec").send()
+    message = str(excinfo.value)
+    assert "Insufficient Solana token balance" in message and "balance 9999" in message and "required 10000" in message
+    assert "solana/zec" in message and fake.sent == []
+    # an uncreated associated token account is a zero balance, refused the same way
+    mod, fake, _, _ = _spl_module(None)
+    with pytest.raises(InsufficientBalanceError, match="balance 0, required 10000"):
+        mod.transfer_remote(RECIPIENT, amount_atomic=10_000, asset="zec").send()
+    assert fake.sent == []
+
+
+def test_spl_send_sol_shortfall_omits_the_amount_from_the_breakdown():
+    mod, fake, _, _ = _spl_module(1_000_000, lamports=0)
+    with pytest.raises(InsufficientBalanceError) as excinfo:
+        mod.transfer_remote(RECIPIENT, amount_atomic=10_000, asset="solana/zec").send()
+    message = str(excinfo.value)
+    assert "balance 0 lamports" in message and "(gas " in message and "amount" not in message
+    assert fake.sent == []
+
+
+def test_spl_send_builds_the_18_account_instruction_and_dispatches():
+    mod, fake, keypair, ata = _spl_module(1_000_000)
+    call = mod.transfer_remote(RECIPIENT, amount="0.0001", asset="solana/zec")
+    transaction = call.build()
+    message = transaction.message
+    programs = [str(message.account_keys[ix.program_id_index]) for ix in message.instructions]
+    assert programs == ["ComputeBudget111111111111111111111111111111", ZEC_WARP_PROGRAM]
+    keys = [str(message.account_keys[i]) for i in message.instructions[1].accounts]
+    assert len(keys) == 18
+    assert keys[14:18] == [ZEC_TOKEN_PROGRAM, ZEC_MINT, ata, ZEC_ESCROW]
+    assert sl.SYSTEM_PROGRAM_ADDRESS == keys[0] and keys.count(sl.SYSTEM_PROGRAM_ADDRESS) == 1   # no row-14 system program
+    data = bytes(message.instructions[1].data)
+    assert data[45:53] == (10_000).to_bytes(8, "little") and len(data) == 77
+    assert call.quote.total_lamports == call.quote.igp_lamports + call.quote.network_fee_lamports + call.quote.rent_lamports
+
+    result = call.send()
+    assert result.route_id == "hyperlane:solana/zec->aleo/zec" and result.amount_atomic == 10_000
+    assert result.receipt.status is Status.DELIVERY_PENDING and len(fake.sent) == 1
+    assert result.receipt.protocol_state["quotedLamports"] == str(call.quote.total_lamports)
+
+
+def test_spl_send_through_a_plan_from_the_lifecycle_quote():
+    mod, fake, keypair, _ = _spl_module(50_000)
+    plan = mod.quote_transfer_remote(RECIPIENT, amount_atomic=10_000, sender=str(keypair.pubkey()), asset="solana/zec").plan
+    result = mod.transfer_remote(plan=plan).send()
+    assert result.route_id == plan.route_id == "hyperlane:solana/zec->aleo/zec" and len(fake.sent) == 1
+    with pytest.raises(ValueError, match="plan"):
+        mod.transfer_remote(plan=plan, asset="solana/zec")

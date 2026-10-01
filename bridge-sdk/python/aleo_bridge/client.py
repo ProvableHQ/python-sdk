@@ -18,7 +18,7 @@ from . import lifecycle as _lifecycle
 from . import _evm_connections
 from ._calls import AleoCall
 from .cctp import CctpModule
-from .errors import BridgeError, ConfigurationError
+from .errors import BridgeError, ConfigurationError, UnsupportedRouteError
 from .eth import Ethereum, EthModule
 from .freezelist import FreezeList
 from .hyperlane import HyperlaneModule
@@ -313,9 +313,15 @@ class Bridge:
         if self.solana is not None and solana_chain is not None:
             # Chain id and asset id come from the registry, not literals: a testnet client (no Solana
             # chain at all) reports no Solana row rather than one naming a chain this environment lacks.
-            native = next((a for a in self.registry.assets(chain=solana_chain.id) if a.kind == "native"), None)
-            balances = ({native.id: self.sol.balance()}
-                        if native is not None and self.solana.address is not None else {})
+            balances: dict[str, int] = {}
+            if self.solana.address is not None:
+                for asset in self.registry.assets(chain=solana_chain.id):
+                    if asset.locator is None or asset.locator.kind not in ("native", "solana-mint"):
+                        continue
+                    try:
+                        balances[asset.id] = self.sol.balance(asset.id)
+                    except UnsupportedRouteError:
+                        continue            # a mint no reviewed route pins a token program for
             chains.append(ChainStatus(chain_id=solana_chain.id, address=self.solana.address,
                                       can_sign=self.solana.can_sign, balances=balances))
         pending: list["Progress | dict"] = self.pending()

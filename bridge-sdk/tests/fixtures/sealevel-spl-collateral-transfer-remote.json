@@ -1,0 +1,31 @@
+{
+  "_source": "ProvableHQ/veil packages/bridge/test/fixtures/sealevel-spl-collateral-transfer-remote.json @ PR #169 (ac7f718)",
+  "source": "https://explorer.hyperlane.xyz/message/0x5f0236faa02b61ea3e8f4406bbd43b7b5b74cc4010574a1fcda47d1d092e3a3e",
+  "signature": "2Qae3pvhSFagiSjxmYgwCnrqMpYiB8TyHfs7mLTqKi1z5NWXY8F573kvYNy7c8ebQ7dtcy1coUf1DaU1biE87kAs",
+  "warpProgramAddress": "2RBzic8nUNJ8KngRRbsCEjkeM9CtpQN2CCqU1cs1n2y5",
+  "senderAddress": "D4jZ2sNktKgTrhWVMnjZb5BXP7MMh9N3y5ZLwkyKfozb",
+  "uniqueMessageAddress": "7bf2tUHDo2PSzRhhR7hJ8Txzg7icrj6pMJCATDWM8vN2",
+  "recipientAleoAddress": "aleo1mx0tldt5qsqymn5a3whnmf9rx2whp837jjn0tvqgxqf86zg6dvyqnc8spm",
+  "amountAtomic": 10000,
+  "instructionDataBase64": "AQEBAQEBAQEBb2VsYdmev7V0BABNzp2Lrz2kozKdcJ4+lKb1sAgwEn0JGmsIECcAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+  "accounts": [
+    { "address": "11111111111111111111111111111111", "signer": false, "writable": false },
+    { "address": "noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV", "signer": false, "writable": false },
+    { "address": "F3r7dPXQbCCEsgt7rz8WzPx9eGtiyoNWxtjyeYRdKDuR", "signer": false, "writable": false },
+    { "address": "E588QtVUvresuXq2KoNEwAmoifCzYGpRBdHByN9KQMbi", "signer": false, "writable": false },
+    { "address": "BvZpTuYLAR77mPhH4GtvwEWUTs53GQqkgBNuXpCePVNk", "signer": false, "writable": true },
+    { "address": "AHyE4g448qfMPXACBkmMkknAtMeWF8CB1Nh9ycUzii4H", "signer": false, "writable": false },
+    { "address": "D4jZ2sNktKgTrhWVMnjZb5BXP7MMh9N3y5ZLwkyKfozb", "signer": true, "writable": true },
+    { "address": "7bf2tUHDo2PSzRhhR7hJ8Txzg7icrj6pMJCATDWM8vN2", "signer": true, "writable": false },
+    { "address": "9oS1MpV9nSWkGP8xodUQaApX372im8K6qxXAzcKgTP2i", "signer": false, "writable": true },
+    { "address": "BhNcatUDC2D5JTyeaqrdSukiVFsEHK7e3hVmKMztwefv", "signer": false, "writable": false },
+    { "address": "8Cv4PHJ6Cf3xY7dse7wYeZKtuQv9SAN6ujt5w22a2uho", "signer": false, "writable": true },
+    { "address": "CsDvLCdkzw4V4FMBjKc4g81rj4Y6JsfsJVAWRnqsFHEH", "signer": false, "writable": true },
+    { "address": "AkeHBbE5JkwVppujCQQ6WuxsVsJtruBAjUo6fDCFp6fF", "signer": false, "writable": false },
+    { "address": "JAvHW21tYXE9dtdG83DReqU2b4LUexFuCbtJT5tF8X6M", "signer": false, "writable": true },
+    { "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "signer": false, "writable": false },
+    { "address": "A7bdiYdS5GjqGFtxf17ppRHtDKPkkRqbKtR27dxvQXaS", "signer": false, "writable": true },
+    { "address": "FPAwNBT635S69zX3d8XLFDRBin4yHfVRkPhAvZN1kQ2K", "signer": false, "writable": true },
+    { "address": "8oir78sC2Xej3gfb57wfthTUPPYkAmGRnWYZ8k9DudiS", "signer": false, "writable": true }
+  ]
+}

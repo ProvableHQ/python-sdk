@@ -8,7 +8,7 @@ over reviewed Hyperlane, Circle xReserve and native-USDC CCTP deployments
 (`pip install aleo-bridge-sdk`, imports as `aleo_bridge`).
 MCP alternative: `python -m aleo_bridge.mcp` exposes the same lifecycle as
 tools; `aleo_bridge.agent.bridge_tools()` gives Claude-shape tool schemas.
-Registry version `2026-09-28.cctp-arc.1`.
+Registry version `2026-09-30.hyperlane-bat-usdg-zec.1`.
 CCTP supports Arc ↔ Ethereum/Base/Arbitrum. Pass `cctp={"speed": "fast",
 "forwarding": True, "max_fee": "0.1"}` to quote; execute the returned plan to retain its ceiling.
 Use `Bridge(..., evm={"arc": Ethereum(...), "base": Ethereum(...)})` for route-selected connections.
@@ -260,12 +260,15 @@ apply here too — these are the same broadcasts, just one leg at a time.
 
 ### `hyperlane.transfer_remote(self, asset: 'Any', recipient: 'str', *, amount: 'Any' = None, amount_atomic: 'int | None' = None, as_signer: 'bool' = False, gas_payment_microcredits: 'int | None' = None) -> 'AleoCall[DispatchReceipt]'`
 
-Withdraw an Aleo warp asset to Ethereum/Solana. Quotes the IGP payment now unless pinned; the
+Withdraw an Aleo warp asset to Ethereum/Solana. ``asset`` is an asset ref (``"aleo/eth"``), or — for
+BAT and USDG, which leave Aleo towards both Ethereum and Solana — the ``Route`` or its id
+(``"hyperlane:aleo/bat->solana/bat"``). Quotes the IGP payment now unless pinned; the
 lifecycle layer (plan 4) re-quotes at the last responsible moment by calling this again.
 
 ### `hyperlane.quote_gas_payment(self, asset: 'Any') -> 'GasQuote'`
 
 Live relayer payment for the route (the exact u64 the hook asserts); quote right before proving.
+``asset`` is an asset ref, a ``Route`` or a route id (BAT/USDG need the route: two destinations).
 
 ### `xreserve.burn(self, recipient: 'str', *, amount: 'Any' = None, amount_atomic: 'int | None' = None, mode: 'str' = 'private', record: 'str | None' = None, merkle_proof: 'str | None' = None, route: 'Route | None' = None) -> 'AleoCall[BurnReceipt]'`
 
@@ -337,28 +340,36 @@ allowance for ``sender`` (or the connection's account); it is ``None`` when no a
 amount, and is validated against the live registry. It is mutually exclusive with
 ``asset=``/``route=``/``sender=``.
 
-### `sol.transfer_remote(self, recipient: 'str | None' = None, *, amount: 'str | None' = None, amount_atomic: 'int | None' = None, plan: 'Plan | None' = None) -> 'SolCall[DispatchReceipt]'`
+### `sol.transfer_remote(self, recipient: 'str | None' = None, *, amount: 'str | None' = None, amount_atomic: 'int | None' = None, plan: 'Plan | None' = None, asset: 'Any' = None) -> 'SolCall[DispatchReceipt]'`
 
-Send native SOL to an Aleo address over the Hyperlane warp route (spec §6).
+Send SOL or an SPL-collateral token (BAT, USDG, ZEC) to an Aleo address over its Hyperlane warp
+route (spec §6). ``asset`` defaults to ``"solana/sol"``.
 
 Returns a :class:`SolCall`: ``build()`` previews the partially signed transaction,
-``send()`` moves funds (amount + IGP payment + network fee + rent leave the wallet).
+``send()`` moves funds. Native SOL: amount + IGP payment + network fee + rent leave the wallet.
+SPL collateral: the amount leaves the sender's associated token account and only IGP payment
++ network fee + rent leave the SOL balance; both balances are checked before broadcast.
 
-``plan`` (from ``Bridge.execute``) supplies recipient and amount and must have been prepared for
-the connected wallet; its registry version and route id are re-checked against the live registry
+``plan`` (from ``Bridge.execute``) supplies route, recipient and amount and must have been prepared
+for the connected wallet; its registry version and route id are re-checked against the live registry
 when the call runs. An ``amount``/``amount_atomic`` that disagrees with the plan is a
-``ValueError``. Without a plan, ``recipient`` is required.
+``ValueError``, as is combining ``plan=`` with ``asset=``. Without a plan, ``recipient`` is required.
 
-### `sol.quote_transfer_remote(self, recipient: 'str | None' = None, *, amount: 'str | None' = None, amount_atomic: 'int | None' = None, sender: 'str | None' = None, plan: 'Plan | None' = None) -> 'SolanaHyperlaneQuote'`
+### `sol.quote_transfer_remote(self, recipient: 'str | None' = None, *, amount: 'str | None' = None, amount_atomic: 'int | None' = None, sender: 'str | None' = None, plan: 'Plan | None' = None, asset: 'Any' = None) -> 'SolanaHyperlaneQuote'`
 
-Lamports required for a SOL → Aleo transfer: amount + IGP payment + network fee + rent (spec §5 kind
-``solana-hyperlane``). Reads Solana; never signs. ``sender`` defaults to the connected wallet and is required
-for the fee estimate.
+What a Solana → Aleo transfer costs (spec §5 kind ``solana-hyperlane``). Reads Solana; never signs.
 
-``plan`` (from ``Bridge.quote``) supplies recipient, amount and sender, and must match the live registry
-version and route; like ``EthModule`` it is mutually exclusive with ``sender=``, and an ``amount``/
-``amount_atomic`` that disagrees with the plan is a ``ValueError`` (an identical one is tolerated, so
-re-stating the plan's own amount is harmless). Without a plan, ``recipient`` is required.
+``asset`` selects the source (``"solana/sol"`` by default, or an SPL-collateral token such as
+``"solana/zec"``). ``total_lamports`` is the SOL the sender must hold: IGP payment + network
+fee + rent, plus the amount itself on the native SOL route. On an SPL route the amount is in
+the token's atomic units and is NOT part of the SOL total — the sender's associated token
+account must cover it separately (checked before ``send``). Every ``Fee`` is in SOL.
+``sender`` defaults to the connected wallet and is required for the fee estimate.
+
+``plan`` (from ``Bridge.quote``) supplies route, recipient, amount and sender, and must match the live
+registry version; like ``EthModule`` it is mutually exclusive with ``sender=``/``asset=``, and an
+``amount``/``amount_atomic`` that disagrees with the plan is a ``ValueError`` (an identical one is
+tolerated, so re-stating the plan's own amount is harmless). Without a plan, ``recipient`` is required.
 
 ### Routes in the pinned registry
 
@@ -374,8 +385,18 @@ re-stating the plan's own amount is harmless). Without a plan, ``recipient`` is 
 | `hyperlane:aleo/wbtc->ethereum/wbtc` | hyperlane | mainnet | active |
 | `hyperlane:ethereum/usdt->aleo/usdt` | hyperlane | mainnet | active |
 | `hyperlane:aleo/usdt->ethereum/usdt` | hyperlane | mainnet | active |
+| `hyperlane:ethereum/bat->aleo/bat` | hyperlane | mainnet | active |
+| `hyperlane:aleo/bat->ethereum/bat` | hyperlane | mainnet | active |
+| `hyperlane:ethereum/usdg->aleo/usdg` | hyperlane | mainnet | active |
+| `hyperlane:aleo/usdg->ethereum/usdg` | hyperlane | mainnet | active |
 | `hyperlane:solana/sol->aleo/sol` | hyperlane | mainnet | active |
 | `hyperlane:aleo/sol->solana/sol` | hyperlane | mainnet | active |
+| `hyperlane:solana/bat->aleo/bat` | hyperlane | mainnet | active |
+| `hyperlane:aleo/bat->solana/bat` | hyperlane | mainnet | active |
+| `hyperlane:solana/usdg->aleo/usdg` | hyperlane | mainnet | active |
+| `hyperlane:aleo/usdg->solana/usdg` | hyperlane | mainnet | active |
+| `hyperlane:solana/zec->aleo/zec` | hyperlane | mainnet | active |
+| `hyperlane:aleo/zec->solana/zec` | hyperlane | mainnet | active |
 | `hyperlane:aleo/aleo->ethereum/aleo` | hyperlane | mainnet | metadata-required |
 | `hyperlane:ethereum/aleo->aleo/aleo` | hyperlane | mainnet | metadata-required |
 | `hyperlane:aleo/aleo->solana/aleo` | hyperlane | mainnet | metadata-required |

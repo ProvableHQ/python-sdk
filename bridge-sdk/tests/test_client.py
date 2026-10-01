@@ -106,7 +106,7 @@ def test_status_reads_every_aleo_asset_balance(fake_aleo):
     chain = status.chains[0]
     assert (chain.chain_id, chain.address, chain.can_sign) == ("aleo", SIGNER, True)
     assert chain.balances == {"aleo/aleo": 2392443, "aleo/usdcx": 1000000, "aleo/eth": 0, "aleo/wbtc": 10000,
-                              "aleo/usdt": 0, "aleo/sol": 0, "aleo/usad": 0}
+                              "aleo/usdt": 0, "aleo/sol": 0, "aleo/bat": 0, "aleo/usdg": 0, "aleo/zec": 0, "aleo/usad": 0}
     assert "arc20_usdt.aleo" in fake_aleo.fetched and "usad_stablecoin.aleo" in fake_aleo.fetched
     unsigned = Bridge(FakeAleo(mappings=default_mappings(), default_account=False)).status().chains[0]
     assert (unsigned.address, unsigned.can_sign) == (None, False) and set(unsigned.balances.values()) == {0}
@@ -239,9 +239,9 @@ def test_from_profile_uses_profile_and_wires_no_side_chains(tmp_path, monkeypatc
 def test_cli_lists_routes_and_assets(capsys):
     assert cli.main(["routes"]) == 0
     routes = json.loads(capsys.readouterr().out)
-    assert len(routes) == 30 and routes[0] == "xreserve:ethereum/usdc->aleo/usdcx"
+    assert len(routes) == 40 and routes[0] == "xreserve:ethereum/usdc->aleo/usdcx"
     assert cli.main(["assets"]) == 0
-    assert len(json.loads(capsys.readouterr().out)) == 22
+    assert len(json.loads(capsys.readouterr().out)) == 30
     assert cli.main(["bogus"]) == 2
 
 
@@ -259,7 +259,8 @@ def test_routes_filters_the_registry_for_this_environment(fake_aleo):
     bridge = Bridge(fake_aleo)
     # veil getRoutes vocabulary, scoped to the client's environment
     assert [r.id for r in bridge.routes(source_chain="solana", destination_chain="aleo")] == \
-        ["hyperlane:solana/sol->aleo/sol", "hyperlane:solana/aleo->aleo/aleo"]
+        ["hyperlane:solana/sol->aleo/sol", "hyperlane:solana/bat->aleo/bat", "hyperlane:solana/usdg->aleo/usdg",
+         "hyperlane:solana/zec->aleo/zec", "hyperlane:solana/aleo->aleo/aleo"]
     assert [r.id for r in bridge.routes(source_chain="ethereum", source_asset="usdc")] == \
         ["xreserve:ethereum/usdc->aleo/usdcx", "cctp:ethereum/usdc->arc/usdc"]
     assert bridge.routes() == REG.routes(environment="mainnet")

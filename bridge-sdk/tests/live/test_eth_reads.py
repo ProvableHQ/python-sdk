@@ -61,7 +61,10 @@ def test_connection_is_mainnet_and_read_only(eth):
     assert chain_id == 1 and not eth.conn.can_sign and eth.chain.id == "ethereum"
 
 
-@pytest.mark.parametrize("asset,amount_atomic,router_type", [("eth", 1, "native"), ("wbtc", 1, "collateral"), ("usdt", 1, "collateral")])
+@pytest.mark.parametrize("asset,amount_atomic,router_type", [
+    ("eth", 1, "native"), ("wbtc", 1, "collateral"), ("usdt", 1, "collateral"),
+    ("bat", 10**14, "collateral"), ("usdg", 100, "collateral"),       # veil PR #169: 0.0001 BAT / 0.0001 USDG
+])
 def test_hyperlane_quotes_at_minimum_amounts(eth, asset, amount_atomic, router_type, record_property):
     q = _run(lambda: eth.quote_transfer_remote(asset, ALEO_RECIPIENT, amount_atomic=amount_atomic, sender=PINNED_SENDER))
     record_property(f"hyperlane_quote_{asset}", {
@@ -106,3 +109,23 @@ def test_balance_pinned_sender(eth, record_property):
 def test_chain_status_read_only(eth):
     status = _run(lambda: eth.chain_status())
     assert status.chain_id == "ethereum" and status.address is None and status.balances == {}
+
+
+@pytest.mark.parametrize("asset", ["bat", "usdg"])
+def test_bat_usdg_routers_wrap_the_registry_token_with_its_decimals(eth, asset, record_property):
+    """veil PR #169 arc22-hyperlane.live.test.ts 'checks Ethereum %s collateral and decimals': the deployed
+    collateral router's wrappedToken() is the registry token, whose decimals() match the registry."""
+    route = eth.registry.route(f"hyperlane:ethereum/{asset}->aleo/{asset}")
+    source = eth.registry.asset(route.source_asset_id)
+    w3 = eth.conn.w3
+    router = w3.to_checksum_address(route.meta_str("routerAddress"))
+    code = _run(lambda: w3.eth.get_code(router))
+    assert len(code) > 0
+    selector = w3.keccak(text="wrappedToken()")[:4]
+    raw = _run(lambda: w3.eth.call({"to": router, "data": selector}))
+    wrapped = "0x" + bytes(raw)[-20:].hex()
+    assert wrapped.lower() == source.locator.value.lower()
+    token = w3.to_checksum_address(source.locator.value)
+    decimals = int.from_bytes(bytes(_run(lambda: w3.eth.call({"to": token, "data": w3.keccak(text="decimals()")[:4]}))), "big")
+    record_property(f"{asset}_collateral", {"router": router, "wrapped_token": wrapped, "decimals": decimals})
+    assert decimals == source.decimals

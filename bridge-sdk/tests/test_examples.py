@@ -182,3 +182,65 @@ def test_outbound_tutorials_spend_public_balance_once(name, source, destination,
     else:
         bridge.execute.assert_not_called()
     bridge.resume.assert_not_called()
+
+
+ARC22_ROUTES = (
+    'hyperlane:ethereum/bat->aleo/bat', 'hyperlane:aleo/bat->ethereum/bat',
+    'hyperlane:ethereum/usdg->aleo/usdg', 'hyperlane:aleo/usdg->ethereum/usdg',
+    'hyperlane:solana/bat->aleo/bat', 'hyperlane:aleo/bat->solana/bat',
+    'hyperlane:solana/usdg->aleo/usdg', 'hyperlane:aleo/usdg->solana/usdg',
+    'hyperlane:solana/zec->aleo/zec', 'hyperlane:aleo/zec->solana/zec',
+)
+
+
+def test_arc22_routes_are_the_ten_active_bat_usdg_zec_directions():
+    from aleo_bridge.registry import DEFAULT_REGISTRY
+    module = importlib.import_module('bridge_arc22_hyperlane')
+    assert module.ROUTES == ARC22_ROUTES
+    assert all(DEFAULT_REGISTRY.route(route_id).active for route_id in module.ROUTES)
+
+
+@pytest.mark.parametrize('route_id', ARC22_ROUTES)
+@pytest.mark.parametrize('execute', [False, True])
+def test_arc22_example_quotes_or_submits_once_per_route(route_id, execute, monkeypatch, tmp_path):
+    module = importlib.import_module('bridge_arc22_hyperlane')
+    bridge = Mock()
+    quote = SimpleNamespace(amount_out='0.0001', fees=[], plan=object())
+    bridge.quote.return_value = quote
+    bridge.execute.return_value = SimpleNamespace(next='done', error=None, receipt=SimpleNamespace(id='receipt', source_tx_id='source'))
+    bridge.aleo_address.return_value = 'aleo-signer'
+    configure_example(module, bridge, monkeypatch)
+    source_chain = route_id.split(':')[1].split('/')[0]
+    args = ['--route', route_id, '--sender', 'sender', '--recipient', 'destination', '--journal', str(tmp_path)]
+    if execute:
+        args += ['--execute']
+    assert module.main(args) == 0
+    call = bridge.quote.call_args.kwargs
+    assert call['route'] == route_id and call['amount'] == '0.0001' and call['recipient'] == 'destination'
+    # only the chains the route touches get a connection; only the source chain gets a key
+    constructed = module.Bridge.call_args.kwargs
+    assert ('ethereum' in constructed) == ('ethereum' in route_id) and ('solana' in constructed) == ('solana' in route_id)
+    for chain, cls in (('ethereum', module.Ethereum), ('solana', module.Solana)):
+        if chain in route_id:
+            assert cls.call_args.kwargs['private_key'] == ('test-only-key' if execute and source_chain == chain else None)
+    if execute:
+        bridge.execute.assert_called_once()
+        assert bridge.execute.call_args.args == (quote.plan,)
+        assert bridge.execute.call_args.kwargs['mode'] == ('signer' if source_chain == 'aleo' else None)
+        if source_chain == 'aleo':
+            assert call['sender'] == 'aleo-signer'
+    else:
+        bridge.execute.assert_not_called()
+        assert call['sender'] == 'sender'
+    bridge.resume.assert_not_called()
+
+
+def test_arc22_example_rejects_an_unknown_route_and_a_missing_source_key(monkeypatch, capsys):
+    module = importlib.import_module('bridge_arc22_hyperlane')
+    with pytest.raises(SystemExit) as excinfo:
+        module.main(['--route', 'hyperlane:solana/sol->aleo/sol', '--recipient', 'x', '--sender', 'y'])
+    assert excinfo.value.code == 2
+    monkeypatch.delenv('SOLANA_PRIVATE_KEY', raising=False)
+    with pytest.raises(SystemExit) as excinfo:
+        module.main(['--route', 'hyperlane:solana/zec->aleo/zec', '--recipient', 'x', '--execute'])
+    assert excinfo.value.code == 2 and 'SOLANA_PRIVATE_KEY' in capsys.readouterr().err

@@ -65,20 +65,34 @@ class HyperlaneModule:
         if resolved.chain_id != self._bridge.aleo_chain().id:
             raise UnsupportedRouteError(
                 f"{resolved.id} is not an Aleo asset on {self._bridge.environment}; Aleo-origin Hyperlane transfers "
-                "start from aleo/eth, aleo/wbtc, aleo/usdt or aleo/sol (use bridge.eth / bridge.sol for other origins)")
+                "start from an Aleo warp asset such as aleo/eth, aleo/wbtc, aleo/usdt, aleo/sol, aleo/bat, aleo/usdg "
+                "or aleo/zec (use bridge.eth / bridge.sol for other origins)")
         return resolved
 
     def _route_for(self, asset_or_route: Any) -> Route:
+        """The executable Aleo-origin route behind an asset ref, a ``Route``, or a route id
+        (``"hyperlane:aleo/bat->solana/bat"``). An asset with ONE active withdrawal (ETH, WBTC, USDT,
+        SOL, ZEC) resolves by asset alone; BAT and USDG leave Aleo towards both Ethereum and Solana,
+        so they must be named by route (or its id)."""
+        if isinstance(asset_or_route, str) and ":" in asset_or_route:
+            asset_or_route = self._bridge.registry.route(asset_or_route)
         if isinstance(asset_or_route, Route):
-            route = asset_or_route
+            # Re-resolve by id: a Route cached from an earlier registry (or edited) must not carry stale
+            # availability or deployment metadata past the checks below. Lifecycle callers pass the live
+            # registry's own object, for which this is the identity lookup.
+            route = self._bridge.registry.route(asset_or_route.id)
             if route.protocol != "hyperlane":
                 raise UnsupportedRouteError(f"Not a Hyperlane route: {route.id}")
             self._aleo_asset(route.source_asset_id)
+            if not route.active or route.metadata.get("aleoPlaceholderConfiguration") is True:
+                raise RouteUnavailableError(f"Hyperlane route is not executable ({route.availability}): {route.id}")
             return route
         return self.outbound_route(asset_or_route)
 
     def outbound_route(self, asset: Any) -> Route:
-        """The single active, non-placeholder Hyperlane route leaving this Aleo asset."""
+        """The single active, non-placeholder Hyperlane route leaving this Aleo asset. BAT and USDG have
+        two (Ethereum and Solana): pass the ``Route`` or its id to ``transfer_remote``/``quote_gas_payment``
+        instead."""
         source = self._aleo_asset(asset)
         candidates = [r for r in self._bridge.registry.routes(bridge_protocol="hyperlane", include_unavailable=True,
                                                              environment=self._bridge.environment)
@@ -90,12 +104,14 @@ class HyperlaneModule:
             detail = ", ".join(f"{r.id} ({r.availability})" for r in candidates)
             raise RouteUnavailableError(f"Hyperlane routes from {source.id} are not executable: {detail}")
         if len(executable) > 1:
-            raise AmbiguousRouteError(f"Several active Hyperlane routes leave {source.id}: {[r.id for r in executable]}")
+            raise AmbiguousRouteError(f"Several active Hyperlane routes leave {source.id}: {[r.id for r in executable]}"
+                                      " — pass the route (or its id) instead of the asset")
         return executable[0]
 
     # ── reads ──
     def quote_gas_payment(self, asset: Any) -> GasQuote:
-        """Live relayer payment for the route (the exact u64 the hook asserts); quote right before proving."""
+        """Live relayer payment for the route (the exact u64 the hook asserts); quote right before proving.
+        ``asset`` is an asset ref, a ``Route`` or a route id (BAT/USDG need the route: two destinations)."""
         route = self._route_for(asset)
         literal = self._bridge.mapping_value(route.meta_str("aleoHookManagerProgram"), "destination_gas_configs",
                                              gas_config_key(route))
@@ -160,9 +176,11 @@ class HyperlaneModule:
 
     def transfer_remote(self, asset: Any, recipient: str, *, amount: Any = None, amount_atomic: int | None = None,
                         as_signer: bool = False, gas_payment_microcredits: int | None = None) -> AleoCall[DispatchReceipt]:
-        """Withdraw an Aleo warp asset to Ethereum/Solana. Quotes the IGP payment now unless pinned; the
+        """Withdraw an Aleo warp asset to Ethereum/Solana. ``asset`` is an asset ref (``"aleo/eth"``), or — for
+        BAT and USDG, which leave Aleo towards both Ethereum and Solana — the ``Route`` or its id
+        (``"hyperlane:aleo/bat->solana/bat"``). Quotes the IGP payment now unless pinned; the
         lifecycle layer (plan 4) re-quotes at the last responsible moment by calling this again."""
-        route = self.outbound_route(asset)
+        route = self._route_for(asset)
         registry = self._bridge.registry
         source, destination = registry.asset(route.source_asset_id), registry.asset(route.destination_asset_id)
         atomic = resolve_amount(amount=amount, amount_atomic=amount_atomic, decimals=source.decimals)

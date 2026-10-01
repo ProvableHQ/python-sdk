@@ -58,6 +58,20 @@ EVM_RPC_VARS = {
 DEFAULT_EVM_RPC_URL = {"mainnet": DEFAULT_ETHEREUM_RPC_URL, "testnet": DEFAULT_SEPOLIA_RPC_URL}
 ALEO_ENDPOINT_VARS = ("BRIDGE_LIVE_ALEO_ENDPOINT", "ALEO_ENDPOINT")
 
+#: The other mainnet EVM chains (CCTP / Arc xReserve), on the same public providers veil's live
+#: suite uses (``test/integration/live/mainnet/arc-readonly.live.test.ts``). ``<CHAIN>_RPC_URL``
+#: — the variable the SDK's ``Bridge.from_env`` reads — overrides, as does its ``BRIDGE_LIVE_`` alias.
+DEFAULT_ARC_RPC_URL = "https://rpc.mainnet.arc.io"
+DEFAULT_BASE_RPC_URL = "https://base-rpc.publicnode.com"
+DEFAULT_ARBITRUM_RPC_URL = "https://arbitrum-one-rpc.publicnode.com"
+EVM_CHAIN_RPC_VARS = {
+    "arc": ("ARC_RPC_URL", "BRIDGE_LIVE_ARC_RPC_URL"),
+    "base": ("BASE_RPC_URL", "BRIDGE_LIVE_BASE_RPC_URL"),
+    "arbitrum": ("ARBITRUM_RPC_URL", "BRIDGE_LIVE_ARBITRUM_RPC_URL"),
+}
+DEFAULT_EVM_CHAIN_RPC_URL = {"arc": DEFAULT_ARC_RPC_URL, "base": DEFAULT_BASE_RPC_URL,
+                             "arbitrum": DEFAULT_ARBITRUM_RPC_URL}
+
 #: The Aleo network name each bridge environment runs on.
 ALEO_NETWORKS = {"mainnet": "mainnet", "testnet": "testnet"}
 
@@ -196,6 +210,17 @@ def evm_rpc_url(environment: str, env: Mapping[str, str] | None = None) -> str:
     return found[1] if found else DEFAULT_EVM_RPC_URL[environment]
 
 
+def evm_chain_rpc_url(chain: str, env: Mapping[str, str] | None = None) -> str:
+    """The RPC url for a mainnet EVM chain other than Ethereum (``arc`` / ``base`` / ``arbitrum``):
+    ``<CHAIN>_RPC_URL`` or its ``BRIDGE_LIVE_`` alias, else the public default."""
+    try:
+        names = EVM_CHAIN_RPC_VARS[chain]
+    except KeyError:
+        raise LiveConfigError(f"No RPC default for EVM chain {chain!r}; one of {tuple(EVM_CHAIN_RPC_VARS)}") from None
+    found = first_value(names, env)
+    return found[1] if found else DEFAULT_EVM_CHAIN_RPC_URL[chain]
+
+
 def aleo_endpoint(env: Mapping[str, str] | None = None) -> str:
     """The Aleo API root, falling back to the open, credential-free edge host."""
     found = first_value(ALEO_ENDPOINT_VARS, env)
@@ -213,11 +238,12 @@ def recipient_override(family: str, env: Mapping[str, str] | None = None) -> str
 
 __all__ = [
     "ALEO_ENDPOINT_VARS", "ALEO_KEY_VARS", "ALEO_NETWORKS", "CASE_NAMES", "DEFAULT_ALEO_ENDPOINT",
-    "DEFAULT_ETHEREUM_RPC_URL", "DEFAULT_EVM_RPC_URL", "DEFAULT_SEPOLIA_RPC_URL", "ENVIRONMENTS",
-    "EVM_KEY_VARS", "EVM_RPC_VARS", "FUNDS_VAR", "LiveConfigError", "MAINNET_ACK", "MAINNET_ACK_VAR",
-    "MAINNET_CASES_VAR", "MAINNET_EXECUTE_ACK", "MAINNET_EXECUTE_VAR", "RECIPIENT_VARS", "STATE_DIR_VAR",
-    "aleo_endpoint", "aleo_private_key", "case_amount_override", "case_route_override", "evm_private_key",
-    "evm_rpc_url", "first_value", "live_funds_enabled", "live_state_path", "mainnet_case_enabled",
-    "mainnet_execution_enabled", "one_atomic_unit", "recipient_override", "required",
-    "required_evm_private_key", "state_dir", "value",
+    "DEFAULT_ARBITRUM_RPC_URL", "DEFAULT_ARC_RPC_URL", "DEFAULT_BASE_RPC_URL", "DEFAULT_ETHEREUM_RPC_URL",
+    "DEFAULT_EVM_CHAIN_RPC_URL", "DEFAULT_EVM_RPC_URL", "DEFAULT_SEPOLIA_RPC_URL", "ENVIRONMENTS",
+    "EVM_CHAIN_RPC_VARS", "EVM_KEY_VARS", "EVM_RPC_VARS", "FUNDS_VAR", "LiveConfigError", "MAINNET_ACK",
+    "MAINNET_ACK_VAR", "MAINNET_CASES_VAR", "MAINNET_EXECUTE_ACK", "MAINNET_EXECUTE_VAR", "RECIPIENT_VARS",
+    "STATE_DIR_VAR", "aleo_endpoint", "aleo_private_key", "case_amount_override", "case_route_override",
+    "evm_chain_rpc_url", "evm_private_key", "evm_rpc_url", "first_value", "live_funds_enabled",
+    "live_state_path", "mainnet_case_enabled", "mainnet_execution_enabled", "one_atomic_unit",
+    "recipient_override", "required", "required_evm_private_key", "state_dir", "value",
 ]

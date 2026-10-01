@@ -140,7 +140,8 @@ def test_read_tools():
     all_routes = dispatch_tool(b, "bridge_list_routes", {"include_unavailable": True})
     assert any(r["availability"] == "metadata-required" for r in all_routes)
     outbound = dispatch_tool(b, "bridge_list_routes", {"source_chain": "solana", "destination_chain": "aleo"})
-    assert [r["id"] for r in outbound] == ["hyperlane:solana/sol->aleo/sol", "hyperlane:solana/aleo->aleo/aleo"]
+    assert [r["id"] for r in outbound] == ["hyperlane:solana/sol->aleo/sol", "hyperlane:solana/bat->aleo/bat", "hyperlane:solana/usdg->aleo/usdg",
+         "hyperlane:solana/zec->aleo/zec", "hyperlane:solana/aleo->aleo/aleo"]
     q = dispatch_tool(b, "bridge_quote", {**QUOTE_ARGS, "mint_mode": "private", "secret_nonce": NONCE})
     assert q["kind"] == "evm-xreserve" and q["plan"]["route_id"] == "xreserve:ethereum/usdc->aleo/usdcx"
     assert q["plan"]["amount"] == "2" and q["hook_data"].startswith("0x")

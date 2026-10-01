@@ -26,6 +26,7 @@ from ._calls import SolCall
 from ._plan import build_plan
 from .encoding import aleo_address_to_bytes32
 from .errors import (
+    AmbiguousRouteError,
     BridgeError,
     CheckpointInvalidError,
     ConfigurationError,
@@ -35,9 +36,10 @@ from .errors import (
     MissingExtraError,
     RegistryVersionMismatchError,
     RouteNotFoundError,
+    RouteUnavailableError,
     UnsupportedRouteError,
 )
-from .registry import Route
+from .registry import Asset, Route
 from .types import DispatchReceipt, Fee, Plan, Receipt, SolanaHyperlaneQuote, Status, Step
 from .units import format_decimal_amount, resolve_amount
 
@@ -538,7 +540,9 @@ def _assert_amount_matches_plan(plan: Plan, *, amount: str | None, amount_atomic
 @dataclass
 class SolBuild:
     """Everything ``send`` needs after ``build``: the quote, the compiled message, the partially signed
-    transaction, the unique-message address that seeds the PDAs, and the blockhash lifetime."""
+    transaction, the unique-message address that seeds the PDAs, the blockhash lifetime, and the
+    reviewed route metadata the instruction was compiled against (its collateral kind decides the
+    balance preflight)."""
     quote: SolanaHyperlaneQuote
     message: Any
     transaction: Any
@@ -547,6 +551,7 @@ class SolBuild:
     last_valid_block_height: int
     sender: str
     destination_domain: int
+    metadata: sl.SolanaRouteMetadata
 
 
 def _signature_status(client: Any, signature: Any) -> str | None:
@@ -606,11 +611,13 @@ def _poll_for_confirmation(client: Any, signature: str, blockhash: str, timeout_
 
 
 class SolModule:
-    """``bridge.sol`` — Solana-origin SOL → Aleo over the Hyperlane warp route (spec §6).
+    """``bridge.sol`` — Solana-origin transfers to Aleo over the Hyperlane warp routes (spec §6):
+    native SOL and the SPL-collateral tokens (BAT, USDG, ZEC).
 
     Reads (``balance``, ``quote_transfer_remote``, ``source_status``) work on a read-only
     connection; ``transfer_remote(...).send()`` needs a signer. Route metadata is re-validated
-    from the live registry on every call.
+    from the live registry on every call. Every verb takes ``asset=`` (``"solana/zec"``, ``"zec"``,
+    an ``Asset``) and defaults to SOL; a ``plan=`` carries its own route.
     """
 
     def __init__(self, bridge: Any, conn: Solana) -> None:
@@ -629,22 +636,81 @@ class SolModule:
     def environment(self) -> str:
         return self._bridge.environment
 
-    def outbound_route(self) -> Route:
-        """The environment's SOL → Aleo Hyperlane route (RouteNotFoundError on testnet, which has none).
+    # --- resolution -------------------------------------------------------------------------
 
-        ``SOLANA_SOL_ASSET_ID``/``ALEO_SOL_ASSET_ID`` are fixed mainnet asset ids (there is no
-        testnet Solana chain in the registry), so ``find_route`` alone would resolve the mainnet
-        route regardless of ``self.environment``; this guards that the route's own environment
-        matches the module's, mirroring how ``EthModule`` scopes its route lookups by environment.
+    def _asset(self, ref: Any) -> Asset:
+        """Accept an ``Asset``, ``"chain/key"``, ``(chain, key)``, or a bare key/symbol on Solana."""
+        if isinstance(ref, Asset):
+            asset = ref
+        elif isinstance(ref, tuple) or (isinstance(ref, str) and "/" in ref):
+            asset = self.registry.asset(ref)
+        else:
+            matches = [a for a in self.registry.assets(chain=SOLANA_CHAIN_ID)
+                       if a.key.lower() == str(ref).lower() or a.symbol.lower() == str(ref).lower()]
+            if len(matches) != 1:
+                raise RouteNotFoundError(f"No unique asset {ref!r} on {SOLANA_CHAIN_ID}; use 'chain/key'")
+            asset = matches[0]
+        if self.registry.chain(asset.chain_id).family != "solana":
+            raise RouteNotFoundError(f"{asset.id} is not a Solana asset; bridge.sol drives Solana-origin transfers only")
+        return asset
+
+    def _native_asset(self) -> Asset:
+        native = [a for a in self.registry.assets(chain=SOLANA_CHAIN_ID) if a.kind == "native"]
+        if len(native) != 1:
+            raise ConfigurationError("Registry must define exactly one native Solana asset")
+        return native[0]
+
+    def outbound_route(self, asset: Any = None) -> Route:
+        """The environment's Hyperlane route from a Solana asset (SOL by default) to Aleo.
+
+        The Solana chain is mainnet-only, so the route's own environment is checked against the
+        module's (a testnet client has no Solana routes), mirroring how ``EthModule`` scopes its
+        lookups. ``metadata-required`` routes are named in the error rather than hidden.
         """
-        route = self.registry.find_route(source_chain="solana", source_asset="sol", destination_chain="aleo",
-                                         destination_asset="sol", bridge_protocol="hyperlane")
-        if route.environment != self.environment:
-            raise RouteNotFoundError(f"No Solana Hyperlane route to Aleo for environment {self.environment!r}")
+        target = self._asset(asset if asset is not None else SOLANA_SOL_ASSET_ID)
+        candidates = [r for r in self.registry.routes(bridge_protocol="hyperlane", include_unavailable=True,
+                                                     environment=self.environment)
+                      if r.source_asset_id == target.id
+                      and self.registry.chain(self.registry.asset(r.destination_asset_id).chain_id).family == "aleo"]
+        if not candidates:
+            raise RouteNotFoundError(f"No Solana Hyperlane route from {target.id} to Aleo for environment {self.environment!r}")
+        active = [r for r in candidates if r.availability == "active"]
+        if not active:
+            raise RouteUnavailableError(f"Hyperlane route is not executable ({candidates[0].availability}): {candidates[0].id}")
+        if len(active) > 1:
+            raise AmbiguousRouteError(f"{len(active)} active Hyperlane routes from {target.id}; pass plan=")
+        return active[0]
+
+    def _route_for_plan(self, plan: Plan) -> Route:
+        """Re-resolve a plan's route from the live registry by id (never trust plan-carried addresses)."""
+        if not is_registry_version_compatible(self.registry, plan.registry_version, plan.route_id):
+            raise RegistryVersionMismatchError(
+                f"plan was prepared against registry {plan.registry_version}; this client runs {self.registry.version} — re-run quote()")
+        try:
+            route = self.registry.route(plan.route_id)
+        except RouteNotFoundError as exc:
+            raise UnsupportedRouteError(f"plan route {plan.route_id} is not in registry {self.registry.version}") from exc
+        source = self.registry.asset(route.source_asset_id)
+        if (route.protocol != "hyperlane" or self.registry.chain(source.chain_id).family != "solana"
+                or route.environment != self.environment):
+            raise UnsupportedRouteError(f"plan route {plan.route_id} is not a Solana Hyperlane route to Aleo")
+        if route.source_asset_id != plan.source_asset_id or route.destination_asset_id != plan.destination_asset_id:
+            raise UnsupportedRouteError(f"plan assets do not match configured route {route.id}")
         return route
 
     def metadata(self, route: Route | None = None) -> sl.SolanaRouteMetadata:
         return sl.solana_route_metadata(route or self.outbound_route())
+
+    def _spl_token_program(self, asset: Asset) -> str:
+        """The SPL Token / Token-2022 program owning *asset*'s mint, read from the reviewed route metadata."""
+        mint = asset.locator.value if asset.locator is not None else None
+        for route in self.registry.routes(bridge_protocol="hyperlane", include_unavailable=True, environment=self.environment):
+            meta = route.metadata
+            if (asset.id in (route.source_asset_id, route.destination_asset_id)
+                    and meta.get("routerType") == "spl-collateral" and meta.get("collateralMintAddress") == mint
+                    and isinstance(meta.get("splTokenProgramAddress"), str)):
+                return str(meta["splTokenProgramAddress"])
+        raise UnsupportedRouteError(f"No reviewed SPL-collateral Hyperlane route pins a token program for {asset.id}")
 
     # --- reads ------------------------------------------------------------------------------
 
@@ -663,12 +729,29 @@ class SolModule:
     def _balance_of(self, address: str) -> int:
         return int(self.client.get_balance(self._pubkey(address), commitment=CONFIRMED).value)
 
-    def balance(self, *, address: str | None = None) -> int:
-        """Lamports held by an explicit public address or the connected wallet."""
+    def _token_balance_of(self, owner: str, mint: str, token_program: str) -> int:
+        """The owner's associated-token-account balance for *mint*; an uncreated account reads as zero."""
+        ata = sl.derive_associated_token_address(owner, mint, token_program)
+        return sl.decode_spl_token_account_amount(self._account_data(ata), ata)
+
+    def balance(self, asset: Any = None, *, address: str | None = None) -> int:
+        """Atomic balance of a Solana asset for an explicit public address or the connected wallet.
+
+        SOL (the default) is read with ``getBalance`` in lamports; an SPL-collateral token
+        (``"solana/zec"``…) is the owner's associated token account balance in the mint's atomic
+        units, zero when the account does not exist yet.
+        """
         address = address if address is not None else self.conn.address
         if address is None:
             raise ConfigurationError("Solana connection is read-only: pass signer= or private_key= to Solana() to read the wallet balance")
-        return self._balance_of(address)
+        target = self._asset(asset if asset is not None else SOLANA_SOL_ASSET_ID)
+        if target.locator is None:
+            raise UnsupportedRouteError(f"{target.id} has no on-chain locator")
+        if target.locator.kind == "native":
+            return self._balance_of(address)
+        if target.locator.kind == "solana-mint":
+            return self._token_balance_of(address, target.locator.value, self._spl_token_program(target))
+        raise UnsupportedRouteError(f"{target.id} is not a Solana asset")
 
     # --- quote ------------------------------------------------------------------------------
 
@@ -694,28 +777,34 @@ class SolModule:
 
     def quote_transfer_remote(self, recipient: str | None = None, *, amount: str | None = None,
                               amount_atomic: int | None = None, sender: str | None = None,
-                              plan: Plan | None = None) -> SolanaHyperlaneQuote:
-        """Lamports required for a SOL → Aleo transfer: amount + IGP payment + network fee + rent (spec §5 kind
-        ``solana-hyperlane``). Reads Solana; never signs. ``sender`` defaults to the connected wallet and is required
-        for the fee estimate.
+                              plan: Plan | None = None, asset: Any = None) -> SolanaHyperlaneQuote:
+        """What a Solana → Aleo transfer costs (spec §5 kind ``solana-hyperlane``). Reads Solana; never signs.
 
-        ``plan`` (from ``Bridge.quote``) supplies recipient, amount and sender, and must match the live registry
-        version and route; like ``EthModule`` it is mutually exclusive with ``sender=``, and an ``amount``/
-        ``amount_atomic`` that disagrees with the plan is a ``ValueError`` (an identical one is tolerated, so
-        re-stating the plan's own amount is harmless). Without a plan, ``recipient`` is required.
+        ``asset`` selects the source (``"solana/sol"`` by default, or an SPL-collateral token such as
+        ``"solana/zec"``). ``total_lamports`` is the SOL the sender must hold: IGP payment + network
+        fee + rent, plus the amount itself on the native SOL route. On an SPL route the amount is in
+        the token's atomic units and is NOT part of the SOL total — the sender's associated token
+        account must cover it separately (checked before ``send``). Every ``Fee`` is in SOL.
+        ``sender`` defaults to the connected wallet and is required for the fee estimate.
+
+        ``plan`` (from ``Bridge.quote``) supplies route, recipient, amount and sender, and must match the live
+        registry version; like ``EthModule`` it is mutually exclusive with ``sender=``/``asset=``, and an
+        ``amount``/``amount_atomic`` that disagrees with the plan is a ``ValueError`` (an identical one is
+        tolerated, so re-stating the plan's own amount is harmless). Without a plan, ``recipient`` is required.
         """
         libs = _libs()
-        route = self.outbound_route()
-        metadata = sl.solana_route_metadata(route)
-        decimals = self.registry.asset(route.source_asset_id).decimals
         if plan is not None:
             if sender is not None:
                 raise ValueError("Pass plan= or sender=, not both: the plan carries its own sender")
-            if not is_registry_version_compatible(self.registry, plan.registry_version, plan.route_id):
-                raise RegistryVersionMismatchError(
-                    f"plan was prepared against registry {plan.registry_version}; this client runs {self.registry.version} — re-run quote()")
-            if plan.route_id != route.id:
-                raise UnsupportedRouteError(f"plan route {plan.route_id} is not the Solana Hyperlane route {route.id}")
+            if asset is not None:
+                raise ValueError("Pass plan= or asset=, not both: the plan carries its own route")
+            route = self._route_for_plan(plan)
+        else:
+            route = self.outbound_route(asset)
+        metadata = sl.solana_route_metadata(route)
+        source = self.registry.asset(route.source_asset_id)
+        decimals = source.decimals
+        if plan is not None:
             _assert_amount_matches_plan(plan, amount=amount, amount_atomic=amount_atomic, decimals=decimals)
             recipient, amount_atomic, amount, sender = plan.recipient, plan.amount_atomic, None, plan.sender
         elif recipient is None:
@@ -744,11 +833,13 @@ class SolModule:
         fee = int(fee_value)
         rent = sum(int(self.client.get_minimum_balance_for_rent_exemption(size).value)
                    for size in (sl.GAS_PAYMENT_ACCOUNT_DATA_LENGTH, sl.DISPATCHED_MESSAGE_ACCOUNT_DATA_LENGTH, 0))
-        total = amount_atomic + igp + fee + rent
+        # SPL collateral leaves the sender's token account, not its SOL balance: the SOL total is fees only.
+        total = (0 if metadata.is_spl_collateral else amount_atomic) + igp + fee + rent
+        native = self._native_asset()
         fees = (
-            Fee("interchain-gas", SOLANA_CHAIN_ID, route.source_asset_id, format_decimal_amount(igp, decimals), True),
-            Fee("network", SOLANA_CHAIN_ID, route.source_asset_id, format_decimal_amount(fee, decimals), True),
-            Fee("rent", SOLANA_CHAIN_ID, route.source_asset_id, format_decimal_amount(rent, decimals), True),
+            Fee("interchain-gas", SOLANA_CHAIN_ID, native.id, format_decimal_amount(igp, native.decimals), True),
+            Fee("network", SOLANA_CHAIN_ID, native.id, format_decimal_amount(fee, native.decimals), True),
+            Fee("rent", SOLANA_CHAIN_ID, native.id, format_decimal_amount(rent, native.decimals), True),
         )
         return SolanaHyperlaneQuote(
             kind="solana-hyperlane", plan=plan, fees=fees, amount_out=plan.amount,
@@ -759,18 +850,27 @@ class SolModule:
     # --- write ------------------------------------------------------------------------------
 
     def transfer_remote(self, recipient: str | None = None, *, amount: str | None = None,
-                        amount_atomic: int | None = None, plan: Plan | None = None) -> SolCall[DispatchReceipt]:
-        """Send native SOL to an Aleo address over the Hyperlane warp route (spec §6).
+                        amount_atomic: int | None = None, plan: Plan | None = None,
+                        asset: Any = None) -> SolCall[DispatchReceipt]:
+        """Send SOL or an SPL-collateral token (BAT, USDG, ZEC) to an Aleo address over its Hyperlane warp
+        route (spec §6). ``asset`` defaults to ``"solana/sol"``.
 
         Returns a :class:`SolCall`: ``build()`` previews the partially signed transaction,
-        ``send()`` moves funds (amount + IGP payment + network fee + rent leave the wallet).
+        ``send()`` moves funds. Native SOL: amount + IGP payment + network fee + rent leave the wallet.
+        SPL collateral: the amount leaves the sender's associated token account and only IGP payment
+        + network fee + rent leave the SOL balance; both balances are checked before broadcast.
 
-        ``plan`` (from ``Bridge.execute``) supplies recipient and amount and must have been prepared for
-        the connected wallet; its registry version and route id are re-checked against the live registry
+        ``plan`` (from ``Bridge.execute``) supplies route, recipient and amount and must have been prepared
+        for the connected wallet; its registry version and route id are re-checked against the live registry
         when the call runs. An ``amount``/``amount_atomic`` that disagrees with the plan is a
-        ``ValueError``. Without a plan, ``recipient`` is required.
+        ``ValueError``, as is combining ``plan=`` with ``asset=``. Without a plan, ``recipient`` is required.
         """
-        route = self.outbound_route()
+        if plan is not None:
+            if asset is not None:
+                raise ValueError("Pass plan= or asset=, not both: the plan carries its own route")
+            route = self._route_for_plan(plan)
+        else:
+            route = self.outbound_route(asset)
         sl.solana_route_metadata(route)                                  # refuse inactive/malformed routes early
         decimals = self.registry.asset(route.source_asset_id).decimals
         if plan is not None:
@@ -794,23 +894,21 @@ class SolModule:
         return SolCall(self, route=route, recipient=recipient, amount_atomic=amount_atomic, plan=plan,
                        build_result=build_result, store=getattr(self._bridge, "checkpoints", None))
 
-    def _build_transaction(self, *, recipient: str, amount_atomic: int, plan: Plan | None) -> SolBuild:
+    def _build_transaction(self, *, recipient: str, amount_atomic: int, plan: Plan | None,
+                           route: Route | None = None) -> SolBuild:
         libs = _libs()
         sender = self.conn.address
         if sender is None:
             raise ConfigurationError("Solana connection is read-only: pass signer= or private_key= to Solana() to build transactions")
         if plan is not None and plan.sender and plan.sender != sender:
             raise ConfigurationError(f"Prepared sender {plan.sender} does not match connected account {sender}")
+        source_asset = (route or self.outbound_route()).source_asset_id
         quote = (self.quote_transfer_remote(plan=plan) if plan is not None          # the plan carries the sender
-                 else self.quote_transfer_remote(recipient, amount_atomic=amount_atomic, sender=sender))
+                 else self.quote_transfer_remote(recipient, amount_atomic=amount_atomic, sender=sender, asset=source_asset))
         # Re-resolved here rather than reusing the route snapshotted when transfer_remote() was called:
         # the registry may have moved since, and compiling the instruction against a stale deployment
         # while the quote priced the live one would sign a transfer to the wrong program.
-        route = self.outbound_route()
-        if route.id != quote.plan.route_id:
-            raise UnsupportedRouteError(
-                f"the Solana Hyperlane route is now {route.id}, but this transfer was quoted for "
-                f"{quote.plan.route_id} — re-run quote()")
+        route = self._route_for_plan(quote.plan)
         metadata = sl.solana_route_metadata(route)
         unique = libs.Keypair()                       # fresh per build: seeds the dispatched-message and gas-payment PDAs
         message, blockhash, last_valid_block_height = self._compile_message(
@@ -825,7 +923,7 @@ class SolModule:
         return SolBuild(quote=replace(quote, unique_message_address=str(unique.pubkey())), message=message,
                         transaction=transaction, unique_message_address=str(unique.pubkey()), blockhash=blockhash,
                         last_valid_block_height=last_valid_block_height, sender=sender,
-                        destination_domain=metadata.destination_domain)
+                        destination_domain=metadata.destination_domain, metadata=metadata)
 
     def _source_receipt(self, built: SolBuild, signature: str) -> Receipt:
         return Receipt(
@@ -896,12 +994,25 @@ class SolModule:
                 on_broadcast: "Callable[[str], None] | None" = None) -> Receipt:
         libs = _libs()
         quote = built.quote
+        metadata = built.metadata
+        # Preflight: the sender must cover gas and the rent of the two accounts the instruction creates
+        # (gas-payment PDA, dispatched-message PDA) and still clear its own rent floor; the native route
+        # also pays the amount from that SOL balance, an SPL route from its associated token account.
         balance = self._balance_of(built.sender)
         if balance < quote.total_lamports:
+            amount_part = "" if metadata.is_spl_collateral else f"amount {quote.plan.amount_atomic} + "
             raise InsufficientBalanceError(
                 f"Insufficient Solana balance for this Hyperlane transfer: balance {balance} lamports, "
-                f"required {quote.total_lamports} lamports (amount {quote.plan.amount_atomic} "
-                f"+ gas {quote.igp_lamports + quote.network_fee_lamports} + rent {quote.rent_lamports})")
+                f"required {quote.total_lamports} lamports ({amount_part}"
+                f"gas {quote.igp_lamports + quote.network_fee_lamports} + rent {quote.rent_lamports})")
+        if metadata.is_spl_collateral:
+            assert metadata.collateral_mint_address is not None and metadata.spl_token_program_address is not None
+            token_balance = self._token_balance_of(built.sender, metadata.collateral_mint_address,
+                                                   metadata.spl_token_program_address)
+            if token_balance < quote.plan.amount_atomic:
+                raise InsufficientBalanceError(
+                    f"Insufficient Solana token balance for this Hyperlane transfer: balance {token_balance}, "
+                    f"required {quote.plan.amount_atomic} atomic units of {quote.plan.source_asset_id}")
         signatures = list(built.transaction.signatures)
         payer_index = list(built.message.account_keys).index(libs.Pubkey.from_string(built.sender))
         signatures[payer_index] = self.conn.sign_message(libs.to_bytes_versioned(built.message))

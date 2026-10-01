@@ -13,17 +13,26 @@ from aleo_bridge.hyperlane import compute_gas_payment, gas_config_key, parse_gas
 pytestmark = pytest.mark.live
 
 MESSAGE_ID = "0xc7c2c763ef846ff1583d9222d8ecbfc56da2e0cdcc9a63bc4bde51467644794d"
-ALEO_ORIGIN = ["aleo/eth", "aleo/wbtc", "aleo/usdt", "aleo/sol"]
+# Every active Aleo-origin Hyperlane withdrawal, by route id: BAT and USDG leave Aleo in two directions
+# (veil PR #169), so a bare asset would be ambiguous for them.
+ALEO_ORIGIN = ["hyperlane:aleo/eth->ethereum/eth", "hyperlane:aleo/wbtc->ethereum/wbtc", "hyperlane:aleo/usdt->ethereum/usdt",
+               "hyperlane:aleo/sol->solana/sol", "hyperlane:aleo/bat->ethereum/bat", "hyperlane:aleo/usdg->ethereum/usdg",
+               "hyperlane:aleo/bat->solana/bat", "hyperlane:aleo/usdg->solana/usdg", "hyperlane:aleo/zec->solana/zec"]
+
+
+def _route(live_bridge, route_id: str):
+    """The validated, executable route behind a registry id (``transfer_remote(asset=<Route>)`` takes this path)."""
+    return live_bridge.hyperlane._route_for(live_bridge.registry.route(route_id))
 
 
 def _squash(text: str) -> str:
     return re.sub(r"\s+", "", text)
 
 
-@pytest.mark.parametrize("asset", ALEO_ORIGIN)
-def test_igp_quote_is_a_positive_u64(live_bridge, asset):
-    quote = live_bridge.hyperlane.quote_gas_payment(asset)
-    route = live_bridge.hyperlane.outbound_route(asset)
+@pytest.mark.parametrize("route_id", ALEO_ORIGIN)
+def test_igp_quote_is_a_positive_u64(live_bridge, route_id):
+    route = _route(live_bridge, route_id)
+    quote = live_bridge.hyperlane.quote_gas_payment(route)
     assert quote.route_id == route.id
     assert 0 < quote.payment_microcredits < 2**64 and quote.gas_price > 0 and quote.exchange_rate > 0
     assert quote.gas_limit == int(route.metadata["aleoRemoteRouterGas"])
@@ -50,9 +59,9 @@ def test_usdcx_bridge_nullifier_read(live_bridge):
     assert live_bridge.xreserve.inbound_route().metadata["bridgeProgram"] == "usdcx_bridge_v2.aleo"
 
 
-@pytest.mark.parametrize("asset", ALEO_ORIGIN)
-def test_registry_matches_deployed_warp_route_state(live_bridge, asset, record_property):
-    route = live_bridge.hyperlane.outbound_route(asset)
+@pytest.mark.parametrize("route_id", ALEO_ORIGIN)
+def test_registry_matches_deployed_warp_route_state(live_bridge, route_id, record_property):
+    route = _route(live_bridge, route_id)
     program = route.metadata["aleoRouterProgram"]
     app = _squash(live_bridge.mapping_value(program, "app_metadata", "true") or "")
     assert f"token_owner:{route.metadata['aleoTokenOwner']}" in app
@@ -60,7 +69,7 @@ def test_registry_matches_deployed_warp_route_state(live_bridge, asset, record_p
     assert f"local_decimals:{route.metadata['aleoLocalDecimals']}u8" in app
     assert f"remote_decimals:{route.metadata['aleoRemoteDecimals']}u8" in app
     raw_router = live_bridge.mapping_value(program, "remote_routers", f"{route.metadata['aleoDestinationDomain']}u32")
-    record_property(f"remote_routers_{asset}", raw_router)
+    record_property(f"remote_routers_{route_id}", raw_router)
     if raw_router is None:
         pytest.skip(f"{program}/remote_routers[{route.metadata['aleoDestinationDomain']}u32] did not parse; logged as None")
     router = _squash(raw_router)
@@ -117,8 +126,8 @@ def test_wrapper_program_is_deployed_with_expected_transitions(live_bridge):
     assert "private_mint" in functions and "private_burn" in functions
     bridge_functions = live_bridge.program("usdcx_bridge_v2.aleo").functions
     assert "burn_public" in bridge_functions and "burn_public_as_signer" in bridge_functions
-    for asset in ALEO_ORIGIN:
-        router = live_bridge.program(live_bridge.hyperlane.outbound_route(asset).metadata["aleoRouterProgram"]).functions
+    for route_id in ALEO_ORIGIN:
+        router = live_bridge.program(_route(live_bridge, route_id).metadata["aleoRouterProgram"]).functions
         assert "transfer_remote" in router and "transfer_remote_as_signer" in router
 
 

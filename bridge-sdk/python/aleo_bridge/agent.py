@@ -444,7 +444,7 @@ _READ_TOOLS: list[tuple[str, str, dict[str, Any], Callable[[Any, dict[str, Any]]
      "(aleo, ethereum, solana, aleo-testnet, sepolia) or symbol.",
      _schema({"chain": _S, "symbol": _S, "environment": {**_S, "enum": ["mainnet", "testnet"]}}, []), _h_list_assets),
     ("bridge_list_routes",
-     "Supported directions and their protocol (xreserve = USDC<->USDCx via Circle; hyperlane = ETH/WBTC/USDT/SOL). "
+     "Supported directions and their protocol (xreserve = USDC<->USDCx via Circle; hyperlane = ETH/WBTC/USDT/SOL/BAT/USDG/ZEC). "
      "Active routes move funds; metadata-required ones are listed but refused by quote/execute.",
      _schema({"source_chain": _S, "source_asset": _S, "destination_chain": _S, "destination_asset": _S,
               "bridge_protocol": {**_S, "enum": ["xreserve", "hyperlane"]}, "symbol": _S,

@@ -128,9 +128,14 @@ def asset_ref(asset: Asset) -> str:
 
 
 def default_amount(registry: Registry, case: str, route: Route) -> str:
-    """veil's literal for the xReserve cases, otherwise one atomic unit of the source asset."""
+    """veil's literal for the xReserve cases, otherwise one atomic unit of the source asset — or, when the
+    destination has fewer decimals (BAT: 18 on Aleo/Ethereum, 8 on Solana), the smallest amount both
+    ends can represent."""
     spec = CASES[case]
-    return spec.amount or one_atomic_unit(registry.asset(route.source_asset_id).decimals)
+    if spec.amount:
+        return spec.amount
+    source, destination = registry.asset(route.source_asset_id), registry.asset(route.destination_asset_id)
+    return one_atomic_unit(min(source.decimals, destination.decimals))
 
 
 def sender_for(bridge: Any, route: Route) -> str | None:
@@ -237,8 +242,11 @@ def precheck(bridge: Any, quote: Any, *, case: str, log: Callable[[str], None] =
             if native_id:
                 _require(balances, native_id, quote.native_fee_atomic, what="gas", log=log)
     elif quote.kind == "solana-hyperlane":
+        if source.kind != "native":
+            # SPL collateral: the token leaves the sender's associated token account; the SOL total is fees only
+            _require(balances, source.id, plan.amount_atomic, log=log)
         if native_id:
-            _require(balances, native_id, quote.total_lamports, log=log)
+            _require(balances, native_id, quote.total_lamports, what="gas" if source.kind != "native" else "balance", log=log)
     elif quote.kind == "aleo-hyperlane":
         _require(balances, source.id, plan.amount_atomic, log=log)
         if native_id:

@@ -10,6 +10,7 @@ from pathlib import Path
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 TRANSFER: dict = json.loads((FIXTURES / "sealevel-transfer-remote.json").read_text())
+SPL_TRANSFER: dict = json.loads((FIXTURES / "sealevel-spl-collateral-transfer-remote.json").read_text())
 IGP: dict = json.loads((FIXTURES / "sealevel-igp-account.json").read_text())
 
 WARP_PROGRAM_ADDRESS = "8YGT2pZwyZe94qBpGzWfY2TMEVcwaQ1bXAE7YAgpUaM7"
@@ -50,3 +51,29 @@ def metadata_from_fixture(*, overhead: bool = True) -> dict[str, str | int | boo
     if overhead:
         metadata["igpOverheadAccount"] = accounts[12]["address"]
     return metadata
+
+
+def spl_metadata_from_fixture() -> dict[str, str | int | bool]:
+    """SPL-collateral route metadata read off the recorded ZEC transfer's account list (veil PR #169)."""
+    accounts = SPL_TRANSFER["accounts"]
+    return {
+        "routerType": "spl-collateral",
+        "warpProgramAddress": SPL_TRANSFER["warpProgramAddress"],
+        "tokenPda": accounts[2]["address"],
+        "dispatchAuthorityPda": accounts[5]["address"],
+        "mailboxProgramAddress": accounts[3]["address"],
+        "mailboxOutboxPda": accounts[4]["address"],
+        "igpProgramAddress": accounts[9]["address"],
+        "igpProgramDataPda": accounts[10]["address"],
+        "igpOverheadAccount": accounts[12]["address"],
+        "igpAccount": accounts[13]["address"],
+        "splNoopProgramAddress": accounts[1]["address"],
+        "splTokenProgramAddress": accounts[14]["address"],
+        "collateralMintAddress": accounts[15]["address"],
+        "escrowPda": accounts[17]["address"],
+        "destinationDomain": ALEO_MAINNET_DOMAIN,
+        "destinationGasAmount": "460000",
+        "registryCommit": "dd03567baf2a7c0a336c12a1e2b97272ca51ee9a",
+        "solanaReviewedAt": "2026-09-30T00:00:00Z",
+        "solanaConfigSource": "hyperlane-registry@dd03567:deployments/warp_routes/ZEC/aleo-config.yaml",
+    }

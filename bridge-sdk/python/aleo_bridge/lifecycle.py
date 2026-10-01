@@ -246,7 +246,7 @@ def quote(bridge, *, source_chain: str | None = None, source_asset: str | None =
         q = _module(bridge, "sol").quote_transfer_remote(plan=plan)
         return replace(q, plan=plan)
     if plan.protocol == "hyperlane" and family == "aleo":
-        gas = bridge.hyperlane.quote_gas_payment(plan.source_asset_id)
+        gas = bridge.hyperlane.quote_gas_payment(resolved.route)       # by route: BAT/USDG leave Aleo two ways
         fee = Fee(kind="protocol", chain_id=resolved.source_chain.id,
                   asset_id=_credits_asset_id(resolved.source_chain),
                   amount=format_decimal_amount(gas.payment_microcredits, 6), estimated=True)
@@ -438,10 +438,16 @@ def _read_destination_balance(bridge, plan: Plan, resolved: ResolvedRoute) -> in
                    else module.balance(asset.id, address=plan.recipient))
     if chain.family == "solana":
         conn = getattr(bridge, "solana", None)
-        if (conn is None or asset.locator is None or asset.locator.kind != "native"):
+        if conn is None or asset.locator is None:
             return None
-        return int(bridge.sol.balance() if conn.address == plan.recipient
-                   else bridge.sol.balance(address=plan.recipient))
+        if asset.locator.kind == "native":
+            return int(bridge.sol.balance() if conn.address == plan.recipient
+                       else bridge.sol.balance(address=plan.recipient))
+        # A reviewed SPL-collateral route delivers into the recipient's associated token account
+        # for the route's mint; anything else has no reader here.
+        if asset.locator.kind != "solana-mint" or resolved.route.metadata.get("routerType") != "spl-collateral":
+            return None
+        return int(bridge.sol.balance(asset.id, address=plan.recipient))
     return None            # Aleo private records / token mappings: protocol signal instead
 
 
@@ -610,8 +616,8 @@ def execute(bridge, plan: Plan, *, on_checkpoint: Callable | None = None, provin
         verification = _delivery_verification(bridge, plan, resolved)
         gas = gas_payment_microcredits
         if gas is None:
-            gas = bridge.hyperlane.quote_gas_payment(plan.source_asset_id).payment_microcredits
-        call = bridge.hyperlane.transfer_remote(plan.source_asset_id, plan.recipient,
+            gas = bridge.hyperlane.quote_gas_payment(resolved.route).payment_microcredits
+        call = bridge.hyperlane.transfer_remote(resolved.route, plan.recipient,
                                                 amount_atomic=plan.amount_atomic, as_signer=as_signer,
                                                 gas_payment_microcredits=gas)
         receipt = _run_aleo_leg(bridge, plan, call, proving=proving, emit=emit, extra_state=verification)

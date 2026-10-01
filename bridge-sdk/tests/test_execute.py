@@ -358,3 +358,16 @@ def test_destination_balance_baseline_read_is_best_effort(monkeypatch):
     progress = execute(b, plan, gas_payment_microcredits=1, on_checkpoint=cps.append)
     assert cps[0].delivery_verification is None
     assert "destinationBalanceBeforeAtomic" not in progress.receipt.protocol_state
+
+
+@pytest.mark.parametrize("route_id,recipient", [
+    ("hyperlane:aleo/bat->ethereum/bat", EVM_ADDRESS), ("hyperlane:aleo/bat->solana/bat", SOL_ADDRESS),
+])
+def test_aleo_hyperlane_execute_resolves_bat_by_route_not_asset(route_id, recipient):
+    b = FakeBridge(solana=True)
+    plan = prepare(b.registry, route=route_id, amount="0.0001", recipient=recipient)
+    progress = execute(b, plan, mode="signer")
+    assert progress.receipt.protocol_state["routeId"] == route_id
+    calls = [c for c in b.calls if c[0].startswith("hyperlane.")]        # the destination-balance baseline reads come first
+    assert calls[0] == ("hyperlane.quote_gas_payment", "aleo/bat")
+    assert calls[1][0] == "hyperlane.transfer_remote" and calls[1][1]["asset"] == "aleo/bat"

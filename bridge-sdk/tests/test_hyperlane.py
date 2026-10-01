@@ -17,6 +17,12 @@ ROUTES = [  # veil test/actions/aleoHyperlane.test.ts ROUTES (active four); amou
     ("aleo/wbtc", "hyperlane:aleo/wbtc->ethereum/wbtc", "hyp_warp_token_wbtc_v2.aleo", EVM1, 10**8),
     ("aleo/usdt", "hyperlane:aleo/usdt->ethereum/usdt", "hyp_warp_token_usdt_v2.aleo", EVM1, 10**6),
     ("aleo/sol", "hyperlane:aleo/sol->solana/sol", "hyp_warp_token_sol_v2.aleo", SOL_SYSTEM, 10**9),
+    # veil PR #169: BAT / USDG / ZEC (BAT→Solana must fit Solana's 8 decimals: 10**10 atomic = 0.00000001 BAT)
+    ("aleo/bat", "hyperlane:aleo/bat->ethereum/bat", "hyp_warp_token_bat_v2.aleo", EVM1, 10**18),
+    ("aleo/usdg", "hyperlane:aleo/usdg->ethereum/usdg", "hyp_warp_token_usdg_v2.aleo", EVM1, 10**6),
+    ("aleo/bat", "hyperlane:aleo/bat->solana/bat", "hyp_warp_token_bat_v2.aleo", SOL_SYSTEM, 10**10),
+    ("aleo/usdg", "hyperlane:aleo/usdg->solana/usdg", "hyp_warp_token_usdg_v2.aleo", SOL_SYSTEM, 10**6),
+    ("aleo/zec", "hyperlane:aleo/zec->solana/zec", "hyp_warp_token_zec_v2.aleo", SOL_SYSTEM, 10**8),
 ]
 
 
@@ -42,8 +48,15 @@ def test_pure_helpers():
 
 @pytest.mark.parametrize("asset,route_id,program,recipient,amount", ROUTES)
 def test_outbound_route_and_common_shape(bridge, asset, route_id, program, recipient, amount):
-    route = bridge.hyperlane.outbound_route(asset)
-    assert route.id == route_id and route.meta_str("aleoRouterProgram") == program
+    route = REG.route(route_id)
+    assert route.meta_str("aleoRouterProgram") == program and route.active
+    if asset in ("aleo/bat", "aleo/usdg"):
+        # two active withdrawals per asset (Ethereum and Solana): the bare asset is ambiguous, the route id is not
+        with pytest.raises(AmbiguousRouteError, match="pass the route"):
+            bridge.hyperlane.outbound_route(asset)
+        assert bridge.hyperlane._route_for(route) is route == bridge.hyperlane._route_for(route_id)
+    else:
+        assert bridge.hyperlane.outbound_route(asset).id == route_id
     inputs = _inputs(bridge, route_id, recipient, amount, gas=1)
     assert len(inputs) == 7
     assert inputs[1] == MAILBOX_STATE
@@ -164,12 +177,23 @@ def test_quote_gas_payment_failure_modes(bridge):
         bridge.hyperlane.quote_gas_payment("ethereum/eth")
 
 
-def test_zero_gas_limit_falls_back_to_50000(bridge):
+def test_zero_gas_limit_falls_back_to_50000(fake_aleo):
+    """A caller's edited Route copy is no longer honoured (routes resolve by id against the bound registry), so
+    the zero-gas route has to BE the registry's route for this bridge."""
     from dataclasses import replace
-    route = REG.route("hyperlane:aleo/eth->ethereum/eth")
+
+    from aleo_bridge import Bridge
+    from aleo_bridge.registry import Registry
+
+    route_id = "hyperlane:aleo/eth->ethereum/eth"
+    route = REG.route(route_id)
     zero = replace(route, metadata={**route.metadata, "aleoRemoteRouterGas": "0"})
-    quote = bridge.hyperlane.quote_gas_payment(zero)
-    assert quote.gas_limit == 50_000 and quote.payment_microcredits == (50_000 + 159337) * 1000000000 * 402 // 10**10
+    registry = Registry(REG.version, REG.chains(), REG.assets(),
+                        [zero if r.id == route_id else r for r in REG.routes(include_unavailable=True)])
+    bridge = Bridge(fake_aleo, registry=registry)
+    for selector in (zero, route_id, "aleo/eth"):
+        quote = bridge.hyperlane.quote_gas_payment(selector)
+        assert quote.gas_limit == 50_000 and quote.payment_microcredits == (50_000 + 159337) * 1000000000 * 402 // 10**10
 
 
 def test_transfer_remote_builds_call_with_live_quote(bridge):
@@ -202,3 +226,71 @@ def test_is_delivered_reads_mailbox_deliveries(bridge):
     assert bridge.hyperlane.is_delivered("0x" + "00" * 32) is False
     with pytest.raises(ConfigurationError, match="32-byte message id"):
         bridge.hyperlane.is_delivered("0x1234")
+
+
+@pytest.mark.parametrize("route_id,recipient,domain", [
+    ("hyperlane:aleo/bat->ethereum/bat", EVM1, "1u32"),
+    ("hyperlane:aleo/bat->solana/bat", SOL_SYSTEM, "1399811149u32"),
+    ("hyperlane:aleo/usdg->ethereum/usdg", EVM1, "1u32"),
+    ("hyperlane:aleo/usdg->solana/usdg", SOL_SYSTEM, "1399811149u32"),
+])
+def test_two_destination_assets_are_selected_by_route_through_tier1_and_tier2(bridge, route_id, recipient, domain):
+    """Review finding (2026-10-01): the lifecycle used to resolve Aleo legs by ASSET, which BAT and USDG made
+    ambiguous. quote()/execute() go by the resolved route; Tier-2 takes the Route or its id."""
+    route = REG.route(route_id)
+    source = REG.asset(route.source_asset_id)
+    amount = "0.0001"
+    quote = bridge.quote(route=route_id, amount=amount, recipient=recipient)
+    assert quote.kind == "aleo-hyperlane" and quote.plan.route_id == route_id and quote.payment_microcredits > 0
+    quote_by_route = bridge.quote(route=route, amount=amount, recipient=recipient)
+    assert quote_by_route.plan == quote.plan
+    gas = bridge.hyperlane.quote_gas_payment(route_id)
+    assert gas.route_id == route_id and gas == bridge.hyperlane.quote_gas_payment(route)
+    for selector in (route_id, route):
+        call = bridge.hyperlane.transfer_remote(selector, recipient, amount=amount, gas_payment_microcredits=gas.payment_microcredits)
+        assert call.program_id == route.meta_str("aleoRouterProgram")
+        assert call.inputs[3] == domain and call.inputs[5] == f"{10 ** (source.decimals - 4)}u128"
+    with pytest.raises(AmbiguousRouteError):
+        bridge.hyperlane.transfer_remote(source.id, recipient, amount=amount, gas_payment_microcredits=1)
+    with pytest.raises(RouteUnavailableError):
+        bridge.hyperlane.transfer_remote("hyperlane:aleo/usad->ethereum/usad", EVM1, amount="1", gas_payment_microcredits=1)
+    with pytest.raises(UnsupportedRouteError):
+        bridge.hyperlane.transfer_remote("hyperlane:ethereum/bat->aleo/bat", EVM1, amount="1", gas_payment_microcredits=1)
+    assert bridge.aleo.calls == [] or all(c[0] != "transact" for c in bridge.aleo.calls)   # nothing broadcast
+
+
+def test_a_supplied_route_object_is_re_resolved_against_the_live_registry(fake_aleo, bridge):
+    """Review finding (PR #75): a ``Route`` passed to transfer_remote/quote_gas_payment was used as given, so a
+    Route cached before a registry change (or edited) bypassed the current availability check and could build a
+    transfer against stale deployment metadata. Resolution now goes by id through ``bridge.registry``."""
+    from dataclasses import replace
+
+    from aleo_bridge import Bridge
+    from aleo_bridge.registry import Registry
+
+    route_id = "hyperlane:aleo/bat->solana/bat"
+    cached = REG.route(route_id)                      # obtained earlier, while the route was active
+    assert cached.active
+    # 1. The live registry has since disabled the route: the cached object must not get through.
+    disabled = replace(cached, availability="disabled")
+    live = Registry(REG.version, REG.chains(), REG.assets(),
+                    [disabled if r.id == route_id else r for r in REG.routes(include_unavailable=True)])
+    stale_bridge = Bridge(fake_aleo, registry=live)
+    for selector in (cached, route_id):
+        with pytest.raises(RouteUnavailableError, match="disabled"):
+            stale_bridge.hyperlane._route_for(selector)
+        with pytest.raises(RouteUnavailableError):
+            stale_bridge.hyperlane.quote_gas_payment(selector)
+        with pytest.raises(RouteUnavailableError):
+            stale_bridge.hyperlane.transfer_remote(selector, SOL_SYSTEM, amount="0.0001", gas_payment_microcredits=1)
+    # 2. Edited metadata on a caller's copy is ignored: the registry's own Route is what gets used.
+    edited = replace(cached, metadata={**cached.metadata, "aleoRemoteRouterGas": "0", "aleoRouterProgram": "evil.aleo"})
+    assert bridge.hyperlane._route_for(edited) is REG.route(route_id)
+    call = bridge.hyperlane.transfer_remote(edited, SOL_SYSTEM, amount="0.0001", gas_payment_microcredits=1)
+    assert call.program_id == cached.meta_str("aleoRouterProgram") != "evil.aleo"
+    # 3. A Route that the live registry does not know at all is refused, not trusted.
+    from aleo_bridge.errors import RouteNotFoundError
+    with pytest.raises(RouteNotFoundError):
+        bridge.hyperlane._route_for(replace(cached, id="hyperlane:aleo/bat->mars/bat"))
+    # 4. The lifecycle path (the live registry's own object) is unchanged: identity, no copy.
+    assert bridge.hyperlane._route_for(REG.route(route_id)) is REG.route(route_id)

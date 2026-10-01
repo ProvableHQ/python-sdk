@@ -35,6 +35,7 @@ real funds. Review a quote before submitting a new transfer.
 | [bridge_usdc_private_recipient.py](bridge_usdc_private_recipient.py) | Hide the Aleo recipient in the deposit, then claim private USDCx using the retained nonce. |
 | [bridge_wbtc_to_ethereum.py](bridge_wbtc_to_ethereum.py) | Return public Aleo WBTC to Ethereum. |
 | [bridge_sol_to_solana.py](bridge_sol_to_solana.py) | Return public Aleo SOL as native SOL on Solana. |
+| [bridge_arc22_hyperlane.py](bridge_arc22_hyperlane.py) | Move BAT, USDG, or ZEC between Aleo and Ethereum or Solana, in either direction. |
 | [bridge_usdcx_to_ethereum.py](bridge_usdcx_to_ethereum.py) | Redeem public Aleo USDCx for USDC on Ethereum. |
 | [recover_from_journal.py](recover_from_journal.py) | Find a saved transfer, check progress, or submit its remaining step. |
 | [recover_without_files.py](recover_without_files.py) | Restore monitoring of a confirmed Ethereum-to-Aleo WBTC dispatch from explorer details. |
@@ -104,8 +105,8 @@ serve mainnet for these examples. Keys are read only by actions that need them.
 
 Return assets to Ethereum or Solana to use them in applications on those chains.
 Each outbound tutorial spends a **public Aleo balance** and needs Aleo credits
-for fees. Hyperlane carries WBTC and SOL; private balances must be unshielded
-before using these examples. xReserve redeems USDCx for USDC and deducts a
+for fees. Hyperlane carries WBTC, SOL, BAT, USDG, and ZEC; private balances must be
+unshielded before using these examples. xReserve redeems USDCx for USDC and deducts a
 withdrawal fee from the amount received. Its quoted fee is an estimate.
 
 Review a quote with public addresses first. These sample addresses illustrate
@@ -134,6 +135,38 @@ Delegated proving is the default. Pass `proving="local"` to `bridge.execute`
 in the tutorial to prove on the application's machine instead. After submission,
 retain the journal and use `recover_from_journal.py --action wait` if monitoring
 times out. A timeout is not a reason to burn or send the source assets again.
+
+## Bridge BAT, USDG, or ZEC
+
+`bridge_arc22_hyperlane.py` covers the ten directed BAT, USDG, and ZEC routes.
+Pick one with `--route`; a quote needs only public addresses:
+
+| Asset | Route ids |
+| --- | --- |
+| BAT | `hyperlane:ethereum/bat->aleo/bat`, `hyperlane:aleo/bat->ethereum/bat` |
+| BAT | `hyperlane:solana/bat->aleo/bat`, `hyperlane:aleo/bat->solana/bat` |
+| USDG | `hyperlane:ethereum/usdg->aleo/usdg`, `hyperlane:aleo/usdg->ethereum/usdg` |
+| USDG | `hyperlane:solana/usdg->aleo/usdg`, `hyperlane:aleo/usdg->solana/usdg` |
+| ZEC | `hyperlane:solana/zec->aleo/zec`, `hyperlane:aleo/zec->solana/zec` |
+
+```sh
+python examples/bridge_arc22_hyperlane.py \
+  --route 'hyperlane:solana/zec->aleo/zec' \
+  --sender "$SOLANA_SENDER" --recipient "$ALEO_RECIPIENT" --amount 0.0001
+```
+
+`0.0001` is representable on both ends of every route. BAT has 18 decimals on
+Ethereum and Aleo but 8 on Solana, so amounts on a Solana route must fit 8
+decimals. On a Solana source the quoted SOL fees exclude the token amount, which
+leaves the sender's token account instead; the sender needs both.
+
+To submit, set the source chain's key (`EVM_PRIVATE_KEY`, `SOLANA_PRIVATE_KEY`,
+or `ALEO_PRIVATE_KEY`) and add `--execute`; the signer supplies the sender. An
+Aleo source spends a public balance: unshield private records first. Delivery
+lands as a public balance; `shield_assets.py` moves BAT, USDG, and ZEC into
+private records afterwards. Aleo-to-Ethereum and Aleo-to-Solana delivery is
+confirmed by the recipient's balance rising, so keep the recipient idle while
+monitoring.
 
 ## Find and recover a transfer
 
@@ -219,10 +252,12 @@ submission, progress, and error handling remain explicit in each script. Only
 command-line argument definitions are shared in [_arguments.py](_arguments.py).
 # Arc journeys
 
-The following commands preview by default. Supply the RPC variables for each EVM
-chain involved (`ARC_RPC_URL`, `ETHEREUM_RPC_URL`, `BASE_RPC_URL`,
-`ARBITRUM_RPC_URL`). `--execute` loads `EVM_PRIVATE_KEY`; an Aleo-origin public
-burn also needs `ALEO_PRIVATE_KEY`. Keep Aleo credits and native EVM gas funded.
+The following commands preview by default. Each EVM chain involved uses a public
+provider (`rpc.mainnet.arc.io`, `ethereum-rpc.publicnode.com`,
+`base-rpc.publicnode.com`, `arbitrum-one-rpc.publicnode.com`) unless its variable
+names another (`ARC_RPC_URL`, `ETHEREUM_RPC_URL`, `BASE_RPC_URL`, `ARBITRUM_RPC_URL`).
+`--execute` loads `EVM_PRIVATE_KEY`; an Aleo-origin public burn also needs
+`ALEO_PRIVATE_KEY`. Keep Aleo credits and native EVM gas funded.
 
 ```sh
 python -m aleo_bridge.examples.bridge_arc_to_aleo --sender 0xYOUR_ADDRESS --recipient aleo1YOUR_ADDRESS --amount 5

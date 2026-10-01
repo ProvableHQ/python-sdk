@@ -1,11 +1,14 @@
-"""Pure Hyperlane sealevel (Solana) layouts for the SOL warp route.
+"""Pure Hyperlane sealevel (Solana) layouts for the Solana warp routes: native SOL and the
+SPL-collateral tokens (BAT, USDG on Token-2022, ZEC).
 
 Nothing here imports solders or solana-py: inputs and outputs are ``bytes``,
 ``int`` and base58 ``str`` so every layout is testable on an Aleo-only
 install. Sources: veil ``src/solana/SEALEVEL_NOTES.md`` (primary-source
 derivations against hyperlane-monorepo 45c0988), ``src/solana/transferRemote.ts``,
-``src/solana/igp.ts``, ``src/protocols/hyperlane/solanaMetadata.ts``, and the
-recorded mainnet deposit in ``tests/fixtures/sealevel-transfer-remote.json``.
+``src/solana/igp.ts``, ``src/protocols/hyperlane/solanaMetadata.ts``, the
+recorded mainnet SOL deposit in ``tests/fixtures/sealevel-transfer-remote.json`` and
+the recorded ZEC deposit in ``tests/fixtures/sealevel-spl-collateral-transfer-remote.json``
+(veil PR #169).
 """
 from __future__ import annotations
 
@@ -167,7 +170,13 @@ def quote_igp_lamports(igp_account_data: bytes, destination_domain: int, gas_amo
 
 SOLANA_ROUTE_ID = "hyperlane:solana/sol->aleo/sol"
 SYSTEM_PROGRAM_ADDRESS = "11111111111111111111111111111111"
+ASSOCIATED_TOKEN_PROGRAM_ADDRESS = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
 SOLANA_PUBKEY_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
+ROUTER_TYPES = ("native", "spl-collateral")
+# SPL Token and Token-2022 share the base account layout: [32B mint][32B owner][u64 LE amount]…; the
+# amount field is at offset 64 and the base layout is 165 bytes (extensions follow it in Token-2022).
+SPL_TOKEN_ACCOUNT_AMOUNT_OFFSET = 64
+SPL_TOKEN_ACCOUNT_MIN_LENGTH = 72
 
 # SEALEVEL_NOTES §3: seeds are separate byte strings (separators are their own seed).
 DISPATCHED_MESSAGE_SEED_PREFIX = (b"hyperlane", b"-", b"dispatched_message", b"-")
@@ -185,9 +194,15 @@ COMPUTE_UNIT_LIMIT = 400_000
 
 @dataclass(frozen=True)
 class SolanaRouteMetadata:
+    """Reviewed Solana warp-route deployment (veil ``SolanaHyperlaneTransferMetadata``).
+
+    ``router_type`` says which collateral plugin the warp program runs: ``"native"`` (SOL; the
+    collateral lives in ``native_collateral_pda``) or ``"spl-collateral"`` (an SPL Token or
+    Token-2022 mint locked in ``escrow_pda``; ``spl_token_program_address`` owns the mint). The
+    fields of the other kind are ``None``.
+    """
     warp_program_address: str
     token_pda: str
-    native_collateral_pda: str
     dispatch_authority_pda: str
     mailbox_program_address: str
     mailbox_outbox_pda: str
@@ -201,12 +216,20 @@ class SolanaRouteMetadata:
     registry_commit: str
     solana_reviewed_at: str
     solana_config_source: str
+    router_type: str = "native"                 # "native" | "spl-collateral"
+    native_collateral_pda: str | None = None    # native only
+    spl_token_program_address: str | None = None  # spl-collateral only
+    collateral_mint_address: str | None = None    # spl-collateral only
+    escrow_pda: str | None = None                 # spl-collateral only
+
+    @property
+    def is_spl_collateral(self) -> bool:
+        return self.router_type == "spl-collateral"
 
 
 _PUBKEY_FIELDS = (
     ("warpProgramAddress", "warp_program_address"),
     ("tokenPda", "token_pda"),
-    ("nativeCollateralPda", "native_collateral_pda"),
     ("dispatchAuthorityPda", "dispatch_authority_pda"),
     ("mailboxProgramAddress", "mailbox_program_address"),
     ("mailboxOutboxPda", "mailbox_outbox_pda"),
@@ -238,6 +261,16 @@ def solana_route_metadata(route: Route) -> SolanaRouteMetadata:
     fields: dict[str, Any] = {attr: pubkey(key) for key, attr in _PUBKEY_FIELDS}
     overhead = metadata.get("igpOverheadAccount")
     fields["igp_overhead_account"] = None if overhead is None else pubkey("igpOverheadAccount")
+    router_type = metadata.get("routerType", "native")
+    if router_type not in ROUTER_TYPES:
+        raise RouteUnavailableError(f"Solana Hyperlane route has an invalid routerType: {route.id}")
+    fields["router_type"] = router_type
+    if router_type == "spl-collateral":
+        fields["spl_token_program_address"] = pubkey("splTokenProgramAddress")
+        fields["collateral_mint_address"] = pubkey("collateralMintAddress")
+        fields["escrow_pda"] = pubkey("escrowPda")
+    else:
+        fields["native_collateral_pda"] = pubkey("nativeCollateralPda")
 
     domain = metadata.get("destinationDomain")
     if isinstance(domain, bool) or not isinstance(domain, int) or not 0 <= domain <= 0xFFFF_FFFF:
@@ -317,6 +350,34 @@ def derive_gas_payment_pda(igp_program_address: str, unique_message_address: str
     return find_program_address([*GAS_PAYMENT_SEED_PREFIX, b58decode(unique_message_address)], igp_program_address)[0]
 
 
+def derive_associated_token_address(owner_address: str, mint_address: str, token_program_address: str) -> str:
+    """The canonical associated token account of *owner* for *mint* under the SPL Token or Token-2022 program.
+
+    ``[owner, token_program, mint]`` seeds of the Associated Token program (spl-associated-token-account
+    ``get_associated_token_address_with_program_id``). Local derivation only: it neither contacts Solana nor
+    creates the account.
+    """
+    for name, value in (("owner", owner_address), ("mint", mint_address), ("token program", token_program_address)):
+        if not isinstance(value, str) or not SOLANA_PUBKEY_RE.match(value):
+            raise BridgeError(f"associated token address derivation needs a base58 Solana {name}, got {value!r}")
+    seeds = [b58decode(owner_address), b58decode(token_program_address), b58decode(mint_address)]
+    return find_program_address(seeds, ASSOCIATED_TOKEN_PROGRAM_ADDRESS)[0]
+
+
+def decode_spl_token_account_amount(data: bytes | None, address: str) -> int:
+    """The u64 balance stored in an SPL token account; a missing account (``None``) reads as zero.
+
+    Classic SPL Token and Token-2022 share the base layout, so Token-2022 extensions after the base data
+    do not move the amount field. *address* only names the account in the malformed-data error.
+    """
+    if data is None:
+        return 0
+    if len(data) < SPL_TOKEN_ACCOUNT_MIN_LENGTH:
+        raise BridgeError(f"Solana SPL token account has invalid data: {address}")
+    offset = SPL_TOKEN_ACCOUNT_AMOUNT_OFFSET
+    return int.from_bytes(bytes(data[offset:offset + 8]), "little")
+
+
 # --- Account table ----------------------------------------------------------------------------
 
 @dataclass(frozen=True)
@@ -330,12 +391,15 @@ class SolanaAccountMeta:
 
 
 def account_metas(metadata: SolanaRouteMetadata, sender: str, unique_message: str) -> list[SolanaAccountMeta]:
-    """The native-collateral ``TransferRemote`` account list, SEALEVEL_NOTES §2 rows 0–15.
+    """The ``TransferRemote`` account list, SEALEVEL_NOTES §2 rows 0–15 (native) or 0–17 (SPL collateral).
 
     Row 12 (``igpOverheadAccount``) is present only when the route wraps its IGP in an
-    OverheadIgp; the list then has 16 entries, otherwise 15. The sender compiles writable
-    (the native-collateral ``transfer_in`` CPI debits it) and the unique-message account is
-    a read-only signer.
+    OverheadIgp; the native list then has 16 entries, otherwise 15. The sender compiles writable
+    (the collateral plugin's ``transfer_in`` CPI debits it) and the unique-message account is
+    a read-only signer. An SPL-collateral route replaces the native plugin's final two rows
+    (system program, native-collateral PDA) with the token program, the mint, the sender's
+    associated token account and the escrow PDA — verified byte-for-byte against the recorded
+    ZEC transfer in ``tests/fixtures/sealevel-spl-collateral-transfer-remote.json``.
     """
     def ro(address: str) -> SolanaAccountMeta:
         return SolanaAccountMeta(address, False, False)
@@ -361,11 +425,24 @@ def account_metas(metadata: SolanaRouteMetadata, sender: str, unique_message: st
     ]
     if metadata.igp_overhead_account is not None:
         metas.append(ro(metadata.igp_overhead_account))   # 12 (optional)
-    metas.extend([
-        rw(metadata.igp_account),                         # 13
-        ro(SYSTEM_PROGRAM_ADDRESS),                       # 14
-        rw(metadata.native_collateral_pda),               # 15
-    ])
+    metas.append(rw(metadata.igp_account))                # 13
+    if metadata.is_spl_collateral:
+        token_program, mint, escrow = metadata.spl_token_program_address, metadata.collateral_mint_address, metadata.escrow_pda
+        if token_program is None or mint is None or escrow is None:
+            raise BridgeError("SPL-collateral Solana route metadata is missing its token program, mint or escrow")
+        metas.extend([
+            ro(token_program),                                              # 14 SPL Token / Token-2022 program
+            rw(mint),                                                       # 15 collateral mint
+            rw(derive_associated_token_address(sender, mint, token_program)),  # 16 sender's associated token account
+            rw(escrow),                                                     # 17 warp program's escrow PDA
+        ])
+    else:
+        if metadata.native_collateral_pda is None:
+            raise BridgeError("native Solana route metadata is missing its native-collateral PDA")
+        metas.extend([
+            ro(SYSTEM_PROGRAM_ADDRESS),                   # 14
+            rw(metadata.native_collateral_pda),           # 15
+        ])
     return metas
 
 

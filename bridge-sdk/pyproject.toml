@@ -30,6 +30,7 @@ packages = ["python/aleo_bridge"]
 [tool.hatch.build.targets.wheel.force-include]
 "examples/_arc_workflow.py" = "aleo_bridge/examples/_arc_workflow.py"
 "examples/bridge_arc_to_aleo.py" = "aleo_bridge/examples/bridge_arc_to_aleo.py"
+"examples/bridge_arc22_hyperlane.py" = "aleo_bridge/examples/bridge_arc22_hyperlane.py"
 "examples/bridge_ethereum_arc_aleo.py" = "aleo_bridge/examples/bridge_ethereum_arc_aleo.py"
 "examples/l2_arc_aleo_roundtrip.py" = "aleo_bridge/examples/l2_arc_aleo_roundtrip.py"
 "examples/__init__.py" = "aleo_bridge/examples/__init__.py"
