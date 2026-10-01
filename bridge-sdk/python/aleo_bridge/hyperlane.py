@@ -77,7 +77,10 @@ class HyperlaneModule:
         if isinstance(asset_or_route, str) and ":" in asset_or_route:
             asset_or_route = self._bridge.registry.route(asset_or_route)
         if isinstance(asset_or_route, Route):
-            route = asset_or_route            # used as given: lifecycle callers pass the live registry's resolved route
+            # Re-resolve by id: a Route cached from an earlier registry (or edited) must not carry stale
+            # availability or deployment metadata past the checks below. Lifecycle callers pass the live
+            # registry's own object, for which this is the identity lookup.
+            route = self._bridge.registry.route(asset_or_route.id)
             if route.protocol != "hyperlane":
                 raise UnsupportedRouteError(f"Not a Hyperlane route: {route.id}")
             self._aleo_asset(route.source_asset_id)

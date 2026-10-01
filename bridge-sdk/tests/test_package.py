@@ -48,6 +48,23 @@ def test_wheel_includes_inbound_sol_example():
     assert included["examples/bridge_sol.py"] == "aleo_bridge/examples/bridge_sol.py"
 
 
+def test_wheel_ships_every_example_the_docs_advertise():
+    """``python -m aleo_bridge.examples.<script>`` is documented as working from the installed
+    package, and the wheel only carries what ``force-include`` names — so every tutorial source in
+    ``examples/`` (and its README) must be listed, at its package path. Review of PR #75 found
+    ``bridge_arc22_hyperlane`` missing; the checkout-based example tests cannot see that."""
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    included = pyproject["tool"]["hatch"]["build"]["targets"]["wheel"]["force-include"]
+    sources = sorted(p.name for p in (ROOT / "examples").iterdir()
+                     if p.suffix == ".py" or p.name == "README.md")
+    assert sources, "no examples found"
+    missing = [name for name in sources if f"examples/{name}" not in included]
+    assert not missing, f"examples not shipped in the wheel: {missing}"
+    for name in sources:
+        assert included[f"examples/{name}"] == f"aleo_bridge/examples/{name}"
+    assert included["examples/bridge_arc22_hyperlane.py"] == "aleo_bridge/examples/bridge_arc22_hyperlane.py"
+
+
 def test_readme_covers_the_journey():
     """The README is written for a caller: explicit client construction, the lifecycle, recovery,
     privacy conversions, and the agent surface. Operator tooling (live tests, rehearsal gates,
