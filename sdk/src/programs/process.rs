@@ -24,7 +24,7 @@ use indexmap::IndexMap;
 use pyo3::prelude::*;
 use rand::rngs::StdRng;
 use snarkvm::algorithms::snark::varuna::VarunaVersion;
-use snarkvm::console::network::{ConsensusVersion, Network};
+use snarkvm::console::network::{varuna_version_from_consensus, ConsensusVersion, Network};
 use snarkvm::synthesizer::process::{deployment_cost, execution_cost, InclusionVersion};
 
 /// The consensus version in force at `block_height` on this build's network,
@@ -33,16 +33,47 @@ use snarkvm::synthesizer::process::{deployment_cost, execution_cost, InclusionVe
 /// A transaction is judged by the rules at its *inclusion* height, so callers
 /// should pass the chain head (the facade does: `network.get_latest_height()`)
 /// — that is snarkvm's own convention (`query.current_block_height()`).  With
-/// no height, the newest version the network has *scheduled* is used.  That
-/// is a fallback for when no node is reachable, not a default to rely on: the
-/// moment a future snarkvm schedules a version at a height not yet reached,
-/// it would apply unenforced rules to a transaction broadcast now.
+/// no height, the newest version the network has *scheduled* is used: snarkvm
+/// parks unscheduled versions at `u32::MAX`, so the lookup is done one block
+/// below that.  That is a fallback for when no node is reachable, not a
+/// default to rely on: the moment a future snarkvm schedules a version at a
+/// height not yet reached, it would apply unenforced rules to a transaction
+/// broadcast now.
 ///
 /// Never hardcode a version here either: the deployment-cost formula changed
 /// at V18 and a stale literal underestimates the fee, so the transaction is
 /// rejected as underpaid.
-fn consensus_version_at(block_height: Option<u32>) -> anyhow::Result<ConsensusVersion> {
-    CurrentNetwork::CONSENSUS_VERSION(block_height.unwrap_or(u32::MAX))
+pub(crate) fn consensus_version_at(block_height: Option<u32>) -> anyhow::Result<ConsensusVersion> {
+    CurrentNetwork::CONSENSUS_VERSION(block_height.unwrap_or(u32::MAX - 1))
+}
+
+/// The Varuna proof-system version in force at `block_height`, derived from
+/// the consensus version the same way snarkvm's ledger does.
+///
+/// Never hardcode this: V3 activates with consensus V21, and a proof made
+/// with the wrong version fails verification on the network.
+pub(crate) fn varuna_version_at(block_height: Option<u32>) -> anyhow::Result<VarunaVersion> {
+    Ok(varuna_version_from_consensus(consensus_version_at(
+        block_height,
+    )?))
+}
+
+/// The consensus version number (1, 2, …) in force at `block_height` on this
+/// build's network, or the newest scheduled version when no height is given.
+#[pyfunction]
+#[pyo3(signature = (block_height=None))]
+pub fn consensus_version(block_height: Option<u32>) -> anyhow::Result<u16> {
+    Ok(consensus_version_at(block_height)? as u16)
+}
+
+/// The Varuna proof-system version number (1, 2 or 3) in force at
+/// `block_height` on this build's network, or the newest scheduled version
+/// when no height is given.  Proofs must be made with the version active at
+/// their inclusion height.
+#[pyfunction]
+#[pyo3(signature = (block_height=None))]
+pub fn varuna_version(block_height: Option<u32>) -> anyhow::Result<u8> {
+    Ok(varuna_version_at(block_height)? as u8)
 }
 
 /// The Aleo process type.
@@ -205,7 +236,7 @@ impl Process {
             .collect::<anyhow::Result<IndexMap<_, _>>>()?;
         ProcessNative::verify_execution(
             consensus_version_at(block_height)?,
-            VarunaVersion::V2,
+            varuna_version_at(block_height)?,
             InclusionVersion::V1,
             &execution,
             &execution_stacks,
@@ -224,7 +255,7 @@ impl Process {
     ) -> anyhow::Result<()> {
         self.0.verify_fee(
             consensus_version_at(block_height)?,
-            VarunaVersion::V2,
+            varuna_version_at(block_height)?,
             InclusionVersion::V1,
             fee,
             deployment_or_execution_id.into(),

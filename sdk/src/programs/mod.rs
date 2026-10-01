@@ -48,7 +48,7 @@ mod offline_query;
 pub use offline_query::OfflineQuery;
 
 mod process;
-pub use process::Process;
+pub use process::{consensus_version, varuna_version, Process};
 
 mod program_id;
 pub use program_id::ProgramID;

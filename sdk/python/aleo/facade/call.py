@@ -249,13 +249,14 @@ class BoundCall(PreparedCall):
     # ── Fee sourcing ────────────────────────────────────────────────────────
 
     def _current_height(self) -> int | None:
-        """The chain head, for consensus-version-dependent estimates — on the
-        hosted API only.
+        """The chain head, for consensus-version-dependent estimates and
+        proofs — on the hosted API only.
 
         A transaction is judged by the rules in force at its inclusion
-        height, so on the hosted Provable API fee estimates use the version
-        active *now* (resolved through the bindings' per-network activation
-        table), not the newest one the network has scheduled.
+        height, so on the hosted Provable API fee estimates and the Varuna
+        proof version use the version active *now* (resolved through the
+        bindings' per-network activation table), not the newest one the
+        network has scheduled.
 
         Off the hosted API the answer is ``None`` on purpose: a devnode or
         custom node runs its own activation schedule (test heights, an env
@@ -408,11 +409,14 @@ class BoundCall(PreparedCall):
         net = self._net()
         process = self._client.process
         auth = self._build_authorization(account)
+        # Proofs carry the Varuna version in force at the inclusion height, so
+        # prove at the chain head (hosted API only; see _current_height).
+        height = self._current_height()
 
         try:
             _, trace = process.execute(auth)
             trace.prepare(net.Query.rest(self._query_url))
-            execution = trace.prove_execution(self._locator)
+            execution = trace.prove_execution(self._locator, block_height=height)
         except Exception as exc:
             raise ExecutionError(
                 f"Failed to execute/prove {self._locator}: {exc}",
@@ -431,7 +435,7 @@ class BoundCall(PreparedCall):
         try:
             _, fee_trace = process.execute(fee_auth)
             fee_trace.prepare(net.Query.rest(self._query_url))
-            fee = fee_trace.prove_fee()
+            fee = fee_trace.prove_fee(block_height=height)
             tx = net.Transaction.from_execution(execution, fee)
         except Exception as exc:
             raise ExecutionError(
@@ -524,7 +528,9 @@ class BoundCall(PreparedCall):
             try:
                 _, trace = process.execute(auth)
                 trace.prepare(net.Query.rest(self._query_url))
-                execution = trace.prove_execution(self._locator)
+                execution = trace.prove_execution(
+                    self._locator, block_height=self._current_height()
+                )
             except Exception as exc:
                 raise ExecutionError(
                     f"Failed to execute/prove {self._locator} for self-paid "

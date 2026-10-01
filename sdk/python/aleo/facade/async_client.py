@@ -837,13 +837,16 @@ class AsyncBoundCall(PreparedCall):
         query_url = self._query_url
         process = self._client.process
         auth = self._build_authorization(account)
+        # Proofs carry the Varuna version in force at the inclusion height, so
+        # prove at the chain head (hosted API only; see _current_height).
+        height = await self._current_height()
 
         # All blocking Process ops in a thread
         def _prove_execution() -> Any:
             try:
                 _, trace = process.execute(auth)
                 trace.prepare(net.Query.rest(query_url))
-                return trace.prove_execution(locator)
+                return trace.prove_execution(locator, block_height=height)
             except Exception as exc:
                 raise ExecutionError(
                     f"Failed to execute/prove {locator}: {exc}", detail=str(exc)
@@ -865,7 +868,7 @@ class AsyncBoundCall(PreparedCall):
             try:
                 _, fee_trace = process.execute(fee_auth)
                 fee_trace.prepare(net.Query.rest(query_url))
-                fee = fee_trace.prove_fee()
+                fee = fee_trace.prove_fee(block_height=height)
                 tx = net.Transaction.from_execution(execution, fee)
                 return TransactionResult(tx)
             except Exception as exc:
@@ -921,12 +924,13 @@ class AsyncBoundCall(PreparedCall):
             locator = self._locator
             query_url = self._query_url
             process = self._client.process
+            height = await self._current_height()
 
             def _prove_for_fee() -> Any:
                 try:
                     _, trace = process.execute(auth)
                     trace.prepare(net.Query.rest(query_url))
-                    return trace.prove_execution(locator)
+                    return trace.prove_execution(locator, block_height=height)
                 except Exception as exc:
                     raise ExecutionError(
                         f"Failed to execute/prove {locator} for self-paid "
@@ -948,6 +952,18 @@ class AsyncBoundCall(PreparedCall):
 
     # ── Fee helpers (async where record sourcing is async) ───────────────────
 
+    async def _current_height(self) -> int | None:
+        """The chain head for version-dependent estimates and proofs — hosted
+        API only; see ``BoundCall._current_height`` in call.py for why a
+        devnode's height must NOT be mapped through the SDK's activation table.
+        """
+        if not is_provable_host(self._client._provider.url):
+            return None
+        try:
+            return int(await self._client.network.get_latest_height())
+        except Exception:  # noqa: BLE001 - estimate still possible without it
+            return None
+
     async def _authorize_fee_async(
         self,
         account: Any,
@@ -962,16 +978,8 @@ class AsyncBoundCall(PreparedCall):
         process = self._client.process
         execution_id = execution.execution_id
         if base_fee is None:
-            # The version in force at the inclusion height — hosted API only;
-            # see BoundCall._current_height in call.py for why a devnode's
-            # height must NOT be mapped through the SDK's activation table.
-            height: int | None = None
-            if is_provable_host(self._client._provider.url):
-                try:
-                    height = int(await self._client.network.get_latest_height())
-                except Exception:  # noqa: BLE001 - estimate still possible without it
-                    height = None
-            total, _ = process.execution_cost(execution, height)
+            # The version in force at the inclusion height — hosted API only.
+            total, _ = process.execution_cost(execution, await self._current_height())
             base_fee = int(total)
         else:
             base_fee = int(base_fee)

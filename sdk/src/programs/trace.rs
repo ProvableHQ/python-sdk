@@ -15,13 +15,13 @@
 // along with the Aleo SDK library. If not, see <https://www.gnu.org/licenses/>.
 
 use crate::{
+    programs::process::varuna_version_at,
     types::{CurrentAleo, QueryNative, TraceNative},
     Execution, Fee, Query, Transition,
 };
 
 use pyo3::prelude::*;
 use rand::rngs::StdRng;
-use snarkvm::algorithms::snark::varuna::VarunaVersion;
 
 /// The Aleo trace type.
 #[pyclass]
@@ -55,20 +55,35 @@ impl Trace {
     }
 
     /// Returns a new execution with a proof, for the current inclusion assignments and global state root.
-    fn prove_execution(&self, locator: &str) -> anyhow::Result<Execution> {
+    ///
+    /// The proof uses the Varuna version in force at `block_height` (default:
+    /// the network's newest scheduled version); pass the chain head so the
+    /// proof matches what the network verifies with at inclusion.
+    #[pyo3(signature = (locator, block_height=None))]
+    fn prove_execution(
+        &self,
+        locator: &str,
+        block_height: Option<u32>,
+    ) -> anyhow::Result<Execution> {
         self.0
             .prove_execution::<CurrentAleo, _>(
                 locator,
-                VarunaVersion::V2,
+                varuna_version_at(block_height)?,
                 &mut rand::make_rng::<StdRng>(),
             )
             .map(Into::into)
     }
 
     /// Returns a new fee with a proof, for the current inclusion assignment and global state root.
-    fn prove_fee(&self) -> anyhow::Result<Fee> {
+    ///
+    /// Same `block_height` semantics as `prove_execution`.
+    #[pyo3(signature = (block_height=None))]
+    fn prove_fee(&self, block_height: Option<u32>) -> anyhow::Result<Fee> {
         self.0
-            .prove_fee::<CurrentAleo, _>(VarunaVersion::V2, &mut rand::make_rng::<StdRng>())
+            .prove_fee::<CurrentAleo, _>(
+                varuna_version_at(block_height)?,
+                &mut rand::make_rng::<StdRng>(),
+            )
             .map(Into::into)
     }
 
