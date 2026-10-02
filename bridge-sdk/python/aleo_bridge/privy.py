@@ -1,4 +1,4 @@
-"""Privy server wallets as bridge signers (``pip install 'aleo-bridge-sdk[privy]'``).
+"""Privy server wallets as bridge signers (the ``privy-client`` SDK ships with ``aleo-bridge-sdk``).
 
 An existing Privy wallet signs the Ethereum or Solana leg of a transfer without ever exporting
 its key; the bridge keeps building, broadcasting, checkpointing and recovering exactly as with a
@@ -16,9 +16,10 @@ local key::
 Construction contacts neither Privy nor a chain. Each ``send`` requests one signature through
 Privy's wallet RPC (``eth_signTransaction`` / ``signTransaction``) and verifies it locally before
 broadcasting through the connection's own RPC: an Ethereum transaction must recover to the
-configured address, a Solana signature must verify over the exact message the bridge built, and a
-Solana response whose message bytes changed is refused. Wallet provisioning, app secrets and
-authorization keys stay with the application; the signers add no retries of their own.
+configured address and carry exactly the requested recipient, value, calldata, nonce, gas, fees and
+chain id; a Solana signature must verify over the exact message the bridge built, and a Solana
+response whose message bytes changed is refused. Wallet provisioning, app secrets and authorization
+keys stay with the application; the signers add no retries of their own.
 """
 from __future__ import annotations
 
@@ -51,8 +52,8 @@ def _services(client: Any, chain: str) -> tuple[Any, Any]:
     service = getattr(wallets, chain, None)
     if service is None or not callable(getattr(service, "sign_transaction", None)) or not callable(getattr(wallets, "get", None)):
         raise ConfigurationError(
-            "client must be a privy.PrivyClient (pip install 'aleo-bridge-sdk[privy]'); the low-level "
-            "privy.PrivyAPI has no wallets.ethereum / wallets.solana signing services")
+            "client must be a privy.PrivyClient (from the privy-client package aleo-bridge-sdk installs); the "
+            "low-level privy.PrivyAPI has no wallets.ethereum / wallets.solana signing services")
     return wallets, service
 
 
@@ -107,8 +108,8 @@ class PrivyEvmSigner:
                         same=lambda found: checksum_address(found, what="Privy wallet address") == self.address)
 
     def sign_transaction(self, tx: Mapping[str, Any]) -> RemoteSignedTransaction:
-        """One ``eth_signTransaction`` request for the prepared *tx*; the result is verified to
-        recover to :attr:`address` before it is handed back for broadcast."""
+        """One ``eth_signTransaction`` request for the prepared *tx*; the result must recover to
+        :attr:`address` and carry exactly the requested fields before it is handed back for broadcast."""
         fields = unsigned_evm_fields(tx, provider=PROVIDER)
         sender = tx.get("from")
         if sender is not None and checksum_address(sender, what="transaction from") != self.address:
@@ -133,7 +134,7 @@ class PrivyEvmSigner:
             raw = bytes.fromhex(signed[2:])
         except ValueError as exc:
             raise BridgeError("Privy returned a malformed hex signed_transaction") from exc
-        return verified_evm_transaction(raw, sender=self.address, provider=PROVIDER)
+        return verified_evm_transaction(raw, sender=self.address, fields=fields, provider=PROVIDER)
 
 
 class PrivySolanaSigner:

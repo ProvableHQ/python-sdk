@@ -174,9 +174,9 @@ monitoring.
 
 `privy_wallets.py` and `dynamic_wallets.py` send ETH or SOL to a public Aleo
 balance from a server wallet the provider holds, so the backend never handles
-a chain private key. Install the provider's SDK with the matching extra
-(`aleo-bridge-sdk[privy]` or `aleo-bridge-sdk[dynamic]`) and provision the
-wallets with the provider's own tools; the examples never create wallets.
+a chain private key. The provider SDKs install with `aleo-bridge-sdk` (the
+Dynamic SDK needs Python 3.11 or newer). Provision the wallets with the
+provider's own tools; the examples never create wallets.
 
 Each example reads its provider's credentials from the environment and picks
 the wallet for `--chain` (`ethereum` by default, or `solana`):

@@ -10,17 +10,18 @@ requires-python = ">=3.10"
 # source transaction is already on chain. `aleo-sdk[dps]` pulls the same package.
 # Every chain family is a base dependency: one `pip install aleo-bridge-sdk` gives Aleo, Ethereum and
 # Solana legs alike, so a checkpoint written on one machine can always be recovered on another.
+# The Privy and Dynamic server-wallet SDKs (aleo_bridge.privy / aleo_bridge.dynamic) ship the same way;
+# dynamic-wallet-sdk itself requires Python 3.11, so on 3.10 that one module reports it missing.
 dependencies = ["aleo-sdk>=0.5.0", "requests>=2", "pynacl>=1.5",
                 "web3>=7,<9", "eth-account>=0.13",
-                "solders>=0.21", "solana>=0.35"]
+                "solders>=0.21", "solana>=0.35",
+                "privy-client>=0.7",
+                "dynamic-wallet-sdk>=0.6; python_version >= '3.11'"]
 
 [project.optional-dependencies]
 # mcp 2.0 renamed the Server registration API — pin to 1.x (same rule as shield-swap).
 mcp = ["mcp>=1.0,<2"]
-# Remote server wallets (aleo_bridge.privy / aleo_bridge.dynamic): each provider's official Python SDK.
-privy = ["privy-client>=0.7"]
-dynamic = ["dynamic-wallet-sdk>=0.6"]
-dev = ["pytest>=8", "pytest-asyncio>=0.23", "mcp>=1.0,<2", "privy-client>=0.7", "dynamic-wallet-sdk>=0.6"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "mcp>=1.0,<2"]
 
 [build-system]
 requires = ["hatchling"]

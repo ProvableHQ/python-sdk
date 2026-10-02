@@ -785,13 +785,9 @@ that only reads balances, quotes, or status.
 A backend can bridge from an existing Privy or Dynamic server wallet without
 holding a chain private key. The provider signs each source transaction
 remotely; the bridge still builds the transaction, broadcasts it through the
-configured RPC, writes the journal, and recovers from it. Install the chosen
-provider's official Python SDK through the matching extra:
-
-```sh
-python -m pip install 'aleo-bridge-sdk[privy]'
-python -m pip install 'aleo-bridge-sdk[dynamic]'
-```
+configured RPC, writes the journal, and recovers from it. Both providers'
+official Python SDKs (`privy-client` and `dynamic-wallet-sdk`) install with
+`aleo-bridge-sdk`; the Dynamic SDK requires Python 3.11 or newer.
 
 Both providers expose the same signer shape. A signer plugs into the `signer`
 argument of `Ethereum` or `Solana`, and the `Bridge` lifecycle is unchanged:
@@ -836,8 +832,9 @@ Dynamic's EVM wallets sign legacy transactions, so the Ethereum connection
 prepares a `gasPrice` transaction for them automatically.
 
 Every remote signature is verified locally before broadcast: an Ethereum
-transaction must recover to the configured address, and a Solana signature
-must verify over the exact message the bridge built. The signers add no
+transaction must recover to the configured address and carry exactly the
+requested recipient, value, calldata, nonce, gas, fees and chain id, and a
+Solana signature must verify over the exact message the bridge built. The signers add no
 signing or broadcast retries. After an uncertain submission, recover from
 the journal instead of starting the same transfer again. The
 `privy_wallets.py` and `dynamic_wallets.py` [examples](examples/README.md)

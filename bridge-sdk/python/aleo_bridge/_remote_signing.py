@@ -85,19 +85,78 @@ def unsigned_evm_fields(tx: Mapping[str, Any], *, provider: str) -> dict[str, An
     return fields
 
 
-def verified_evm_transaction(raw: bytes, *, sender: str, provider: str) -> RemoteSignedTransaction:
-    """Recover the signer of *raw* and refuse it unless it is *sender* — the only proof that the
-    provider signed with the wallet this connection was configured for."""
+def decode_signed_evm_transaction(raw: bytes) -> dict[str, Any]:
+    """The fields of a signed *raw* transaction (typed 0x02 or legacy envelope), normalised to the
+    shape :func:`unsigned_evm_fields` produces: ``chainId``/``nonce``/``to``/``value``/``data``/``gas``
+    plus ``gasPrice`` or ``maxFeePerGas``+``maxPriorityFeePerGas``. A pre-EIP-155 legacy
+    transaction carries no chain id, so ``chainId`` is ``None`` for it."""
+    from eth_account.typed_transactions.typed_transaction import TypedTransaction
+    from hexbytes import HexBytes
+
+    utils = _eth_utils()
+    decoded: dict[str, Any]
+    if raw[0] <= 0x7F:
+        decoded = dict(TypedTransaction.from_bytes(HexBytes(raw)).as_dict())
+        chain_id: int | None = int(decoded["chainId"])
+    else:
+        import rlp
+        from eth_account._utils.legacy_transactions import Transaction
+
+        legacy: Any = rlp.decode(raw, Transaction)
+        decoded = dict(legacy.as_dict())
+        v = int(decoded["v"])
+        chain_id = (v - 35) // 2 if v >= 35 else None
+    to = decoded.get("to")
+    data = decoded.get("data", b"")
+    fields: dict[str, Any] = {
+        "chainId": chain_id,
+        "nonce": int(decoded["nonce"]),
+        "to": utils.to_checksum_address(to if isinstance(to, str) else "0x" + bytes(to).hex()) if to else None,
+        "value": int(decoded.get("value", 0)),
+        "data": data if isinstance(data, str) else "0x" + bytes(data).hex(),
+        "gas": int(decoded["gas"]),
+    }
+    for key in ("gasPrice", "maxFeePerGas", "maxPriorityFeePerGas"):
+        if decoded.get(key) is not None:
+            fields[key] = int(decoded[key])
+    return fields
+
+
+def verified_evm_transaction(raw: bytes, *, sender: str, fields: Mapping[str, Any],
+                             provider: str) -> RemoteSignedTransaction:
+    """Refuse *raw* unless it recovers to *sender* AND carries exactly the requested *fields*.
+
+    A valid signature only proves which wallet signed; it says nothing about what was signed. A
+    provider (or anything between it and this process) that returns a well-signed transaction to
+    another recipient, with another value, calldata, nonce, gas or fee, must never reach the chain,
+    so every field of the decoded transaction is compared with what was requested.
+    """
     from eth_account import Account
 
     raw = bytes(raw)
     try:
         recovered = Account.recover_transaction(raw)
+        decoded = decode_signed_evm_transaction(raw)
     except Exception as exc:  # noqa: BLE001 — any decoding/recovery failure is a bad signature
         raise BridgeError(f"{provider} returned a malformed signed Ethereum transaction") from exc
     if checksum_address(recovered, what="recovered signer") != sender:
         raise BridgeError(f"{provider} signature does not recover to the configured wallet {sender}; "
                           f"it recovers to {recovered} — refusing to broadcast")
+    expected: dict[str, Any] = {
+        "chainId": int(fields["chainId"]), "nonce": int(fields["nonce"]),
+        "to": checksum_address(fields["to"], what="transaction to"), "value": int(fields.get("value", 0)),
+        "data": str(fields.get("data", "0x")).lower(), "gas": int(fields["gas"]),
+    }
+    fee_keys = ("gasPrice",) if "gasPrice" in fields else ("maxFeePerGas", "maxPriorityFeePerGas")
+    for key in fee_keys:
+        expected[key] = int(fields[key])
+    mismatched = [key for key, value in expected.items()
+                  if (str(decoded.get(key)).lower() if key == "data" else decoded.get(key)) != value]
+    mismatched += [key for key in ("gasPrice", "maxFeePerGas", "maxPriorityFeePerGas")
+                   if key in decoded and key not in expected]
+    if mismatched:
+        raise BridgeError(f"{provider} signed a different transaction than requested "
+                          f"({', '.join(mismatched)} differ) — refusing to broadcast")
     return RemoteSignedTransaction(raw_transaction=raw, hash=bytes(_eth_utils().keccak(raw)))
 
 
@@ -127,7 +186,7 @@ def legacy_transaction_from_signature(fields: Mapping[str, Any], signature: byte
         "data": fields["data"],
     })
     raw = encode_transaction(unsigned, vrs=(v, r, s))
-    return verified_evm_transaction(bytes(raw), sender=sender, provider=provider)
+    return verified_evm_transaction(bytes(raw), sender=sender, fields=fields, provider=provider)
 
 
 # --- Solana --------------------------------------------------------------------------------------
@@ -221,6 +280,6 @@ def run_async(coroutine: Awaitable[T], *, timeout: float) -> T:
     return _SigningLoop.shared().run(coroutine, timeout=timeout)
 
 
-__all__ = ["RemoteSignedTransaction", "checksum_address", "legacy_transaction_from_signature", "run_async",
-           "signer_index", "solana_pubkey", "unsigned_evm_fields", "verified_evm_transaction",
-           "verified_solana_signature"]
+__all__ = ["RemoteSignedTransaction", "checksum_address", "decode_signed_evm_transaction",
+           "legacy_transaction_from_signature", "run_async", "signer_index", "solana_pubkey", "unsigned_evm_fields",
+           "verified_evm_transaction", "verified_solana_signature"]

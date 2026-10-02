@@ -79,6 +79,8 @@ class FakePrivyClient:
         else:
             tx.update({"maxFeePerGas": t["max_fee_per_gas"], "maxPriorityFeePerGas": t["max_priority_fee_per_gas"]})
         account = OTHER_ACCOUNT if self.mode == "wrong-key" else self.evm_account
+        if self.mode == "tampered":                      # the right wallet signs, but not what was asked
+            tx.update({"to": OTHER_ACCOUNT.address, "value": tx["value"] + 1})
         signed = account.sign_transaction(tx)
         return SimpleNamespace(signed_transaction="0x" + bytes(signed.raw_transaction).hex(), encoding="rlp")
 
@@ -221,6 +223,35 @@ def test_evm_signer_refuses_a_signature_from_another_key_without_broadcasting(pr
     with pytest.raises(BridgeError, match="does not recover to the configured wallet"):
         Ethereum(w3=w3, signer=signer).send_transaction({"to": TO, "data": "0x", "value": 1})
     assert len(sign_calls(client)) == 1 and w3.provider.sent == []
+
+
+def test_privy_evm_signer_refuses_a_correctly_signed_but_different_transaction() -> None:
+    signer, client = privy_evm("tampered")
+    w3 = fake_web3(chain_id=1)
+    with pytest.raises(BridgeError, match=r"different transaction than requested \(to, value differ\)"):
+        Ethereum(w3=w3, signer=signer).send_transaction({"to": TO, "data": "0x", "value": 1})
+    assert len(sign_calls(client)) == 1 and w3.provider.sent == []
+
+
+@pytest.mark.parametrize("envelope", ["legacy", "eip1559"])
+@pytest.mark.parametrize("field,other", [("nonce", 9), ("chainId", 5), ("gas", 30000), ("data", "0xdead"),
+                                         ("value", 7), ("fee", None)])
+def test_verified_evm_transaction_compares_every_requested_field(envelope: str, field: str, other: Any) -> None:
+    fee = {"gasPrice": 10**9} if envelope == "legacy" else {"maxFeePerGas": 2 * 10**9, "maxPriorityFeePerGas": 10**8}
+    requested = {"to": TO, "value": 1, "data": "0x1234", "chainId": 1, "nonce": 3, "gas": 21000, **fee}
+    signed_as = dict(requested)
+    if field == "fee":
+        signed_as.update({"gasPrice": 10**9 + 1} if envelope == "legacy" else {"maxFeePerGas": 3 * 10**9})
+    else:
+        signed_as[field] = other
+    raw = bytes(EVM_ACCOUNT.sign_transaction(signed_as).raw_transaction)
+    with pytest.raises(BridgeError, match="different transaction than requested"):
+        remote.verified_evm_transaction(raw, sender=EVM_ACCOUNT.address, fields=requested, provider="Test")
+    honest = bytes(EVM_ACCOUNT.sign_transaction(requested).raw_transaction)
+    assert remote.verified_evm_transaction(honest, sender=EVM_ACCOUNT.address, fields=requested, provider="Test").raw_transaction == honest
+    decoded = remote.decode_signed_evm_transaction(honest)
+    assert decoded["to"] == TO and decoded["chainId"] == 1 and decoded["data"] == "0x1234"
+    assert ("gasPrice" in decoded) == (envelope == "legacy")
 
 
 @pytest.mark.parametrize("provider", ["privy", "dynamic"])
@@ -468,6 +499,8 @@ def _signer_mock(address: str) -> Mock:
 @pytest.mark.parametrize("execute", [False, True])
 def test_server_wallet_examples_quote_or_submit_once(module_name: str, env: dict[str, str], chain: str, execute: bool,
                                                       monkeypatch: Any, tmp_path: Any, capsys: Any) -> None:
+    # The examples import the provider SDK at module level; dynamic-wallet-sdk needs Python 3.11+.
+    pytest.importorskip("privy" if module_name == "privy_wallets" else "dynamic_wallet_sdk")
     module = importlib.import_module(module_name)
     for name, value in env.items():
         monkeypatch.setenv(name, value)
@@ -501,6 +534,7 @@ def test_server_wallet_examples_quote_or_submit_once(module_name: str, env: dict
 
 
 def test_server_wallet_examples_name_only_the_missing_variable(monkeypatch: Any, capsys: Any) -> None:
+    pytest.importorskip("privy")
     module = importlib.import_module("privy_wallets")
     monkeypatch.delenv("PRIVY_APP_ID", raising=False)
     with pytest.raises(SystemExit) as exc:

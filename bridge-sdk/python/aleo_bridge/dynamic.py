@@ -1,4 +1,5 @@
-"""Dynamic server wallets as bridge signers (``pip install 'aleo-bridge-sdk[dynamic]'``).
+"""Dynamic server wallets as bridge signers (the ``dynamic-wallet-sdk`` SDK ships with ``aleo-bridge-sdk``
+on Python 3.11 and newer, the oldest Python that SDK supports).
 
 An existing Dynamic MPC wallet signs the Ethereum or Solana leg of a transfer; the bridge keeps
 building, broadcasting, checkpointing and recovering exactly as with a local key::
@@ -61,8 +62,8 @@ class _DynamicSigner:
         for method in ("load_wallet", "sign_transaction", "authenticate_api_token"):
             if not callable(getattr(client, method, None)):
                 raise ConfigurationError(
-                    f"client must be a dynamic_wallet_sdk wallet client with {method}() "
-                    "(pip install 'aleo-bridge-sdk[dynamic]')")
+                    f"client must be a dynamic_wallet_sdk wallet client with {method}() — the dynamic-wallet-sdk "
+                    "package aleo-bridge-sdk installs on Python 3.11 and newer")
         if api_token is not None and not api_token.strip():
             raise ConfigurationError("Dynamic api_token must not be empty when given")
         if wallet_id is not None and not wallet_id.strip():
