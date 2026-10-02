@@ -1,6 +1,6 @@
 [project]
 name = "aleo-bridge-sdk"
-version = "0.6.0"
+version = "0.6.1"
 description = "Bridge Aleo, Ethereum, Arc, Base, Arbitrum and Solana assets with Hyperlane, Circle xReserve and CCTP"
 readme = "README.md"
 requires-python = ">=3.10"
