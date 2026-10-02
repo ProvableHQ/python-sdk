@@ -16,10 +16,12 @@ def test_version_is_pinned_in_lockstep():
     assert pyproject["project"]["version"] == "0.6.0" == aleo_bridge.__version__
     assert pyproject["project"]["name"] == "aleo-bridge-sdk"
     deps = pyproject["project"]["dependencies"]
-    for base in ("aleo-sdk", "pynacl", "web3", "eth-account", "solders", "solana"):
+    for base in ("aleo-sdk", "pynacl", "web3", "eth-account", "solders", "solana", "privy-client", "dynamic-wallet-sdk"):
         assert any(dep.startswith(base) for dep in deps), f"{base} must be a base dependency"
+    # dynamic-wallet-sdk only supports Python 3.11+, so it is gated by a marker rather than dropped.
+    assert any(dep.startswith("dynamic-wallet-sdk") and "python_version >= '3.11'" in dep for dep in deps)
     extras = pyproject["project"]["optional-dependencies"]
-    assert set(extras) == {"mcp", "dev"}                     # no chain family hides behind an extra
+    assert set(extras) == {"mcp", "dev"}                     # no chain family or wallet provider hides behind an extra
     assert any(dep.startswith("mcp>=1") and "<2" in dep for dep in extras["mcp"])
 
 

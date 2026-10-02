@@ -780,6 +780,66 @@ signers through `Ethereum(w3=..., signer=...)` or
 `Solana(client=..., signer=...)`. Omit the side-chain signer for an application
 that only reads balances, quotes, or status.
 
+### Sign with Privy or Dynamic server wallets
+
+A backend can bridge from an existing Privy or Dynamic server wallet without
+holding a chain private key. The provider signs each source transaction
+remotely; the bridge still builds the transaction, broadcasts it through the
+configured RPC, writes the journal, and recovers from it. Both providers'
+official Python SDKs (`privy-client` and `dynamic-wallet-sdk`) install with
+`aleo-bridge-sdk`; the Dynamic SDK requires Python 3.11 or newer.
+
+Both providers expose the same signer shape. A signer plugs into the `signer`
+argument of `Ethereum` or `Solana`, and the `Bridge` lifecycle is unchanged:
+
+```python
+from privy import PrivyClient
+from aleo_bridge.privy import PrivyEvmSigner, PrivySolanaSigner
+
+privy = PrivyClient(app_id=os.environ["PRIVY_APP_ID"], app_secret=os.environ["PRIVY_APP_SECRET"])
+ethereum = Ethereum("https://ethereum-rpc.publicnode.com", signer=PrivyEvmSigner(
+    privy, wallet_id=os.environ["PRIVY_EVM_WALLET_ID"], address=os.environ["PRIVY_EVM_ADDRESS"]))
+solana = Solana(os.environ["SOLANA_RPC_URL"], signer=PrivySolanaSigner(
+    privy, wallet_id=os.environ["PRIVY_SOLANA_WALLET_ID"], address=os.environ["PRIVY_SOLANA_ADDRESS"]))
+bridge = Bridge(aleo, ethereum=ethereum, solana=solana, checkpoints=store)
+```
+
+```python
+from dynamic_wallet_sdk import DynamicEvmWalletClient, DynamicSvmWalletClient
+from aleo_bridge.dynamic import DynamicEvmSigner, DynamicSolanaSigner
+
+environment_id, api_token = os.environ["DYNAMIC_ENVIRONMENT_ID"], os.environ["DYNAMIC_API_TOKEN"]
+ethereum = Ethereum("https://ethereum-rpc.publicnode.com", signer=DynamicEvmSigner(
+    DynamicEvmWalletClient(environment_id), address=os.environ["DYNAMIC_EVM_ADDRESS"],
+    api_token=api_token, password=os.environ["DYNAMIC_EVM_WALLET_PASSWORD"]))
+solana = Solana(os.environ["SOLANA_RPC_URL"], signer=DynamicSolanaSigner(
+    DynamicSvmWalletClient(environment_id), address=os.environ["DYNAMIC_SOLANA_ADDRESS"],
+    api_token=api_token, password=os.environ["DYNAMIC_SOLANA_WALLET_PASSWORD"]))
+bridge = Bridge(aleo, ethereum=ethereum, solana=solana, checkpoints=store)
+```
+
+Constructing a signer contacts neither the provider nor a chain. Call
+`signer.resolve()` at startup to confirm the credentials and the wallet:
+Privy must report a wallet of the right chain at the configured address for
+the wallet id, and Dynamic must find a wallet of the right chain at the
+address, with the configured `wallet_id` when one is given. Otherwise the
+first signature does the same check. Privy wallets whose policy requires an
+owner signature take `authorization_private_keys=[...]`. Dynamic wallets need
+the `password` used when their shares were backed up to Dynamic, or
+caller-managed `key_shares`; a Dynamic signer built with `api_token=`
+re-authenticates hourly because Dynamic's session token is short-lived.
+Dynamic's EVM wallets sign legacy transactions, so the Ethereum connection
+prepares a `gasPrice` transaction for them automatically.
+
+Every remote signature is verified locally before broadcast: an Ethereum
+transaction must recover to the configured address and carry exactly the
+requested recipient, value, calldata, nonce, gas, fees and chain id, and a
+Solana signature must verify over the exact message the bridge built. The signers add no
+signing or broadcast retries. After an uncertain submission, recover from
+the journal instead of starting the same transfer again. The
+`privy_wallets.py` and `dynamic_wallets.py` [examples](examples/README.md)
+bridge ETH or SOL from a server wallet to Aleo.
+
 ### Delegated and local proving
 
 Aleo transactions require a cryptographic proof before they can be submitted.

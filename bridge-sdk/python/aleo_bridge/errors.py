@@ -15,7 +15,8 @@ class ConfigurationError(BridgeError):
     """The client, environment, or registry is configured inconsistently."""
 
 
-_BASE_PACKAGES = {"evm": "web3 and eth-account", "solana": "solders and solana"}
+_BASE_PACKAGES = {"evm": "web3 and eth-account", "solana": "solders and solana", "privy": "privy-client",
+                  "dynamic": "dynamic-wallet-sdk (Python 3.11 or newer)"}
 
 
 class MissingExtraError(BridgeError):

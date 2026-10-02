@@ -36,6 +36,8 @@ real funds. Review a quote before submitting a new transfer.
 | [bridge_wbtc_to_ethereum.py](bridge_wbtc_to_ethereum.py) | Return public Aleo WBTC to Ethereum. |
 | [bridge_sol_to_solana.py](bridge_sol_to_solana.py) | Return public Aleo SOL as native SOL on Solana. |
 | [bridge_arc22_hyperlane.py](bridge_arc22_hyperlane.py) | Move BAT, USDG, or ZEC between Aleo and Ethereum or Solana, in either direction. |
+| [privy_wallets.py](privy_wallets.py) | Send ETH or SOL to Aleo from an existing Privy server wallet that signs remotely. |
+| [dynamic_wallets.py](dynamic_wallets.py) | Send ETH or SOL to Aleo from an existing Dynamic server wallet that signs remotely. |
 | [bridge_usdcx_to_ethereum.py](bridge_usdcx_to_ethereum.py) | Redeem public Aleo USDCx for USDC on Ethereum. |
 | [recover_from_journal.py](recover_from_journal.py) | Find a saved transfer, check progress, or submit its remaining step. |
 | [recover_without_files.py](recover_without_files.py) | Restore monitoring of a confirmed Ethereum-to-Aleo WBTC dispatch from explorer details. |
@@ -167,6 +169,40 @@ lands as a public balance; `shield_assets.py` moves BAT, USDG, and ZEC into
 private records afterwards. Aleo-to-Ethereum and Aleo-to-Solana delivery is
 confirmed by the recipient's balance rising, so keep the recipient idle while
 monitoring.
+
+## Bridge from a Privy or Dynamic server wallet
+
+`privy_wallets.py` and `dynamic_wallets.py` send ETH or SOL to a public Aleo
+balance from a server wallet the provider holds, so the backend never handles
+a chain private key. The provider SDKs install with `aleo-bridge-sdk` (the
+Dynamic SDK needs Python 3.11 or newer). Provision the wallets with the
+provider's own tools; the examples never create wallets.
+
+Each example reads its provider's credentials from the environment and picks
+the wallet for `--chain` (`ethereum` by default, or `solana`):
+
+- Privy: `PRIVY_APP_ID`, `PRIVY_APP_SECRET`, `PRIVY_EVM_WALLET_ID`,
+  `PRIVY_EVM_ADDRESS`, `PRIVY_SOLANA_WALLET_ID`, `PRIVY_SOLANA_ADDRESS`, and
+  optionally `PRIVY_AUTHORIZATION_PRIVATE_KEY` for wallets with an owner policy.
+- Dynamic: `DYNAMIC_ENVIRONMENT_ID`, `DYNAMIC_API_TOKEN`, `DYNAMIC_EVM_ADDRESS`,
+  `DYNAMIC_EVM_WALLET_PASSWORD`, `DYNAMIC_SOLANA_ADDRESS`,
+  `DYNAMIC_SOLANA_WALLET_PASSWORD`, and optionally `DYNAMIC_EVM_WALLET_ID` and
+  `DYNAMIC_SOLANA_WALLET_ID` to assert the wallet identity.
+
+`ETHEREUM_RPC_URL` and `SOLANA_RPC_URL` override the public mainnet endpoints.
+A run first resolves the wallet with the provider, then prints the quote:
+
+```sh
+python examples/privy_wallets.py --recipient "$ALEO_RECIPIENT" --amount 0.00001
+python examples/dynamic_wallets.py --chain solana --recipient "$ALEO_RECIPIENT" --amount 0.0001
+```
+
+Add `--execute` to submit once. The provider signs the deposit remotely; the
+example verifies the signature locally, broadcasts through the RPC, prints
+the journal ID, and monitors delivery. The wallet needs the amount plus the
+quoted fees: on Solana that includes interchain gas and account rent, which
+exceed the amount for a small transfer. A timeout or an interruption is not a
+reason to submit again; recover the journal entry instead.
 
 ## Find and recover a transfer
 

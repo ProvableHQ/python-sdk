@@ -61,6 +61,18 @@ def outbound_parser(description, *, amount):
     return parser
 
 
+def remote_wallet_parser(description):
+    parser = argparse.ArgumentParser(description=description)
+    parser.add_argument('--chain', choices=['ethereum', 'solana'], default='ethereum',
+                        help='Source chain; the server wallet on that chain signs the deposit.')
+    parser.add_argument('--recipient', required=True, help='Aleo address receiving the funds.')
+    parser.add_argument('--amount', help='Amount in display units; defaults to 0.00001 ETH or 0.0001 SOL.')
+    parser.add_argument('--execute', action='store_true', help='Submit a NEW MAINNET transfer; costs real funds.')
+    parser.add_argument('--journal', default='~/.aleo-bridge/checkpoints')
+    parser.add_argument('--timeout', type=float, default=120, help='Seconds to monitor delivery.')
+    return parser
+
+
 def route_parser(description, *, routes, amount):
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument('--route', required=True, choices=routes, metavar='ROUTE_ID',
