@@ -17,7 +17,10 @@ dependencies = ["aleo-sdk>=0.5.0", "requests>=2", "pynacl>=1.5",
 [project.optional-dependencies]
 # mcp 2.0 renamed the Server registration API — pin to 1.x (same rule as shield-swap).
 mcp = ["mcp>=1.0,<2"]
-dev = ["pytest>=8", "pytest-asyncio>=0.23", "mcp>=1.0,<2"]
+# Remote server wallets (aleo_bridge.privy / aleo_bridge.dynamic): each provider's official Python SDK.
+privy = ["privy-client>=0.7"]
+dynamic = ["dynamic-wallet-sdk>=0.6"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "mcp>=1.0,<2", "privy-client>=0.7", "dynamic-wallet-sdk>=0.6"]
 
 [build-system]
 requires = ["hatchling"]
@@ -35,6 +38,9 @@ packages = ["python/aleo_bridge"]
 "examples/l2_arc_aleo_roundtrip.py" = "aleo_bridge/examples/l2_arc_aleo_roundtrip.py"
 "examples/__init__.py" = "aleo_bridge/examples/__init__.py"
 "examples/_arguments.py" = "aleo_bridge/examples/_arguments.py"
+"examples/_remote_wallets.py" = "aleo_bridge/examples/_remote_wallets.py"
+"examples/privy_wallets.py" = "aleo_bridge/examples/privy_wallets.py"
+"examples/dynamic_wallets.py" = "aleo_bridge/examples/dynamic_wallets.py"
 "examples/bridge_sol.py" = "aleo_bridge/examples/bridge_sol.py"
 "examples/bridge_sol_to_solana.py" = "aleo_bridge/examples/bridge_sol_to_solana.py"
 "examples/bridge_usdc_private_balance.py" = "aleo_bridge/examples/bridge_usdc_private_balance.py"

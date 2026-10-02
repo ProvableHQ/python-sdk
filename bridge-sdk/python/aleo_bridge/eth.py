@@ -132,6 +132,12 @@ class Ethereum:
     ``send_raw_transaction``s; in default-account mode it calls
     ``w3.eth.send_transaction`` so the caller's middleware signs. Receipts are
     polled on the same ``Web3``.
+
+    ``signer`` is anything with an ``address`` and ``sign_transaction(tx)`` returning an object
+    with ``raw_transaction`` and ``hash`` — an ``eth_account`` ``LocalAccount``, or a remote
+    wallet from :mod:`aleo_bridge.privy` / :mod:`aleo_bridge.dynamic`. A signer that sets
+    ``legacy_transactions_only = True`` is handed a ``gasPrice`` transaction instead of an
+    EIP-1559 one.
     """
 
     def __init__(self, rpc_url: str | None = None, *, w3: Any = None, signer: Any = None,
@@ -279,6 +285,10 @@ class Ethereum:
             base_fee = self._w3.eth.get_block("latest").get("baseFeePerGas")
             if base_fee is None:
                 tx["gasPrice"] = int(self._w3.eth.gas_price)
+            elif getattr(self._signer, "legacy_transactions_only", False):
+                # A signer that cannot sign EIP-1559 (Dynamic's MPC wallets) gets a legacy price with
+                # the same tip floor: gasPrice - baseFee is the tip, so it must clear the floor too.
+                tx["gasPrice"] = max(int(self._w3.eth.gas_price), int(base_fee) + self.min_priority_fee_wei)
             else:
                 tip = max(int(self._w3.eth.max_priority_fee), self.min_priority_fee_wei)
                 tx["maxPriorityFeePerGas"] = tip

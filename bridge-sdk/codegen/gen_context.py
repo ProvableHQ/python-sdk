@@ -71,7 +71,11 @@ CONVERSATION_PATTERN = """\
    `EVM_PRIVATE_KEY` + `ETHEREUM_RPC_URL`, `SOLANA_PRIVATE_KEY` (+ optional
    `SOLANA_RPC_URL`), set in the user's own shell before the process starts.
    `Bridge.from_profile()` creates an Aleo key on first use and never writes
-   EVM/Solana keys to disk.
+   EVM/Solana keys to disk.  A backend that keeps its Ethereum/Solana wallets at
+   Privy or Dynamic signs through `aleo_bridge.privy` / `aleo_bridge.dynamic`
+   (`Ethereum(rpc, signer=PrivyEvmSigner(...))`, `Solana(rpc, signer=...)`): the
+   provider's credentials come from the environment the same way, and no chain
+   key exists on this machine at all.
 2. `status()` first in any session: which chains are configured, balances of
    every bridge asset, and the pending transfers in the checkpoint store.  A
    pending transfer is finished with `recover` → `wait`/`resume`/`complete`,

@@ -19,8 +19,11 @@ def test_version_is_pinned_in_lockstep():
     for base in ("aleo-sdk", "pynacl", "web3", "eth-account", "solders", "solana"):
         assert any(dep.startswith(base) for dep in deps), f"{base} must be a base dependency"
     extras = pyproject["project"]["optional-dependencies"]
-    assert set(extras) == {"mcp", "dev"}                     # no chain family hides behind an extra
+    # No chain family hides behind an extra; only the MCP server and the two remote-wallet provider SDKs do.
+    assert set(extras) == {"mcp", "dev", "privy", "dynamic"}
     assert any(dep.startswith("mcp>=1") and "<2" in dep for dep in extras["mcp"])
+    assert extras["privy"] == ["privy-client>=0.7"] and extras["dynamic"] == ["dynamic-wallet-sdk>=0.6"]
+    assert set(extras["privy"] + extras["dynamic"]) <= set(extras["dev"])   # the suite's fakes import neither, but the live tests do
 
 
 def test_wheel_ships_agents_md():
