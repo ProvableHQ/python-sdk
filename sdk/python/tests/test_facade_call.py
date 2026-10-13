@@ -321,13 +321,17 @@ def test_decode_transition_by_id_404_raises_transaction_not_found() -> None:
         a.decode_transition("at1fake")
 
 
-def test_current_height_is_only_consulted_on_the_hosted_api() -> None:
+def test_current_height_follows_the_real_network_only() -> None:
     """A devnode or custom node runs its own activation schedule, so its
     height must not be mapped through the SDK's network table (a devnode at
     height 40 would be priced under V1 and drain its account — seen in the
-    devnode lifecycle tier).  Hosted API → chain head; anything else → None,
+    devnode lifecycle tier).  Hosted API → chain head; a self-hosted node
+    deep into the real chain → chain head (between a snarkvm release
+    scheduling a version and its activation, the newest *scheduled* version
+    would misprice fees and mis-version proofs); a tiny-height node → None,
     which the bindings resolve to the newest scheduled version."""
     from types import SimpleNamespace as NS
+    from aleo._client_common import REAL_NETWORK_MIN_HEIGHT
     from aleo.facade.call import BoundCall
 
     def fake(url: str, height: Any = 4242) -> Any:
@@ -340,4 +344,27 @@ def test_current_height_is_only_consulted_on_the_hosted_api() -> None:
     assert BoundCall._current_height(fake("https://edge.provable.com/api")) == 4242
     assert BoundCall._current_height(fake("https://api.provable.com/v2")) == 4242
     assert BoundCall._current_height(fake("http://127.0.0.1:3030")) is None            # devnode
+    assert BoundCall._current_height(fake("http://127.0.0.1:3030", REAL_NETWORK_MIN_HEIGHT - 1)) is None
+    assert BoundCall._current_height(fake("https://my-node.example.com", REAL_NETWORK_MIN_HEIGHT)) == REAL_NETWORK_MIN_HEIGHT
+    assert BoundCall._current_height(fake("https://my-node.example.com", 22_782_261)) == 22_782_261
     assert BoundCall._current_height(fake("https://edge.provable.com/api", RuntimeError("down"))) is None
+    assert BoundCall._current_height(fake("https://my-node.example.com", RuntimeError("down"))) is None
+
+
+@pytest.mark.asyncio
+async def test_async_current_height_matches_sync_gating() -> None:
+    from types import SimpleNamespace as NS
+    from aleo._client_common import REAL_NETWORK_MIN_HEIGHT
+    from aleo.facade.async_client import AsyncBoundCall
+
+    def fake(url: str, height: Any = 4242) -> Any:
+        async def latest() -> int:
+            if isinstance(height, Exception):
+                raise height
+            return height
+        return NS(_client=NS(_provider=NS(url=url), network=NS(get_latest_height=latest)))
+
+    assert await AsyncBoundCall._current_height(fake("https://edge.provable.com/api")) == 4242
+    assert await AsyncBoundCall._current_height(fake("http://127.0.0.1:3030")) is None
+    assert await AsyncBoundCall._current_height(fake("https://my-node.example.com", REAL_NETWORK_MIN_HEIGHT)) == REAL_NETWORK_MIN_HEIGHT
+    assert await AsyncBoundCall._current_height(fake("https://my-node.example.com", RuntimeError("down"))) is None

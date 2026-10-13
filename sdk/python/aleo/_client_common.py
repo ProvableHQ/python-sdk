@@ -62,6 +62,33 @@ def is_provable_host(url: str) -> bool:
     return (urlparse(url).hostname or "").lower() in PROVABLE_API_HOSTS
 
 
+#: A node whose chain head is at least this high follows the real network's
+#: activation schedule.  Mainnet and testnet are both past twenty million
+#: blocks; a devnode or custom node runs its own (test-height) schedule and
+#: produces thousands of blocks, never a million.
+REAL_NETWORK_MIN_HEIGHT: int = 1_000_000
+
+
+def inclusion_height(url: str, head: int) -> int | None:
+    """The height a transaction broadcast now should be judged at, or ``None``
+    when *head* must not be mapped through the SDK's activation table.
+
+    A transaction is judged by the rules in force at its inclusion height, so
+    the chain head is the right answer for any node on the real network: the
+    hosted API, or a self-hosted node that has produced
+    :data:`REAL_NETWORK_MIN_HEIGHT` blocks.  A devnode or custom node runs its
+    own schedule (test heights, an env override), so mapping ITS tiny height
+    through the mainnet/testnet table lands on an ancient version whose fee
+    formula does not match — a devnode at height 40 would be priced under V1
+    and drain its account.  For those the answer is ``None`` and the bindings
+    fall back to the newest scheduled version, which such a node runs once
+    past its test heights.
+    """
+    if is_provable_host(url) or head >= REAL_NETWORK_MIN_HEIGHT:
+        return head
+    return None
+
+
 def requires_credentials(url: str) -> bool:
     """True if the hosted API at *url* needs api_key/consumer_id for the prover
     and scanner.  The edge does not; the legacy ``api.provable.com`` does.

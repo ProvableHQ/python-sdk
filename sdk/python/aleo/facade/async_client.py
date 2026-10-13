@@ -35,7 +35,7 @@ from contextlib import asynccontextmanager
 from decimal import Decimal
 from typing import Any, AsyncGenerator
 
-from .._client_common import AleoNetworkError, is_provable_host
+from .._client_common import AleoNetworkError, inclusion_height
 from .._facade_common import (
     CreditsAmount,
     credits_to_microcredits,
@@ -838,7 +838,7 @@ class AsyncBoundCall(PreparedCall):
         process = self._client.process
         auth = self._build_authorization(account)
         # Proofs carry the Varuna version in force at the inclusion height, so
-        # prove at the chain head (hosted API only; see _current_height).
+        # prove at the chain head (real-network nodes only; see _current_height).
         height = await self._current_height()
 
         # All blocking Process ops in a thread
@@ -953,16 +953,15 @@ class AsyncBoundCall(PreparedCall):
     # ── Fee helpers (async where record sourcing is async) ───────────────────
 
     async def _current_height(self) -> int | None:
-        """The chain head for version-dependent estimates and proofs — hosted
-        API only; see ``BoundCall._current_height`` in call.py for why a
-        devnode's height must NOT be mapped through the SDK's activation table.
+        """The chain head for version-dependent estimates and proofs; see
+        ``BoundCall._current_height`` in call.py and ``inclusion_height`` for
+        why a devnode's height must NOT be mapped through the SDK's table.
         """
-        if not is_provable_host(self._client._provider.url):
-            return None
         try:
-            return int(await self._client.network.get_latest_height())
+            head = int(await self._client.network.get_latest_height())
         except Exception:  # noqa: BLE001 - estimate still possible without it
             return None
+        return inclusion_height(self._client._provider.url, head)
 
     async def _authorize_fee_async(
         self,
@@ -978,7 +977,7 @@ class AsyncBoundCall(PreparedCall):
         process = self._client.process
         execution_id = execution.execution_id
         if base_fee is None:
-            # The version in force at the inclusion height — hosted API only.
+            # The version in force at the inclusion height — real-network nodes only.
             total, _ = process.execution_cost(execution, await self._current_height())
             base_fee = int(total)
         else:
