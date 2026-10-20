@@ -654,6 +654,45 @@ supplying `record=` avoids the hosted scanner.
 Shielding and unshielding each submit a separate Aleo transaction with a fee.
 A failed conversion does not reverse or repeat the bridge transfer.
 
+### Compliance proofs for USDCx
+
+USDCx is an ARC-22 token: every private transfer checks that the signer is
+not on the token's freeze list. A USDCx unshield and a private xReserve
+withdrawal therefore take one `[MerkleProof; 2]` argument — a bundle of two
+Merkle paths proving the signer's address is absent from
+`usdcx_freezelist.aleo`.
+
+By default the SDK builds that bundle. It reads the list's current root,
+fetches the published tree only when the root changed since the last call,
+verifies every witness against the root, and reuses the result until the
+list changes. While the list is empty (its state on both networks as of
+2026-10-20) the fixed empty-tree bundle is used and nothing beyond the root is
+read. A signer that is on the list gets `FrozenAddressError` before any fee is
+paid.
+
+```python
+receipt = bridge.unshield("aleo/usdcx", amount="2.5").delegate()  # proof built by the SDK
+progress = bridge.execute(quote.plan)                              # private burn: proof built by the SDK
+```
+
+Pass `compliance_proofs=` to use a bundle built elsewhere. The value is the
+encoded literal, a `MerkleProofPair`, or a `(MerkleProof, MerkleProof)` tuple;
+a one-element tuple of any of these is accepted too. `merkle_proof=` is the
+earlier name for the literal form and still works.
+
+```python
+from aleo_bridge import MerkleProof, MerkleProofPair
+
+bundle = MerkleProofPair(MerkleProof(siblings=(0,) * 16, leaf_index=1),
+                         MerkleProof(siblings=(0,) * 16, leaf_index=1))
+receipt = bridge.unshield("aleo/usdcx", amount="2.5", compliance_proofs=bundle).delegate()
+```
+
+`bridge.freezelist.exclusion_proof(address, "usdcx_stablecoin.aleo")` returns
+the bundle for any address, and `bridge.freezelist.clear_cache()` forgets the
+cached trees. The published tree comes from
+`aleo.network.get_program_freeze_list(program)`.
+
 ## Understand transfer costs
 
 A bridge transfer can incur transaction fees, relay costs, and provider fees

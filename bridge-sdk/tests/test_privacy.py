@@ -43,7 +43,7 @@ def test_unshield_arc20_selects_smallest_covering_record(bridge):
     assert bridge.aleo.record_queries[-1] == {"program": "arc20_sol.aleo", "record": "Token", "unspent": True}
     result = call.delegate(wait=False)
     assert result == PrivacyReceipt("at1delegated", "aleo/sol", "0.25", 250_000_000, "unshield")
-    with pytest.raises(ConfigurationError, match="ARC-20 unshield takes no Merkle proof"):
+    with pytest.raises(ConfigurationError, match="ARC-20 unshield takes no compliance proof"):
         bridge.privacy.unshield("aleo/sol", amount="0.25", merkle_proof="[x]")
 
 

@@ -37,6 +37,7 @@ from ._client_common import (
     strip_quotes,
     validate_block_range,
     retry_with_backoff,
+    parse_freeze_list_tree,
 )
 from .security import encrypt_proving_request
 
@@ -748,6 +749,36 @@ class AleoNetworkClient:
             "getProgramMappingPlaintext",
         )
         return Plaintext.from_string(json.loads(raw))
+
+    def get_program_freeze_list(self, program_id: str) -> list[int] | None:
+        """Read the published compliance Merkle tree of a freeze-list program.
+
+        The tree is what an exclusion proof is built from: node values from the
+        leaf layer up to the root, as integers. The indexer can lag a root
+        update, so compare the last node with the program's on-chain
+        ``freeze_list_root`` before using a witness built from it.
+
+        Args:
+            program_id: The program that owns the freeze list, e.g.
+                ``"usdcx_freezelist.aleo"`` — not the token program that
+                imports it.
+
+        Returns:
+            The tree nodes, leaves first and root last; an empty list is
+            published as two zero leaves plus the empty-tree root. ``None`` when
+            the program has no freeze list.
+
+        Raises:
+            AleoNetworkError: If the request fails for another reason, or the
+                response is not a list of decimal node values.
+        """
+        try:
+            raw = self._get(f"/programs/{program_id}/compliance/freeze-list", "getProgramFreezeList")
+        except AleoNetworkError as exc:
+            if exc.status == 404:
+                return None
+            raise
+        return parse_freeze_list_tree(raw)
 
     def get_public_balance(self, address: str) -> int:
         """Read an address's public ``credits.aleo`` balance.

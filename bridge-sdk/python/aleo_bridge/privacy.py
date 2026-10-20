@@ -5,8 +5,11 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any
 
+from aleo.compliance import ProofBundle
+
 from ._calls import AleoCall
 from .errors import ConfigurationError, InsufficientBalanceError, InvalidAmountError, InvalidRecipientError, UnsupportedRouteError
+from .freezelist import resolve_one_bundle
 from .registry import Asset
 from .types import PrivacyReceipt
 from .units import format_decimal_amount, resolve_amount
@@ -104,23 +107,32 @@ class PrivacyModule:
         return self._bridge._call(privacy.program, function, inputs, build)
 
     def unshield(self, asset: Any, *, amount: Any = None, amount_atomic: int | None = None, record: str | None = None,
-                 merkle_proof: str | None = None, recipient: str | None = None) -> AleoCall[PrivacyReceipt]:
-        """Private record → public balance. The record defaults to the smallest covering one; ARC-22 also needs the
-        freeze-list exclusion proof (computed for the signer; veil's empty pair when the list is empty)."""
+                 compliance_proofs: ProofBundle | tuple[ProofBundle] | None = None, merkle_proof: str | None = None,
+                 recipient: str | None = None) -> AleoCall[PrivacyReceipt]:
+        """Move a private record into the public balance.
+
+        The record defaults to the smallest one covering the amount. An ARC-22
+        token (USDCx) also checks that the signer is not on its freeze list:
+        leave ``compliance_proofs`` unset and the SDK computes the exclusion
+        proof from the published list (cached until the list changes), or
+        pass one ``[MerkleProof; 2]`` bundle to use it as given. ``merkle_proof``
+        is the earlier name for that literal and still works.
+        """
         resolved = self._asset(asset, "unshielding")
         atomic, literal = self._amount(resolved, amount, amount_atomic, "Unshielding")
         privacy = resolved.privacy
         assert privacy is not None
         record = record if record is not None else self.select_record(privacy.program, atomic)
+        proof = resolve_one_bundle(compliance_proofs, merkle_proof)
         if privacy.kind == "arc22":
-            proof = merkle_proof if merkle_proof is not None else \
-                self._bridge.freezelist.exclusion_proof(self._bridge.aleo_address(), privacy.program)
+            if proof is None:
+                proof = self._bridge.freezelist.exclusion_proof(self._bridge.aleo_address(), privacy.program)
             function, inputs = "transfer_private_to_public", [self._recipient(resolved, recipient), literal, record, proof]
         else:
             if recipient is not None and recipient != self._bridge.aleo_address():
                 raise ConfigurationError("ARC-20 unshield always credits the caller; omit recipient=")
-            if merkle_proof is not None:
-                raise ConfigurationError("ARC-20 unshield takes no Merkle proof; omit merkle_proof=")
+            if proof is not None:
+                raise ConfigurationError("ARC-20 unshield takes no compliance proof; omit compliance_proofs=")
             function, inputs = "unshield", [record, literal]
         human = format_decimal_amount(atomic, resolved.decimals)
 

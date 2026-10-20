@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import random
 import time
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable, TypeVar, cast
 from urllib.parse import urlparse
 
 _T = TypeVar("_T")
@@ -212,6 +212,28 @@ def jwt_expired(jwt_data: dict[str, Any]) -> bool:
         return True
     exp: int = jwt_data.get("expiration", 0)
     return now_ms() >= exp - FIVE_MINUTES_MS
+
+
+def parse_freeze_list_tree(raw: Any) -> list[int] | None:
+    """Turn the freeze-list endpoint's body into tree node integers.
+
+    The endpoint publishes decimal node strings, leaves first and root last;
+    ``null`` (or a missing body) means the program has no freeze list.
+
+    Raises:
+        AleoNetworkError: If the body is not a list of decimal strings.
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, list):
+        raise AleoNetworkError("Invalid compliance tree: expected a list of decimal node values")
+    nodes: list[int] = []
+    for node in cast(list[Any], raw):
+        text = str(node)
+        if not text.isascii() or not text.isdigit():
+            raise AleoNetworkError(f"Invalid compliance tree node {node!r}: expected a decimal field value")
+        nodes.append(int(text))
+    return nodes
 
 
 def validate_block_range(start: int, end: int) -> None:

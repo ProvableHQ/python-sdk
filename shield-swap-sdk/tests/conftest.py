@@ -138,6 +138,11 @@ class _Program:
         self._mappings = mappings
         self.functions = _Functions(recorder, pid)
         self.source = _valid_source(pid)
+        # Every token program the stub does not describe is backed by an
+        # (empty) freeze list named after it, so the automatic compliance
+        # path resolves without a registry; a test overrides ``imports``.
+        default = [] if pid.endswith("freezelist.aleo") else [f"{pid.removesuffix('.aleo')}_freezelist.aleo"]
+        self.imports = list(recorder.imports.get(pid, default))
 
     def mapping(self, name):
         return _Mapping(self._mappings.get(name, {}))
@@ -187,13 +192,24 @@ class _Network:
 
     def get_program_mapping_value(self, program_id, mapping_name, key):
         """The node's mapping endpoint: no program handle involved.  The
-        stub keys mappings by name only; a program listed in
-        ``missing_programs`` answers the node's 404."""
+        stub keys mappings by name only — except ``freeze_list_root``, which
+        is keyed by program (``StubAleo.roots``) because several lists are
+        read in one call; a program listed in ``missing_programs`` answers
+        the node's 404."""
         self._recorder.mapping_reads.append((program_id, mapping_name, key))
         if program_id in self._recorder.missing_programs:
             from aleo import AleoNetworkError
             raise AleoNetworkError(f"GET /program/{program_id}/... returned 404", status=404)
+        if mapping_name == "freeze_list_root":
+            from aleo.compliance import EMPTY_TREE_ROOT
+            root = self._recorder.roots.get(program_id, EMPTY_TREE_ROOT if program_id.endswith("freezelist.aleo") else None)
+            return None if root is None else f"{root}field"
         return self._recorder._mappings.get(mapping_name, {}).get(key)
+
+    def get_program_freeze_list(self, program_id):
+        """The compliance endpoint: ``StubAleo.freeze_list_trees[program]`` (None = no list)."""
+        self._recorder.tree_reads.append(program_id)
+        return self._recorder.freeze_list_trees.get(program_id)
 
 
 class _Provider:
@@ -219,7 +235,17 @@ class StubAleo:
         self.fetched_programs = []
         self.registered_programs = []
         self.mapping_reads = []
+        self.tree_reads = []
         self.missing_programs = set()
+        # Freeze lists: every list the stub knows is empty unless a test says
+        # otherwise — ``roots[program]`` is the current root (int), and
+        # ``freeze_list_trees[program]`` the published tree for a populated one.
+        # (``roots[program] = None`` makes that list's root unreadable.)
+        self.roots = {}
+        self.freeze_list_trees = {}
+        # program id -> import list, for the compliance resolver's freeze-list lookup.
+        self.imports = {"test_usdcx_stablecoin.aleo": ["test_usdcx_freezelist.aleo"],
+                        "test_usad_stablecoin.aleo": ["test_usad_freezelist.aleo"]}
         self._mappings = mappings or {}
         self.programs = _Programs(self, self._mappings)
         self.record_provider = _Provider(records if records is not None

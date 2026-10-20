@@ -22,6 +22,18 @@ from .rebalance import (
     RebalancePlan as RebalancePlan,
     RebalanceResult as RebalanceResult,
 )
+from .compliance import (
+    ClaimProofs as ClaimProofs,
+    CollectProofs as CollectProofs,
+    IncreaseProofs as IncreaseProofs,
+    MerkleProof as MerkleProof,
+    MerkleProofPair as MerkleProofPair,
+    MintProofs as MintProofs,
+    ProofBundle as ProofBundle,
+    RebalanceProofs as RebalanceProofs,
+    SHIELD_SWAP_FREEZELIST as SHIELD_SWAP_FREEZELIST,
+    SwapProofs as SwapProofs,
+)
 from .types import (
     OwnedPosition as OwnedPosition,
     OwnedPositionState as OwnedPositionState,

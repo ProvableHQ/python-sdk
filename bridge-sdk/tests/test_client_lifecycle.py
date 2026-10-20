@@ -79,7 +79,8 @@ def test_execute_wait_get_status_recover_resume_complete_forward(monkeypatch):
     Bridge.execute(b, "PLAN", on_checkpoint=cb, proving="local", mode="signer", record="r", merkle_proof="m",
                    gas_payment_microcredits=5, secret_nonce="1scalar", poll_seconds=2.0, timeout_seconds=3.0)
     assert seen["args"] == ("PLAN",) and seen["kwargs"] == dict(
-        on_checkpoint=cb, proving="local", mode="signer", record="r", merkle_proof="m", gas_payment_microcredits=5,
+        on_checkpoint=cb, proving="local", mode="signer", record="r", compliance_proofs=None, merkle_proof="m",
+        gas_payment_microcredits=5,
         secret_nonce="1scalar", poll_seconds=2.0, timeout_seconds=3.0)
     seen = _spy(monkeypatch, "wait")
     on_err = lambda exc: None

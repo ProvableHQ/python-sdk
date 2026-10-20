@@ -176,6 +176,58 @@ Two conveniences trade secret material for service:
   `aleo.records.register` shares the account's **view key** with the
   scanning service, which can then see everything the account owns.
 
+## Compliance proofs
+
+Shield Swap checks two kinds of freeze list. Its own
+(`shield_swap_freezelist.aleo`) screens the signer, a position's recipient,
+and its withdrawal address when a position is minted, collected, or
+rebalanced, and the signer when a swap output is claimed. Each ARC-22
+stablecoin traded through a wrapper (USDCx, USAD) screens the signer when its
+records are wrapped and the receiving address when they are unwrapped. Every
+check is one `[MerkleProof; 2]` argument — a *bundle* — and a routed call
+takes up to six.
+
+By default the SDK builds every bundle a call needs. It works out which
+entrypoint the call resolves to and which address each bundle screens, reads
+each list's current root, builds the bundles (the empty-tree pair while a
+list is empty, a verified witness from the published tree otherwise), and
+reuses them until the list's root changes. Nothing changes in how the
+methods are called:
+
+```python
+dex.mint(pool_key=key, tick_lower=lo, tick_upper=hi,
+         amount0_desired=a0, amount1_desired=a1)   # proofs built by the SDK
+dex.claim_swap_output(handle)                     # likewise
+```
+
+An address that is on a list gets `FrozenAddressError` before any fee is
+paid; an unreadable root or a published tree that does not match it raises
+`FreezeListError` naming the fix.
+
+Pass `compliance_proofs=` to supply the bundles yourself, as a tuple in the
+entrypoint's input order. Each element is the encoded literal, a
+`MerkleProofPair`, or a `(MerkleProof, MerkleProof)` tuple. The count must
+match the route the call resolves to, and the per-method aliases spell out
+the possibilities:
+
+| Method | Type | Bundles, in order |
+|---|---|---|
+| `swap` | `SwapProofs` | 0–1: the signer's, when the input is wrapped. |
+| `claim_swap_output` | `ClaimProofs` | 1–3: AMM signer, then a receiver bundle per wrapped leg paid (output, then refund). |
+| `mint` | `MintProofs` | 3–5: a sender bundle per wrapped side (token0 first), then AMM signer, recipient, withdrawal. |
+| `increase_liquidity` | `IncreaseProofs` | 0–2: a sender bundle per wrapped side. |
+| `collect` | `CollectProofs` | 2–4: AMM owner, withdrawal, then a receiver bundle per wrapped side. |
+| `rebalance_position` | `RebalanceProofs` | 2–6: a sender bundle per funded wrapped side, a receiver bundle per wrapped side, then AMM owner, withdrawal. |
+
+A wrong count raises `ValueError` listing the slots the route expects.
+`wrapper_proofs=` — the earlier single-literal argument — still fills every
+wrapped-side slot while the AMM slots are built by the SDK; it cannot be
+combined with `compliance_proofs=`.
+
+`dex.freezelist` is the resolver (`aleo.FreezeListProofs`):
+`dex.freezelist.exclusion_proof(address, program)` returns one bundle for any
+address and list, and `dex.freezelist.clear()` forgets the cached trees.
+
 ## Async
 
 `AsyncShieldSwap` / `AsyncApiClient` mirror the sync **read, swap and claim**

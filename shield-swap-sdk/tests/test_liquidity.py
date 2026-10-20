@@ -246,15 +246,17 @@ def test_increase_wrapped_token1_routes_through_lp_router():
 def test_collect_wrapped_sides_append_wrapper_proofs():
     from aleo_shield_swap._routing import LP_ROUTER_ID
     stub = _wrapped_stub({"1field"})
-    ShieldSwap(stub).collect(pool_key="5field", amount0_requested=7,
-                             amount1_requested=8)
+    dex = ShieldSwap(stub)
+    dex._token_program = lambda tid: "tok.aleo"      # registry row; the stub backs it with an empty list
+    dex.collect(pool_key="5field", amount0_requested=7, amount1_requested=8)
     fn, args = stub.last_call
     assert (stub.last_program, fn) == (LP_ROUTER_ID, "collect_to_wrapped_arc20")
     assert len(args) == 8                            # + trailing wp0
 
     stub = _wrapped_stub({"1field", "2field"})
-    ShieldSwap(stub).collect(pool_key="5field", amount0_requested=7,
-                             amount1_requested=8)
+    dex = ShieldSwap(stub)
+    dex._token_program = lambda tid: "tok.aleo"
+    dex.collect(pool_key="5field", amount0_requested=7, amount1_requested=8)
     fn, args = stub.last_call
     assert fn == "collect_to_wrapped_wrapped"
     assert len(args) == 9                            # + wp0 + wp1

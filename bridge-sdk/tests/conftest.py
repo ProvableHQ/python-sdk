@@ -158,6 +158,19 @@ class FakeNetwork:
     def get_transaction_object(self, tx_id: str) -> FakeTx:
         return FakeTx(tx_id, "hyp_warp_token_wbtc_v2.aleo", "transfer_remote", [{"value": "99field"}])
 
+    def get_program_mapping_value(self, program_id: str, mapping_name: str, key: str) -> Any:
+        """The node's mapping endpoint (no program handle): the same mappings dict, program → mapping → key."""
+        self._aleo.mapping_reads.append((program_id, mapping_name, key))
+        return self._aleo.mappings.get(program_id, {}).get(mapping_name, {}).get(key)
+
+    def get_program_freeze_list(self, program_id: str) -> list[int] | None:
+        """The compliance endpoint: script with ``FakeAleo.freeze_list_trees[program] = nodes`` (None = no list)."""
+        self._aleo.tree_reads.append(program_id)
+        tree = self._aleo.freeze_list_trees.get(program_id)
+        if isinstance(tree, Exception):
+            raise tree
+        return tree
+
     def get_confirmed_transaction(self, tx_id: str) -> Any:
         """Script via ``FakeAleo.confirmed_transactions[tx_id] = <json>``; else raises TransactionNotFound
         (mirrors the real facade's 404 mapping) — additive for lifecycle recovery/status tests."""
@@ -202,6 +215,9 @@ class FakeAleo:
         self.fetched: list = []
         self.registered: list = []
         self.record_queries: list = []
+        self.freeze_list_trees: dict[str, Any] = {}           # freeze-list program -> published tree nodes (or an exception)
+        self.mapping_reads: list = []
+        self.tree_reads: list = []
         self.confirmed_transactions: dict[str, Any] = {}      # tx id -> confirmed-transaction JSON (script for get_confirmed_transaction)
         self.confirmed_transaction_queries: list = []
         self.duplicate_on_submit = False

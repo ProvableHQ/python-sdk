@@ -418,7 +418,7 @@ Returns the API's best route and final slippage floor; pass it to
 ``swap(quote)``. Requires API authentication. Quoting spends no funds
 and needs no record scanning or transaction signature.
 
-### `swap(self, quote: 'Optional[SwapQuote]' = None, *, pool_key: 'Optional[str]' = None, token_in_id: 'Optional[str]' = None, amount_in: 'Optional[int | str | Decimal]' = None, slippage_bps: 'Optional[int]' = None, expected_out: 'Optional[int | str | Decimal]' = None, sqrt_price_limit: 'Optional[int]' = None, deadline_offset_blocks: 'int' = 10000, nonce: 'Optional[int]' = None, identity: 'Optional[BlindedIdentity]' = None, token_in_program: 'Optional[str]' = None, token_record: 'Optional[str]' = None, wrapper_proofs: 'Optional[str]' = None, track: 'bool' = True, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[SwapHandle]'`
+### `swap(self, quote: 'Optional[SwapQuote]' = None, *, pool_key: 'Optional[str]' = None, token_in_id: 'Optional[str]' = None, amount_in: 'Optional[int | str | Decimal]' = None, slippage_bps: 'Optional[int]' = None, expected_out: 'Optional[int | str | Decimal]' = None, sqrt_price_limit: 'Optional[int]' = None, deadline_offset_blocks: 'int' = 10000, nonce: 'Optional[int]' = None, identity: 'Optional[BlindedIdentity]' = None, token_in_program: 'Optional[str]' = None, token_record: 'Optional[str]' = None, compliance_proofs: 'Optional[SwapProofs]' = None, wrapper_proofs: 'Optional[str]' = None, track: 'bool' = True, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[SwapHandle]'`
 
 Prepare a direct or multi-hop swap; submit with transact/delegate.
 
@@ -432,8 +432,10 @@ Journaled calls reserve a counter during preparation and retain the
 submitted handle. Without a journal, save the handle and avoid concurrent
 swaps; use an explicit identity for concurrency. ``track=False`` bypasses
 journaling. ``deadline_offset_blocks`` defaults to 10,000 (~8 hours).
+Freeze-list proofs: leave ``compliance_proofs`` unset and the SDK builds
+them, or pass 0–1 bundles (the signer's, for a wrapped input).
 
-### `claim_swap_output(self, handle: 'SwapHandle', *, timeout: 'float' = 0.0, wrapper_proofs: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[ClaimResult]'`
+### `claim_swap_output(self, handle: 'SwapHandle', *, timeout: 'float' = 0.0, compliance_proofs: 'Optional[ClaimProofs]' = None, wrapper_proofs: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[ClaimResult]'`
 
 Claim a private swap's output.
 
@@ -449,6 +451,8 @@ the signer; claiming consumes the mapping entry.
 After swap confirmation, ``timeout`` sets the maximum wait in seconds
 (default 0). Missing output is polled every 2s without submitting. Timeout raises
 ``SwapOutputNotFinalizedError``; other errors propagate.
+Freeze-list proofs: leave ``compliance_proofs`` unset and the SDK builds
+them, or pass 1–3 bundles (AMM signer, then each wrapped leg paid).
 
 ### `create_pool(self, *, token0_id: 'str', token1_id: 'str', fee: 'int', initial_tick: 'int', tick_spacing: 'Optional[int]' = None, initial_sqrt_price: 'Optional[int]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[TxResult]'`
 
@@ -458,7 +462,7 @@ The fee tier must be registered with the program (validated before
 submission); tick spacing defaults to the tier's on-chain binding and
 the opening price to the tick's sqrt price.
 
-### `mint(self, *, pool_key: 'str', tick_lower: 'int', tick_upper: 'int', amount0_desired: 'int', amount1_desired: 'int', amount0_min: 'int' = 0, amount1_min: 'int' = 0, token0_program: 'Optional[str]' = None, token1_program: 'Optional[str]' = None, token0_record: 'Optional[str]' = None, token1_record: 'Optional[str]' = None, tick_lower_hint: 'Optional[int]' = None, tick_upper_hint: 'Optional[int]' = None, recipient: 'Optional[str]' = None, withdrawal: 'Optional[str]' = None, nonce: 'Optional[str]' = None, wrapper_proofs: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[MintResult]'`
+### `mint(self, *, pool_key: 'str', tick_lower: 'int', tick_upper: 'int', amount0_desired: 'int', amount1_desired: 'int', amount0_min: 'int' = 0, amount1_min: 'int' = 0, token0_program: 'Optional[str]' = None, token1_program: 'Optional[str]' = None, token0_record: 'Optional[str]' = None, token1_record: 'Optional[str]' = None, tick_lower_hint: 'Optional[int]' = None, tick_upper_hint: 'Optional[int]' = None, recipient: 'Optional[str]' = None, withdrawal: 'Optional[str]' = None, nonce: 'Optional[str]' = None, compliance_proofs: 'Optional[MintProofs]' = None, wrapper_proofs: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[MintResult]'`
 
 Mint a concentrated-liquidity position as a private PositionNFT.
 
@@ -467,23 +471,29 @@ from the slot's neighbors unless given explicitly.  *withdrawal* is
 the immutable payout address stored on the NFT — ``collect`` always
 pays it and it can never be changed; defaults to *recipient*.
 Wrapped pool sides route via the LP router; fund with UNDERLYING records.
+Freeze-list proofs: leave ``compliance_proofs`` unset and the SDK builds
+them, or pass 3–5 bundles (wrapped senders, then signer, recipient, withdrawal).
 
-### `increase_liquidity(self, *, pool_key: 'str', amount0_desired: 'int', amount1_desired: 'int', amount0_min: 'int' = 0, amount1_min: 'int' = 0, token0_program: 'Optional[str]' = None, token1_program: 'Optional[str]' = None, token0_record: 'Optional[str]' = None, token1_record: 'Optional[str]' = None, position_record: 'Optional[str]' = None, tick_lower_hint: 'Optional[int]' = None, tick_upper_hint: 'Optional[int]' = None, wrapper_proofs: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[TxResult]'`
+### `increase_liquidity(self, *, pool_key: 'str', amount0_desired: 'int', amount1_desired: 'int', amount0_min: 'int' = 0, amount1_min: 'int' = 0, token0_program: 'Optional[str]' = None, token1_program: 'Optional[str]' = None, token0_record: 'Optional[str]' = None, token1_record: 'Optional[str]' = None, position_record: 'Optional[str]' = None, tick_lower_hint: 'Optional[int]' = None, tick_upper_hint: 'Optional[int]' = None, compliance_proofs: 'Optional[IncreaseProofs]' = None, wrapper_proofs: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[TxResult]'`
 
 Add funds to an existing position (range fixed at mint).
 Wrapped pool sides route via the LP router; fund with UNDERLYING records.
+Freeze-list proofs: leave ``compliance_proofs`` unset and the SDK builds
+them, or pass 0–2 bundles (the signer's, per wrapped side).
 
 ### `decrease_liquidity(self, *, pool_key: 'str', liquidity_to_remove: 'int', amount0_min: 'int' = 0, amount1_min: 'int' = 0, position_record: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[TxResult]'`
 
 Remove liquidity from a position; owed amounts become collectable.
 
-### `collect(self, *, pool_key: 'str', amount0_requested: 'int', amount1_requested: 'int', position_record: 'Optional[str]' = None, wrapper_proofs: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[TxResult]'`
+### `collect(self, *, pool_key: 'str', amount0_requested: 'int', amount1_requested: 'int', position_record: 'Optional[str]' = None, compliance_proofs: 'Optional[CollectProofs]' = None, wrapper_proofs: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[TxResult]'`
 
 Collect owed token amounts from a position.
 
 The payout always goes to the position's immutable ``withdrawal``
 address — set at mint, not redirectable here.  Wrapped pool sides
 route via the LP router, unwrapping to that address in-transaction.
+Freeze-list proofs: leave ``compliance_proofs`` unset and the SDK builds
+them, or pass 2–4 bundles (owner, withdrawal, then a receiver per wrapped side).
 
 ### `burn(self, *, pool_key: 'str', position_record: 'Optional[str]' = None, account: 'Any' = None) -> 'DexCall[TxResult]'`
 
@@ -510,7 +520,7 @@ Raises:
         aligned range is empty, the sizing is ambiguous, or the budget
         supports no liquidity.
 
-### `rebalance_position(self, *, plan: 'Optional[RebalancePlan]' = None, pool_key: 'Optional[str]' = None, position_token_id: 'Optional[str]' = None, tick_lower: 'Optional[int]' = None, tick_upper: 'Optional[int]' = None, liquidity_target: 'Optional[int]' = None, max_funding0: 'Optional[int]' = None, max_funding1: 'Optional[int]' = None, position_record: 'Optional[str]' = None, token0_program: 'Optional[str]' = None, token1_program: 'Optional[str]' = None, token0_record: 'Optional[str]' = None, token1_record: 'Optional[str]' = None, tick_lower_hint: 'Optional[int]' = None, tick_upper_hint: 'Optional[int]' = None, deadline_offset_blocks: 'int' = 20, nonce: 'Optional[str]' = None, wrapper_proofs: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[RebalanceResult]'`
+### `rebalance_position(self, *, plan: 'Optional[RebalancePlan]' = None, pool_key: 'Optional[str]' = None, position_token_id: 'Optional[str]' = None, tick_lower: 'Optional[int]' = None, tick_upper: 'Optional[int]' = None, liquidity_target: 'Optional[int]' = None, max_funding0: 'Optional[int]' = None, max_funding1: 'Optional[int]' = None, position_record: 'Optional[str]' = None, token0_program: 'Optional[str]' = None, token1_program: 'Optional[str]' = None, token0_record: 'Optional[str]' = None, token1_record: 'Optional[str]' = None, tick_lower_hint: 'Optional[int]' = None, tick_upper_hint: 'Optional[int]' = None, deadline_offset_blocks: 'int' = 20, nonce: 'Optional[str]' = None, compliance_proofs: 'Optional[RebalanceProofs]' = None, wrapper_proofs: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[RebalanceResult]'`
 
 Close a position and mint its successor range in ONE transaction.
 
@@ -527,9 +537,13 @@ that moves the price between planning and finalize reverts the whole
 transaction (fee paid, no funds moved).  Rebuild and resubmit when
 that happens; the short default deadline fails stale requests cheaply.
 Funding records for a wrapped side are the UNDERLYING asset's records.
+Freeze-list proofs: leave ``compliance_proofs`` unset and the SDK builds
+them, or pass 2–6 bundles (funded wrapped senders, wrapped receivers,
+then owner and withdrawal).
 
 Raises:
-    ValueError: Without a plan or a complete (pool, range, sizing).
+    ValueError: Without a plan or a complete (pool, range, sizing), or
+        with the wrong number of compliance proof bundles.
     InsufficientRecordsError: If no record covers a funded side.
 
 ### `get_pool(self, pool_key: 'str') -> 'g.PoolState'`

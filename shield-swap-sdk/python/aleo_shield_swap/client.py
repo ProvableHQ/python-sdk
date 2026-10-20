@@ -17,6 +17,7 @@ from typing import Any, Optional
 
 from aleo import AleoNetworkError, ProgramNotFound
 from aleo.codegen.runtime import parse_plaintext
+from aleo.compliance import FreezeListProofs, ProofSlot, freeze_list_program
 
 from . import _generated as g
 from ._core import (
@@ -84,6 +85,11 @@ from .types import (
     TxResult,
 )
 from ._calls import DexCall
+from .compliance import (
+    SHIELD_SWAP_FREEZELIST, ClaimProofs, CollectProofs, IncreaseProofs, MintProofs, RebalanceProofs, Slot,
+    SwapProofs, check_proof_arguments, claim_slots, collect_slots, increase_slots, merge_legacy_wrapper_proofs,
+    mint_slots, planned_proof_slots, rebalance_slots, supplied_literals, swap_slots,
+)
 from ._routing import (
     claim_route,
     collect_route,
@@ -134,6 +140,10 @@ class ShieldSwap:
         # client's lifetime.
         self._wrapped_cache: dict[str, bool] = {}
         self._program_handles: dict[str, Any] = {}
+        #: The freeze list Shield Swap itself checks; override for a non-standard deployment.
+        self.amm_freezelist_program: str = SHIELD_SWAP_FREEZELIST
+        #: Freeze-list exclusion proofs, cached per list until its root changes.
+        self.freezelist = FreezeListProofs(aleo)
 
     def __repr__(self) -> str:
         return f"ShieldSwap(program={self.program!r}, api={self.api.base_url!r})"
@@ -813,6 +823,43 @@ class ShieldSwap:
                     pids.append(wrapper)
         return pids
 
+    # ── Compliance proofs ────────────────────────────────────────────────────
+
+    def _freezelist_for_token(self, token_id: str, program: Optional[str] = None) -> Optional[str]:
+        """The freeze list a wrapped token's wrapper checks — its underlying
+        stablecoin's — or None for a wrapper that ignores the proof (credits).
+        *program* is the underlying program when the caller named it."""
+        if program is None:
+            try:
+                program = self._token_program(token_id)
+            except ValueError as exc:
+                raise ValueError(
+                    f"Cannot resolve the program behind {token_id} to find its freeze "
+                    "list — pass compliance_proofs= explicitly.") from exc
+        return freeze_list_program(self._aleo, program)
+
+    def _compliance_proofs(self, action: str, slots: list[Slot], compliance_proofs: Any,
+                           wrapper_proofs: Optional[str],
+                           programs: Optional[dict[str, Optional[str]]] = None) -> list[str]:
+        """The ``[MerkleProof; 2]`` literal for every planned slot, in order:
+        the caller's bundles when given (count-checked against the route),
+        otherwise built from each list's current root and cached.  *programs*
+        maps a token id to the underlying program the caller named for it."""
+        check_proof_arguments(compliance_proofs, wrapper_proofs)
+        if compliance_proofs is not None:
+            return supplied_literals(action, compliance_proofs, slots)
+        if wrapper_proofs is not None:
+            # Legacy form: the caller's one literal fills every wrapper slot;
+            # only the AMM slots are resolved.
+            amm_only = [ProofSlot(self.amm_freezelist_program, slot.subject) if slot.kind == "amm" else None
+                        for slot in slots]
+            return merge_legacy_wrapper_proofs(slots, self.freezelist.resolve(amm_only), wrapper_proofs)
+        known = programs or {}
+        planned = planned_proof_slots(
+            slots, self.amm_freezelist_program,
+            lambda token_id: self._freezelist_for_token(token_id, known.get(token_id)))
+        return self.freezelist.resolve(planned)
+
     def quote(self, *, token_in: str, token_out: str, amount_in: str | Decimal,
                     slippage_bps: int = 50) -> SwapQuote:
         """Quote a direct or multi-hop swap from two symbols and a token amount.
@@ -841,6 +888,7 @@ class ShieldSwap:
         identity: Optional[BlindedIdentity] = None,
         token_in_program: Optional[str] = None,
         token_record: Optional[str] = None,
+        compliance_proofs: Optional[SwapProofs] = None,
         wrapper_proofs: Optional[str] = None,
         track: bool = True,
         imports: Optional[dict[str, str]] = None,
@@ -858,6 +906,8 @@ class ShieldSwap:
         submitted handle. Without a journal, save the handle and avoid concurrent
         swaps; use an explicit identity for concurrency. ``track=False`` bypasses
         journaling. ``deadline_offset_blocks`` defaults to 10,000 (~8 hours).
+        Freeze-list proofs: leave ``compliance_proofs`` unset and the SDK builds
+        them, or pass 0–1 bundles (the signer's, for a wrapped input).
         """
         if quote is not None:
             if any(v is not None for v in (pool_key, token_in_id, amount_in, expected_out, slippage_bps, sqrt_price_limit)):
@@ -927,6 +977,14 @@ class ShieldSwap:
             for hop in quote.hops:
                 extra.extend([self._amm_token_program(hop.token_in), self._amm_token_program(hop.token_out)])
         self._ensure([p for p in (program, wrapper, *extra) if p], imports)
+        if route.program != self.program and resolved.amount_out_min <= 0:
+            raise ValueError(
+                "routed swaps require amount_out_min > 0 — pass "
+                "expected_out or a slippage below 100%")
+        proofs = self._compliance_proofs(
+            "swap", swap_slots(route.program != self.program, str(acct.address), token_in_id),
+            compliance_proofs, wrapper_proofs, {token_in_id: program})
+        sender_proof = proofs[0] if proofs else default_merkle_proofs()
 
         # Core input order per the contract's swap entrypoint:
         # record, blinding slots, then pool/direction/amounts/bounds/timing/tokens.
@@ -947,16 +1005,11 @@ class ShieldSwap:
         if route.program != self.program:
             # Router deposits the underlying, swaps, and burns the empty
             # wrapper change record in one transaction.
-            if resolved.amount_out_min <= 0:
-                raise ValueError(
-                    "routed swaps require amount_out_min > 0 — pass "
-                    "expected_out or a slippage below 100%")
-            inputs = [record, wrapper_proofs or default_merkle_proofs(),
-                      *inputs[1:]]
+            inputs = [record, sender_proof, *inputs[1:]]
         if multi_hop:
             inputs = multi_hop_inputs(quote, hop_literals, record, identity, amount_in,
                                       resolved.amount_out_min, swap_nonce, deadline,
-                                      wrapper_proofs or default_merkle_proofs(), route.program != self.program)
+                                      sender_proof, route.program != self.program)
         bound = getattr(self._program(route.program).functions,
                         route.function)(*inputs)
 
@@ -999,6 +1052,7 @@ class ShieldSwap:
         handle: SwapHandle,
         *,
         timeout: float = 0.0,
+        compliance_proofs: Optional[ClaimProofs] = None,
         wrapper_proofs: Optional[str] = None,
         imports: Optional[dict[str, str]] = None,
         account: Any = None,
@@ -1017,10 +1071,12 @@ class ShieldSwap:
         After swap confirmation, ``timeout`` sets the maximum wait in seconds
         (default 0). Missing output is polled every 2s without submitting. Timeout raises
         ``SwapOutputNotFinalizedError``; other errors propagate.
+        Freeze-list proofs: leave ``compliance_proofs`` unset and the SDK builds
+        them, or pass 1–3 bundles (AMM signer, then each wrapped leg paid).
         """
         if not math.isfinite(timeout) or timeout < 0:
             raise ValueError("timeout must be finite and nonnegative")
-        self._account(account)
+        acct = self._account(account)
         if not handle.swap_id:
             raise ValueError(
                 "handle.swap_id is not set — recover it from the confirmed "
@@ -1071,14 +1127,12 @@ class ShieldSwap:
         ]
         if not no_refund:
             inputs.append(f"{out.amount_remaining}u128")
-        inputs.append(default_merkle_proofs())
-        # Wrapper receiver proofs: one per wrapped leg being paid — the output
-        # first, then the refund.  A no-refund claim pays only the output.
-        wp = wrapper_proofs or default_merkle_proofs()
-        if w_out:
-            inputs.append(wp)
-        if w_in and not no_refund:
-            inputs.append(wp)
+        # The AMM signer bundle, then one receiver bundle per wrapped leg being
+        # paid — the output first, then the refund (none on a no-refund claim).
+        inputs.extend(self._compliance_proofs(
+            "claim_swap_output",
+            claim_slots(w_out, w_in, no_refund, str(acct.address), str(out.token_in), str(out.token_out)),
+            compliance_proofs, wrapper_proofs))
         bound = getattr(self._program(route.program).functions,
                         route.function)(*inputs)
 
@@ -1552,6 +1606,7 @@ class ShieldSwap:
         tick_upper_hint: Optional[int] = None,
         deadline_offset_blocks: int = REBALANCE_DEADLINE_OFFSET_BLOCKS,
         nonce: Optional[str] = None,
+        compliance_proofs: Optional[RebalanceProofs] = None,
         wrapper_proofs: Optional[str] = None,
         imports: Optional[dict[str, str]] = None,
         account: Any = None,
@@ -1571,9 +1626,13 @@ class ShieldSwap:
         transaction (fee paid, no funds moved).  Rebuild and resubmit when
         that happens; the short default deadline fails stale requests cheaply.
         Funding records for a wrapped side are the UNDERLYING asset's records.
+        Freeze-list proofs: leave ``compliance_proofs`` unset and the SDK builds
+        them, or pass 2–6 bundles (funded wrapped senders, wrapped receivers,
+        then owner and withdrawal).
 
         Raises:
-            ValueError: Without a plan or a complete (pool, range, sizing).
+            ValueError: Without a plan or a complete (pool, range, sizing), or
+                with the wrong number of compliance proof bundles.
             InsufficientRecordsError: If no record covers a funded side.
         """
         acct = self._account(account)
@@ -1656,7 +1715,12 @@ class ShieldSwap:
         # Slot rule shared by all 14 entries: each funded side's record (with
         # the wrapped side's sender proof right after it), then every wrapped
         # side's receiver proof, then the common tail.
-        wp = wrapper_proofs or default_merkle_proofs()
+        proofs = iter(self._compliance_proofs(
+            "rebalance_position",
+            rebalance_slots(w0, w1, plan.funded0 > 0, plan.funded1 > 0, str(acct.address),
+                            str(decoded["withdrawal"]), str(pool.token0), str(pool.token1)),
+            compliance_proofs, wrapper_proofs,
+            {str(pool.token0): token0_program, str(pool.token1): token1_program}))
         programs: list[str] = [route.program]
         funding: list[str] = []
         sides = ((pool.token0, w0, plan.funded0, token0_record, token0_program),
@@ -1670,8 +1734,8 @@ class ShieldSwap:
                     programs.append(program)
                 funding.append(record)
                 if wrapped:
-                    funding.append(wp)
-        receivers = [wp for wrapped in (w0, w1) if wrapped]
+                    funding.append(next(proofs))
+        receivers = [next(proofs) for wrapped in (w0, w1) if wrapped]
         # Refunds pay through both settlement token programs; wrapped sides
         # also dispatch into their wrapper.
         for token_id, wrapped in ((pool.token0, w0), (pool.token1, w1)):
@@ -1686,9 +1750,8 @@ class ShieldSwap:
         self._ensure(programs, imports)
 
         field_nonce = nonce if nonce is not None else generate_field_nonce()
-        proofs = default_merkle_proofs()
         inputs = [position, field_nonce, *funding, *receivers,
-                  request, assets, proofs, proofs]
+                  request, assets, *proofs]
         bound = getattr(self._program(route.program).functions,
                         route.function)(*inputs)
         final_plan = plan
@@ -1739,6 +1802,7 @@ class ShieldSwap:
         recipient: Optional[str] = None,
         withdrawal: Optional[str] = None,
         nonce: Optional[str] = None,
+        compliance_proofs: Optional[MintProofs] = None,
         wrapper_proofs: Optional[str] = None,
         imports: Optional[dict[str, str]] = None,
         account: Any = None,
@@ -1750,6 +1814,8 @@ class ShieldSwap:
         the immutable payout address stored on the NFT — ``collect`` always
         pays it and it can never be changed; defaults to *recipient*.
         Wrapped pool sides route via the LP router; fund with UNDERLYING records.
+        Freeze-list proofs: leave ``compliance_proofs`` unset and the SDK builds
+        them, or pass 3–5 bundles (wrapped senders, then signer, recipient, withdrawal).
         """
 
         acct = self._account(account)
@@ -1795,15 +1861,16 @@ class ShieldSwap:
         field_nonce = nonce if nonce is not None else generate_field_nonce()
         to = recipient or str(acct.address)
         payout = withdrawal or to
-        proofs = default_merkle_proofs()
-        wp = wrapper_proofs or default_merkle_proofs()
+        proofs = iter(self._compliance_proofs(
+            "mint", mint_slots(w0, w1, str(acct.address), to, payout, str(pool.token0), str(pool.token1)),
+            compliance_proofs, wrapper_proofs, {str(pool.token0): program0, str(pool.token1): program1}))
 
         # Wrapper proofs sit directly after their wrapped-side record
-        # (deployed LP-router input order).
-        rec0 = [record0, wp] if w0 else [record0]
-        rec1 = [record1, wp] if w1 else [record1]
+        # (deployed LP-router input order); the three AMM bundles close the call.
+        rec0 = [record0, next(proofs)] if w0 else [record0]
+        rec1 = [record1, next(proofs)] if w1 else [record1]
         inputs = [field_nonce, *rec0, *rec1, to, payout, request,
-                  pool.token0, pool.token1, proofs, proofs, proofs]
+                  pool.token0, pool.token1, *proofs]
         bound = getattr(self._program(route.program).functions,
                         route.function)(*inputs)
 
@@ -1839,12 +1906,16 @@ class ShieldSwap:
         position_record: Optional[str] = None,
         tick_lower_hint: Optional[int] = None,
         tick_upper_hint: Optional[int] = None,
+        compliance_proofs: Optional[IncreaseProofs] = None,
         wrapper_proofs: Optional[str] = None,
         imports: Optional[dict[str, str]] = None,
         account: Any = None,
     ) -> DexCall[TxResult]:
         """Add funds to an existing position (range fixed at mint).
-        Wrapped pool sides route via the LP router; fund with UNDERLYING records."""
+        Wrapped pool sides route via the LP router; fund with UNDERLYING records.
+        Freeze-list proofs: leave ``compliance_proofs`` unset and the SDK builds
+        them, or pass 0–2 bundles (the signer's, per wrapped side).
+        """
 
         acct = self._account(account)
         pool = self.get_pool(pool_key)
@@ -1874,9 +1945,11 @@ class ShieldSwap:
         self._ensure(self._lp_programs(route, program0, program1, pool, w0, w1),
                      imports)
 
-        wp = wrapper_proofs or default_merkle_proofs()
-        rec0 = [record0, wp] if w0 else [record0]
-        rec1 = [record1, wp] if w1 else [record1]
+        proofs = iter(self._compliance_proofs(
+            "increase_liquidity", increase_slots(w0, w1, str(acct.address), str(pool.token0), str(pool.token1)),
+            compliance_proofs, wrapper_proofs, {str(pool.token0): program0, str(pool.token1): program1}))
+        rec0 = [record0, next(proofs)] if w0 else [record0]
+        rec1 = [record1, next(proofs)] if w1 else [record1]
         inputs = [
             position, *rec0, *rec1,
             f"{amount0_desired}u128", f"{amount1_desired}u128",
@@ -1915,6 +1988,7 @@ class ShieldSwap:
         amount0_requested: int,
         amount1_requested: int,
         position_record: Optional[str] = None,
+        compliance_proofs: Optional[CollectProofs] = None,
         wrapper_proofs: Optional[str] = None,
         imports: Optional[dict[str, str]] = None,
         account: Any = None,
@@ -1924,6 +1998,8 @@ class ShieldSwap:
         The payout always goes to the position's immutable ``withdrawal``
         address — set at mint, not redirectable here.  Wrapped pool sides
         route via the LP router, unwrapping to that address in-transaction.
+        Freeze-list proofs: leave ``compliance_proofs`` unset and the SDK builds
+        them, or pass 2–4 bundles (owner, withdrawal, then a receiver per wrapped side).
         """
         acct = self._account(account)
         pool = self.get_pool(pool_key)
@@ -1944,14 +2020,12 @@ class ShieldSwap:
             except ValueError:
                 pass
         self._ensure(token_programs, imports)
-        proofs = default_merkle_proofs()
-        wp = wrapper_proofs or default_merkle_proofs()
+        withdrawal = str(parse_plaintext(position)["withdrawal"])
+        proofs = self._compliance_proofs(
+            "collect", collect_slots(w0, w1, str(acct.address), withdrawal, str(pool.token0), str(pool.token1)),
+            compliance_proofs, wrapper_proofs)
         inputs = [position, f"{amount0_requested}u128", f"{amount1_requested}u128",
-                  pool.token0, pool.token1, proofs, proofs]
-        if w0:
-            inputs.append(wp)
-        if w1:
-            inputs.append(wp)
+                  pool.token0, pool.token1, *proofs]
         bound = getattr(self._program(route.program).functions,
                         route.function)(*inputs)
         # collect's first output is the re-issued PositionNFT record, not a

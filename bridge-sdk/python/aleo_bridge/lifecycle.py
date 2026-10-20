@@ -557,7 +557,7 @@ def _mint_secret(plan: Plan, secret_nonce: str | None) -> str:
 # ── execute ───────────────────────────────────────────────────────────────────
 
 def execute(bridge, plan: Plan, *, on_checkpoint: Callable | None = None, proving: str = "delegate",
-            mode: str | None = None, record: str | None = None, merkle_proof: str | None = None,
+            mode: str | None = None, record: str | None = None, compliance_proofs: Any = None, merkle_proof: str | None = None,
             gas_payment_microcredits: int | None = None, secret_nonce: str | None = None,
             poll_seconds: float = 1.0, timeout_seconds: float = 120.0) -> Progress:
     """Commit funds on the source chain and return the transfer's ``Progress``.
@@ -566,8 +566,8 @@ def execute(bridge, plan: Plan, *, on_checkpoint: Callable | None = None, provin
     a ``Checkpoint`` at each boundary (after each approval hash; after proving and BEFORE
     broadcast for Aleo legs; after broadcast).  Aleo legs prove with ``proving="delegate"`` (DPS)
     or ``"local"``; ``mode`` is ``"caller"|"signer"`` for Aleo Hyperlane and ``"private"|"public"|
-    "public-as-signer"`` for Aleo xReserve burns (``record`` / ``merkle_proof`` feed a private
-    burn).  The Hyperlane hook payment is re-quoted right before proving unless
+    "public-as-signer"`` for Aleo xReserve burns (``record`` / ``compliance_proofs`` feed a private
+    burn; ``merkle_proof`` is the earlier name for one literal bundle).  The Hyperlane hook payment is re-quoted right before proving unless
     ``gas_payment_microcredits`` pins it.  ``secret_nonce`` is the private-mint commitment secret
     for an EVM xReserve deposit — required when ``plan.mint_mode == "private"``; keep it,
     ``complete`` needs it again and the SDK never stores it.
@@ -654,7 +654,8 @@ def execute(bridge, plan: Plan, *, on_checkpoint: Callable | None = None, provin
             burn = bridge.xreserve._burn
             fee_options["withdrawal_fee_atomic"] = fee_atomic
         call = burn(plan.recipient, amount_atomic=plan.amount_atomic, mode=burn_mode,
-                    record=record, merkle_proof=merkle_proof, route=resolved.route, **fee_options)
+                    record=record, compliance_proofs=compliance_proofs, merkle_proof=merkle_proof,
+                    route=resolved.route, **fee_options)
         receipt = _run_aleo_leg(bridge, plan, call, proving=proving, emit=emit, extra_state=verification)
         emit.finalize()
         return to_progress(plan, receipt)

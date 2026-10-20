@@ -29,7 +29,7 @@ from .checkpoint import (Checkpoint, CheckpointLoadResult, CheckpointProblem, Ch
 from .circle import CircleClient  # noqa: E402
 from .client import Bridge  # noqa: E402
 from .eth import Ethereum, EthModule  # noqa: E402
-from .freezelist import EMPTY_MERKLE_PROOF_PAIR, FreezeList  # noqa: E402
+from .freezelist import EMPTY_MERKLE_PROOF_PAIR, FreezeList, MerkleProof, MerkleProofPair, ProofBundle  # noqa: E402
 from .hyperlane import HyperlaneModule  # noqa: E402
 from . import lifecycle  # noqa: E402
 from .lifecycle import prepare  # noqa: E402
@@ -51,6 +51,7 @@ __all__ = [
     "Fee", "GasQuote", "MintReceipt", "Plan", "PreparedTx", "PrivacyReceipt", "Progress", "Quote", "Receipt",
     "SolanaHyperlaneQuote", "Status", "Step", "to_progress",
     "AleoCall", "Bridge", "CircleClient", "DEFAULT_ENDPOINT", "EMPTY_MERKLE_PROOF_PAIR", "FreezeList",
+    "MerkleProof", "MerkleProofPair", "ProofBundle",
     "HyperlaneModule", "PrivacyModule", "Profile", "XReserveModule",
     "Checkpoint", "CheckpointLoadResult", "CheckpointProblem", "CheckpointStore", "FileCheckpointStore", "create_checkpoint",
     "EthModule", "Ethereum", "EvmCall",

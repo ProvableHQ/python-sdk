@@ -20,7 +20,7 @@ from ._calls import AleoCall
 from .cctp import CctpModule
 from .errors import BridgeError, ConfigurationError, UnsupportedRouteError
 from .eth import Ethereum, EthModule
-from .freezelist import FreezeList
+from .freezelist import FreezeList, ProofBundle
 from .hyperlane import HyperlaneModule
 from .privacy import PrivacyModule
 from .profile import DEFAULT_ENDPOINT, Profile
@@ -268,9 +268,16 @@ class Bridge:
         return self.privacy.shield(asset, amount=amount, amount_atomic=amount_atomic, recipient=recipient)
 
     def unshield(self, asset: Any, *, amount: Any = None, amount_atomic: int | None = None, record: str | None = None,
-                 merkle_proof: str | None = None, recipient: str | None = None) -> AleoCall[PrivacyReceipt]:
+                 compliance_proofs: ProofBundle | tuple[ProofBundle] | None = None, merkle_proof: str | None = None,
+                 recipient: str | None = None) -> AleoCall[PrivacyReceipt]:
+        """Move a private record into the public balance; see ``privacy.unshield``.
+
+        An ARC-22 token (USDCx) needs a freeze-list exclusion proof for the
+        signer: computed and cached by the SDK when ``compliance_proofs`` is
+        unset, or taken as given from one ``[MerkleProof; 2]`` bundle.
+        """
         return self.privacy.unshield(asset, amount=amount, amount_atomic=amount_atomic, record=record,
-                                     merkle_proof=merkle_proof, recipient=recipient)
+                                     compliance_proofs=compliance_proofs, merkle_proof=merkle_proof, recipient=recipient)
 
     # ── status ──
     def _public_balance(self, asset: Asset, address: str) -> int:
@@ -370,7 +377,8 @@ class Bridge:
                                 mint_mode=mint_mode, secret_nonce=secret_nonce, **({"cctp": cctp} if cctp is not None else {}))
 
     def execute(self, plan, *, on_checkpoint=None, proving: str = "delegate", mode: str | None = None,
-                record: str | None = None, merkle_proof: str | None = None,
+                record: str | None = None, compliance_proofs: ProofBundle | tuple[ProofBundle] | None = None,
+                merkle_proof: str | None = None,
                 gas_payment_microcredits: int | None = None, secret_nonce: str | None = None,
                 poll_seconds: float = 1.0, timeout_seconds: float = 120.0):
         """Commit funds on the source chain for ``quote.plan``; returns ``Progress``.
@@ -384,14 +392,16 @@ class Bridge:
         changing on-chain receipt identity. ``proving`` is ``"delegate"`` (DPS) or
         ``"local"``; ``mode`` is ``"caller"|"signer"`` (Aleo Hyperlane) or
         ``"private"|"public"|"public-as-signer"`` (Aleo xReserve burn, default
-        private; ``record``/``merkle_proof`` optional — the SDK selects a record
-        and computes the exclusion proof).  The Hyperlane hook payment is
+        private; ``record``/``compliance_proofs`` optional — the SDK selects a
+        record and computes the freeze-list exclusion proof, caching it until
+        the list changes; ``merkle_proof`` is the earlier name for one literal
+        bundle).  The Hyperlane hook payment is
         re-quoted right before proving unless ``gas_payment_microcredits`` is
         pinned.  Irreversible once the source step is broadcast: afterwards use
         ``wait`` / ``recover``, never ``execute`` again.
         """
         return _lifecycle.execute(self, plan, on_checkpoint=on_checkpoint, proving=proving, mode=mode,
-                                  record=record, merkle_proof=merkle_proof,
+                                  record=record, compliance_proofs=compliance_proofs, merkle_proof=merkle_proof,
                                   gas_payment_microcredits=gas_payment_microcredits, secret_nonce=secret_nonce,
                                   poll_seconds=poll_seconds, timeout_seconds=timeout_seconds)
 

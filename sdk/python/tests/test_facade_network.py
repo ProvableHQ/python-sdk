@@ -567,3 +567,12 @@ def test_wait_for_transaction_polls_until_accepted() -> None:
         result = aleo.network.wait_for_transaction(TX_ID, timeout=30.0, poll_interval=0.1)
     assert result["status"] == "accepted"
     assert attempt[0] == 3
+
+
+@resp_lib.activate
+def test_get_program_freeze_list() -> None:
+    resp_lib.add(resp_lib.GET, f"{HOST}/programs/usdcx_freezelist.aleo/compliance/freeze-list", json=["0", "0", "7"])
+    resp_lib.add(resp_lib.GET, f"{HOST}/programs/credits.aleo/compliance/freeze-list", json={"statusCode": 404}, status=404)
+    a = make_client()
+    assert a.network.get_program_freeze_list("usdcx_freezelist.aleo") == [0, 0, 7]
+    assert a.network.get_program_freeze_list("credits.aleo") is None

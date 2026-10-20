@@ -79,7 +79,7 @@ solana-hyperlane / aleo-hyperlane / evm-xreserve / aleo-xreserve) with
 ``fees`` and ``amount_out`` in human units and ``quote.plan``.  Show the
 user fees + amount before ``execute``.
 
-### `execute(self, plan, *, on_checkpoint=None, proving: 'str' = 'delegate', mode: 'str | None' = None, record: 'str | None' = None, merkle_proof: 'str | None' = None, gas_payment_microcredits: 'int | None' = None, secret_nonce: 'str | None' = None, poll_seconds: 'float' = 1.0, timeout_seconds: 'float' = 120.0)`
+### `execute(self, plan, *, on_checkpoint=None, proving: 'str' = 'delegate', mode: 'str | None' = None, record: 'str | None' = None, compliance_proofs: 'ProofBundle | tuple[ProofBundle] | None' = None, merkle_proof: 'str | None' = None, gas_payment_microcredits: 'int | None' = None, secret_nonce: 'str | None' = None, poll_seconds: 'float' = 1.0, timeout_seconds: 'float' = 120.0)`
 
 Commit funds on the source chain for ``quote.plan``; returns ``Progress``.
 
@@ -92,8 +92,10 @@ journal id is reserved before submission and stays fixed through recovery.
 changing on-chain receipt identity. ``proving`` is ``"delegate"`` (DPS) or
 ``"local"``; ``mode`` is ``"caller"|"signer"`` (Aleo Hyperlane) or
 ``"private"|"public"|"public-as-signer"`` (Aleo xReserve burn, default
-private; ``record``/``merkle_proof`` optional — the SDK selects a record
-and computes the exclusion proof).  The Hyperlane hook payment is
+private; ``record``/``compliance_proofs`` optional — the SDK selects a
+record and computes the freeze-list exclusion proof, caching it until
+the list changes; ``merkle_proof`` is the earlier name for one literal
+bundle).  The Hyperlane hook payment is
 re-quoted right before proving unless ``gas_payment_microcredits`` is
 pinned.  Irreversible once the source step is broadcast: afterwards use
 ``wait`` / ``recover``, never ``execute`` again.
@@ -274,11 +276,19 @@ lifecycle layer (plan 4) re-quotes at the last responsible moment by calling thi
 Live relayer payment for the route (the exact u64 the hook asserts); quote right before proving.
 ``asset`` is an asset ref, a ``Route`` or a route id (BAT/USDG need the route: two destinations).
 
-### `xreserve.burn(self, recipient: 'str', *, amount: 'Any' = None, amount_atomic: 'int | None' = None, mode: 'str' = 'private', record: 'str | None' = None, merkle_proof: 'str | None' = None, route: 'Route | None' = None) -> 'AleoCall[BurnReceipt]'`
+### `xreserve.burn(self, recipient: 'str', *, amount: 'Any' = None, amount_atomic: 'int | None' = None, mode: 'str' = 'private', record: 'str | None' = None, compliance_proofs: 'ProofBundle | tuple[ProofBundle] | None' = None, merkle_proof: 'str | None' = None, route: 'Route | None' = None) -> 'AleoCall[BurnReceipt]'`
 
-Burn USDCx for USDC on the selected EVM route (Ethereum by default). ``private`` spends a Token record via the wrapper and needs a
-freeze-list exclusion proof — both are resolved from chain state when not supplied. Minimum: more than
-the 2 USDCx withdrawal fee. The Aleo burn-attestation service forwards accepted burns to Circle.
+Burn USDCx for USDC on the selected EVM route (Ethereum by default).
+
+``mode="private"`` spends a USDCx Token record through the wrapper and
+proves the signer is not on the USDCx freeze list. Both inputs are
+resolved from chain state when not supplied: the record is the
+smallest one covering the amount, and the exclusion proof is computed
+from the published list and cached until the list changes. Pass one
+``[MerkleProof; 2]`` bundle in ``compliance_proofs`` to use it as given
+(``merkle_proof`` is the earlier name for the literal form). The amount
+must exceed the 2 USDCx withdrawal fee. The Aleo burn-attestation
+service forwards accepted burns to Circle.
 
 ### `xreserve.private_mint(self, attestation: 'Attestation', recipient: 'str', *, secret_nonce: 'str' = '0scalar', route: 'Route | None' = None) -> 'AleoCall[MintReceipt]'`
 
@@ -292,13 +302,22 @@ One Circle request for *message_hash*; ``None`` while pending (404).
 
 
 
-### `unshield(self, asset: 'Any', *, amount: 'Any' = None, amount_atomic: 'int | None' = None, record: 'str | None' = None, merkle_proof: 'str | None' = None, recipient: 'str | None' = None) -> 'AleoCall[PrivacyReceipt]'`
+### `unshield(self, asset: 'Any', *, amount: 'Any' = None, amount_atomic: 'int | None' = None, record: 'str | None' = None, compliance_proofs: 'ProofBundle | tuple[ProofBundle] | None' = None, merkle_proof: 'str | None' = None, recipient: 'str | None' = None) -> 'AleoCall[PrivacyReceipt]'`
 
+Move a private record into the public balance; see ``privacy.unshield``.
 
+An ARC-22 token (USDCx) needs a freeze-list exclusion proof for the
+signer: computed and cached by the SDK when ``compliance_proofs`` is
+unset, or taken as given from one ``[MerkleProof; 2]`` bundle.
 
 ### `freezelist.exclusion_proof(self, address: 'str', program: 'str') -> 'str'`
 
-``[MerkleProof; 2]`` proving *address* is not frozen on *program*; veil's empty pair when the list is empty.
+``[MerkleProof; 2]`` proving *address* is not frozen on *program*; the empty pair when the list is empty.
+
+Reads the current root every call and the published tree only when
+the root changed. Raises ``ConfigurationError`` when the root is
+unreadable, the published tree does not match it, or *address* is on
+the list.
 
 ### `eth.transfer_remote(self, asset: 'Any' = None, recipient: 'str | None' = None, *, amount: 'Any' = None, amount_atomic: 'int | None' = None, plan: 'Plan | None' = None) -> 'EvmCall[DispatchReceipt]'`
 

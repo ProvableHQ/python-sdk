@@ -30,6 +30,16 @@ from ._scanner_common import (
 from .facade import Aleo as Aleo
 from .facade import AsyncAleo as AsyncAleo
 from .facade import HTTPProvider as HTTPProvider
+from .compliance import (
+    AsyncFreezeListProofs as AsyncFreezeListProofs,
+    FreezeListError as FreezeListError,
+    FreezeListProofs as FreezeListProofs,
+    FrozenAddressError as FrozenAddressError,
+    MerkleProof as MerkleProof,
+    MerkleProofPair as MerkleProofPair,
+    ProofBundle as ProofBundle,
+    ProofSlot as ProofSlot,
+)
 from .facade.errors import (
     AleoError as AleoError,
     TransactionNotFound as TransactionNotFound,

@@ -2,6 +2,7 @@ import pytest
 
 from aleo_bridge import freezelist as fl
 from aleo_bridge.errors import ConfigurationError
+from aleo.compliance import FreezeListError
 
 # Vectors from sdk/src/integrations/sealance/merkle-tree.ts docstrings
 A = "aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px"
@@ -46,7 +47,7 @@ def test_generate_leaves_sorts_pads_and_filters_zero():
     assert fl.generate_leaves([ZERO, ZERO, A]) == ["0field", f"{A_FIELD}field"]
     assert fl.generate_leaves([]) == ["0field", "0field"]
     assert len(fl.generate_leaves([A] * 5)) == 8 and fl.generate_leaves([A] * 5)[:3] == ["0field"] * 3
-    with pytest.raises(ConfigurationError, match="Leaves limit exceeded"):
+    with pytest.raises(FreezeListError, match="Leaves limit exceeded"):
         fl.generate_leaves([A] * (2 ** 14 + 1), 15)
 
 
@@ -57,9 +58,9 @@ def test_build_tree_shapes_and_errors():
     assert len(four) == 7 and four[:4] == [1, 2, 3, 4]
     assert f"{four[4]}field" == fl.hash_two("1field", "1field", "2field", "mainnet")   # leaf level uses 1field
     assert f"{four[6]}field" == fl.hash_two("0field", f"{four[4]}field", f"{four[5]}field", "mainnet")  # inner level uses 0field
-    with pytest.raises(ConfigurationError, match="cannot be empty"):
+    with pytest.raises(FreezeListError, match="cannot be empty"):
         fl.build_tree([], "mainnet")
-    with pytest.raises(ConfigurationError, match="even number"):
+    with pytest.raises(FreezeListError, match="even number"):
         fl.build_tree(["1field", "2field", "3field"], "mainnet")
 
 
@@ -71,8 +72,10 @@ def test_leaf_indices_and_sibling_path():
     path = fl.sibling_path(four, 1, 15)
     assert len(path) == 15 and path[:3] == [2, 1, four[5]] and path[3:] == [0] * 12   # leaf, sibling, uncle, zero-padding
     assert len(fl.sibling_path(four, 1, 16)) == 16
-    assert fl.format_merkle_proof(([2, 1], 1), ([3, 4], 2)) == \
-        "[{ siblings: [2field, 1field], leaf_index: 1u32 }, { siblings: [3field, 4field], leaf_index: 2u32 }]"
+    pad = [0] * 14
+    assert fl.format_merkle_proof(([2, 1] + pad, 1), ([3, 4] + pad, 2)) == (
+        "[{ siblings: [2field, 1field, " + ", ".join(["0field"] * 14) + "], leaf_index: 1u32 }, "
+        "{ siblings: [3field, 4field, " + ", ".join(["0field"] * 14) + "], leaf_index: 2u32 }]")
 
 
 def test_pure_exclusion_proof_of_empty_tree_equals_veil_literal():
@@ -87,21 +90,44 @@ def test_pure_exclusion_proof_of_empty_tree_equals_veil_literal():
 def test_freezelist_reads_mappings_and_builds_proof(bridge):
     mappings = bridge.aleo.mappings.setdefault(FREEZE_LIST_PROGRAM, {})
     assert bridge.freezelist.leaves(PROGRAM) == []
-    # An unreadable on-chain root is fatal now (item 4): no silent fallback to an unverified proof.
+    # An unreadable on-chain root is fatal: no silent fallback to an unverified proof.
     with pytest.raises(ConfigurationError, match="unreadable"):
         bridge.freezelist.exclusion_proof(RECIPIENT, PROGRAM)
     mappings["freeze_list_root"] = {"1u8": f"{fl.EMPTY_TREE_ROOT}field"}
     assert bridge.freezelist.exclusion_proof(RECIPIENT, PROGRAM) == fl.EMPTY_MERKLE_PROOF_PAIR
+    assert bridge.aleo.tree_reads == []                                # an empty list never fetches the tree
     mappings["freeze_list_last_index"] = {"true": "1u32"}
     mappings["freeze_list_index"] = {"0u32": A, "1u32": ZERO}
     assert bridge.freezelist.leaves(PROGRAM) == [A]                    # zero address filtered
-    # The root moved once the list gained a member; seed the fake with the matching root.
-    mappings["freeze_list_root"] = {"1u8": f"{fl.build_tree(fl.generate_leaves([A]), 'mainnet')[-1]}field"}
+    # The root moved once the list gained a member; seed the fake with the matching root and published tree.
+    tree = fl.build_tree(fl.generate_leaves([A]), "mainnet")
+    mappings["freeze_list_root"] = {"1u8": f"{tree[-1]}field"}
+    bridge.aleo.freeze_list_trees[FREEZE_LIST_PROGRAM] = tree
     assert bridge.freezelist.tree(PROGRAM)[:2] == [0, A_FIELD]
     one = "{ siblings: [" + f"{A_FIELD}field, 0field, " + ", ".join(["0field"] * 14) + "], leaf_index: 1u32 }"
     assert bridge.freezelist.exclusion_proof(RECIPIENT, PROGRAM) == f"[{one}, {one}]"
+    assert bridge.freezelist.exclusion_proof(RECIPIENT, PROGRAM) == f"[{one}, {one}]"
+    assert bridge.aleo.tree_reads == [FREEZE_LIST_PROGRAM]             # cached while the root is unchanged
     with pytest.raises(ConfigurationError, match="freeze list"):
         bridge.freezelist.exclusion_proof(A, PROGRAM)
+
+
+def test_exclusion_proof_refetches_when_the_root_changes_and_rejects_a_stale_tree(bridge):
+    mappings = bridge.aleo.mappings.setdefault(FREEZE_LIST_PROGRAM, {})
+    tree = fl.build_tree(fl.generate_leaves([A]), "mainnet")
+    mappings["freeze_list_root"] = {"1u8": f"{tree[-1]}field"}
+    bridge.aleo.freeze_list_trees[FREEZE_LIST_PROGRAM] = tree
+    first = bridge.freezelist.exclusion_proof(RECIPIENT, PROGRAM)
+    bigger = fl.build_tree(fl.generate_leaves([A, B]), "mainnet")
+    mappings["freeze_list_root"] = {"1u8": f"{bigger[-1]}field"}
+    with pytest.raises(ConfigurationError, match="does not match the on-chain root"):   # indexer still serves the old tree
+        bridge.freezelist.exclusion_proof(RECIPIENT, PROGRAM)
+    bridge.aleo.freeze_list_trees[FREEZE_LIST_PROGRAM] = bigger
+    second = bridge.freezelist.exclusion_proof(RECIPIENT, PROGRAM)
+    assert second != first and bridge.aleo.tree_reads == [FREEZE_LIST_PROGRAM] * 3
+    bridge.freezelist.clear_cache()
+    assert bridge.freezelist.exclusion_proof(RECIPIENT, PROGRAM) == second
+    assert bridge.aleo.tree_reads == [FREEZE_LIST_PROGRAM] * 4
 
 
 def test_exclusion_proof_raises_when_root_unreadable(bridge):
@@ -134,6 +160,8 @@ def test_freeze_list_program_resolves_via_fallback_table_when_imports_unavailabl
 def test_freeze_list_program_raises_for_unknown_program(bridge):
     with pytest.raises(ConfigurationError, match="no freeze-list program"):
         bridge.freezelist.freeze_list_program("arc20_wbtc.aleo")
+    with pytest.raises(ConfigurationError, match="compliance_proofs"):
+        bridge.freezelist.exclusion_proof(RECIPIENT, "arc20_wbtc.aleo")
 
 
 def test_freeze_list_program_propagates_unrelated_exceptions(bridge, monkeypatch):
@@ -160,7 +188,55 @@ def test_leaves_reads_from_freeze_list_program_not_token_program(bridge):
 def test_exclusion_proof_verifies_onchain_root(bridge):
     fl_mappings = bridge.aleo.mappings.setdefault(FREEZE_LIST_PROGRAM, {})
     fl_mappings["freeze_list_root"] = {"1u8": "123field"}
-    with pytest.raises(ConfigurationError, match="freeze-list root"):
+    bridge.aleo.freeze_list_trees[FREEZE_LIST_PROGRAM] = [0, 0, fl.EMPTY_TREE_ROOT]
+    with pytest.raises(ConfigurationError, match="freeze-list tree root"):
         bridge.freezelist.exclusion_proof(RECIPIENT, PROGRAM)
     fl_mappings["freeze_list_root"] = {"1u8": f"{fl.EMPTY_TREE_ROOT}field"}
     assert bridge.freezelist.exclusion_proof(RECIPIENT, PROGRAM) == fl.EMPTY_MERKLE_PROOF_PAIR
+    fl_mappings["freeze_list_root"] = {"1u8": "123field"}
+    with pytest.raises(ConfigurationError, match="freeze-list root"):      # the mapping-walk tree checks the root too
+        bridge.freezelist.tree(PROGRAM)
+
+
+# ── compliance_proofs= and the merkle_proof= alias ──────────────────────────
+
+ONE_LITERAL = fl.EMPTY_MERKLE_PROOF_PAIR
+
+
+def _seed_empty_list(bridge):
+    bridge.aleo.mappings.setdefault(FREEZE_LIST_PROGRAM, {})["freeze_list_root"] = {"1u8": f"{fl.EMPTY_TREE_ROOT}field"}
+
+
+def test_unshield_accepts_every_proof_form_and_computes_when_unset(bridge):
+    _seed_empty_list(bridge)
+    pair = fl.MerkleProofPair(fl.MerkleProof((0,) * 16, 1), fl.MerkleProof((0,) * 16, 1))
+    for kwargs in ({}, {"compliance_proofs": ONE_LITERAL}, {"compliance_proofs": (ONE_LITERAL,)},
+                   {"compliance_proofs": pair}, {"compliance_proofs": (pair.left, pair.right)},
+                   {"merkle_proof": ONE_LITERAL}):
+        call = bridge.unshield("aleo/usdcx", amount="1", **kwargs)
+        assert call.inputs[-1] == ONE_LITERAL, kwargs
+    assert bridge.aleo.mapping_reads.count((FREEZE_LIST_PROGRAM, "freeze_list_root", "1u8")) == 1   # only the unset case read the chain
+
+
+def test_unshield_rejects_both_proof_arguments_and_bad_values(bridge):
+    _seed_empty_list(bridge)
+    with pytest.raises(ConfigurationError, match="not both"):
+        bridge.unshield("aleo/usdcx", amount="1", compliance_proofs=ONE_LITERAL, merkle_proof=ONE_LITERAL)
+    with pytest.raises(ConfigurationError, match="exactly one"):
+        bridge.unshield("aleo/usdcx", amount="1", compliance_proofs=(ONE_LITERAL, ONE_LITERAL))
+    with pytest.raises(ConfigurationError, match="encoded"):
+        bridge.unshield("aleo/usdcx", amount="1", compliance_proofs="nope")
+    with pytest.raises(ConfigurationError, match="takes no compliance proof"):
+        bridge.unshield("aleo/wbtc", amount="0.001", record="{ owner: aleo1x.private }", compliance_proofs=ONE_LITERAL)
+
+
+def test_private_burn_accepts_every_proof_form(bridge):
+    _seed_empty_list(bridge)
+    recipient = "0x" + "11" * 20
+    for kwargs in ({}, {"compliance_proofs": ONE_LITERAL}, {"compliance_proofs": (ONE_LITERAL,)}, {"merkle_proof": ONE_LITERAL}):
+        call = bridge.xreserve.burn(recipient, amount="3", **kwargs)
+        assert call.function_name == "private_burn" and call.inputs[-1] == ONE_LITERAL, kwargs
+    with pytest.raises(ConfigurationError, match="not both"):
+        bridge.xreserve.burn(recipient, amount="3", compliance_proofs=ONE_LITERAL, merkle_proof=ONE_LITERAL)
+    with pytest.raises(ConfigurationError, match="only apply to mode='private'"):
+        bridge.xreserve.burn(recipient, amount="3", mode="public", compliance_proofs=ONE_LITERAL)
