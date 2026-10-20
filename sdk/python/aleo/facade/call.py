@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .._client_common import is_provable_host
+from .._client_common import inclusion_height
 from .errors import ExecutionError
 from .programs import PreparedCall
 
@@ -250,29 +250,24 @@ class BoundCall(PreparedCall):
 
     def _current_height(self) -> int | None:
         """The chain head, for consensus-version-dependent estimates and
-        proofs — on the hosted API only.
+        proofs — on any node that follows the real network's schedule.
 
         A transaction is judged by the rules in force at its inclusion
-        height, so on the hosted Provable API fee estimates and the Varuna
-        proof version use the version active *now* (resolved through the
-        bindings' per-network activation table), not the newest one the
-        network has scheduled.
+        height, so fee estimates and the Varuna proof version use the version
+        active *now* (resolved through the bindings' per-network activation
+        table), not the newest one the network has scheduled — those differ
+        between a snarkvm release scheduling a version and its activation.
 
-        Off the hosted API the answer is ``None`` on purpose: a devnode or
-        custom node runs its own activation schedule (test heights, an env
-        override), so mapping ITS height through the SDK's mainnet/testnet
-        table lands on an ancient version whose fee formula does not match —
-        a devnode at height 40 would be priced under V1 and drain its account.
-        The bindings then use the newest scheduled version, which is what such
-        a node runs once past its test heights.  Also ``None`` when the node
-        cannot answer.
+        A devnode or custom node runs its own activation schedule, so its
+        height must not be mapped through the SDK's table; ``None`` for those
+        (see :func:`inclusion_height`), and ``None`` when the node cannot
+        answer.
         """
-        if not is_provable_host(self._client._provider.url):
-            return None
         try:
-            return int(self._client.network.get_latest_height())
+            head = int(self._client.network.get_latest_height())
         except Exception:  # noqa: BLE001 - estimate still possible without it
             return None
+        return inclusion_height(self._client._provider.url, head)
 
     def _authorize_fee(
         self,
@@ -410,7 +405,7 @@ class BoundCall(PreparedCall):
         process = self._client.process
         auth = self._build_authorization(account)
         # Proofs carry the Varuna version in force at the inclusion height, so
-        # prove at the chain head (hosted API only; see _current_height).
+        # prove at the chain head (real-network nodes only; see _current_height).
         height = self._current_height()
 
         try:

@@ -59,6 +59,13 @@ abi_json = aleo_abi.generate_abi(
 `network` is `"mainnet"`, `"testnet"`, or `"canary"` — it selects the
 validation rules, not a connection.
 
+The validation rules are those of the snarkVM release Leo pins, which can
+trail the main SDK's by one release. Right now this package validates with
+snarkVM 4.11.0 while `aleo-sdk` uses 4.12.0: a program with more than 31
+mappings, which consensus V22 allows (live on testnet, mainnet from block
+22,962,000), parses in the main SDK but is rejected here with "Program
+exceeds the maximum number of mappings" until Leo moves to 4.12.
+
 ## Checking compatibility
 
 `check_compatibility(candidate_abi_json, standard_abi_json)` returns a list
