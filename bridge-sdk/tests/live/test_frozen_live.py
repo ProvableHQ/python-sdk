@@ -47,7 +47,7 @@ def _bridge(private_key: str) -> Bridge:
 
 
 def _is_leaf(bridge: Bridge, address: str) -> bool:
-    tree = bridge.aleo.network.get_program_freeze_list(LIST)
+    tree = bridge.aleo.network.get_compliance_freeze_list(LIST)
     assert tree is not None
     return address_to_field_int(address) in tree[: (len(tree) + 1) // 2]
 

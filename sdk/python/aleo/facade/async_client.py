@@ -575,14 +575,14 @@ class AsyncNetworkModule:
             program_id, mapping_name, key
         )
 
-    async def get_program_freeze_list(self, program_id: str) -> list[int] | None:
+    async def get_compliance_freeze_list(self, program_id: str) -> list[int] | None:
         """Return the published compliance Merkle tree of a freeze-list program (awaited).
 
         Node values leaves first and root last; ``None`` when the program has
         no freeze list. Verify the root against ``freeze_list_root`` before
         building a witness.
         """
-        return await self._nc().get_program_freeze_list(program_id)
+        return await self._nc().get_compliance_freeze_list(program_id)
 
     async def get_public_balance(self, address: str) -> int:
         """Return the public credits balance for *address* in microcredits.

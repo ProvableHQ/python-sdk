@@ -206,7 +206,7 @@ paid; an unreadable root or a published tree that does not match it raises
 
 Pass `compliance_proofs=` to supply the bundles yourself, as a tuple in the
 entrypoint's input order. Each element is the encoded literal, a
-`MerkleProofPair`, or a `(MerkleProof, MerkleProof)` tuple. The count must
+`MerkleProofPair`, or a `(MerkleProofInput, MerkleProofInput)` tuple. The count must
 match the route the call resolves to, and the per-method aliases spell out
 the possibilities:
 

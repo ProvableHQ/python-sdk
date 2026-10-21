@@ -4,14 +4,17 @@ Programs that enforce a freeze list (the USDCx stablecoin, Shield Swap) take
 a ``[MerkleProof; 2]`` argument proving that an address is *not* on the list.
 This module builds those arguments and caches them per client:
 
-- :func:`exclusion_proof_from_tree` turns a published tree into the proof
+- :func:`generate_freezelist_proof` turns a published tree into the proof
   literal for one address and checks every witness against the root.
 - :class:`FreezeListProofs` / :class:`AsyncFreezeListProofs` read the current
   root, fetch the tree only when the root changed, and reuse witnesses while
   the root is unchanged. While a list is empty the fixed empty-tree pair is
   returned without fetching anything beyond the root.
-- :func:`freeze_list_program` finds the freeze-list program a token program
+- :func:`freezelist_program` finds the freeze-list program a token program
   checks, so callers can name the token and let the SDK find the list.
+- :func:`literal_compliance_proof` normalises a caller-supplied
+  ``compliance_proofs`` argument to its literal, and
+  :func:`format_merkle_proof_pair` encodes a structured pair.
 
 Tree layout (shared with the TypeScript SDK and the compliance API): leaves
 are frozen addresses as little-endian field integers, sorted ascending and
@@ -44,7 +47,7 @@ FREEZELIST_SUFFIX = "freezelist.aleo"
 
 #: Token programs whose freeze list is known without reading their imports.
 #: ``None`` marks a program that takes the proof argument and ignores it.
-KNOWN_FREEZE_LISTS: dict[str, str | None] = {
+KNOWN_TOKEN_FREEZELISTS: dict[str, str | None] = {
     "credits.aleo": None,
     "usdcx_stablecoin.aleo": "usdcx_freezelist.aleo",
     "test_usdcx_stablecoin.aleo": "test_usdcx_freezelist.aleo",
@@ -137,14 +140,18 @@ def sibling_path(tree: Sequence[int], index: int, depth: int = DEFAULT_DEPTH) ->
 
 
 def format_merkle_proof(left: tuple[Sequence[int], int], right: tuple[Sequence[int], int]) -> str:
-    """A ``[MerkleProof; 2]`` literal from two (siblings, leaf_index) pairs."""
-    return str(MerkleProofPair(MerkleProof(tuple(left[0]), left[1]), MerkleProof(tuple(right[0]), right[1])))
+    """A ``[MerkleProof; 2]`` literal from two raw ``(siblings, leaf_index)`` pairs.
+
+    The typed form is :func:`format_merkle_proof_pair`.
+    """
+    return format_merkle_proof_pair((MerkleProofInput(tuple(left[0]), left[1]),
+                                     MerkleProofInput(tuple(right[0]), right[1])))
 
 
 # ── Proof values ─────────────────────────────────────────────────────────────
 
 @dataclass(frozen=True)
-class MerkleProof:
+class MerkleProofInput:
     """One Merkle path of an exclusion proof, as the contracts take it.
 
     Attributes:
@@ -166,7 +173,7 @@ class MerkleProof:
         return "{ siblings: [" + ", ".join(f"{s}field" for s in self.siblings) + f"], leaf_index: {self.leaf_index}u32 }}"
 
     @classmethod
-    def from_string(cls, text: str) -> "MerkleProof":
+    def from_string(cls, text: str) -> "MerkleProofInput":
         """Parse one ``{ siblings: [..], leaf_index: Nu32 }`` literal."""
         body = text.strip()
         if not (body.startswith("{") and body.endswith("}")):
@@ -191,8 +198,8 @@ class MerkleProofPair:
         right: The path to the leaf just above the address.
     """
 
-    left: MerkleProof
-    right: MerkleProof
+    left: MerkleProofInput
+    right: MerkleProofInput
 
     def __str__(self) -> str:
         return f"[{self.left}, {self.right}]"
@@ -219,35 +226,43 @@ class MerkleProofPair:
         parts.append("".join(current))
         if len(parts) != 2:
             raise FreezeListError(f"A [MerkleProof; 2] literal holds two proofs, found {len(parts)}")
-        return cls(MerkleProof.from_string(parts[0]), MerkleProof.from_string(parts[1]))
+        return cls(MerkleProofInput.from_string(parts[0]), MerkleProofInput.from_string(parts[1]))
 
 
 #: One compliance proof argument as a caller may supply it: the ``[MerkleProof; 2]``
-#: literal, a :class:`MerkleProofPair`, or the two :class:`MerkleProof` paths.
-ProofBundle = str | MerkleProofPair | tuple[MerkleProof, MerkleProof]
+#: literal, a :class:`MerkleProofPair`, or the two :class:`MerkleProofInput` paths.
+ProofBundle = str | MerkleProofPair | tuple[MerkleProofInput, MerkleProofInput]
 
 
-def bundle_literal(bundle: ProofBundle) -> str:
-    """The ``[MerkleProof; 2]`` literal for a caller-supplied proof, validated."""
+def format_merkle_proof_pair(pair: MerkleProofPair | tuple[MerkleProofInput, MerkleProofInput]) -> str:
+    """The ``[MerkleProof; 2]`` literal the transitions take, from a structured pair."""
+    if isinstance(pair, MerkleProofPair):
+        return str(pair)
+    if isinstance(pair, tuple) and len(pair) == 2 and all(isinstance(p, MerkleProofInput) for p in pair):  # pyright: ignore[reportUnnecessaryIsInstance]
+        return str(MerkleProofPair(pair[0], pair[1]))
+    raise FreezeListError("A proof pair is a MerkleProofPair or a (MerkleProofInput, MerkleProofInput) tuple")
+
+
+def _bundle_literal(bundle: ProofBundle) -> str:
+    """The ``[MerkleProof; 2]`` literal for one caller-supplied bundle, validated."""
     if isinstance(bundle, str):
         text = bundle.strip()
         if not (text.startswith("[") and text.endswith("]")):
             raise FreezeListError("A compliance proof must be an encoded [MerkleProof; 2] Aleo literal")
         return text
-    if isinstance(bundle, MerkleProofPair):
-        return str(bundle)
-    if isinstance(bundle, tuple) and len(bundle) == 2 and all(isinstance(p, MerkleProof) for p in bundle):  # pyright: ignore[reportUnnecessaryIsInstance]
-        return str(MerkleProofPair(bundle[0], bundle[1]))
+    if isinstance(bundle, MerkleProofPair) or _is_path_tuple(bundle):
+        return format_merkle_proof_pair(bundle)
     raise FreezeListError("A compliance proof must be a [MerkleProof; 2] literal, a MerkleProofPair, "
-                          "or a (MerkleProof, MerkleProof) tuple")
+                          "or a (MerkleProofInput, MerkleProofInput) tuple")
 
 
-def one_bundle(compliance_proofs: Any, legacy: Any = None, *, legacy_name: str = "merkle_proof") -> str | None:
-    """Normalise the proof arguments of a call that takes exactly one bundle.
+def literal_compliance_proof(compliance_proofs: Any, legacy: Any = None, *, legacy_name: str = "merkle_proof") -> str | None:
+    """The one ``[MerkleProof; 2]`` literal a call was given, or ``None`` when the SDK should build it.
 
-    Accepts a :data:`ProofBundle` or a one-element tuple of one under
+    Normalises the proof arguments of a call that takes exactly one bundle:
+    a :data:`ProofBundle` or a one-element tuple of one under
     ``compliance_proofs``, and the literal string the call accepted before
-    under its old keyword. ``None`` from both means the SDK builds the proof.
+    under its old keyword. Reads nothing from the chain.
 
     Raises:
         FreezeListError: Both arguments were given, the tuple does not hold
@@ -259,26 +274,30 @@ def one_bundle(compliance_proofs: Any, legacy: Any = None, *, legacy_name: str =
         if not isinstance(legacy, str):
             raise FreezeListError(f"{legacy_name}= takes the encoded [MerkleProof; 2] literal; "
                                   "pass structured proofs through compliance_proofs=")
-        return bundle_literal(legacy)
+        return _bundle_literal(legacy)
     if compliance_proofs is None:
         return None
     if isinstance(compliance_proofs, tuple):
         items = cast(tuple[Any, ...], compliance_proofs)
         if _is_path_tuple(items):
-            return bundle_literal(cast(ProofBundle, items))
+            return _bundle_literal(cast(ProofBundle, items))
         if len(items) != 1:
-            raise FreezeListError(f"This call takes exactly one compliance proof bundle; received {len(items)}")
-        return bundle_literal(cast(ProofBundle, items[0]))
-    return bundle_literal(cast(ProofBundle, compliance_proofs))
+            raise FreezeListError(f"This operation requires exactly one compliance proof bundle; received {len(items)}")
+        return _bundle_literal(cast(ProofBundle, items[0]))
+    return _bundle_literal(cast(ProofBundle, compliance_proofs))
 
 
-def _is_path_tuple(value: tuple[Any, ...]) -> bool:
-    return len(value) == 2 and all(isinstance(p, MerkleProof) for p in value)
+def _is_path_tuple(value: Any) -> bool:
+    """True for a ``(MerkleProofInput, MerkleProofInput)`` tuple, the structured form of one bundle."""
+    if not isinstance(value, tuple):
+        return False
+    items = cast(tuple[Any, ...], value)
+    return len(items) == 2 and all(isinstance(p, MerkleProofInput) for p in items)
 
 
 # ── Witness construction and verification ────────────────────────────────────
 
-def exclusion_proof_from_tree(tree: Sequence[int], address: str, root: int, network: str) -> str:
+def generate_freezelist_proof(tree: Sequence[int], address: str, root: int, network: str) -> str:
     """Build the ``[MerkleProof; 2]`` literal proving *address* is absent from *tree*.
 
     The published tree must be complete, sorted, and end in *root*; each
@@ -312,14 +331,14 @@ def exclusion_proof_from_tree(tree: Sequence[int], address: str, root: int, netw
         if i and nodes[i] < nodes[i - 1]:
             raise FreezeListError("Invalid freeze-list tree: leaves must be sorted")
     left, right = leaf_indices(nodes, address)
-    paths = [MerkleProof(tuple(sibling_path(nodes, index, PROOF_SIBLINGS)), index) for index in (left, right)]
+    paths = [MerkleProofInput(tuple(sibling_path(nodes, index, PROOF_SIBLINGS)), index) for index in (left, right)]
     for path in paths:
         if _reconstruct_root(path, network) != root:
             raise FreezeListError("Freeze-list witness does not reconstruct the on-chain root")
     return str(MerkleProofPair(paths[0], paths[1]))
 
 
-def _reconstruct_root(path: MerkleProof, network: str) -> int:
+def _reconstruct_root(path: MerkleProofInput, network: str) -> int:
     value = path.siblings[0]
     for level in range(1, PROOF_SIBLINGS):
         sibling = path.siblings[level]
@@ -334,15 +353,15 @@ def _reconstruct_root(path: MerkleProof, network: str) -> int:
 
 # ── Which list a program checks ──────────────────────────────────────────────
 
-def freeze_list_from_imports(program: str, imports: Sequence[str] | None) -> str | None | _Unresolved:
+def freezelist_from_imports(program: str, imports: Sequence[str] | None) -> str | None | _Unresolved:
     """The freeze-list program *program* checks, from its name, imports, or the known table."""
     if program.endswith(FREEZELIST_SUFFIX):
         return program
     for dep in imports or ():
         if str(dep).endswith(FREEZELIST_SUFFIX):
             return str(dep)
-    if program in KNOWN_FREEZE_LISTS:
-        return KNOWN_FREEZE_LISTS[program]
+    if program in KNOWN_TOKEN_FREEZELISTS:
+        return KNOWN_TOKEN_FREEZELISTS[program]
     return _UNRESOLVED
 
 
@@ -358,11 +377,11 @@ def _unresolved_error(program: str) -> FreezeListError:
                            "pass compliance_proofs= explicitly")
 
 
-def freeze_list_program(aleo: Any, program: str) -> str | None:
+def freezelist_program(aleo: Any, program: str) -> str | None:
     """The freeze-list program that *program* checks, or ``None`` when it ignores the proof.
 
     A program named ``*freezelist.aleo`` is its own list. Otherwise the first
-    ``*freezelist.aleo`` import wins, then :data:`KNOWN_FREEZE_LISTS`.
+    ``*freezelist.aleo`` import wins, then :data:`KNOWN_TOKEN_FREEZELISTS`.
     Reads the program once through the facade when the table has no entry.
 
     Raises:
@@ -370,32 +389,32 @@ def freeze_list_program(aleo: Any, program: str) -> str | None:
     """
     if program.endswith(FREEZELIST_SUFFIX):
         return program
-    if program in KNOWN_FREEZE_LISTS:
-        return KNOWN_FREEZE_LISTS[program]
+    if program in KNOWN_TOKEN_FREEZELISTS:
+        return KNOWN_TOKEN_FREEZELISTS[program]
     from .facade.errors import AleoError as FacadeAleoError, ProgramNotFound
     try:
         imports = list(aleo.programs.get(program).imports)
     except (ProgramNotFound, FacadeAleoError):
         imports = []
-    found = freeze_list_from_imports(program, imports)
+    found = freezelist_from_imports(program, imports)
     if isinstance(found, _Unresolved):
         raise _unresolved_error(program)
     return found
 
 
-async def async_freeze_list_program(aleo: Any, program: str) -> str | None:
-    """Async twin of :func:`freeze_list_program`."""
+async def async_freezelist_program(aleo: Any, program: str) -> str | None:
+    """Async twin of :func:`freezelist_program`."""
     if program.endswith(FREEZELIST_SUFFIX):
         return program
-    if program in KNOWN_FREEZE_LISTS:
-        return KNOWN_FREEZE_LISTS[program]
+    if program in KNOWN_TOKEN_FREEZELISTS:
+        return KNOWN_TOKEN_FREEZELISTS[program]
     from .facade.errors import AleoError as FacadeAleoError, ProgramNotFound
     try:
         handle = await aleo.programs.get(program)
         imports = list(handle.imports)
     except (ProgramNotFound, FacadeAleoError):
         imports = []
-    found = freeze_list_from_imports(program, imports)
+    found = freezelist_from_imports(program, imports)
     if isinstance(found, _Unresolved):
         raise _unresolved_error(program)
     return found
@@ -404,7 +423,7 @@ async def async_freeze_list_program(aleo: Any, program: str) -> str | None:
 # ── Resolution with a per-client cache ───────────────────────────────────────
 
 @dataclass(frozen=True)
-class ProofSlot:
+class ComplianceProofContext:
     """One ``[MerkleProof; 2]`` argument a call needs.
 
     Attributes:
@@ -476,7 +495,7 @@ def _witness(entry: _CachedList, network: str, address: str) -> str:
         return EMPTY_MERKLE_PROOF_PAIR          # the same pair for every address; nothing to build or cache
     proof = entry.proofs.get(address)
     if proof is None:
-        proof = exclusion_proof_from_tree(entry.tree, address, entry.root, network)
+        proof = generate_freezelist_proof(entry.tree, address, entry.root, network)
         while len(entry.proofs) >= MAX_CACHED_ADDRESSES:
             entry.proofs.popitem(last=False)
         entry.proofs[address] = proof
@@ -541,12 +560,12 @@ class FreezeListProofs:
             FreezeListError: The root is unreadable, the published tree does
                 not match it, or no list can be found for *program*.
         """
-        freezelist = freeze_list_program(self._aleo, program)
+        freezelist = freezelist_program(self._aleo, program)
         if freezelist is None:
             return EMPTY_MERKLE_PROOF_PAIR
-        return self.resolve([ProofSlot(freezelist, address)])[0]
+        return self.resolve([ComplianceProofContext(freezelist, address)])[0]
 
-    def resolve(self, slots: Sequence[ProofSlot | None]) -> list[str]:
+    def resolve(self, slots: Sequence[ComplianceProofContext | None]) -> list[str]:
         """One ``[MerkleProof; 2]`` literal per slot, in order.
 
         Every slot naming the same list is proved against one root read, so
@@ -574,7 +593,7 @@ class FreezeListProofs:
 
     def _entry(self, program: str, root: int) -> _CachedList:
         def fetch() -> list[int]:
-            return _fetched_tree(program, self._aleo.network.get_program_freeze_list(program))
+            return _fetched_tree(program, self._aleo.network.get_compliance_freeze_list(program))
         return self._cache.entry(self.network, program, root, fetch)
 
 
@@ -611,12 +630,12 @@ class AsyncFreezeListProofs:
 
     async def exclusion_proof(self, address: str, program: str) -> str:
         """The ``[MerkleProof; 2]`` literal proving *address* is not on *program*'s list (awaited)."""
-        freezelist = await async_freeze_list_program(self._aleo, program)
+        freezelist = await async_freezelist_program(self._aleo, program)
         if freezelist is None:
             return EMPTY_MERKLE_PROOF_PAIR
-        return (await self.resolve([ProofSlot(freezelist, address)]))[0]
+        return (await self.resolve([ComplianceProofContext(freezelist, address)]))[0]
 
-    async def resolve(self, slots: Sequence[ProofSlot | None]) -> list[str]:
+    async def resolve(self, slots: Sequence[ComplianceProofContext | None]) -> list[str]:
         """One ``[MerkleProof; 2]`` literal per slot, in order; one root read per list per call."""
         roots: dict[str, int] = {}
         out: list[str] = []
@@ -640,7 +659,7 @@ class AsyncFreezeListProofs:
     async def _entry(self, program: str, root: int) -> _CachedList:
         network = self.network
         if root != EMPTY_TREE_ROOT and self._cache.current(network, program, root) is None:
-            nodes = _fetched_tree(program, await self._aleo.network.get_program_freeze_list(program))
+            nodes = _fetched_tree(program, await self._aleo.network.get_compliance_freeze_list(program))
             return self._cache.entry(network, program, root, lambda: nodes)
         return self._cache.entry(network, program, root, _never)
 
@@ -657,10 +676,10 @@ def _network_module(network: str) -> Any:
 __all__ = [
     "CURRENT_ROOT_KEY", "DEFAULT_DEPTH", "EMPTY_MERKLE_PROOF", "EMPTY_MERKLE_PROOF_PAIR", "EMPTY_TREE_ROOT",
     "FREEZE_LIST_INDEX_MAPPING", "FREEZE_LIST_LAST_INDEX_MAPPING", "FREEZE_LIST_MAPPING", "FREEZE_LIST_ROOT_MAPPING",
-    "KNOWN_FREEZE_LISTS", "PROOF_SIBLINGS", "ZERO_ADDRESS",
+    "KNOWN_TOKEN_FREEZELISTS", "PROOF_SIBLINGS", "ZERO_ADDRESS",
     "AsyncFreezeListProofs", "FreezeListError", "FreezeListProofs", "FrozenAddressError",
-    "MerkleProof", "MerkleProofPair", "ProofBundle", "ProofSlot",
-    "address_to_field_int", "async_freeze_list_program", "build_tree", "bundle_literal",
-    "exclusion_proof_from_tree", "format_merkle_proof", "freeze_list_from_imports", "freeze_list_program",
-    "generate_leaves", "hash_two", "leaf_indices", "one_bundle", "sibling_path",
+    "ComplianceProofContext", "MerkleProofInput", "MerkleProofPair", "ProofBundle",
+    "address_to_field_int", "async_freezelist_program", "build_tree", "format_merkle_proof",
+    "format_merkle_proof_pair", "freezelist_from_imports", "freezelist_program", "generate_freezelist_proof",
+    "generate_leaves", "hash_two", "leaf_indices", "literal_compliance_proof", "sibling_path",
 ]

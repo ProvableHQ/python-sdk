@@ -16,7 +16,7 @@ from decimal import Decimal
 from typing import Any, Callable, Generic, Optional, TypeVar
 
 from aleo import AleoNetworkError, ProgramNotFound
-from aleo.compliance import AsyncFreezeListProofs, ProofSlot, async_freeze_list_program
+from aleo.compliance import AsyncFreezeListProofs, ComplianceProofContext, async_freezelist_program
 
 from . import _generated as g
 from ._calls import extract_tx_id, root_outputs
@@ -667,7 +667,7 @@ class AsyncShieldSwap:
                 raise ValueError(
                     f"Cannot resolve the program behind {token_id} to find its freeze "
                     "list — pass compliance_proofs= explicitly.") from exc
-        return await async_freeze_list_program(self._aleo, program)
+        return await async_freezelist_program(self._aleo, program)
 
     async def _compliance_proofs(self, action: str, slots: list[Slot], compliance_proofs: Any,
                                  wrapper_proofs: Optional[str],
@@ -678,7 +678,7 @@ class AsyncShieldSwap:
         if compliance_proofs is not None:
             return supplied_literals(action, compliance_proofs, slots)
         if wrapper_proofs is not None:
-            amm_only = [ProofSlot(self.amm_freezelist_program, slot.subject) if slot.kind == "amm" else None
+            amm_only = [ComplianceProofContext(self.amm_freezelist_program, slot.subject) if slot.kind == "amm" else None
                         for slot in slots]
             return merge_legacy_wrapper_proofs(slots, await self.freezelist.resolve(amm_only), wrapper_proofs)
         known = programs or {}

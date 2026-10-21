@@ -750,7 +750,7 @@ class AleoNetworkClient:
         )
         return Plaintext.from_string(json.loads(raw))
 
-    def get_program_freeze_list(self, program_id: str) -> list[int] | None:
+    def get_compliance_freeze_list(self, program_id: str) -> list[int] | None:
         """Read the published compliance Merkle tree of a freeze-list program.
 
         The tree is what an exclusion proof is built from: node values from the

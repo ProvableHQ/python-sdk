@@ -163,7 +163,7 @@ class FakeNetwork:
         self._aleo.mapping_reads.append((program_id, mapping_name, key))
         return self._aleo.mappings.get(program_id, {}).get(mapping_name, {}).get(key)
 
-    def get_program_freeze_list(self, program_id: str) -> list[int] | None:
+    def get_compliance_freeze_list(self, program_id: str) -> list[int] | None:
         """The compliance endpoint: script with ``FakeAleo.freeze_list_trees[program] = nodes`` (None = no list)."""
         self._aleo.tree_reads.append(program_id)
         tree = self._aleo.freeze_list_trees.get(program_id)

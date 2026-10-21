@@ -209,7 +209,7 @@ def _seed_empty_list(bridge):
 
 def test_unshield_accepts_every_proof_form_and_computes_when_unset(bridge):
     _seed_empty_list(bridge)
-    pair = fl.MerkleProofPair(fl.MerkleProof((0,) * 16, 1), fl.MerkleProof((0,) * 16, 1))
+    pair = fl.MerkleProofPair(fl.MerkleProofInput((0,) * 16, 1), fl.MerkleProofInput((0,) * 16, 1))
     for kwargs in ({}, {"compliance_proofs": ONE_LITERAL}, {"compliance_proofs": (ONE_LITERAL,)},
                    {"compliance_proofs": pair}, {"compliance_proofs": (pair.left, pair.right)},
                    {"merkle_proof": ONE_LITERAL}):

@@ -12,7 +12,7 @@ from . import encoding as enc
 from ._calls import AleoCall
 from ._keccak import keccak256
 from .circle import CircleClient
-from .freezelist import resolve_one_bundle
+from .freezelist import literal_compliance_proof
 from .errors import (AttestationError, ConfigurationError, InvalidAmountError, InvalidRecipientError,
                      RouteNotFoundError, RouteUnavailableError, UnsupportedRouteError)
 from .registry import Route
@@ -162,7 +162,7 @@ class XReserveModule:
         """Build a burn with the lifecycle's validated execution-time estimate, if supplied."""
         if mode not in BURN_MODES:
             raise ConfigurationError(f"Unsupported USDCx burn mode {mode!r}; expected one of {BURN_MODES}")
-        merkle_proof = resolve_one_bundle(compliance_proofs, merkle_proof)
+        merkle_proof = literal_compliance_proof(compliance_proofs, merkle_proof)
         if mode != "private" and (record is not None or merkle_proof is not None):
             raise ConfigurationError(
                 f"mode={mode!r} burns the public balance; record=/compliance_proofs= only apply to mode='private'")

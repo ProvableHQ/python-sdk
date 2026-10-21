@@ -26,7 +26,7 @@ from .compliance import (
     ClaimProofs as ClaimProofs,
     CollectProofs as CollectProofs,
     IncreaseProofs as IncreaseProofs,
-    MerkleProof as MerkleProof,
+    MerkleProofInput as MerkleProofInput,
     MerkleProofPair as MerkleProofPair,
     MintProofs as MintProofs,
     ProofBundle as ProofBundle,

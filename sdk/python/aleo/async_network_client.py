@@ -685,7 +685,7 @@ class AsyncAleoNetworkClient:
         import json as _json
         return Plaintext.from_string(_json.loads(raw))
 
-    async def get_program_freeze_list(self, program_id: str) -> list[int] | None:
+    async def get_compliance_freeze_list(self, program_id: str) -> list[int] | None:
         """Read the published compliance Merkle tree of a freeze-list program (awaited).
 
         Same contract as the sync client: node values leaves first and root

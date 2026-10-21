@@ -52,7 +52,7 @@ def _address(private_key: str) -> str:
 
 
 def _is_leaf(dex: ShieldSwap, program: str, address: str) -> bool:
-    tree = dex._aleo.network.get_program_freeze_list(program)
+    tree = dex._aleo.network.get_compliance_freeze_list(program)
     assert tree is not None
     leaves = (len(tree) + 1) // 2
     return address_to_field_int(address) in tree[:leaves]

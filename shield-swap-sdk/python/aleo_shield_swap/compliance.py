@@ -19,7 +19,7 @@ The write methods on :class:`~aleo_shield_swap.ShieldSwap` take one
   cached on the client until the list's root changes.
 - A tuple of bundles in the entrypoint's input order, each a literal string,
   a :class:`~aleo.compliance.MerkleProofPair`, or a pair of
-  :class:`~aleo.compliance.MerkleProof`. The count must match the route the
+  :class:`~aleo.compliance.MerkleProofInput`. The count must match the route the
   call resolves to; the type aliases below spell out the possible counts.
 
 The planners in this module are pure: they turn a route's shape into the
@@ -34,11 +34,11 @@ from typing import Callable, Literal, Optional, Sequence, Union
 from aleo.compliance import (
     EMPTY_MERKLE_PROOF_PAIR,
     FreezeListError,
-    MerkleProof,
+    MerkleProofInput,
     MerkleProofPair,
     ProofBundle,
-    ProofSlot,
-    bundle_literal,
+    ComplianceProofContext,
+    literal_compliance_proof,
 )
 
 SHIELD_SWAP_FREEZELIST = "shield_swap_freezelist.aleo"
@@ -191,30 +191,36 @@ def supplied_literals(action: str, supplied: Sequence[ProofBundle], slots: Seque
         raise ValueError(f"{action} on this route takes {len(slots)} compliance proof bundle(s) "
                          f"[{expected}]; received {len(supplied)}")
     try:
-        return [bundle_literal(b) for b in supplied]
+        return [_literal(b) for b in supplied]
     except FreezeListError as exc:
         raise ValueError(f"{action}: {exc}") from exc
 
 
+def _literal(bundle: ProofBundle) -> str:
+    literal = literal_compliance_proof(bundle)
+    assert literal is not None          # a bundle is never None
+    return literal
+
+
 def _looks_like_one_bundle(value: Sequence[ProofBundle]) -> bool:
-    return len(value) == 2 and all(isinstance(p, MerkleProof) for p in value)
+    return len(value) == 2 and all(isinstance(p, MerkleProofInput) for p in value)
 
 
-def planned_proof_slots(slots: Sequence[Slot], amm_list: Optional[str], list_for_token: ListResolver) -> list[ProofSlot]:
-    """The :class:`aleo.compliance.ProofSlot` per planned slot: which list and which address."""
-    out: list[ProofSlot] = []
+def planned_proof_slots(slots: Sequence[Slot], amm_list: Optional[str], list_for_token: ListResolver) -> list[ComplianceProofContext]:
+    """The :class:`aleo.compliance.ComplianceProofContext` per planned slot: which list and which address."""
+    out: list[ComplianceProofContext] = []
     for slot in slots:
         if slot.kind == "amm":
-            out.append(ProofSlot(amm_list, slot.subject))
+            out.append(ComplianceProofContext(amm_list, slot.subject))
         else:
             assert slot.token_id is not None
-            out.append(ProofSlot(list_for_token(slot.token_id), slot.subject))
+            out.append(ComplianceProofContext(list_for_token(slot.token_id), slot.subject))
     return out
 
 
 def merge_legacy_wrapper_proofs(slots: Sequence[Slot], resolved: Sequence[str], wrapper_proofs: str) -> list[str]:
     """Put the caller's one legacy ``wrapper_proofs`` literal into every wrapper slot, keeping resolved AMM bundles."""
-    literal = bundle_literal(wrapper_proofs)
+    literal = _literal(wrapper_proofs)
     return [literal if slot.kind == "wrapper" else proof for slot, proof in zip(slots, resolved)]
 
 
@@ -227,7 +233,7 @@ def check_proof_arguments(compliance_proofs: object, wrapper_proofs: Optional[st
 __all__ = [
     "EMPTY_MERKLE_PROOF_PAIR", "SHIELD_SWAP_FREEZELIST",
     "ClaimProofs", "CollectProofs", "IncreaseProofs", "MintProofs", "RebalanceProofs", "SwapProofs",
-    "MerkleProof", "MerkleProofPair", "ProofBundle", "Slot",
+    "MerkleProofInput", "MerkleProofPair", "ProofBundle", "Slot",
     "check_proof_arguments", "claim_slots", "collect_slots", "increase_slots", "merge_legacy_wrapper_proofs",
     "mint_slots", "planned_proof_slots", "rebalance_slots", "supplied_literals", "swap_slots",
 ]

@@ -6,7 +6,7 @@ from __future__ import annotations
 import pytest
 
 from aleo import compliance as fl
-from aleo.compliance import EMPTY_MERKLE_PROOF_PAIR, EMPTY_TREE_ROOT, FrozenAddressError, MerkleProof, MerkleProofPair
+from aleo.compliance import EMPTY_MERKLE_PROOF_PAIR, EMPTY_TREE_ROOT, FrozenAddressError, MerkleProofInput, MerkleProofPair
 from aleo_shield_swap import ShieldSwap
 from aleo_shield_swap._core import default_merkle_proofs
 from aleo_shield_swap._routing import LP_ROUTER_ID, REBALANCE_ROUTER_ID, ROUTER_ID
@@ -21,7 +21,7 @@ from .test_liquidity import POSITION_TEXT, TOKEN0_RECORD
 S, R, W = "aleo1signer", "aleo1recipient", "aleo1withdrawal"
 T0, T1 = "1field", "2field"
 LIT = EMPTY_MERKLE_PROOF_PAIR
-ONE = MerkleProof((0,) * 16, 1)
+ONE = MerkleProofInput((0,) * 16, 1)
 
 
 def names(slots: list[Slot]) -> list[str]:
@@ -124,7 +124,7 @@ def test_supplied_literals_count_mismatch_names_the_slots():
         supplied_literals("swap", (LIT,), [])
     with pytest.raises(ValueError, match="encoded"):
         supplied_literals("swap", ("nope",), swap_slots(True, S, T0))
-    # A bare (MerkleProof, MerkleProof) tuple is one bundle, not two.
+    # A bare (MerkleProofInput, MerkleProofInput) tuple is one bundle, not two.
     assert supplied_literals("swap", (ONE, ONE), swap_slots(True, S, T0)) == [LIT]
 
 
@@ -201,8 +201,8 @@ def test_populated_lists_yield_real_witnesses_per_subject_and_cache_them():
     _, args = stub.last_call
     signer_proof, recipient_proof = args[9], args[10]
     assert args[2] == default_merkle_proofs()                             # the USDCx list is still empty
-    assert signer_proof == fl.exclusion_proof_from_tree(tree, SIGNER, tree[-1], "testnet")
-    assert recipient_proof == args[11] == fl.exclusion_proof_from_tree(tree, recipient, tree[-1], "testnet")
+    assert signer_proof == fl.generate_freezelist_proof(tree, SIGNER, tree[-1], "testnet")
+    assert recipient_proof == args[11] == fl.generate_freezelist_proof(tree, recipient, tree[-1], "testnet")
     assert signer_proof != recipient_proof
     _mint(dex, recipient=recipient, withdrawal=recipient)
     assert stub.tree_reads == [SHIELD_SWAP_FREEZELIST]                     # cached across calls while the root holds

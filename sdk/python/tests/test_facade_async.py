@@ -588,5 +588,5 @@ async def test_async_network_get_program_freeze_list() -> None:
         f"{HOST}/programs/usdcx_freezelist.aleo/compliance/freeze-list": jr(["0", "0", "7"]),
         f"{HOST}/programs/credits.aleo/compliance/freeze-list": jr({"statusCode": 404}, 404),
     })
-    assert await a.network.get_program_freeze_list("usdcx_freezelist.aleo") == [0, 0, 7]
-    assert await a.network.get_program_freeze_list("credits.aleo") is None
+    assert await a.network.get_compliance_freeze_list("usdcx_freezelist.aleo") == [0, 0, 7]
+    assert await a.network.get_compliance_freeze_list("credits.aleo") is None

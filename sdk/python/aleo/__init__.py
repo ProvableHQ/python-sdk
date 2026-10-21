@@ -35,10 +35,10 @@ from .compliance import (
     FreezeListError as FreezeListError,
     FreezeListProofs as FreezeListProofs,
     FrozenAddressError as FrozenAddressError,
-    MerkleProof as MerkleProof,
+    MerkleProofInput as MerkleProofInput,
     MerkleProofPair as MerkleProofPair,
     ProofBundle as ProofBundle,
-    ProofSlot as ProofSlot,
+    ComplianceProofContext as ComplianceProofContext,
 )
 from .facade.errors import (
     AleoError as AleoError,

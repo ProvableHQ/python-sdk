@@ -206,7 +206,7 @@ class _Network:
             return None if root is None else f"{root}field"
         return self._recorder._mappings.get(mapping_name, {}).get(key)
 
-    def get_program_freeze_list(self, program_id):
+    def get_compliance_freeze_list(self, program_id):
         """The compliance endpoint: ``StubAleo.freeze_list_trees[program]`` (None = no list)."""
         self._recorder.tree_reads.append(program_id)
         return self._recorder.freeze_list_trees.get(program_id)

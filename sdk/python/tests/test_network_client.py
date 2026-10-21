@@ -949,7 +949,7 @@ def test_get_program_freeze_list_returns_tree_nodes_as_ints() -> None:
     resp_lib.add(resp_lib.GET, f"{HOST}/programs/usdcx_freezelist.aleo/compliance/freeze-list",
                  json=["0", "0", EMPTY_FREEZE_LIST_ROOT])
     c = make_client()
-    assert c.get_program_freeze_list("usdcx_freezelist.aleo") == [0, 0, int(EMPTY_FREEZE_LIST_ROOT)]
+    assert c.get_compliance_freeze_list("usdcx_freezelist.aleo") == [0, 0, int(EMPTY_FREEZE_LIST_ROOT)]
     assert resp_lib.calls[0].request.url == f"{HOST}/programs/usdcx_freezelist.aleo/compliance/freeze-list"
 
 
@@ -959,8 +959,8 @@ def test_get_program_freeze_list_is_none_when_the_program_has_no_list() -> None:
                  json={"statusCode": 404, "message": "No current freeze list found for program: credits.aleo"}, status=404)
     resp_lib.add(resp_lib.GET, f"{HOST}/programs/nolist.aleo/compliance/freeze-list", body="null", content_type="application/json")
     c = make_client()
-    assert c.get_program_freeze_list("credits.aleo") is None
-    assert c.get_program_freeze_list("nolist.aleo") is None
+    assert c.get_compliance_freeze_list("credits.aleo") is None
+    assert c.get_compliance_freeze_list("nolist.aleo") is None
 
 
 @resp_lib.activate
@@ -968,7 +968,7 @@ def test_get_program_freeze_list_rejects_non_decimal_nodes() -> None:
     resp_lib.add(resp_lib.GET, f"{HOST}/programs/bad.aleo/compliance/freeze-list", json=["0", "x"])
     c = make_client()
     with pytest.raises(AleoNetworkError, match="decimal"):
-        c.get_program_freeze_list("bad.aleo")
+        c.get_compliance_freeze_list("bad.aleo")
 
 
 @resp_lib.activate
@@ -976,4 +976,4 @@ def test_get_program_freeze_list_propagates_other_errors() -> None:
     resp_lib.add(resp_lib.GET, f"{HOST}/programs/down.aleo/compliance/freeze-list", json={"error": "boom"}, status=403)
     c = make_client()
     with pytest.raises(AleoNetworkError):
-        c.get_program_freeze_list("down.aleo")
+        c.get_compliance_freeze_list("down.aleo")

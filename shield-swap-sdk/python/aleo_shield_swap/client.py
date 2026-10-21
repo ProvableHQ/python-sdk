@@ -17,7 +17,7 @@ from typing import Any, Optional
 
 from aleo import AleoNetworkError, ProgramNotFound
 from aleo.codegen.runtime import parse_plaintext
-from aleo.compliance import FreezeListProofs, ProofSlot, freeze_list_program
+from aleo.compliance import FreezeListProofs, ComplianceProofContext, freezelist_program
 
 from . import _generated as g
 from ._core import (
@@ -836,7 +836,7 @@ class ShieldSwap:
                 raise ValueError(
                     f"Cannot resolve the program behind {token_id} to find its freeze "
                     "list — pass compliance_proofs= explicitly.") from exc
-        return freeze_list_program(self._aleo, program)
+        return freezelist_program(self._aleo, program)
 
     def _compliance_proofs(self, action: str, slots: list[Slot], compliance_proofs: Any,
                            wrapper_proofs: Optional[str],
@@ -851,7 +851,7 @@ class ShieldSwap:
         if wrapper_proofs is not None:
             # Legacy form: the caller's one literal fills every wrapper slot;
             # only the AMM slots are resolved.
-            amm_only = [ProofSlot(self.amm_freezelist_program, slot.subject) if slot.kind == "amm" else None
+            amm_only = [ComplianceProofContext(self.amm_freezelist_program, slot.subject) if slot.kind == "amm" else None
                         for slot in slots]
             return merge_legacy_wrapper_proofs(slots, self.freezelist.resolve(amm_only), wrapper_proofs)
         known = programs or {}

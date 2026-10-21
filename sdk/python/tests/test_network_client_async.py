@@ -613,8 +613,8 @@ async def test_async_get_program_freeze_list() -> None:
         f"{HOST}/programs/nolist.aleo/compliance/freeze-list": httpx.Response(200, content=b"null", headers={"content-type": "application/json"}),
         f"{HOST}/programs/bad.aleo/compliance/freeze-list": jr(["0", "x"]),
     })
-    assert await c.get_program_freeze_list("usdcx_freezelist.aleo") == [0, 0, int(EMPTY_FREEZE_LIST_ROOT)]
-    assert await c.get_program_freeze_list("credits.aleo") is None
-    assert await c.get_program_freeze_list("nolist.aleo") is None
+    assert await c.get_compliance_freeze_list("usdcx_freezelist.aleo") == [0, 0, int(EMPTY_FREEZE_LIST_ROOT)]
+    assert await c.get_compliance_freeze_list("credits.aleo") is None
+    assert await c.get_compliance_freeze_list("nolist.aleo") is None
     with pytest.raises(AleoNetworkError, match="decimal"):
-        await c.get_program_freeze_list("bad.aleo")
+        await c.get_compliance_freeze_list("bad.aleo")

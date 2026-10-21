@@ -13,7 +13,7 @@ import os
 
 import pytest
 
-from aleo.compliance import EMPTY_MERKLE_PROOF_PAIR, EMPTY_TREE_ROOT, exclusion_proof_from_tree
+from aleo.compliance import EMPTY_MERKLE_PROOF_PAIR, EMPTY_TREE_ROOT, generate_freezelist_proof
 
 from . import config as live_config, helpers as live_helpers
 
@@ -26,15 +26,15 @@ UNSHIELD_AMOUNT = "0.1"
 
 
 def test_published_tree_matches_the_on_chain_root(live_bridge):
-    tree = live_bridge.aleo.network.get_program_freeze_list(LIST)
+    tree = live_bridge.aleo.network.get_compliance_freeze_list(LIST)
     assert tree is not None and len(tree) >= 3
     root = live_bridge.freezelist._proofs.root(LIST)
     assert tree[-1] == root
-    proof = exclusion_proof_from_tree(tree, live_bridge.aleo_address(), root, "mainnet")
+    proof = generate_freezelist_proof(tree, live_bridge.aleo_address(), root, "mainnet")
     assert proof.count("leaf_index") == 2
     if root == EMPTY_TREE_ROOT:
         assert proof == EMPTY_MERKLE_PROOF_PAIR
-    assert live_bridge.aleo.network.get_program_freeze_list("credits.aleo") is None
+    assert live_bridge.aleo.network.get_compliance_freeze_list("credits.aleo") is None
 
 
 def test_exclusion_proof_resolves_through_the_token_program_and_caches(live_bridge):

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from aleo.compliance import EMPTY_MERKLE_PROOF_PAIR, EMPTY_TREE_ROOT, ProofSlot, exclusion_proof_from_tree
+from aleo.compliance import EMPTY_MERKLE_PROOF_PAIR, EMPTY_TREE_ROOT, ComplianceProofContext, generate_freezelist_proof
 from aleo_shield_swap.compliance import SHIELD_SWAP_FREEZELIST
 
 pytestmark = pytest.mark.live
@@ -20,19 +20,19 @@ ANY_ADDRESS = "aleo1kypwp5m7qtk9mwazgcpg0tq8aal23mnrvwfvug65qgcg9xvsrqgspyjm6n"
 @pytest.mark.parametrize("program", [SHIELD_SWAP_FREEZELIST, USDCX_LIST])
 def test_published_tree_matches_the_on_chain_root(live_dex, program):
     aleo = live_dex._aleo
-    tree = aleo.network.get_program_freeze_list(program)
+    tree = aleo.network.get_compliance_freeze_list(program)
     assert tree is not None and len(tree) >= 3 and (len(tree) + 1) % 2 == 0
     root = live_dex.freezelist.root(program)
     assert tree[-1] == root
     # A witness built from the published tree reconstructs that root.
-    proof = exclusion_proof_from_tree(tree, ANY_ADDRESS, root, "testnet")
+    proof = generate_freezelist_proof(tree, ANY_ADDRESS, root, "testnet")
     assert proof.startswith("[{ siblings: [") and proof.count("leaf_index") == 2
     if root == EMPTY_TREE_ROOT:
         assert proof == EMPTY_MERKLE_PROOF_PAIR
 
 
 def test_programs_without_a_list_answer_none(live_dex):
-    assert live_dex._aleo.network.get_program_freeze_list("credits.aleo") is None
+    assert live_dex._aleo.network.get_compliance_freeze_list("credits.aleo") is None
 
 
 def test_resolver_finds_the_list_behind_each_token_and_caches_it(live_dex):
@@ -41,7 +41,7 @@ def test_resolver_finds_the_list_behind_each_token_and_caches_it(live_dex):
     # The USDCx wrapper's underlying stablecoin names its list through its imports.
     assert live_dex._freezelist_for_token("x", "test_usdcx_stablecoin.aleo") == USDCX_LIST
     assert live_dex._freezelist_for_token("x", "credits.aleo") is None
-    first = fl.resolve([ProofSlot(SHIELD_SWAP_FREEZELIST, ANY_ADDRESS), ProofSlot(USDCX_LIST, ANY_ADDRESS), ProofSlot(None, ANY_ADDRESS)])
+    first = fl.resolve([ComplianceProofContext(SHIELD_SWAP_FREEZELIST, ANY_ADDRESS), ComplianceProofContext(USDCX_LIST, ANY_ADDRESS), ComplianceProofContext(None, ANY_ADDRESS)])
     assert len(first) == 3 and first[2] == EMPTY_MERKLE_PROOF_PAIR
     assert first[0] == fl.exclusion_proof(ANY_ADDRESS, SHIELD_SWAP_FREEZELIST)
     assert first[1] == fl.exclusion_proof(ANY_ADDRESS, "test_usdcx_stablecoin.aleo")

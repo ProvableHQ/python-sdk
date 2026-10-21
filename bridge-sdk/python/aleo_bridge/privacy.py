@@ -9,7 +9,7 @@ from aleo.compliance import ProofBundle
 
 from ._calls import AleoCall
 from .errors import ConfigurationError, InsufficientBalanceError, InvalidAmountError, InvalidRecipientError, UnsupportedRouteError
-from .freezelist import resolve_one_bundle
+from .freezelist import literal_compliance_proof
 from .registry import Asset
 from .types import PrivacyReceipt
 from .units import format_decimal_amount, resolve_amount
@@ -123,7 +123,7 @@ class PrivacyModule:
         privacy = resolved.privacy
         assert privacy is not None
         record = record if record is not None else self.select_record(privacy.program, atomic)
-        proof = resolve_one_bundle(compliance_proofs, merkle_proof)
+        proof = literal_compliance_proof(compliance_proofs, merkle_proof)
         if privacy.kind == "arc22":
             if proof is None:
                 proof = self._bridge.freezelist.exclusion_proof(self._bridge.aleo_address(), privacy.program)

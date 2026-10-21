@@ -676,22 +676,22 @@ progress = bridge.execute(quote.plan)                              # private bur
 ```
 
 Pass `compliance_proofs=` to use a bundle built elsewhere. The value is the
-encoded literal, a `MerkleProofPair`, or a `(MerkleProof, MerkleProof)` tuple;
+encoded literal, a `MerkleProofPair`, or a `(MerkleProofInput, MerkleProofInput)` tuple;
 a one-element tuple of any of these is accepted too. `merkle_proof=` is the
 earlier name for the literal form and still works.
 
 ```python
-from aleo_bridge import MerkleProof, MerkleProofPair
+from aleo_bridge import MerkleProofInput, MerkleProofPair
 
-bundle = MerkleProofPair(MerkleProof(siblings=(0,) * 16, leaf_index=1),
-                         MerkleProof(siblings=(0,) * 16, leaf_index=1))
+bundle = MerkleProofPair(MerkleProofInput(siblings=(0,) * 16, leaf_index=1),
+                         MerkleProofInput(siblings=(0,) * 16, leaf_index=1))
 receipt = bridge.unshield("aleo/usdcx", amount="2.5", compliance_proofs=bundle).delegate()
 ```
 
 `bridge.freezelist.exclusion_proof(address, "usdcx_stablecoin.aleo")` returns
 the bundle for any address, and `bridge.freezelist.clear_cache()` forgets the
 cached trees. The published tree comes from
-`aleo.network.get_program_freeze_list(program)`.
+`aleo.network.get_compliance_freeze_list(program)`.
 
 ## Understand transfer costs
 

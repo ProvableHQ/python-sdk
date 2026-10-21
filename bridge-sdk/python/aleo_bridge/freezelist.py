@@ -17,13 +17,13 @@ from aleo.compliance import (  # noqa: F401 — re-exported under the bridge's h
     FREEZE_LIST_LAST_INDEX_MAPPING,
     FREEZE_LIST_MAPPING,
     FREEZE_LIST_ROOT_MAPPING,
-    KNOWN_FREEZE_LISTS,
+    KNOWN_TOKEN_FREEZELISTS,
     PROOF_SIBLINGS,
     ZERO_ADDRESS,
     FreezeListError,
     FreezeListProofs,
     FrozenAddressError,
-    MerkleProof,
+    MerkleProofInput,
     MerkleProofPair,
     ProofBundle,
     address_to_field_int,
@@ -32,9 +32,9 @@ from aleo.compliance import (  # noqa: F401 — re-exported under the bridge's h
     generate_leaves,
     hash_two,
     leaf_indices,
-    one_bundle,
     sibling_path,
 )
+from aleo.compliance import literal_compliance_proof as _literal_compliance_proof
 
 from .errors import ConfigurationError
 
@@ -42,17 +42,17 @@ if TYPE_CHECKING:  # pragma: no cover
     from .client import Bridge
 
 #: Token program -> its freeze-list program, for when ``Bridge.program(token).imports`` is unavailable.
-FREEZE_LIST_PROGRAMS = {program: freezelist for program, freezelist in KNOWN_FREEZE_LISTS.items() if freezelist}
+FREEZE_LIST_PROGRAMS = {program: freezelist for program, freezelist in KNOWN_TOKEN_FREEZELISTS.items() if freezelist}
 
 
-def resolve_one_bundle(compliance_proofs: ProofBundle | tuple[ProofBundle] | None, merkle_proof: str | None) -> str | None:
+def literal_compliance_proof(compliance_proofs: ProofBundle | tuple[ProofBundle] | None, merkle_proof: str | None) -> str | None:
     """The single ``[MerkleProof; 2]`` literal a bridge call was given, or ``None`` to compute one.
 
     Raises:
         ConfigurationError: Both arguments were given, or the value is not a proof bundle.
     """
     try:
-        return one_bundle(compliance_proofs, merkle_proof)
+        return _literal_compliance_proof(compliance_proofs, merkle_proof)
     except FreezeListError as exc:
         raise ConfigurationError(str(exc)) from exc
 
@@ -150,6 +150,6 @@ class FreezeList:
 __all__ = ["CURRENT_ROOT_KEY", "DEFAULT_DEPTH", "EMPTY_MERKLE_PROOF_PAIR", "EMPTY_TREE_ROOT",
            "FREEZE_LIST_INDEX_MAPPING", "FREEZE_LIST_LAST_INDEX_MAPPING", "FREEZE_LIST_MAPPING",
            "FREEZE_LIST_PROGRAMS", "FREEZE_LIST_ROOT_MAPPING", "PROOF_SIBLINGS", "ZERO_ADDRESS", "FreezeList",
-           "FreezeListError", "FrozenAddressError", "MerkleProof", "MerkleProofPair", "ProofBundle",
+           "FreezeListError", "FrozenAddressError", "MerkleProofInput", "MerkleProofPair", "ProofBundle",
            "address_to_field_int", "build_tree", "format_merkle_proof", "generate_leaves", "hash_two",
-           "leaf_indices", "one_bundle", "sibling_path"]
+           "leaf_indices", "literal_compliance_proof", "sibling_path"]
