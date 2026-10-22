@@ -1,6 +1,6 @@
 [project]
 name = "aleo-bridge-sdk"
-version = "0.6.2"
+version = "0.7.0"
 description = "Bridge Aleo, Ethereum, Arc, Base, Arbitrum and Solana assets with Hyperlane, Circle xReserve and CCTP"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -12,7 +12,7 @@ requires-python = ">=3.10"
 # Solana legs alike, so a checkpoint written on one machine can always be recovered on another.
 # The Privy and Dynamic server-wallet SDKs (aleo_bridge.privy / aleo_bridge.dynamic) ship the same way;
 # dynamic-wallet-sdk itself requires Python 3.11, so on 3.10 that one module reports it missing.
-dependencies = ["aleo-sdk>=0.5.0", "requests>=2", "pynacl>=1.5",
+dependencies = ["aleo-sdk>=0.7.0", "requests>=2", "pynacl>=1.5",
                 "web3>=7,<9", "eth-account>=0.13",
                 "solders>=0.21", "solana>=0.35",
                 "privy-client>=0.7",

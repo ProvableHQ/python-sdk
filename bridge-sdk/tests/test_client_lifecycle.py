@@ -205,7 +205,7 @@ def test_public_exports_pin_pre_existing_set_and_add_lifecycle_names():
         assert hasattr(aleo_bridge, name), name
     assert set(PRE_EXISTING_EXPORTS) <= set(aleo_bridge.__all__)
     assert set(NEW_EXPORTS) <= set(aleo_bridge.__all__)
-    assert aleo_bridge.__version__ == "0.6.2"
+    assert aleo_bridge.__version__ == "0.7.0"
     assert aleo_bridge.lifecycle is lifecycle
     assert aleo_bridge.prepare is lifecycle.prepare
     assert aleo_bridge.bridge_tools is agent.bridge_tools
