@@ -132,3 +132,11 @@ def test_polling_timeout_carries_status():
     assert err.status == "DELIVERY_PENDING" and err.progress is None
     with pytest.raises(PollingTimeoutError):
         raise err
+
+
+def test_import_guard_names_the_aleo_sdk_upgrade(monkeypatch):
+    import aleo_bridge
+    aleo_bridge._require_aleo_sdk()                                    # the installed sdk has aleo.compliance
+    monkeypatch.setitem(sys.modules, "aleo.compliance", None)          # simulate an aleo-sdk without it
+    with pytest.raises(ImportError, match=r'needs aleo-sdk>=0\.7\.0 \(found .*\); run: pip install -U "aleo-sdk>=0\.7\.0"'):
+        aleo_bridge._require_aleo_sdk()

@@ -9,6 +9,30 @@ from __future__ import annotations
 from pathlib import Path
 
 __version__ = "0.7.0"
+_ALEO_SDK_MINIMUM = "0.7.0"
+
+
+def _require_aleo_sdk() -> None:
+    """Fail at import, naming the fix, when the installed aleo-sdk predates ``aleo.compliance``.
+
+    Freeze-list proofs come from ``aleo.compliance``, which first shipped in aleo-sdk 0.7.0. An
+    older install would otherwise fail deep inside the first private USDCx call with a bare
+    ``ModuleNotFoundError``.
+    """
+    try:
+        import aleo.compliance  # noqa: F401
+    except ImportError as exc:
+        from importlib.metadata import PackageNotFoundError, version
+        try:
+            found = version("aleo-sdk")
+        except PackageNotFoundError:
+            found = "not installed"
+        raise ImportError(
+            f"aleo-bridge-sdk {__version__} needs aleo-sdk>={_ALEO_SDK_MINIMUM} (found {found}); "
+            f'run: pip install -U "aleo-sdk>={_ALEO_SDK_MINIMUM}"') from exc
+
+
+_require_aleo_sdk()
 
 from .errors import (  # noqa: E402
     AmbiguousRouteError, AttestationError, BridgeError, ChainMismatchError, CheckpointInvalidError,
