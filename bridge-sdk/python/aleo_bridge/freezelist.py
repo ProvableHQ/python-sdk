@@ -1,125 +1,91 @@
-"""Sealance compliance tree — Merkle exclusion proofs for ARC-22 (USDCx) private transfers and burns.
+"""Freeze-list exclusion proofs for ARC-22 (USDCx) private transfers and burns.
 
-Port of ``sdk/src/integrations/sealance/merkle-tree.ts``. Leaves are frozen addresses as little-endian
-field ints, sorted ascending and front-padded with ``0field`` to a power of two (minimum two). The leaf
-level hashes ``Poseidon4([1field, l, r])``, inner levels ``Poseidon4([0field, l, r])`` — with the
-three-element array packed through ``Plaintext.to_fields()``, exactly as the Leo program does. A sibling
-path starts with the leaf itself, then one sibling per level, zero-padded to ``depth`` entries.
-The deployed ``MerkleProof`` struct is ``[field; 16]`` + ``u32``, so proofs use ``PROOF_SIBLINGS = 16``.
+The tree math and the per-client proof cache live in :mod:`aleo.compliance`;
+this module keeps the bridge's names for them and the ``bridge.freezelist``
+module that reads a token's list straight from its mappings.
 """
 from __future__ import annotations
 
-import math
 from typing import TYPE_CHECKING
 
-from . import encoding as enc
+from aleo.compliance import (  # noqa: F401 — re-exported under the bridge's historical names
+    CURRENT_ROOT_KEY,
+    DEFAULT_DEPTH,
+    EMPTY_MERKLE_PROOF_PAIR,
+    EMPTY_TREE_ROOT,
+    FREEZE_LIST_INDEX_MAPPING,
+    FREEZE_LIST_LAST_INDEX_MAPPING,
+    FREEZE_LIST_MAPPING,
+    FREEZE_LIST_ROOT_MAPPING,
+    KNOWN_TOKEN_FREEZELISTS,
+    PROOF_SIBLINGS,
+    ZERO_ADDRESS,
+    FreezeListError,
+    FreezeListProofs,
+    FrozenAddressError,
+    MerkleProofInput,
+    MerkleProofPair,
+    ComplianceProof,
+    address_to_field_int,
+    build_tree,
+    format_merkle_proof,
+    generate_leaves,
+    hash_two,
+    leaf_indices,
+    sibling_path,
+)
+from aleo.compliance import literal_compliance_proof as _literal_compliance_proof
+
 from .errors import ConfigurationError
 
 if TYPE_CHECKING:  # pragma: no cover
     from .client import Bridge
 
-ZERO_ADDRESS = "aleo1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq3ljyzc"
-DEFAULT_DEPTH = 15                    # TS getSiblingPath default; tree capacity 2**(depth-1) leaves
-PROOF_SIBLINGS = 16                   # struct MerkleProof { siblings: [field; 16u32], leaf_index: u32 }
-FREEZE_LIST_MAPPING = "freeze_list"                    # address => bool (frozen flag, NOT the list)
-FREEZE_LIST_LAST_INDEX_MAPPING = "freeze_list_last_index"   # bool => u32, keyed "true"
-FREEZE_LIST_INDEX_MAPPING = "freeze_list_index"        # u32 => address (the ordered list; [0u32] = zero-address sentinel)
-FREEZE_LIST_ROOT_MAPPING = "freeze_list_root"          # u8 => field, keyed "1u8" (current) / "2u8" (previous)
-CURRENT_ROOT_KEY = "1u8"
-# Token program -> its freeze-list program, for when Bridge.program(token).imports is unavailable.
-FREEZE_LIST_PROGRAMS = {
-    "usdcx_stablecoin.aleo": "usdcx_freezelist.aleo",
-    "test_usdcx_stablecoin.aleo": "test_usdcx_freezelist.aleo",
-}
-EMPTY_TREE_ROOT = 3642222252059314292809609689035560016959342421640560347114299934615987159853
-_EMPTY_PROOF = "{ siblings: [" + ", ".join(["0field"] * PROOF_SIBLINGS) + "], leaf_index: 1u32 }"
-EMPTY_MERKLE_PROOF_PAIR = f"[{_EMPTY_PROOF}, {_EMPTY_PROOF}]"
+#: The ``compliance_proofs`` argument of a bridge call, which takes exactly one proof: a
+#: :data:`ComplianceProof` bare or in a one-tuple, or ``None`` to have the SDK build it.
+ComplianceProofs = ComplianceProof | tuple[ComplianceProof] | None
+
+#: Token program -> its freeze-list program, for when ``Bridge.program(token).imports`` is unavailable.
+FREEZE_LIST_PROGRAMS = {program: freezelist for program, freezelist in KNOWN_TOKEN_FREEZELISTS.items() if freezelist}
 
 
-def address_to_field_int(address: str) -> int:
-    """bech32m payload bytes read little-endian — the field element a Leo program sees for an address."""
-    return int.from_bytes(enc.aleo_address_to_bytes32(address), "little")
+def literal_compliance_proof(compliance_proofs: ComplianceProofs, merkle_proof: str | None) -> str | None:
+    """The single ``[MerkleProof; 2]`` literal a bridge call was given, or ``None`` to compute one.
 
-
-def hash_two(prefix: str, left: str, right: str, network: str) -> str:
-    """``Poseidon4(Plaintext("[prefix,left,right]").to_fields())`` as a ``…field`` literal."""
-    net = enc.network_module(network)
-    plaintext = net.Plaintext.from_string(f"[{prefix},{left},{right}]")
-    return str(net.Poseidon4().hash(plaintext.to_fields()))
-
-
-def generate_leaves(addresses: list[str], depth: int = DEFAULT_DEPTH) -> list[str]:
-    """Frozen addresses → sorted ``…field`` leaves, zero address dropped, front-padded to a power of two (min 2)."""
-    live = [a for a in addresses if a != ZERO_ADDRESS]
-    max_leaves = 2 ** (depth - 1)
-    if len(live) > max_leaves:
-        raise ConfigurationError(f"Leaves limit exceeded. Max: {max_leaves}, provided: {len(live)}")
-    count = 2 if len(live) <= 1 else 2 ** math.ceil(math.log2(len(live)))
-    fields = sorted(address_to_field_int(a) for a in live)
-    return ["0field"] * (count - len(fields)) + [f"{f}field" for f in fields]
-
-
-def build_tree(leaves: list[str], network: str) -> list[int]:
-    """Bottom-up tree as ints: leaves first, root last (the layout the TS SDK and compliance API use)."""
-    if not leaves:
-        raise ConfigurationError("Leaves array cannot be empty")
-    if len(leaves) % 2:
-        raise ConfigurationError("Leaves array must have even number of elements")
-    tree = list(leaves)
-    level = list(leaves)
-    while len(level) > 1:
-        prefix = "1field" if len(level) == len(leaves) else "0field"
-        level = [hash_two(prefix, level[i], level[i + 1], network) for i in range(0, len(level), 2)]
-        tree.extend(level)
-    return [int(node[: -len("field")]) for node in tree]
-
-
-def leaf_indices(tree: list[int], address: str) -> tuple[int, int]:
-    """(left, right) leaf indices bracketing *address* for a non-inclusion proof (TS ``getLeafIndices``)."""
-    count = (len(tree) + 1) // 2
-    target = address_to_field_int(address)
-    leaves = tree[:count]
-    right = next((i for i, leaf in enumerate(leaves) if target <= leaf), -1)
-    left = right - 1
-    if right == -1:
-        right = left = count - 1
-    if right == 0:
-        left = 0
-    return left, right
-
-
-def sibling_path(tree: list[int], index: int, depth: int = DEFAULT_DEPTH) -> list[int]:
-    """Leaf, then the sibling at each level, zero-padded to *depth* entries (TS ``getSiblingPath``)."""
-    count = (len(tree) + 1) // 2
-    path = [tree[index]]
-    node, parent, level = index, count, 1
-    while parent < len(tree):
-        sibling = node + 1 if node % 2 == 0 else node - 1
-        path.append(tree[sibling])
-        node = parent + index // 2 ** level
-        parent += count // 2 ** level
-        level += 1
-    while len(path) < depth:
-        path.append(0)
-    return path
-
-
-def format_merkle_proof(left: tuple[list[int], int], right: tuple[list[int], int]) -> str:
-    """``[MerkleProof; 2]`` literal with veil's spacing: ``{ siblings: [a, b], leaf_index: Nu32 }``."""
-    parts = []
-    for siblings, index in (left, right):
-        parts.append("{ siblings: [" + ", ".join(f"{s}field" for s in siblings) + f"], leaf_index: {index}u32 }}")
-    return "[" + ", ".join(parts) + "]"
+    Raises:
+        ConfigurationError: Both arguments were given, or the value is not a proof bundle.
+    """
+    try:
+        return _literal_compliance_proof(compliance_proofs, merkle_proof)
+    except FreezeListError as exc:
+        raise ConfigurationError(str(exc)) from exc
 
 
 class FreezeList:
-    """``bridge.freezelist`` — reads a compliant token's frozen addresses and proves an address is not among them."""
+    """``bridge.freezelist`` — prove that an address is not on a compliant token's freeze list.
+
+    ``exclusion_proof`` is what every private USDCx unshield and burn needs. It
+    reads the list's current root, fetches the published tree only when that
+    root changed since the last call, and reuses verified witnesses while it
+    is unchanged. While the list is empty the fixed empty-tree pair is
+    returned. ``leaves`` and ``tree`` read the list entry by entry from the
+    program's mappings instead, for callers that want to inspect it.
+    """
 
     def __init__(self, bridge: "Bridge") -> None:
         self._bridge = bridge
+        self._proofs = FreezeListProofs(bridge.aleo)
+
+    def clear_cache(self) -> None:
+        """Forget every cached tree and witness; the next proof reads the chain again."""
+        self._proofs.clear()
 
     def freeze_list_program(self, token_program: str) -> str:
-        """The freeze-list program backing *token_program* (usually a token program that imports it)."""
+        """The freeze-list program backing *token_program* (usually a token program that imports it).
+
+        Raises:
+            ConfigurationError: *token_program* names no freeze list.
+        """
         if token_program.endswith("freezelist.aleo"):
             return token_program
         from aleo.facade.errors import AleoError, ProgramNotFound
@@ -133,7 +99,7 @@ class FreezeList:
         fallback = FREEZE_LIST_PROGRAMS.get(token_program)
         if fallback:
             return fallback
-        raise ConfigurationError(f"{token_program} has no freeze-list program; pass merkle_proof explicitly")
+        raise ConfigurationError(f"{token_program} has no freeze-list program; pass compliance_proofs explicitly")
 
     def leaves(self, program: str) -> list[str]:
         """Frozen addresses from *program*'s freeze-list ``freeze_list_index`` mapping (0..last inclusive),
@@ -146,7 +112,7 @@ class FreezeList:
             count = int(last.removesuffix("u32"))
         except ValueError as exc:
             raise ConfigurationError(f"{fl_program}/{FREEZE_LIST_LAST_INDEX_MAPPING} returned {last!r}, expected a u32") from exc
-        addresses = []
+        addresses: list[str] = []
         for index in range(count + 1):
             value = self._bridge.mapping_value(fl_program, FREEZE_LIST_INDEX_MAPPING, f"{index}u32")
             if value and value != ZERO_ADDRESS:
@@ -158,7 +124,7 @@ class FreezeList:
         on_chain_root = self._bridge.mapping_value(fl_program, FREEZE_LIST_ROOT_MAPPING, CURRENT_ROOT_KEY)
         if on_chain_root is None:
             raise ConfigurationError(
-                f"{fl_program}/{FREEZE_LIST_ROOT_MAPPING}[{CURRENT_ROOT_KEY}] is unreadable; pass merkle_proof= explicitly")
+                f"{fl_program}/{FREEZE_LIST_ROOT_MAPPING}[{CURRENT_ROOT_KEY}] is unreadable; pass compliance_proofs= explicitly")
         computed_root = f"{tree[-1]}field"
         if computed_root != on_chain_root:
             raise ConfigurationError(
@@ -167,27 +133,27 @@ class FreezeList:
         return tree
 
     def tree(self, program: str) -> list[int]:
-        """Merkle tree over *program*'s frozen addresses, verified against the on-chain root when readable."""
+        """Merkle tree over *program*'s frozen addresses (read from its mappings), verified against the on-chain root."""
         return self._verified_tree(self.freeze_list_program(program), self.leaves(program))
 
     def exclusion_proof(self, address: str, program: str) -> str:
-        """``[MerkleProof; 2]`` proving *address* is not frozen on *program*; veil's empty pair when the list is empty."""
+        """``[MerkleProof; 2]`` proving *address* is not frozen on *program*; the empty pair when the list is empty.
+
+        Reads the current root every call and the published tree only when
+        the root changed. Raises ``ConfigurationError`` when the root is
+        unreadable, the published tree does not match it, or *address* is on
+        the list.
+        """
         fl_program = self.freeze_list_program(program)
-        leaves = self.leaves(program)
-        tree = self._verified_tree(fl_program, leaves)     # verifies the on-chain root, empty list included
-        if not leaves:
-            return EMPTY_MERKLE_PROOF_PAIR
-        count = (len(tree) + 1) // 2
-        target = address_to_field_int(address)
-        if target in tree[:count]:
-            raise ConfigurationError(f"{address} is on the {program} freeze list; no exclusion proof exists for it")
-        left, right = leaf_indices(tree, address)
-        return format_merkle_proof((sibling_path(tree, left, PROOF_SIBLINGS), left),
-                                   (sibling_path(tree, right, PROOF_SIBLINGS), right))
+        try:
+            return self._proofs.exclusion_proof(address, fl_program)
+        except FreezeListError as exc:
+            raise ConfigurationError(str(exc)) from exc
 
 
 __all__ = ["CURRENT_ROOT_KEY", "DEFAULT_DEPTH", "EMPTY_MERKLE_PROOF_PAIR", "EMPTY_TREE_ROOT",
            "FREEZE_LIST_INDEX_MAPPING", "FREEZE_LIST_LAST_INDEX_MAPPING", "FREEZE_LIST_MAPPING",
            "FREEZE_LIST_PROGRAMS", "FREEZE_LIST_ROOT_MAPPING", "PROOF_SIBLINGS", "ZERO_ADDRESS", "FreezeList",
+           "FreezeListError", "FrozenAddressError", "MerkleProofInput", "MerkleProofPair", "ComplianceProof", "ComplianceProofs",
            "address_to_field_int", "build_tree", "format_merkle_proof", "generate_leaves", "hash_two",
-           "leaf_indices", "sibling_path"]
+           "leaf_indices", "literal_compliance_proof", "sibling_path"]

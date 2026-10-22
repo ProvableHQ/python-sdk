@@ -596,3 +596,25 @@ async def test_async_dps_400_not_retried() -> None:
     assert result["ok"] is False
     assert result["status"] == 400
     assert post_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Compliance freeze list
+# ---------------------------------------------------------------------------
+
+EMPTY_FREEZE_LIST_ROOT = "3642222252059314292809609689035560016959342421640560347114299934615987159853"
+
+
+@pytest.mark.asyncio
+async def test_async_get_program_freeze_list() -> None:
+    c = make_client({
+        f"{HOST}/programs/usdcx_freezelist.aleo/compliance/freeze-list": jr(["0", "0", EMPTY_FREEZE_LIST_ROOT]),
+        f"{HOST}/programs/credits.aleo/compliance/freeze-list": jr({"statusCode": 404}, 404),
+        f"{HOST}/programs/nolist.aleo/compliance/freeze-list": httpx.Response(200, content=b"null", headers={"content-type": "application/json"}),
+        f"{HOST}/programs/bad.aleo/compliance/freeze-list": jr(["0", "x"]),
+    })
+    assert await c.get_compliance_freeze_list("usdcx_freezelist.aleo") == [0, 0, int(EMPTY_FREEZE_LIST_ROOT)]
+    assert await c.get_compliance_freeze_list("credits.aleo") is None
+    assert await c.get_compliance_freeze_list("nolist.aleo") is None
+    with pytest.raises(AleoNetworkError, match="decimal"):
+        await c.get_compliance_freeze_list("bad.aleo")

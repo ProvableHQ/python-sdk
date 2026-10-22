@@ -1,5 +1,6 @@
-"""Verbatim port of veil ``packages/bridge/src/registry/default.ts`` (PR #169 head ac7f718, registry version
-2026-09-30.hyperlane-bat-usdg-zec.1). Plain dicts only — ``registry.py`` turns them into dataclasses.
+"""Verbatim port of veil ``packages/bridge/src/registry/default.ts`` (PR #169 head ac7f718 plus the PR #193
+owner rotation at afc5601, registry version 2026-09-30.hyperlane-bat-usdg-zec.1). Plain dicts only —
+``registry.py`` turns them into dataclasses.
 Every key keeps veil's camelCase spelling so the brief and veil tests stay the source of truth."""
 from __future__ import annotations
 
@@ -368,16 +369,21 @@ ALEO_SOL_APP_METADATA = {
 }
 
 
+# _source: ProvableHQ/veil packages/bridge/src/registry/default.ts @ afc5601c98dfa28e76a6c619825856f1bdd6e7d9
+# (PR #193). Each program's owner rotated on 2026-10-02; the on-chain app_metadata asserts equality, so a
+# stale owner fails every outbound transfer. Reviewed 2026-10-21 against
+# https://edge.provable.com/api/v2/mainnet/program/<program>/mapping/app_metadata/true
+# (tests/fixtures/warp-route-app-metadata.json).
 def _new_warp_route_aleo_app_metadata(program: str, token_id: str, local_decimals: int, remote_decimals: int,
-                                      hyperlane_config_source: str) -> dict:
+                                      hyperlane_config_source: str, token_owner: str) -> dict:
     return {
         "aleoAppMetadataVerified": True,
         "aleoProgramSource": f"https://explorer.provable.com/program/{program}",
         "aleoAppMetadataSource": f"https://api.explorer.provable.com/v2/mainnet/program/{program}/mapping/app_metadata/true",
-        "aleoAppMetadataReviewedAt": "2026-09-30",
+        "aleoAppMetadataReviewedAt": "2026-10-21",
         "aleoProgramEdition": 0,
         "aleoTokenType": "1",
-        "aleoTokenOwner": "aleo1mx0tldt5qsqymn5a3whnmf9rx2whp837jjn0tvqgxqf86zg6dvyqnc8spm",
+        "aleoTokenOwner": token_owner,
         "aleoIsm": ZERO_ADDRESS,
         "aleoHook": ZERO_ADDRESS,
         "aleoTokenId": token_id,
@@ -390,15 +396,18 @@ def _new_warp_route_aleo_app_metadata(program: str, token_id: str, local_decimal
 ALEO_BAT_APP_METADATA = _new_warp_route_aleo_app_metadata(
     "hyp_warp_token_bat_v2.aleo",
     "8193754087214450113583165652573869677861364321518267024225788045720787201438field", 18, 18,
-    BAT_HYPERLANE_CONFIG_SOURCE)
+    BAT_HYPERLANE_CONFIG_SOURCE,
+    "aleo1x7gswtgsj4hj9ntckt39wmfrnvr60eje5feyak2pnpfghuxh8v9qmxv5da")
 ALEO_USDG_APP_METADATA = _new_warp_route_aleo_app_metadata(
     "hyp_warp_token_usdg_v2.aleo",
     "4364459415416156846201796031612641041087412365006702457109915656601258641029field", 6, 6,
-    USDG_HYPERLANE_CONFIG_SOURCE)
+    USDG_HYPERLANE_CONFIG_SOURCE,
+    "aleo1lad36r82wn80fs9vzmyykfgkne6045auy9dy50rppck98rvuk58s70xyfh")
 ALEO_ZEC_APP_METADATA = _new_warp_route_aleo_app_metadata(
     "hyp_warp_token_zec_v2.aleo",
     "220414605002186903241059728372192608429362177759171998609092499027319866844field", 8, 8,
-    ZEC_HYPERLANE_CONFIG_SOURCE)
+    ZEC_HYPERLANE_CONFIG_SOURCE,
+    "aleo1yv5gy4l5g82dcu47260t6lpls4xvg29zpg2m06jdwvdtm8m06gzsysx6dy")
 
 _ALLOWANCES = {
     "aleoAllowanceSpendersVerified": True,

@@ -14,13 +14,51 @@
                       amount_in=10**9).delegate()
     out = dex.claim_swap_output(handle).delegate()
 """
-from .client import ShieldSwap as ShieldSwap
+_ALEO_SDK_MINIMUM = "0.7.0"
+
+
+def _require_aleo_sdk() -> None:
+    """Fail at import, naming the fix, when the installed aleo-sdk predates ``aleo.compliance``.
+
+    Freeze-list proofs come from ``aleo.compliance``, which first shipped in aleo-sdk 0.7.0. An
+    older install would otherwise fail on the first import of the client with a bare
+    ``ModuleNotFoundError``.
+    """
+    try:
+        import aleo.compliance  # noqa: F401
+    except ImportError as exc:
+        from importlib.metadata import PackageNotFoundError, version
+        try:
+            found = version("aleo-sdk")
+        except PackageNotFoundError:
+            found = "not installed"
+        raise ImportError(
+            f"shield-swap-sdk needs aleo-sdk>={_ALEO_SDK_MINIMUM} (found {found}); "
+            f'run: pip install -U "aleo-sdk>={_ALEO_SDK_MINIMUM}"') from exc
+
+
+_require_aleo_sdk()
+
+from .client import ShieldSwap as ShieldSwap  # noqa: E402
 from .async_client import AsyncShieldSwap as AsyncShieldSwap
 from .api import ApiClient as ApiClient, AsyncApiClient as AsyncApiClient
 from .api import ConfirmAirdropResult as ConfirmAirdropResult
 from .rebalance import (
     RebalancePlan as RebalancePlan,
     RebalanceResult as RebalanceResult,
+)
+from .compliance import (
+    ClaimProofs as ClaimProofs,
+    CollectProofs as CollectProofs,
+    ComplianceProof as ComplianceProof,
+    ComplianceProofs as ComplianceProofs,
+    IncreaseProofs as IncreaseProofs,
+    MerkleProofInput as MerkleProofInput,
+    MerkleProofPair as MerkleProofPair,
+    MintProofs as MintProofs,
+    RebalanceProofs as RebalanceProofs,
+    SHIELD_SWAP_FREEZELIST as SHIELD_SWAP_FREEZELIST,
+    SwapProofs as SwapProofs,
 )
 from .types import (
     OwnedPosition as OwnedPosition,
@@ -80,7 +118,7 @@ def agent_guide() -> str:
     return files(__name__).joinpath("AGENTS.md").read_text()
 
 
-__version__ = "0.6.2"
+__version__ = "0.7.0"
 
 __all__ = [
     "ShieldSwap", "AsyncShieldSwap", "ApiClient", "AsyncApiClient",

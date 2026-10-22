@@ -16,6 +16,7 @@ from decimal import Decimal
 from typing import Any, Callable, Generic, Optional, TypeVar
 
 from aleo import AleoNetworkError, ProgramNotFound
+from aleo.compliance import AsyncFreezeListProofs, ComplianceProofContext, async_freezelist_program
 
 from . import _generated as g
 from ._calls import extract_tx_id, root_outputs
@@ -37,6 +38,10 @@ from ._core import (
     unreadable_airdrop_transactions,
 )
 from ._routing import claim_route, swap_route
+from .compliance import (
+    SHIELD_SWAP_FREEZELIST, ClaimProofs, Slot, SwapProofs, check_proof_arguments, claim_slots,
+    merge_legacy_wrapper_proofs, planned_proof_slots, supplied_literals, swap_slots,
+)
 from .rebalance import RebalancePlan, plan_rebalance as _plan_rebalance
 from .position_math import (
     amounts_for_liquidity,
@@ -141,6 +146,10 @@ class AsyncShieldSwap:
         self.program = program
         # Resolve the API from the bound client's network (see api_url_for).
         self.api = AsyncApiClient(api_url or api_url_for(aleo.network_name))
+        #: The freeze list Shield Swap itself checks; override for a non-standard deployment.
+        self.amm_freezelist_program: str = SHIELD_SWAP_FREEZELIST
+        #: Freeze-list exclusion proofs, cached per list until its root changes.
+        self.freezelist = AsyncFreezeListProofs(aleo)
         # allow_token relationships are immutable — cache probes for the
         # client's lifetime.
         self._wrapped_cache: dict[str, bool] = {}
@@ -645,6 +654,41 @@ class AsyncShieldSwap:
 
     # ── Writes ───────────────────────────────────────────────────────────────
 
+    # ── Compliance proofs ────────────────────────────────────────────────────
+
+    async def _freezelist_for_token(self, token_id: str, program: Optional[str] = None) -> Optional[str]:
+        """The freeze list a wrapped token's wrapper checks — its underlying
+        stablecoin's — or None for a wrapper that ignores the proof (credits).
+        *program* is the underlying program when the caller named it."""
+        if program is None:
+            try:
+                program = await self._token_program(token_id)
+            except ValueError as exc:
+                raise ValueError(
+                    f"Cannot resolve the program behind {token_id} to find its freeze "
+                    "list — pass compliance_proofs= explicitly.") from exc
+        return await async_freezelist_program(self._aleo, program)
+
+    async def _compliance_proofs(self, action: str, slots: list[Slot], compliance_proofs: Any,
+                                 wrapper_proofs: Optional[str],
+                                 programs: Optional[dict[str, Optional[str]]] = None) -> list[str]:
+        """The ``[MerkleProof; 2]`` literal for every planned slot, in order
+        (see the sync client)."""
+        check_proof_arguments(compliance_proofs, wrapper_proofs)
+        if compliance_proofs is not None:
+            return supplied_literals(action, compliance_proofs, slots)
+        if wrapper_proofs is not None:
+            amm_only = [ComplianceProofContext(self.amm_freezelist_program, slot.subject) if slot.kind == "amm" else None
+                        for slot in slots]
+            return merge_legacy_wrapper_proofs(slots, await self.freezelist.resolve(amm_only), wrapper_proofs)
+        known = programs or {}
+        lists: dict[str, Optional[str]] = {}
+        for slot in slots:
+            if slot.kind == "wrapper" and slot.token_id is not None and slot.token_id not in lists:
+                lists[slot.token_id] = await self._freezelist_for_token(slot.token_id, known.get(slot.token_id))
+        planned = planned_proof_slots(slots, self.amm_freezelist_program, lambda token_id: lists[token_id])
+        return await self.freezelist.resolve(planned)
+
     async def quote(self, *, token_in: str, token_out: str, amount_in: str | Decimal,
                     slippage_bps: int = 50) -> SwapQuote:
         """Quote a direct or multi-hop swap from two symbols and a token amount.
@@ -666,7 +710,8 @@ class AsyncShieldSwap:
                    nonce: Optional[int] = None,
                    token_in_program: Optional[str] = None,
                    token_record: Optional[str] = None,
-                              identity: Optional[BlindedIdentity] = None,
+                   identity: Optional[BlindedIdentity] = None,
+                   compliance_proofs: Optional[SwapProofs] = None,
                    wrapper_proofs: Optional[str] = None,
                    imports: Optional[dict[str, str]] = None,
                    account: Any = None) -> AsyncDexCall[SwapHandle]:
@@ -731,8 +776,9 @@ class AsyncShieldSwap:
             resolved, hop_literals = resolve_quote(quote, pools, slots, amount_in, expected_out)
 
         record = token_record
+        program = token_in_program
         if record is None:
-            program = token_in_program or await self._token_program(token_in_id)
+            program = program or await self._token_program(token_in_id)
             record = await self._select_token_record(
                 program=program, min_amount=amount_in,
                 token_id=token_in_id, account=acct)
@@ -756,6 +802,10 @@ class AsyncShieldSwap:
                 token_programs.append(await self._amm_token_program(hop.token_in))
                 token_programs.append(await self._amm_token_program(hop.token_out))
         await self._ensure([p for p in token_programs if p], imports)
+        proofs = await self._compliance_proofs(
+            "swap", swap_slots(route.program != self.program, str(acct.address), token_in_id),
+            compliance_proofs, wrapper_proofs, {token_in_id: program})
+        sender_proof = proofs[0] if proofs else default_merkle_proofs()
 
         inputs = [
             record, identity.blinding_factor, identity.blinded_address,
@@ -770,12 +820,11 @@ class AsyncShieldSwap:
                 raise ValueError(
                     "routed swaps require amount_out_min > 0 — pass "
                     "expected_out or a slippage below 100%")
-            inputs = [record, wrapper_proofs or default_merkle_proofs(),
-                      *inputs[1:]]
+            inputs = [record, sender_proof, *inputs[1:]]
         if multi_hop:
             inputs = multi_hop_inputs(quote, hop_literals, record, identity, amount_in,
                                       resolved.amount_out_min, swap_nonce, deadline,
-                                      wrapper_proofs or default_merkle_proofs(), route.program != self.program)
+                                      sender_proof, route.program != self.program)
         prog = await self._program(route.program)
         bound = getattr(prog.functions, route.function)(*inputs)
 
@@ -801,6 +850,7 @@ class AsyncShieldSwap:
 
     async def claim_swap_output(self, handle: SwapHandle, *,
                                 timeout: float = 0.0,
+                                compliance_proofs: Optional[ClaimProofs] = None,
                                 wrapper_proofs: Optional[str] = None,
                                 imports: Optional[dict[str, str]] = None,
                                 account: Any = None) -> AsyncDexCall[ClaimResult]:
@@ -821,7 +871,7 @@ class AsyncShieldSwap:
         """
         if not math.isfinite(timeout) or timeout < 0:
             raise ValueError("timeout must be finite and nonnegative")
-        self._account(account)
+        acct = self._account(account)
         if not handle.swap_id:
             raise ValueError("handle.swap_id is not set — recover it from the "
                              "confirmed request transaction before claiming.")
@@ -859,12 +909,12 @@ class AsyncShieldSwap:
                   out.token_in, out.token_out, f"{out.amount_out}u128"]
         if not no_refund:
             inputs.append(f"{out.amount_remaining}u128")
-        inputs.append(default_merkle_proofs())
-        wp = wrapper_proofs or default_merkle_proofs()
-        if w_out:
-            inputs.append(wp)             # output receiver proof
-        if w_in and not no_refund:
-            inputs.append(wp)             # refund receiver proof
+        # The AMM signer bundle, then one receiver bundle per wrapped leg being
+        # paid — the output first, then the refund (none on a no-refund claim).
+        inputs.extend(await self._compliance_proofs(
+            "claim_swap_output",
+            claim_slots(w_out, w_in, no_refund, str(acct.address), str(out.token_in), str(out.token_out)),
+            compliance_proofs, wrapper_proofs))
         prog = await self._program(route.program)
         bound = getattr(prog.functions, route.function)(*inputs)
         return AsyncDexCall(self._aleo, bound,

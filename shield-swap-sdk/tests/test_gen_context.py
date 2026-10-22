@@ -61,5 +61,7 @@ def test_page_stays_compact():
     # edit broke — this is deliberate room, not another squeeze.  26k → 32k
     # (2026-09) for the upstream sync: rebalancing (plan + execute, with the
     # price-fragility warning agents must relay), fill receipts, the routing
-    # graph, and the indexer's unclaimed/protocol-state views.
-    assert len(_render()) < 32_000
+    # graph, and the indexer's unclaimed/protocol-state views.  32k → 34k
+    # (2026-10) for compliance proofs: six write methods gained a
+    # ``compliance_proofs`` parameter and a one-line note on what it takes.
+    assert len(_render()) < 34_000

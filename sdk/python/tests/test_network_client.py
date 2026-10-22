@@ -935,3 +935,45 @@ def test_open_edge_ignores_ambient_credentials() -> None:
     # The legacy host still mints as before (covered by the JWT tests above).
     legacy = AleoNetworkClient("https://api.provable.com", network="testnet")
     assert legacy._ensure_jwt(None, None, None) is None            # no creds → nothing to mint
+
+
+# ---------------------------------------------------------------------------
+# Compliance freeze list
+# ---------------------------------------------------------------------------
+
+EMPTY_FREEZE_LIST_ROOT = "3642222252059314292809609689035560016959342421640560347114299934615987159853"
+
+
+@resp_lib.activate
+def test_get_program_freeze_list_returns_tree_nodes_as_ints() -> None:
+    resp_lib.add(resp_lib.GET, f"{HOST}/programs/usdcx_freezelist.aleo/compliance/freeze-list",
+                 json=["0", "0", EMPTY_FREEZE_LIST_ROOT])
+    c = make_client()
+    assert c.get_compliance_freeze_list("usdcx_freezelist.aleo") == [0, 0, int(EMPTY_FREEZE_LIST_ROOT)]
+    assert resp_lib.calls[0].request.url == f"{HOST}/programs/usdcx_freezelist.aleo/compliance/freeze-list"
+
+
+@resp_lib.activate
+def test_get_program_freeze_list_is_none_when_the_program_has_no_list() -> None:
+    resp_lib.add(resp_lib.GET, f"{HOST}/programs/credits.aleo/compliance/freeze-list",
+                 json={"statusCode": 404, "message": "No current freeze list found for program: credits.aleo"}, status=404)
+    resp_lib.add(resp_lib.GET, f"{HOST}/programs/nolist.aleo/compliance/freeze-list", body="null", content_type="application/json")
+    c = make_client()
+    assert c.get_compliance_freeze_list("credits.aleo") is None
+    assert c.get_compliance_freeze_list("nolist.aleo") is None
+
+
+@resp_lib.activate
+def test_get_program_freeze_list_rejects_non_decimal_nodes() -> None:
+    resp_lib.add(resp_lib.GET, f"{HOST}/programs/bad.aleo/compliance/freeze-list", json=["0", "x"])
+    c = make_client()
+    with pytest.raises(AleoNetworkError, match="decimal"):
+        c.get_compliance_freeze_list("bad.aleo")
+
+
+@resp_lib.activate
+def test_get_program_freeze_list_propagates_other_errors() -> None:
+    resp_lib.add(resp_lib.GET, f"{HOST}/programs/down.aleo/compliance/freeze-list", json={"error": "boom"}, status=403)
+    c = make_client()
+    with pytest.raises(AleoNetworkError):
+        c.get_compliance_freeze_list("down.aleo")

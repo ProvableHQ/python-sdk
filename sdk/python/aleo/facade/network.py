@@ -251,6 +251,23 @@ class NetworkModule:
         """
         return self._nc().get_program_mapping_value(program_id, mapping_name, key)
 
+    def get_compliance_freeze_list(self, program_id: str) -> list[int] | None:
+        """Return the published compliance Merkle tree of a freeze-list program.
+
+        Parameters
+        ----------
+        program_id:
+            The program that owns the freeze list (``usdcx_freezelist.aleo``).
+
+        Returns
+        -------
+        list[int] | None
+            Node values, leaves first and root last; ``None`` when the program
+            has no freeze list. Verify the root against the program's
+            ``freeze_list_root`` mapping before building a witness.
+        """
+        return self._nc().get_compliance_freeze_list(program_id)
+
     def get_public_balance(self, address: str) -> int:
         """Return the public credits balance for *address* in microcredits.
 

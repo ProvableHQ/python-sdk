@@ -234,3 +234,112 @@ skips certificate verification); `ALEO_DEVNODE_UNPROVEN=1` extends that to
 executions and is the fast path (~5 minutes). Without it, executions are
 fully proven locally: expect SNARK parameter downloads and key synthesis on
 first use.
+
+<a id="compliance"></a>
+
+## Compliance
+
+Swaps and liquidity actions prove in zero knowledge that the addresses taking
+part are not on a freezelist. Two kinds of list apply. Shield Swap's own list
+(`shield_swap_freezelist.aleo`) screens the signer when a swap output is
+claimed, and the signer, the position's recipient, and its withdrawal address
+when a position is minted, collected, or rebalanced. Each ARC-22 stablecoin
+that trades through a wrapper (USDCx, USAD) screens the signer when its
+records are wrapped and the receiving address when they are unwrapped, against
+the stablecoin's own list.
+
+The SDK builds these Merkle exclusion proofs locally and passes them as
+private inputs of the transaction. The programs check the Merkle paths inside
+the transaction proof, and their finalize compares each reconstructed root
+with the root stored on chain. The network verifies that an address is absent
+from a list without seeing the address or the paths.
+
+Proof generation is on by default. Leave `compliance_proofs` unset and call
+the methods as usual:
+
+```python
+dex.mint(pool_key=key, tick_lower=lo, tick_upper=hi,
+         amount0_desired=a0, amount1_desired=a1)
+dex.claim_swap_output(handle)
+```
+
+### Functions that take compliance proofs
+
+Each bundle is one `[MerkleProof; 2]` input: two Merkle paths proving that one
+address is absent from one list. The counts are input slots on the entrypoint
+the call resolves to, including the placeholder slot of a wrapper that ignores
+proofs (credits).
+
+| Method | Type | Bundles | Subjects, in input order |
+| --- | --- | --- | --- |
+| `swap()` | `SwapProofs` | 0 to 1 | The signer, for a wrapped input token |
+| `claim_swap_output()` | `ClaimProofs` | 1 to 3 | Shield Swap signer, then the wrapped output receiver and the wrapped refund receiver when there is a refund |
+| `mint()` | `MintProofs` | 3 to 5 | Wrapped token senders, then Shield Swap signer, recipient, and withdrawal address |
+| `increase_liquidity()` | `IncreaseProofs` | 0 to 2 | Wrapped token senders |
+| `collect()` | `CollectProofs` | 2 to 4 | Shield Swap owner and withdrawal address, then wrapped token receivers |
+| `rebalance_position()` | `RebalanceProofs` | 2 to 6 | Funded wrapped token senders, wrapped token receivers, then Shield Swap owner and withdrawal address |
+
+Shield Swap slots use the AMM list. Wrapped-token slots use the underlying
+stablecoin's list, found through that program's imports
+(`test_usdcx_stablecoin.aleo` imports `test_usdcx_freezelist.aleo`). Senders
+are the signer. Claim receivers are the signer too; collect and rebalance
+receivers are the PositionNFT's withdrawal address. Within each group side 0
+comes before side 1, a plain side has no slot, and a rebalance keeps its
+receiver slots even when a side has no refund. A multi-hop swap adds no slot
+for its intermediate hops. `decrease_liquidity()` and `burn()` take no proofs;
+`swap_many()` and `collect_all()` always let the SDK build them.
+
+### Automatic generation
+
+Before each call the SDK works out the entrypoint, the slots, and the address
+each slot screens, then reads each list's current root
+(`freeze_list_root[1u8]`) once, so a mint's three Shield Swap bundles share
+one root. When a root changed since the last call it downloads the published
+tree from `GET /programs/{id}/compliance/freeze-list`, checks that the tree
+ends in that root, builds each witness, and checks that the witness
+reconstructs the root. Trees and witnesses stay in memory per client, list,
+and root, so while a root is unchanged nothing beyond the root is read. An
+empty list uses the empty-tree witness without a download.
+
+A frozen address raises `FrozenAddressError`, and a missing root or a
+published tree that does not match the root raises `FreezeListError`, in each
+case before anything is proved or a fee is paid. A wrapped token whose
+underlying program the registry cannot name raises `ValueError`; passing
+`token0_program=` (or the matching argument) names it. The cache holds at
+most 16 lists and 256 addresses per list and does not survive a restart.
+
+`dex.freezelist` is the resolver, an `aleo.FreezeListProofs`:
+`dex.freezelist.exclusion_proof(address, program)` returns one bundle for any
+address and list, `dex.freezelist.resolve(contexts)` fills a list of
+`ComplianceProofContext` values, and `dex.freezelist.clear()` drops the
+cached trees. `dex.amm_freezelist_program` names the AMM list for a
+non-standard deployment.
+
+### Optional proof inputs
+
+`compliance_proofs` takes a `ComplianceProofs` value: the method's tuple of
+bundles in input order, or `None`. Each bundle is an encoded `[MerkleProof; 2]`
+string, a `MerkleProofPair`, or a `(MerkleProofInput, MerkleProofInput)` tuple;
+`MerkleProofInput` takes siblings as ints or `"...field"` literals. The count
+is checked against the route the call resolves to before anything runs, and a
+mismatch raises `ValueError` naming the slots the route expects. The same
+bundle may fill several slots when the list and the address match.
+
+`wrapper_proofs=`, the earlier single-string argument, still fills every
+wrapped-token slot while the Shield Swap slots are built by the SDK. It cannot
+be combined with `compliance_proofs`. A supplied bundle bypasses the root read
+and the witness check, so its freshness is the caller's responsibility.
+
+```python
+from aleo_shield_swap import MerkleProofInput, MerkleProofPair
+
+dex.swap(pool_key=key, token_in_id=usdcx, amount_in=10**6,
+         compliance_proofs=(sender_bundle,))                      # one wrapped input
+dex.mint(pool_key=key, tick_lower=lo, tick_upper=hi,
+         amount0_desired=a0, amount1_desired=a1,
+         compliance_proofs=(signer_bundle, recipient_bundle, withdrawal_bundle))   # plain pool
+pair = MerkleProofPair(MerkleProofInput(siblings=(0,) * 16, leaf_index=1),
+                       MerkleProofInput(siblings=("0field",) * 16, leaf_index="1u32"))
+dex.collect(pool_key=key, amount0_requested=x, amount1_requested=y,
+            compliance_proofs=(pair, pair, usdcx_receiver_bundle))  # token0 wrapped
+```

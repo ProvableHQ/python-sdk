@@ -33,6 +33,7 @@ from ._client_common import (
     strip_quotes,
     validate_block_range,
     async_retry_with_backoff,
+    parse_freeze_list_tree,
 )
 from .security import encrypt_proving_request
 
@@ -683,6 +684,25 @@ class AsyncAleoNetworkClient:
         )
         import json as _json
         return Plaintext.from_string(_json.loads(raw))
+
+    async def get_compliance_freeze_list(self, program_id: str) -> list[int] | None:
+        """Read the published compliance Merkle tree of a freeze-list program (awaited).
+
+        Same contract as the sync client: node values leaves first and root
+        last, ``None`` when the program has no freeze list. Compare the last
+        node with the on-chain ``freeze_list_root`` before building a witness.
+
+        Raises:
+            AleoNetworkError: If the request fails for another reason, or the
+                response is not a list of decimal node values.
+        """
+        try:
+            raw = await self._get(f"/programs/{program_id}/compliance/freeze-list", "getProgramFreezeList")
+        except AleoNetworkError as exc:
+            if exc.status == 404:
+                return None
+            raise
+        return parse_freeze_list_tree(raw)
 
     async def get_transaction_object(self, tx_id: str) -> Any:
         """Fetch a transaction and parse it into a ``Transaction``.

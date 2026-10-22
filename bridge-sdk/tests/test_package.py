@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_version_is_pinned_in_lockstep():
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text())
-    assert pyproject["project"]["version"] == "0.6.2" == aleo_bridge.__version__
+    assert pyproject["project"]["version"] == "0.7.0" == aleo_bridge.__version__
     assert pyproject["project"]["name"] == "aleo-bridge-sdk"
     deps = pyproject["project"]["dependencies"]
     for base in ("aleo-sdk", "pynacl", "web3", "eth-account", "solders", "solana", "privy-client", "dynamic-wallet-sdk"):
@@ -105,7 +105,7 @@ def test_import_without_optional_extras(monkeypatch):
             monkeypatch.delitem(sys.modules, name)  # reverted at teardown — a fresh reimport below must not
                                                      # leak new module/class objects into tests that run after this one
     pkg = importlib.import_module("aleo_bridge")
-    assert pkg.__version__ == "0.6.2"
+    assert pkg.__version__ == "0.7.0"
     assert issubclass(pkg.RouteNotFoundError, pkg.BridgeError)
 
 
@@ -132,3 +132,11 @@ def test_polling_timeout_carries_status():
     assert err.status == "DELIVERY_PENDING" and err.progress is None
     with pytest.raises(PollingTimeoutError):
         raise err
+
+
+def test_import_guard_names_the_aleo_sdk_upgrade(monkeypatch):
+    import aleo_bridge
+    aleo_bridge._require_aleo_sdk()                                    # the installed sdk has aleo.compliance
+    monkeypatch.setitem(sys.modules, "aleo.compliance", None)          # simulate an aleo-sdk without it
+    with pytest.raises(ImportError, match=r'needs aleo-sdk>=0\.7\.0 \(found .*\); run: pip install -U "aleo-sdk>=0\.7\.0"'):
+        aleo_bridge._require_aleo_sdk()

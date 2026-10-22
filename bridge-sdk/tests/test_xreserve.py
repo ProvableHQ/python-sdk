@@ -79,9 +79,9 @@ def test_burn_validates_mode_before_any_amount_or_chain_work(bridge):
 
 
 def test_burn_rejects_record_or_merkle_proof_for_public_modes(bridge):
-    with pytest.raises(ConfigurationError, match="record=/merkle_proof="):
+    with pytest.raises(ConfigurationError, match="record=/compliance_proofs="):
         bridge.xreserve.burn(EVM1, amount="2.5", mode="public", record=USDCX_RECORD)
-    with pytest.raises(ConfigurationError, match="record=/merkle_proof="):
+    with pytest.raises(ConfigurationError, match="record=/compliance_proofs="):
         bridge.xreserve.burn(EVM1, amount="2.5", mode="public-as-signer", merkle_proof="[x]")
     assert bridge.aleo.record_queries == []
 

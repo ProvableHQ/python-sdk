@@ -580,3 +580,13 @@ async def test_async_decode_transition_by_id_404_raises_transaction_not_found() 
     )
     with pytest.raises(TransactionNotFound):
         await a.decode_transition("at1fake")
+
+
+@pytest.mark.asyncio
+async def test_async_network_get_program_freeze_list() -> None:
+    a = _make_aleo({
+        f"{HOST}/programs/usdcx_freezelist.aleo/compliance/freeze-list": jr(["0", "0", "7"]),
+        f"{HOST}/programs/credits.aleo/compliance/freeze-list": jr({"statusCode": 404}, 404),
+    })
+    assert await a.network.get_compliance_freeze_list("usdcx_freezelist.aleo") == [0, 0, 7]
+    assert await a.network.get_compliance_freeze_list("credits.aleo") is None

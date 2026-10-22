@@ -1,6 +1,6 @@
 {
   "include": ["python/aleo_bridge"],
-  "extraPaths": ["python"],
+  "extraPaths": ["python", "../sdk/python"],
   "venvPath": ".",
   "venv": ".venv",
   "reportMissingModuleSource": false

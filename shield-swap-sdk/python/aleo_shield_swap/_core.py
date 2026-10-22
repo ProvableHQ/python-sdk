@@ -8,6 +8,8 @@ token-record selection — everything both ``client.py`` and
 """
 from __future__ import annotations
 
+from aleo.compliance import EMPTY_MERKLE_PROOF as _EMPTY_MERKLE_PROOF, EMPTY_MERKLE_PROOF_PAIR
+
 import re
 import secrets
 from dataclasses import dataclass
@@ -145,17 +147,17 @@ def generate_field_nonce() -> str:
 #
 # mint / claim_swap_output / collect prove signer (and recipient/withdrawal)
 # non-inclusion in the AMM freezelist; routed calls additionally carry
-# wrapper-freezelist proofs.  While a freezelist is empty, the contract
-# accepts two copies of the empty-tree proof below (the credits wrapper
-# ignores its proof input entirely).  Building real proofs against a
-# populated tree is deferred until a list is non-empty.
+# wrapper-freezelist proofs.  The clients resolve every bundle through
+# ``aleo.compliance`` (see ``compliance.py``); the empty-tree pair below is
+# what a list yields while it is empty, and what a wrapper that ignores its
+# proof input (credits) receives.
 
-EMPTY_MERKLE_PROOF = "{ siblings: [" + ", ".join(["0field"] * 16) + "], leaf_index: 1u32 }"
+EMPTY_MERKLE_PROOF = _EMPTY_MERKLE_PROOF
 
 
 def default_merkle_proofs() -> str:
     """The ``[MerkleProof; 2]`` literal accepted while the freezelist is empty."""
-    return f"[{EMPTY_MERKLE_PROOF}, {EMPTY_MERKLE_PROOF}]"
+    return EMPTY_MERKLE_PROOF_PAIR
 
 
 # ── Shared pure helpers (sync + async clients) ───────────────────────────────

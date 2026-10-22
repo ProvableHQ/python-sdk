@@ -101,6 +101,9 @@ class _AsyncProgram:
         self._mappings = mappings
         self.functions = _AsyncFunctions(recorder, pid)
         self.source = _valid_source(pid)
+        # As in the sync stub: an unknown token program is backed by an empty freeze list named after it.
+        default = [] if pid.endswith("freezelist.aleo") else [f"{pid.removesuffix('.aleo')}_freezelist.aleo"]
+        self.imports = list(recorder.imports.get(pid, default))
 
     def mapping(self, name):
         return _AsyncMapping(self._mappings.get(name, {}))
@@ -138,7 +141,15 @@ class _AsyncNetwork:
         if program_id in self._recorder.missing_programs:
             from aleo import AleoNetworkError
             raise AleoNetworkError("404", status=404)
+        if mapping_name == "freeze_list_root":
+            from aleo.compliance import EMPTY_TREE_ROOT
+            root = self._recorder.roots.get(program_id, EMPTY_TREE_ROOT if program_id.endswith("freezelist.aleo") else None)
+            return None if root is None else f"{root}field"
         return self._recorder._mappings.get(mapping_name, {}).get(key)
+
+    async def get_compliance_freeze_list(self, program_id):
+        self._recorder.tree_reads.append(program_id)
+        return self._recorder.freeze_list_trees.get(program_id)
 
 
 class _AsyncProvider:
@@ -161,7 +172,11 @@ class AsyncStubAleo:
         self.waited = []
         self.registered_programs = []
         self.mapping_reads = []
+        self.tree_reads = []
         self.missing_programs = set()
+        self.roots = {}
+        self.freeze_list_trees = {}
+        self.imports = {}
         self._mappings = mappings or {}
         self.programs = _AsyncPrograms(self, self._mappings)
         self.record_provider = _AsyncProvider(
@@ -254,8 +269,8 @@ async def test_async_claim_wrapped_output_routes_through_router():
                         transaction_id="at1req", program="shield_swap.aleo")
     dex = AsyncShieldSwap(astub)
 
-    async def plain_program(token_id):          # the registry, stubbed
-        return {"1field": "tok_in.aleo"}[token_id]
+    async def plain_program(token_id):          # the registry, stubbed (a wrapped token's underlying program too)
+        return {"1field": "tok_in.aleo", "2field": "under_out.aleo"}[token_id]
 
     async def wrapper_program(token_id):
         return {"2field": "wrapped_out.aleo"}[token_id]

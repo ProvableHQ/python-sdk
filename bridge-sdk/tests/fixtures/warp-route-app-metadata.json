@@ -1,0 +1,18 @@
+{
+  "_source": "ProvableHQ/veil packages/bridge/test/fixtures/warp-route-app-metadata.json @ afc5601c98dfa28e76a6c619825856f1bdd6e7d9 (PR #193)",
+  "hyp_warp_token_bat_v2.aleo": {
+    "source": "https://edge.provable.com/api/v2/mainnet/program/hyp_warp_token_bat_v2.aleo/mapping/app_metadata/true",
+    "reviewedAt": "2026-10-21",
+    "metadata": "{\n  token_type: 1u8,\n  token_owner: aleo1x7gswtgsj4hj9ntckt39wmfrnvr60eje5feyak2pnpfghuxh8v9qmxv5da,\n  ism: aleo1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq3ljyzc,\n  hook: aleo1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq3ljyzc,\n  token_id: 8193754087214450113583165652573869677861364321518267024225788045720787201438field,\n  local_decimals: 18u8,\n  remote_decimals: 18u8\n}"
+  },
+  "hyp_warp_token_usdg_v2.aleo": {
+    "source": "https://edge.provable.com/api/v2/mainnet/program/hyp_warp_token_usdg_v2.aleo/mapping/app_metadata/true",
+    "reviewedAt": "2026-10-21",
+    "metadata": "{\n  token_type: 1u8,\n  token_owner: aleo1lad36r82wn80fs9vzmyykfgkne6045auy9dy50rppck98rvuk58s70xyfh,\n  ism: aleo1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq3ljyzc,\n  hook: aleo1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq3ljyzc,\n  token_id: 4364459415416156846201796031612641041087412365006702457109915656601258641029field,\n  local_decimals: 6u8,\n  remote_decimals: 6u8\n}"
+  },
+  "hyp_warp_token_zec_v2.aleo": {
+    "source": "https://edge.provable.com/api/v2/mainnet/program/hyp_warp_token_zec_v2.aleo/mapping/app_metadata/true",
+    "reviewedAt": "2026-10-21",
+    "metadata": "{\n  token_type: 1u8,\n  token_owner: aleo1yv5gy4l5g82dcu47260t6lpls4xvg29zpg2m06jdwvdtm8m06gzsysx6dy,\n  ism: aleo1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq3ljyzc,\n  hook: aleo1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq3ljyzc,\n  token_id: 220414605002186903241059728372192608429362177759171998609092499027319866844field,\n  local_decimals: 8u8,\n  remote_decimals: 8u8\n}"
+  }
+}

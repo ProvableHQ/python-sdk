@@ -68,6 +68,14 @@ def test_claim_incomplete_handle_raises():
         ShieldSwap(stub).claim_swap_output(_handle(blinding_factor=None))
 
 
+def _dex(stub):
+    """A client whose token registry names ``tok.aleo`` for every token; the
+    stub backs it with an empty freeze list (see ``StubAleo``)."""
+    dex = ShieldSwap(stub)
+    dex._token_program = lambda tid: "tok.aleo"
+    return dex
+
+
 def _stub_wrapped(swap_outputs, wrapped):
     """Stub with the given token ids marked wrapped on chain."""
     return StubAleo(mappings={
@@ -80,7 +88,7 @@ def _stub_wrapped(swap_outputs, wrapped):
 
 def test_claim_wrapped_output_routes_through_router():
     stub = _stub_wrapped({"77field": SWAP_OUTPUT_TEXT}, wrapped={"2field"})
-    ShieldSwap(stub).claim_swap_output(_handle()).transact()
+    _dex(stub).claim_swap_output(_handle()).transact()
     fn, args = stub.last_call
     assert stub.last_program == ROUTER_ID
     assert fn == "claim_to_wrapped_refund_arc20"
@@ -91,7 +99,7 @@ def test_claim_wrapped_output_routes_through_router():
 
 def test_claim_wrapped_refund_routes_through_router():
     stub = _stub_wrapped({"77field": SWAP_OUTPUT_TEXT}, wrapped={"1field"})
-    ShieldSwap(stub).claim_swap_output(_handle()).transact()
+    _dex(stub).claim_swap_output(_handle()).transact()
     fn, args = stub.last_call
     assert (stub.last_program, fn) == (ROUTER_ID, "claim_to_arc20_refund_wrapped")
     assert len(args) == 9
@@ -99,7 +107,7 @@ def test_claim_wrapped_refund_routes_through_router():
 
 def test_claim_both_wrapped_routes_with_two_proof_arrays():
     stub = _stub_wrapped({"77field": SWAP_OUTPUT_TEXT}, wrapped={"1field", "2field"})
-    ShieldSwap(stub).claim_swap_output(_handle()).transact()
+    _dex(stub).claim_swap_output(_handle()).transact()
     fn, args = stub.last_call
     assert (stub.last_program, fn) == (ROUTER_ID, "claim_to_wrapped_refund_wrapped")
     assert len(args) == 10
@@ -108,7 +116,7 @@ def test_claim_both_wrapped_routes_with_two_proof_arrays():
 
 def test_claim_plain_stays_on_core():
     stub = _stub_wrapped({"77field": SWAP_OUTPUT_TEXT}, wrapped=set())
-    ShieldSwap(stub).claim_swap_output(_handle()).transact()
+    _dex(stub).claim_swap_output(_handle()).transact()
     fn, _ = stub.last_call
     assert (stub.last_program, fn) == ("shield_swap.aleo", "claim_swap_output")
 
@@ -117,7 +125,7 @@ def test_claim_plain_stays_on_core():
 
 def test_claim_no_refund_plain_drops_remaining_input():
     stub = _stub_wrapped({"77field": SWAP_OUTPUT_NO_REFUND_TEXT}, wrapped=set())
-    result = ShieldSwap(stub).claim_swap_output(_handle()).transact()
+    result = _dex(stub).claim_swap_output(_handle()).transact()
     fn, args = stub.last_call
     assert (stub.last_program, fn) == ("shield_swap.aleo", "claim_swap_output_no_refund")
     assert args == ["11field", "aleo1blinded", "77field",
@@ -128,7 +136,7 @@ def test_claim_no_refund_plain_drops_remaining_input():
 
 def test_claim_no_refund_wrapped_output_takes_one_receiver_proof():
     stub = _stub_wrapped({"77field": SWAP_OUTPUT_NO_REFUND_TEXT}, wrapped={"2field"})
-    ShieldSwap(stub).claim_swap_output(_handle()).transact()
+    _dex(stub).claim_swap_output(_handle()).transact()
     fn, args = stub.last_call
     assert (stub.last_program, fn) == (ROUTER_ID, "claim_to_wrapped_no_refund")
     assert len(args) == 8
@@ -140,7 +148,7 @@ def test_claim_no_refund_wrapped_input_only_needs_no_receiver_proof():
     # The refund leg is wrapped but empty: the router variant still exists
     # (it must not pay through the core), yet takes no receiver proof.
     stub = _stub_wrapped({"77field": SWAP_OUTPUT_NO_REFUND_TEXT}, wrapped={"1field"})
-    ShieldSwap(stub).claim_swap_output(_handle()).transact()
+    _dex(stub).claim_swap_output(_handle()).transact()
     fn, args = stub.last_call
     assert (stub.last_program, fn) == (ROUTER_ID, "claim_to_arc20_no_refund")
     assert len(args) == 7
@@ -149,7 +157,7 @@ def test_claim_no_refund_wrapped_input_only_needs_no_receiver_proof():
 def test_claim_no_refund_both_wrapped_proves_only_the_output():
     stub = _stub_wrapped({"77field": SWAP_OUTPUT_NO_REFUND_TEXT},
                          wrapped={"1field", "2field"})
-    ShieldSwap(stub).claim_swap_output(_handle()).transact()
+    _dex(stub).claim_swap_output(_handle()).transact()
     fn, args = stub.last_call
     assert (stub.last_program, fn) == (ROUTER_ID, "claim_to_wrapped_no_refund")
     assert len(args) == 8

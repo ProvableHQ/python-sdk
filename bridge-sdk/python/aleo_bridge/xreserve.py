@@ -11,6 +11,7 @@ from . import encoding as enc
 from ._calls import AleoCall
 from ._keccak import keccak256
 from .circle import CircleClient
+from .freezelist import ComplianceProofs, literal_compliance_proof
 from .errors import (AttestationError, ConfigurationError, InvalidAmountError, InvalidRecipientError,
                      RouteNotFoundError, RouteUnavailableError, UnsupportedRouteError)
 from .registry import Route
@@ -136,22 +137,34 @@ class XReserveModule:
         return route.meta_str("bridgeProgram"), function, [amount_lit, domain_lit, recipient_lit]
 
     def burn(self, recipient: str, *, amount: Any = None, amount_atomic: int | None = None, mode: str = "private",
-             record: str | None = None, merkle_proof: str | None = None, route: Route | None = None) -> AleoCall[BurnReceipt]:
-        """Burn USDCx for USDC on the selected EVM route (Ethereum by default). ``private`` spends a Token record via the wrapper and needs a
-        freeze-list exclusion proof — both are resolved from chain state when not supplied. Minimum: more than
-        the 2 USDCx withdrawal fee. The Aleo burn-attestation service forwards accepted burns to Circle."""
+             record: str | None = None, compliance_proofs: ComplianceProofs = None,
+             merkle_proof: str | None = None, route: Route | None = None) -> AleoCall[BurnReceipt]:
+        """Burn USDCx for USDC on the selected EVM route (Ethereum by default).
+
+        ``mode="private"`` spends a USDCx Token record through the wrapper and
+        proves the signer is not on the USDCx freeze list. Both inputs are
+        resolved from chain state when not supplied: the record is the
+        smallest one covering the amount, and the exclusion proof is computed
+        from the published list and cached until the list changes. Pass one
+        ``[MerkleProof; 2]`` bundle in ``compliance_proofs`` to use it as given
+        (``merkle_proof`` is the earlier name for the literal form). The amount
+        must exceed the 2 USDCx withdrawal fee. The Aleo burn-attestation
+        service forwards accepted burns to Circle.
+        """
         return self._burn(recipient, amount=amount, amount_atomic=amount_atomic, mode=mode,
-                          record=record, merkle_proof=merkle_proof, route=route)
+                          record=record, compliance_proofs=compliance_proofs, merkle_proof=merkle_proof, route=route)
 
     def _burn(self, recipient: str, *, amount: Any = None, amount_atomic: int | None = None,
-              mode: str = "private", record: str | None = None, merkle_proof: str | None = None,
+              mode: str = "private", record: str | None = None,
+              compliance_proofs: ComplianceProofs = None, merkle_proof: str | None = None,
               route: Route | None = None, withdrawal_fee_atomic: int | None = None) -> AleoCall[BurnReceipt]:
         """Build a burn with the lifecycle's validated execution-time estimate, if supplied."""
         if mode not in BURN_MODES:
             raise ConfigurationError(f"Unsupported USDCx burn mode {mode!r}; expected one of {BURN_MODES}")
+        merkle_proof = literal_compliance_proof(compliance_proofs, merkle_proof)
         if mode != "private" and (record is not None or merkle_proof is not None):
             raise ConfigurationError(
-                f"mode={mode!r} burns the public balance; record=/merkle_proof= only apply to mode='private'")
+                f"mode={mode!r} burns the public balance; record=/compliance_proofs= only apply to mode='private'")
         route = self._validated(self._bridge.registry.route(route.id) if route is not None else self.outbound_route(), direction="burn")
         source = self._bridge.registry.asset(route.source_asset_id)
         atomic = resolve_amount(amount=amount, amount_atomic=amount_atomic, decimals=source.decimals)
@@ -172,7 +185,7 @@ class XReserveModule:
                 freezelist = getattr(self._bridge, "freezelist", None)
                 if freezelist is None:
                     raise ConfigurationError(
-                        "burn(mode='private') needs merkle_proof; pass merkle_proof= explicitly "
+                        "burn(mode='private') needs a compliance proof; pass compliance_proofs= explicitly "
                         "(bridge.freezelist is not available yet)")
                 merkle_proof = freezelist.exclusion_proof(self._bridge.aleo_address(), token_program)
         program, function, inputs = self.build_burn_inputs(route, mode=mode, amount_atomic=atomic, recipient=recipient,
