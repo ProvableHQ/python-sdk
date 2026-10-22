@@ -120,6 +120,21 @@ def test_merkle_proof_round_trips_through_its_literal():
         MerkleProofPair.from_string(f"[{EMPTY_ONE}]")
 
 
+def test_merkle_proof_input_accepts_field_literals_as_well_as_ints():
+    ints = MerkleProofInput((A_FIELD,) + (0,) * 15, 1)
+    strs = MerkleProofInput((f"{A_FIELD}field",) + ("0field",) * 15, "1u32")      # the TypeScript SDK's form
+    mixed = MerkleProofInput([A_FIELD] + [" 0field "] * 15, 1)
+    assert ints == strs == mixed and hash(ints) == hash(strs)
+    assert strs.siblings[0] == A_FIELD and strs.leaf_index == 1
+    assert strs.sibling_literals == (f"{A_FIELD}field",) + ("0field",) * 15
+    assert str(strs) == str(ints) and MerkleProofInput.from_string(str(strs)) == strs
+    with pytest.raises(FreezeListError, match="field literal"):
+        MerkleProofInput(("1",) + ("0field",) * 15, 1)
+    with pytest.raises(FreezeListError, match="u32 literal"):
+        MerkleProofInput((0,) * 16, "1")
+    assert fl.format_merkle_proof((["0field"] * 16, "1u32"), ([0] * 16, 1)) == EMPTY_MERKLE_PROOF_PAIR
+
+
 def test_format_merkle_proof_pair_matches_the_raw_form():
     one = MerkleProofInput((0,) * 16, 1)
     assert fl.format_merkle_proof_pair(MerkleProofPair(one, one)) == EMPTY_MERKLE_PROOF_PAIR

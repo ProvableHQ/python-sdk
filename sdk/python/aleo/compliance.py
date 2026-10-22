@@ -139,7 +139,8 @@ def sibling_path(tree: Sequence[int], index: int, depth: int = DEFAULT_DEPTH) ->
     return path
 
 
-def format_merkle_proof(left: tuple[Sequence[int], int], right: tuple[Sequence[int], int]) -> str:
+def format_merkle_proof(left: tuple[Sequence[int | str], int | str],
+                        right: tuple[Sequence[int | str], int | str]) -> str:
     """A ``[MerkleProof; 2]`` literal from two raw ``(siblings, leaf_index)`` pairs.
 
     The typed form is :func:`format_merkle_proof_pair`.
@@ -150,9 +151,34 @@ def format_merkle_proof(left: tuple[Sequence[int], int], right: tuple[Sequence[i
 
 # ── Proof values ─────────────────────────────────────────────────────────────
 
-@dataclass(frozen=True)
+def _field_value(value: int | str) -> int:
+    """An integer field element from an ``int`` or a ``"…field"`` literal."""
+    if isinstance(value, int):
+        return value
+    text = value.strip()
+    if not text.endswith("field") or not text[:-5].isdigit():
+        raise FreezeListError(f"Not a field literal: {value!r}")
+    return int(text[:-5])
+
+
+def _u32_value(value: int | str) -> int:
+    """An integer from an ``int`` or a ``"Nu32"`` literal."""
+    if isinstance(value, int):
+        return value
+    text = value.strip()
+    if not text.endswith("u32") or not text[:-3].isdigit():
+        raise FreezeListError(f"Not a u32 literal: {value!r}")
+    return int(text[:-3])
+
+
+@dataclass(frozen=True, init=False)
 class MerkleProofInput:
     """One Merkle path of an exclusion proof, as the contracts take it.
+
+    ``siblings`` may be given as integers or as ``"…field"`` literals (the
+    TypeScript SDK's form) and ``leaf_index`` as an ``int`` or ``"Nu32"``;
+    both are stored normalised, so equal paths compare equal however they
+    were built. :attr:`sibling_literals` gives the siblings back as literals.
 
     Attributes:
         siblings: The leaf followed by one sibling per level, 16 field values
@@ -163,14 +189,23 @@ class MerkleProofInput:
     siblings: tuple[int, ...]
     leaf_index: int
 
-    def __post_init__(self) -> None:
-        if len(self.siblings) != PROOF_SIBLINGS:
-            raise FreezeListError(f"A MerkleProof needs {PROOF_SIBLINGS} siblings, got {len(self.siblings)}")
-        if self.leaf_index < 0 or any(s < 0 for s in self.siblings):
+    def __init__(self, siblings: Sequence[int | str], leaf_index: int | str) -> None:
+        values = tuple(_field_value(s) for s in siblings)
+        if len(values) != PROOF_SIBLINGS:
+            raise FreezeListError(f"A MerkleProof needs {PROOF_SIBLINGS} siblings, got {len(values)}")
+        index = _u32_value(leaf_index)
+        if index < 0 or any(v < 0 for v in values):
             raise FreezeListError("MerkleProof values must be non-negative")
+        object.__setattr__(self, "siblings", values)
+        object.__setattr__(self, "leaf_index", index)
+
+    @property
+    def sibling_literals(self) -> tuple[str, ...]:
+        """The siblings as ``"…field"`` literals."""
+        return tuple(f"{s}field" for s in self.siblings)
 
     def __str__(self) -> str:
-        return "{ siblings: [" + ", ".join(f"{s}field" for s in self.siblings) + f"], leaf_index: {self.leaf_index}u32 }}"
+        return "{ siblings: [" + ", ".join(self.sibling_literals) + f"], leaf_index: {self.leaf_index}u32 }}"
 
     @classmethod
     def from_string(cls, text: str) -> "MerkleProofInput":

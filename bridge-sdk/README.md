@@ -684,7 +684,7 @@ earlier name for the literal form and still works.
 from aleo_bridge import MerkleProofInput, MerkleProofPair
 
 bundle = MerkleProofPair(MerkleProofInput(siblings=(0,) * 16, leaf_index=1),
-                         MerkleProofInput(siblings=(0,) * 16, leaf_index=1))
+                         MerkleProofInput(siblings=("0field",) * 16, leaf_index="1u32"))  # ints or literals
 receipt = bridge.unshield("aleo/usdcx", amount="2.5", compliance_proofs=bundle).delegate()
 ```
 
