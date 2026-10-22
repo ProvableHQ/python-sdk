@@ -266,7 +266,7 @@ class MerkleProofPair:
 
 #: One compliance proof argument as a caller may supply it: the ``[MerkleProof; 2]``
 #: literal, a :class:`MerkleProofPair`, or the two :class:`MerkleProofInput` paths.
-ProofBundle = str | MerkleProofPair | tuple[MerkleProofInput, MerkleProofInput]
+ComplianceProofs = str | MerkleProofPair | tuple[MerkleProofInput, MerkleProofInput]
 
 
 def format_merkle_proof_pair(pair: MerkleProofPair | tuple[MerkleProofInput, MerkleProofInput]) -> str:
@@ -278,7 +278,7 @@ def format_merkle_proof_pair(pair: MerkleProofPair | tuple[MerkleProofInput, Mer
     raise FreezeListError("A proof pair is a MerkleProofPair or a (MerkleProofInput, MerkleProofInput) tuple")
 
 
-def _bundle_literal(bundle: ProofBundle) -> str:
+def _bundle_literal(bundle: ComplianceProofs) -> str:
     """The ``[MerkleProof; 2]`` literal for one caller-supplied bundle, validated."""
     if isinstance(bundle, str):
         text = bundle.strip()
@@ -295,7 +295,7 @@ def literal_compliance_proof(compliance_proofs: Any, legacy: Any = None, *, lega
     """The one ``[MerkleProof; 2]`` literal a call was given, or ``None`` when the SDK should build it.
 
     Normalises the proof arguments of a call that takes exactly one bundle:
-    a :data:`ProofBundle` or a one-element tuple of one under
+    a :data:`ComplianceProofs` or a one-element tuple of one under
     ``compliance_proofs``, and the literal string the call accepted before
     under its old keyword. Reads nothing from the chain.
 
@@ -315,11 +315,11 @@ def literal_compliance_proof(compliance_proofs: Any, legacy: Any = None, *, lega
     if isinstance(compliance_proofs, tuple):
         items = cast(tuple[Any, ...], compliance_proofs)
         if _is_path_tuple(items):
-            return _bundle_literal(cast(ProofBundle, items))
+            return _bundle_literal(cast(ComplianceProofs, items))
         if len(items) != 1:
             raise FreezeListError(f"This operation requires exactly one compliance proof bundle; received {len(items)}")
-        return _bundle_literal(cast(ProofBundle, items[0]))
-    return _bundle_literal(cast(ProofBundle, compliance_proofs))
+        return _bundle_literal(cast(ComplianceProofs, items[0]))
+    return _bundle_literal(cast(ComplianceProofs, compliance_proofs))
 
 
 def _is_path_tuple(value: Any) -> bool:
@@ -713,7 +713,7 @@ __all__ = [
     "FREEZE_LIST_INDEX_MAPPING", "FREEZE_LIST_LAST_INDEX_MAPPING", "FREEZE_LIST_MAPPING", "FREEZE_LIST_ROOT_MAPPING",
     "KNOWN_TOKEN_FREEZELISTS", "PROOF_SIBLINGS", "ZERO_ADDRESS",
     "AsyncFreezeListProofs", "FreezeListError", "FreezeListProofs", "FrozenAddressError",
-    "ComplianceProofContext", "MerkleProofInput", "MerkleProofPair", "ProofBundle",
+    "ComplianceProofContext", "MerkleProofInput", "MerkleProofPair", "ComplianceProofs",
     "address_to_field_int", "async_freezelist_program", "build_tree", "format_merkle_proof",
     "format_merkle_proof_pair", "freezelist_from_imports", "freezelist_program", "generate_freezelist_proof",
     "generate_leaves", "hash_two", "leaf_indices", "literal_compliance_proof", "sibling_path",

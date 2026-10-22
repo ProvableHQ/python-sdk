@@ -36,14 +36,14 @@ from aleo.compliance import (
     FreezeListError,
     MerkleProofInput,
     MerkleProofPair,
-    ProofBundle,
+    ComplianceProofs,
     ComplianceProofContext,
     literal_compliance_proof,
 )
 
 SHIELD_SWAP_FREEZELIST = "shield_swap_freezelist.aleo"
 
-_B = ProofBundle
+_B = ComplianceProofs
 #: ``swap``: one sender bundle when the input token is wrapped, none otherwise.
 SwapProofs = Union[tuple[()], tuple[_B]]
 #: ``claim_swap_output``: the AMM signer bundle, then a receiver bundle per wrapped leg paid (output, then refund).
@@ -177,7 +177,7 @@ ListResolver = Callable[[str], Optional[str]]
 """Maps a wrapped token id to the freeze-list program its wrapper checks (``None`` when it ignores the proof)."""
 
 
-def supplied_literals(action: str, supplied: Sequence[ProofBundle], slots: Sequence[Slot]) -> list[str]:
+def supplied_literals(action: str, supplied: Sequence[ComplianceProofs], slots: Sequence[Slot]) -> list[str]:
     """Validate caller-supplied bundles against the planned slots and return their literals in order.
 
     Raises:
@@ -196,13 +196,13 @@ def supplied_literals(action: str, supplied: Sequence[ProofBundle], slots: Seque
         raise ValueError(f"{action}: {exc}") from exc
 
 
-def _literal(bundle: ProofBundle) -> str:
+def _literal(bundle: ComplianceProofs) -> str:
     literal = literal_compliance_proof(bundle)
     assert literal is not None          # a bundle is never None
     return literal
 
 
-def _looks_like_one_bundle(value: Sequence[ProofBundle]) -> bool:
+def _looks_like_one_bundle(value: Sequence[ComplianceProofs]) -> bool:
     return len(value) == 2 and all(isinstance(p, MerkleProofInput) for p in value)
 
 
@@ -233,7 +233,7 @@ def check_proof_arguments(compliance_proofs: object, wrapper_proofs: Optional[st
 __all__ = [
     "EMPTY_MERKLE_PROOF_PAIR", "SHIELD_SWAP_FREEZELIST",
     "ClaimProofs", "CollectProofs", "IncreaseProofs", "MintProofs", "RebalanceProofs", "SwapProofs",
-    "MerkleProofInput", "MerkleProofPair", "ProofBundle", "Slot",
+    "MerkleProofInput", "MerkleProofPair", "ComplianceProofs", "Slot",
     "check_proof_arguments", "claim_slots", "collect_slots", "increase_slots", "merge_legacy_wrapper_proofs",
     "mint_slots", "planned_proof_slots", "rebalance_slots", "supplied_literals", "swap_slots",
 ]

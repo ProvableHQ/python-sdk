@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any
 
-from aleo.compliance import ProofBundle
+from aleo.compliance import ComplianceProofs
 
 from ._calls import AleoCall
 from .errors import ConfigurationError, InsufficientBalanceError, InvalidAmountError, InvalidRecipientError, UnsupportedRouteError
@@ -107,7 +107,7 @@ class PrivacyModule:
         return self._bridge._call(privacy.program, function, inputs, build)
 
     def unshield(self, asset: Any, *, amount: Any = None, amount_atomic: int | None = None, record: str | None = None,
-                 compliance_proofs: ProofBundle | tuple[ProofBundle] | None = None, merkle_proof: str | None = None,
+                 compliance_proofs: ComplianceProofs | tuple[ComplianceProofs] | None = None, merkle_proof: str | None = None,
                  recipient: str | None = None) -> AleoCall[PrivacyReceipt]:
         """Move a private record into the public balance.
 

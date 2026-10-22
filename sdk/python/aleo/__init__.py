@@ -37,7 +37,7 @@ from .compliance import (
     FrozenAddressError as FrozenAddressError,
     MerkleProofInput as MerkleProofInput,
     MerkleProofPair as MerkleProofPair,
-    ProofBundle as ProofBundle,
+    ComplianceProofs as ComplianceProofs,
     ComplianceProofContext as ComplianceProofContext,
 )
 from .facade.errors import (

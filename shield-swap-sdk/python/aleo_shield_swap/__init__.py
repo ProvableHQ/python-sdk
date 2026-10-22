@@ -29,7 +29,7 @@ from .compliance import (
     MerkleProofInput as MerkleProofInput,
     MerkleProofPair as MerkleProofPair,
     MintProofs as MintProofs,
-    ProofBundle as ProofBundle,
+    ComplianceProofs as ComplianceProofs,
     RebalanceProofs as RebalanceProofs,
     SHIELD_SWAP_FREEZELIST as SHIELD_SWAP_FREEZELIST,
     SwapProofs as SwapProofs,
