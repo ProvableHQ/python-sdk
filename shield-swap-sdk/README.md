@@ -251,11 +251,11 @@ the stablecoin's own list.
 The SDK builds these Merkle exclusion proofs locally and passes them as
 private inputs of the transaction. The programs check the Merkle paths inside
 the transaction proof, and their finalize compares each reconstructed root
-with the root stored on chain. The network learns that an address is absent
-from a list; it does not learn the address or the paths.
+with the root stored on chain. The network verifies that an address is absent
+from a list without seeing the address or the paths.
 
-Proof generation is on by default. Leave `compliance_proofs` unset and the
-calls look as they always did:
+Proof generation is on by default. Leave `compliance_proofs` unset and call
+the methods as usual:
 
 ```python
 dex.mint(pool_key=key, tick_lower=lo, tick_upper=hi,

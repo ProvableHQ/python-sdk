@@ -943,9 +943,9 @@ signer's private address is not on the USDCx freezelist. The SDK builds that
 Merkle exclusion proof locally and passes it as a private input of the
 transaction. The program checks the Merkle paths inside the transaction proof,
 and its finalize compares the reconstructed root with the root stored on
-chain. The network learns that the signer is absent from the list; it does not
-learn the signer's address or the paths. The recipient of an unshield stays
-public, as before.
+chain. The network verifies that the signer is absent from the list without
+seeing the signer's address or the paths. The recipient of an unshield stays
+public.
 
 Proof generation is on by default. Leave `compliance_proofs` unset and the
 SDK does the work; set it only to replace the proof the SDK would build.
