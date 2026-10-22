@@ -654,45 +654,6 @@ supplying `record=` avoids the hosted scanner.
 Shielding and unshielding each submit a separate Aleo transaction with a fee.
 A failed conversion does not reverse or repeat the bridge transfer.
 
-### Compliance proofs for USDCx
-
-USDCx is an ARC-22 token: every private transfer checks that the signer is
-not on the token's freeze list. A USDCx unshield and a private xReserve
-withdrawal therefore take one `[MerkleProof; 2]` argument — a bundle of two
-Merkle paths proving the signer's address is absent from
-`usdcx_freezelist.aleo`.
-
-By default the SDK builds that bundle. It reads the list's current root,
-fetches the published tree only when the root changed since the last call,
-verifies every witness against the root, and reuses the result until the
-list changes. While the list is empty (its state on both networks as of
-2026-10-20) the fixed empty-tree bundle is used and nothing beyond the root is
-read. A signer that is on the list gets `FrozenAddressError` before any fee is
-paid.
-
-```python
-receipt = bridge.unshield("aleo/usdcx", amount="2.5").delegate()  # proof built by the SDK
-progress = bridge.execute(quote.plan)                              # private burn: proof built by the SDK
-```
-
-Pass `compliance_proofs=` to use a bundle built elsewhere. The value is the
-encoded literal, a `MerkleProofPair`, or a `(MerkleProofInput, MerkleProofInput)` tuple;
-a one-element tuple of any of these is accepted too. `merkle_proof=` is the
-earlier name for the literal form and still works.
-
-```python
-from aleo_bridge import MerkleProofInput, MerkleProofPair
-
-bundle = MerkleProofPair(MerkleProofInput(siblings=(0,) * 16, leaf_index=1),
-                         MerkleProofInput(siblings=("0field",) * 16, leaf_index="1u32"))  # ints or literals
-receipt = bridge.unshield("aleo/usdcx", amount="2.5", compliance_proofs=bundle).delegate()
-```
-
-`bridge.freezelist.exclusion_proof(address, "usdcx_stablecoin.aleo")` returns
-the bundle for any address, and `bridge.freezelist.clear_cache()` forgets the
-cached trees. The published tree comes from
-`aleo.network.get_compliance_freeze_list(program)`.
-
 ## Understand transfer costs
 
 A bridge transfer can incur transaction fees, relay costs, and provider fees
@@ -972,3 +933,80 @@ Unknown versions and old version labels attached to new routes are rejected.
 
 Runnable Arc examples and explicit live-test gates are described in
 [examples/README.md](examples/README.md). No live test runs by default.
+
+<a id="compliance"></a>
+
+## Compliance
+
+A USDCx unshield and a private xReserve burn prove in zero knowledge that the
+signer's private address is not on the USDCx freezelist. The SDK builds that
+Merkle exclusion proof locally and passes it as a private input of the
+transaction. The program checks the Merkle paths inside the transaction proof,
+and its finalize compares the reconstructed root with the root stored on
+chain. The network learns that the signer is absent from the list; it does not
+learn the signer's address or the paths. The recipient of an unshield stays
+public, as before.
+
+Proof generation is on by default. Leave `compliance_proofs` unset and the
+SDK does the work; set it only to replace the proof the SDK would build.
+
+### Functions that take a compliance proof
+
+Each call takes one `[MerkleProof; 2]` bundle: two Merkle paths proving that
+the signer is absent from the asset's freezelist.
+
+| Function | When a proof is needed | Program function |
+| --- | --- | --- |
+| `bridge.unshield()` | Unshielding an ARC-22 asset such as USDCx | `transfer_private_to_public` |
+| `bridge.execute()` | An Aleo USDCx xReserve burn with `mode="private"`, the default | `private_burn` |
+| `bridge.xreserve.burn()` | The same private burn as a single call | `private_burn` |
+
+The subject is always the signer, even when the unshield recipient is another
+address. ARC-20 unshielding, `bridge.shield()`, and burns with `mode="public"`
+or `mode="public-as-signer"` take no proof.
+
+### Automatic generation
+
+Before each call the SDK reads the list's current root
+(`freeze_list_root[1u8]` on `usdcx_freezelist.aleo`). When the root changed
+since the last call it downloads the published tree from
+`GET /programs/{id}/compliance/freeze-list`, checks that the tree ends in that
+root, builds the signer's witness, and checks that the witness reconstructs
+the root. Trees and witnesses stay in memory per client, list, and root, so
+while the root is unchanged nothing beyond the root is read. An empty list
+uses the empty-tree witness without a download. A frozen signer, a missing
+root, or a published tree that does not match the root raises
+`ConfigurationError` before anything is proved or a fee is paid; the message
+says which. The cache holds at most 16 lists and 256 addresses per list and
+does not survive a restart.
+
+The list is found through the token program's imports:
+`usdcx_stablecoin.aleo` imports `usdcx_freezelist.aleo`, and the testnet
+programs carry a `test_` prefix. `bridge.freezelist.exclusion_proof(address,
+program)` returns the bundle for any address, and
+`bridge.freezelist.clear_cache()` drops the cached trees.
+
+### Optional proof inputs
+
+`compliance_proofs` takes a `ComplianceProofs` value: one bundle, or `None`.
+
+| Value | Meaning |
+| --- | --- |
+| `None` (the default) | The SDK builds the proof. |
+| An encoded `[MerkleProof; 2]` string | Used as given. |
+| `MerkleProofPair(...)` or `(MerkleProofInput, MerkleProofInput)` | The same proof as structured values. `MerkleProofInput` takes siblings as ints or `"...field"` literals. |
+| A one-element tuple of any of the above | The same, in the tuple form the Shield Swap SDK uses. |
+
+`merkle_proof=` is the earlier name for the string form and still works. A
+supplied proof bypasses the root read and the witness check, so its freshness
+is the caller's responsibility.
+
+```python
+from aleo_bridge import MerkleProofInput, MerkleProofPair
+
+receipt = bridge.unshield("aleo/usdcx", amount="2.5").delegate()  # proof built by the SDK
+
+bundle = MerkleProofPair(MerkleProofInput(siblings=(0,) * 16, leaf_index=1),
+                         MerkleProofInput(siblings=("0field",) * 16, leaf_index="1u32"))
+receipt = bridge.unshield("aleo/usdcx", amount="2.5", compliance_proofs=bundle).delegate()
+```
