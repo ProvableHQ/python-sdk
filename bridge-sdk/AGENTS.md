@@ -79,7 +79,7 @@ solana-hyperlane / aleo-hyperlane / evm-xreserve / aleo-xreserve) with
 ``fees`` and ``amount_out`` in human units and ``quote.plan``.  Show the
 user fees + amount before ``execute``.
 
-### `execute(self, plan, *, on_checkpoint=None, proving: 'str' = 'delegate', mode: 'str | None' = None, record: 'str | None' = None, compliance_proofs: 'ProofBundle | tuple[ProofBundle] | None' = None, merkle_proof: 'str | None' = None, gas_payment_microcredits: 'int | None' = None, secret_nonce: 'str | None' = None, poll_seconds: 'float' = 1.0, timeout_seconds: 'float' = 120.0)`
+### `execute(self, plan, *, on_checkpoint=None, proving: 'str' = 'delegate', mode: 'str | None' = None, record: 'str | None' = None, compliance_proofs: 'ComplianceProofs' = None, merkle_proof: 'str | None' = None, gas_payment_microcredits: 'int | None' = None, secret_nonce: 'str | None' = None, poll_seconds: 'float' = 1.0, timeout_seconds: 'float' = 120.0)`
 
 Commit funds on the source chain for ``quote.plan``; returns ``Progress``.
 
@@ -276,7 +276,7 @@ lifecycle layer (plan 4) re-quotes at the last responsible moment by calling thi
 Live relayer payment for the route (the exact u64 the hook asserts); quote right before proving.
 ``asset`` is an asset ref, a ``Route`` or a route id (BAT/USDG need the route: two destinations).
 
-### `xreserve.burn(self, recipient: 'str', *, amount: 'Any' = None, amount_atomic: 'int | None' = None, mode: 'str' = 'private', record: 'str | None' = None, compliance_proofs: 'ProofBundle | tuple[ProofBundle] | None' = None, merkle_proof: 'str | None' = None, route: 'Route | None' = None) -> 'AleoCall[BurnReceipt]'`
+### `xreserve.burn(self, recipient: 'str', *, amount: 'Any' = None, amount_atomic: 'int | None' = None, mode: 'str' = 'private', record: 'str | None' = None, compliance_proofs: 'ComplianceProofs' = None, merkle_proof: 'str | None' = None, route: 'Route | None' = None) -> 'AleoCall[BurnReceipt]'`
 
 Burn USDCx for USDC on the selected EVM route (Ethereum by default).
 
@@ -302,7 +302,7 @@ One Circle request for *message_hash*; ``None`` while pending (404).
 
 
 
-### `unshield(self, asset: 'Any', *, amount: 'Any' = None, amount_atomic: 'int | None' = None, record: 'str | None' = None, compliance_proofs: 'ProofBundle | tuple[ProofBundle] | None' = None, merkle_proof: 'str | None' = None, recipient: 'str | None' = None) -> 'AleoCall[PrivacyReceipt]'`
+### `unshield(self, asset: 'Any', *, amount: 'Any' = None, amount_atomic: 'int | None' = None, record: 'str | None' = None, compliance_proofs: 'ComplianceProofs' = None, merkle_proof: 'str | None' = None, recipient: 'str | None' = None) -> 'AleoCall[PrivacyReceipt]'`
 
 Move a private record into the public balance; see ``privacy.unshield``.
 

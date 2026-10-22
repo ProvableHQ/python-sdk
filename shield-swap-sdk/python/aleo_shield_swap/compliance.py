@@ -36,14 +36,14 @@ from aleo.compliance import (
     FreezeListError,
     MerkleProofInput,
     MerkleProofPair,
-    ComplianceProofs,
+    ComplianceProof,
     ComplianceProofContext,
     literal_compliance_proof,
 )
 
 SHIELD_SWAP_FREEZELIST = "shield_swap_freezelist.aleo"
 
-_B = ComplianceProofs
+_B = ComplianceProof
 #: ``swap``: one sender bundle when the input token is wrapped, none otherwise.
 SwapProofs = Union[tuple[()], tuple[_B]]
 #: ``claim_swap_output``: the AMM signer bundle, then a receiver bundle per wrapped leg paid (output, then refund).
@@ -57,6 +57,9 @@ CollectProofs = Union[tuple[_B, _B], tuple[_B, _B, _B], tuple[_B, _B, _B, _B]]
 #: ``rebalance_position``: a sender bundle per funded wrapped side, a receiver bundle per wrapped side, then AMM owner and withdrawal.
 RebalanceProofs = Union[tuple[_B, _B], tuple[_B, _B, _B], tuple[_B, _B, _B, _B],
                         tuple[_B, _B, _B, _B, _B], tuple[_B, _B, _B, _B, _B, _B]]
+#: The ``compliance_proofs`` argument of any Shield Swap write: the method's tuple of proofs in
+#: input order, or ``None`` to have the SDK build them.
+ComplianceProofs = Optional[Union[SwapProofs, ClaimProofs, MintProofs, IncreaseProofs, CollectProofs, RebalanceProofs]]
 
 SlotKind = Literal["amm", "wrapper"]
 
@@ -177,7 +180,7 @@ ListResolver = Callable[[str], Optional[str]]
 """Maps a wrapped token id to the freeze-list program its wrapper checks (``None`` when it ignores the proof)."""
 
 
-def supplied_literals(action: str, supplied: Sequence[ComplianceProofs], slots: Sequence[Slot]) -> list[str]:
+def supplied_literals(action: str, supplied: Sequence[ComplianceProof], slots: Sequence[Slot]) -> list[str]:
     """Validate caller-supplied bundles against the planned slots and return their literals in order.
 
     Raises:
@@ -196,13 +199,13 @@ def supplied_literals(action: str, supplied: Sequence[ComplianceProofs], slots: 
         raise ValueError(f"{action}: {exc}") from exc
 
 
-def _literal(bundle: ComplianceProofs) -> str:
+def _literal(bundle: ComplianceProof) -> str:
     literal = literal_compliance_proof(bundle)
     assert literal is not None          # a bundle is never None
     return literal
 
 
-def _looks_like_one_bundle(value: Sequence[ComplianceProofs]) -> bool:
+def _looks_like_one_bundle(value: Sequence[ComplianceProof]) -> bool:
     return len(value) == 2 and all(isinstance(p, MerkleProofInput) for p in value)
 
 
@@ -233,7 +236,7 @@ def check_proof_arguments(compliance_proofs: object, wrapper_proofs: Optional[st
 __all__ = [
     "EMPTY_MERKLE_PROOF_PAIR", "SHIELD_SWAP_FREEZELIST",
     "ClaimProofs", "CollectProofs", "IncreaseProofs", "MintProofs", "RebalanceProofs", "SwapProofs",
-    "MerkleProofInput", "MerkleProofPair", "ComplianceProofs", "Slot",
+    "MerkleProofInput", "MerkleProofPair", "ComplianceProof", "ComplianceProofs", "Slot",
     "check_proof_arguments", "claim_slots", "collect_slots", "increase_slots", "merge_legacy_wrapper_proofs",
     "mint_slots", "planned_proof_slots", "rebalance_slots", "supplied_literals", "swap_slots",
 ]

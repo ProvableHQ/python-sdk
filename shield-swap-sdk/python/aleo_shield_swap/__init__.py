@@ -25,11 +25,12 @@ from .rebalance import (
 from .compliance import (
     ClaimProofs as ClaimProofs,
     CollectProofs as CollectProofs,
+    ComplianceProof as ComplianceProof,
+    ComplianceProofs as ComplianceProofs,
     IncreaseProofs as IncreaseProofs,
     MerkleProofInput as MerkleProofInput,
     MerkleProofPair as MerkleProofPair,
     MintProofs as MintProofs,
-    ComplianceProofs as ComplianceProofs,
     RebalanceProofs as RebalanceProofs,
     SHIELD_SWAP_FREEZELIST as SHIELD_SWAP_FREEZELIST,
     SwapProofs as SwapProofs,

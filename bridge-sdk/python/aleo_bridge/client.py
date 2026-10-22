@@ -20,7 +20,7 @@ from ._calls import AleoCall
 from .cctp import CctpModule
 from .errors import BridgeError, ConfigurationError, UnsupportedRouteError
 from .eth import Ethereum, EthModule
-from .freezelist import FreezeList, ComplianceProofs
+from .freezelist import ComplianceProofs, FreezeList
 from .hyperlane import HyperlaneModule
 from .privacy import PrivacyModule
 from .profile import DEFAULT_ENDPOINT, Profile
@@ -268,7 +268,7 @@ class Bridge:
         return self.privacy.shield(asset, amount=amount, amount_atomic=amount_atomic, recipient=recipient)
 
     def unshield(self, asset: Any, *, amount: Any = None, amount_atomic: int | None = None, record: str | None = None,
-                 compliance_proofs: ComplianceProofs | tuple[ComplianceProofs] | None = None, merkle_proof: str | None = None,
+                 compliance_proofs: ComplianceProofs = None, merkle_proof: str | None = None,
                  recipient: str | None = None) -> AleoCall[PrivacyReceipt]:
         """Move a private record into the public balance; see ``privacy.unshield``.
 
@@ -377,7 +377,7 @@ class Bridge:
                                 mint_mode=mint_mode, secret_nonce=secret_nonce, **({"cctp": cctp} if cctp is not None else {}))
 
     def execute(self, plan, *, on_checkpoint=None, proving: str = "delegate", mode: str | None = None,
-                record: str | None = None, compliance_proofs: ComplianceProofs | tuple[ComplianceProofs] | None = None,
+                record: str | None = None, compliance_proofs: ComplianceProofs = None,
                 merkle_proof: str | None = None,
                 gas_payment_microcredits: int | None = None, secret_nonce: str | None = None,
                 poll_seconds: float = 1.0, timeout_seconds: float = 120.0):

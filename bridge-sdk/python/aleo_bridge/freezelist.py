@@ -25,7 +25,7 @@ from aleo.compliance import (  # noqa: F401 — re-exported under the bridge's h
     FrozenAddressError,
     MerkleProofInput,
     MerkleProofPair,
-    ComplianceProofs,
+    ComplianceProof,
     address_to_field_int,
     build_tree,
     format_merkle_proof,
@@ -41,11 +41,15 @@ from .errors import ConfigurationError
 if TYPE_CHECKING:  # pragma: no cover
     from .client import Bridge
 
+#: The ``compliance_proofs`` argument of a bridge call, which takes exactly one proof: a
+#: :data:`ComplianceProof` bare or in a one-tuple, or ``None`` to have the SDK build it.
+ComplianceProofs = ComplianceProof | tuple[ComplianceProof] | None
+
 #: Token program -> its freeze-list program, for when ``Bridge.program(token).imports`` is unavailable.
 FREEZE_LIST_PROGRAMS = {program: freezelist for program, freezelist in KNOWN_TOKEN_FREEZELISTS.items() if freezelist}
 
 
-def literal_compliance_proof(compliance_proofs: ComplianceProofs | tuple[ComplianceProofs] | None, merkle_proof: str | None) -> str | None:
+def literal_compliance_proof(compliance_proofs: ComplianceProofs, merkle_proof: str | None) -> str | None:
     """The single ``[MerkleProof; 2]`` literal a bridge call was given, or ``None`` to compute one.
 
     Raises:
@@ -150,6 +154,6 @@ class FreezeList:
 __all__ = ["CURRENT_ROOT_KEY", "DEFAULT_DEPTH", "EMPTY_MERKLE_PROOF_PAIR", "EMPTY_TREE_ROOT",
            "FREEZE_LIST_INDEX_MAPPING", "FREEZE_LIST_LAST_INDEX_MAPPING", "FREEZE_LIST_MAPPING",
            "FREEZE_LIST_PROGRAMS", "FREEZE_LIST_ROOT_MAPPING", "PROOF_SIBLINGS", "ZERO_ADDRESS", "FreezeList",
-           "FreezeListError", "FrozenAddressError", "MerkleProofInput", "MerkleProofPair", "ComplianceProofs",
+           "FreezeListError", "FrozenAddressError", "MerkleProofInput", "MerkleProofPair", "ComplianceProof", "ComplianceProofs",
            "address_to_field_int", "build_tree", "format_merkle_proof", "generate_leaves", "hash_two",
            "leaf_indices", "literal_compliance_proof", "sibling_path"]

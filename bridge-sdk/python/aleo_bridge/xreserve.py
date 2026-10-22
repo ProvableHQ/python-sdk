@@ -6,13 +6,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import requests
-from aleo.compliance import ComplianceProofs
 
 from . import encoding as enc
 from ._calls import AleoCall
 from ._keccak import keccak256
 from .circle import CircleClient
-from .freezelist import literal_compliance_proof
+from .freezelist import ComplianceProofs, literal_compliance_proof
 from .errors import (AttestationError, ConfigurationError, InvalidAmountError, InvalidRecipientError,
                      RouteNotFoundError, RouteUnavailableError, UnsupportedRouteError)
 from .registry import Route
@@ -138,7 +137,7 @@ class XReserveModule:
         return route.meta_str("bridgeProgram"), function, [amount_lit, domain_lit, recipient_lit]
 
     def burn(self, recipient: str, *, amount: Any = None, amount_atomic: int | None = None, mode: str = "private",
-             record: str | None = None, compliance_proofs: ComplianceProofs | tuple[ComplianceProofs] | None = None,
+             record: str | None = None, compliance_proofs: ComplianceProofs = None,
              merkle_proof: str | None = None, route: Route | None = None) -> AleoCall[BurnReceipt]:
         """Burn USDCx for USDC on the selected EVM route (Ethereum by default).
 
@@ -157,7 +156,7 @@ class XReserveModule:
 
     def _burn(self, recipient: str, *, amount: Any = None, amount_atomic: int | None = None,
               mode: str = "private", record: str | None = None,
-              compliance_proofs: ComplianceProofs | tuple[ComplianceProofs] | None = None, merkle_proof: str | None = None,
+              compliance_proofs: ComplianceProofs = None, merkle_proof: str | None = None,
               route: Route | None = None, withdrawal_fee_atomic: int | None = None) -> AleoCall[BurnReceipt]:
         """Build a burn with the lifecycle's validated execution-time estimate, if supplied."""
         if mode not in BURN_MODES:
