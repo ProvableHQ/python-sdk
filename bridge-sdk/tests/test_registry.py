@@ -420,8 +420,16 @@ def test_bat_usdg_zec_aleo_withdrawals_are_reviewed_not_placeholders():
         assert m["aleoRouterProgram"] == program and m["aleoDestinationDomain"] == domain and m["aleoRemoteRouterGas"] == gas
         assert m["aleoTokenId"] == token_id and (m["aleoLocalDecimals"], m["aleoRemoteDecimals"]) == decimals
         assert m["aleoPlaceholderConfiguration"] is False and m["aleoWithdrawalReviewedAt"] == "2026-09-30"
-        assert m["aleoAppMetadataReviewedAt"] == m["aleoRemoteRouterReviewedAt"] == "2026-09-30"
-        assert m["aleoTokenOwner"] == "aleo1mx0tldt5qsqymn5a3whnmf9rx2whp837jjn0tvqgxqf86zg6dvyqnc8spm"
+        assert m["aleoRemoteRouterReviewedAt"] == "2026-09-30"
+        # veil PR #193: owners rotated on 2026-10-02 (one per program); the stale shared owner failed the
+        # on-chain app_metadata equality check on every outbound transfer.
+        assert m["aleoAppMetadataReviewedAt"] == "2026-10-21"
+        assert m["aleoTokenOwner"] == {
+            "hyp_warp_token_bat_v2.aleo": "aleo1x7gswtgsj4hj9ntckt39wmfrnvr60eje5feyak2pnpfghuxh8v9qmxv5da",
+            "hyp_warp_token_usdg_v2.aleo": "aleo1lad36r82wn80fs9vzmyykfgkne6045auy9dy50rppck98rvuk58s70xyfh",
+            "hyp_warp_token_zec_v2.aleo": "aleo1yv5gy4l5g82dcu47260t6lpls4xvg29zpg2m06jdwvdtm8m06gzsysx6dy",
+        }[program]
+        assert m["aleoTokenOwner"] != "aleo1mx0tldt5qsqymn5a3whnmf9rx2whp837jjn0tvqgxqf86zg6dvyqnc8spm"   # the pre-rotation owner
         assert m["aleoRemoteRouterSource"] == f"https://api.explorer.provable.com/v2/mainnet/program/{program}/mapping/remote_routers/{domain}u32"
         assert m["aleoProgramEdition"] == 0 and m["aleoTokenType"] == "1"
         assert m["aleoAllowanceSpender0"] == "aleo194tz0jmyq8rd9htvnqppqw4jqerk2p2zd8plzn3sxl06wcgsm5pq9fka74"

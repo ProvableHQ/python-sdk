@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 import pytest
 
 from aleo_bridge import hyperlane as hl
@@ -32,6 +35,17 @@ def _inputs(bridge, route_id, recipient, amount, gas=8174147):
     return bridge.hyperlane.build_transfer_remote_inputs(
         route, recipient=recipient, amount_atomic=amount, gas_payment_microcredits=gas,
         decimals=(route.metadata["aleoLocalDecimals"], route.metadata["aleoRemoteDecimals"]))
+
+
+# veil PR #193: the reviewed on-chain app_metadata of each BAT / USDG / ZEC warp program after the
+# 2026-10-02 owner rotation. transfer_remote's first input must equal it or the finalize rejects.
+WARP_APP_METADATA = json.loads((Path(__file__).parent / "fixtures" / "warp-route-app-metadata.json").read_text())
+
+
+@pytest.mark.parametrize("asset,route_id,program,recipient,amount", ROUTES[4:])
+def test_bat_usdg_zec_app_metadata_matches_reviewed_chain_state(bridge, asset, route_id, program, recipient, amount):
+    inputs = _inputs(bridge, route_id, recipient, amount, gas=1)
+    assert "".join(inputs[0].split()) == "".join(WARP_APP_METADATA[program]["metadata"].split())
 
 
 def test_pure_helpers():
