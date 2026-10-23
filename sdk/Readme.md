@@ -179,7 +179,7 @@ plan = aleo.inventory.plan_record_inventory(
 result = aleo.inventory.rebalance_record_inventory(plan, max_fee_microcredits=1_000_000)
 ```
 
-`get_record_inventory` reads; `plan_record_inventory` plans without signing; `join_records`, `split_record`, and `auto_join` run single operations; `reconcile_record_inventory` settles pending journal entries against the chain and can rebroadcast a saved proved transaction. The journal is in memory by default; pass any object with `list`, `acquire`, and `update` as `store` for a database or file. The top-level [README](../README.md#manage-private-records) explains the choices and the recovery steps.
+`get_record_inventory` reads; `plan_record_inventory` plans without signing; `join_records`, `split_record`, and `auto_join` run single operations; `reconcile_record_inventory` settles pending journal entries against the chain and can rebroadcast a saved proved transaction. The journal is in memory by default; `JsonFileRecordInventoryStore(path)` and `SqliteRecordInventoryStore(path)` keep it across restarts and coordinate processes on one machine, and any object with `list`, `acquire`, and `update` works for another backend. The top-level [README](../README.md#manage-private-records) compares the stores and explains the recovery steps.
 
 ## Async (`AsyncAleo`)
 

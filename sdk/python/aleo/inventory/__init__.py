@@ -49,7 +49,9 @@ from .client import (
 )
 from .planner import build_inventory_plan as build_inventory_plan
 from .store import (
+    JsonFileRecordInventoryStore as JsonFileRecordInventoryStore,
     MemoryRecordInventoryStore as MemoryRecordInventoryStore,
+    SqliteRecordInventoryStore as SqliteRecordInventoryStore,
     held_record_ids as held_record_ids,
     holds_records as holds_records,
 )
@@ -77,11 +79,12 @@ from .types import (
 __all__ = [
     "AssetCapabilities", "AsyncRecordInventory", "CREDITS_SPLIT_DEDUCTION", "InventoryError", "InventoryPlan",
     "InventoryPlanError", "InventoryRecord", "InventoryResult", "InventoryStep", "InventoryTarget",
-    "MemoryRecordInventoryStore", "PlannedRecord", "PreparedTransaction", "ProgramFunction", "ProgramInterface",
-    "ProgramParam", "ProgramRecord", "RECORD_JOIN_PROGRAMS", "RecordAsset", "RecordField", "RecordInventory",
-    "RecordInventorySnapshot", "RecordInventoryStore", "RecordJoinProgram", "RecordManagementConfig",
-    "RecordReservationConflictError", "RecordSpend", "RecordSpendPatch", "ResolvedRecordAsset", "SpendCheckpoint",
-    "TokenJoinRouter", "build_inventory_plan", "decode_record", "held_record_ids", "holds_records",
+    "JsonFileRecordInventoryStore", "MemoryRecordInventoryStore", "PlannedRecord", "PreparedTransaction",
+    "ProgramFunction", "ProgramInterface", "ProgramParam", "ProgramRecord", "RECORD_JOIN_PROGRAMS", "RecordAsset",
+    "RecordField", "RecordInventory", "RecordInventorySnapshot", "RecordInventoryStore", "RecordJoinProgram",
+    "RecordManagementConfig", "RecordReservationConflictError", "RecordSpend", "RecordSpendPatch",
+    "ResolvedRecordAsset", "SpendCheckpoint", "SqliteRecordInventoryStore", "TokenJoinRouter", "build_inventory_plan",
+    "decode_record", "held_record_ids", "holds_records",
     "inventory_output_commitments", "inventory_record_id", "managed_inventory", "parse_program_interface",
     "prepared_from_payload", "prepared_from_result", "record_input_ids", "scope_for", "transaction_fee",
     "validate_asset", "validate_record_join_program", "validate_token_join_router",

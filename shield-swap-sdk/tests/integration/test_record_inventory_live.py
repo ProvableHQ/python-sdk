@@ -16,17 +16,14 @@ takes tens of minutes. Opt in with ``-m "live and slow"`` and
 """
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
-import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
-from types import ModuleType
 from typing import Any, Callable
 
 import pytest
@@ -35,6 +32,7 @@ from aleo import Aleo, HTTPProvider, TransactionNotFound
 from aleo.facade.call import BoundCall
 from aleo.inventory import (
     InventoryRecord, InventoryTarget, RecordAsset, RecordInventorySnapshot, RecordManagementConfig, RecordSpend,
+    SqliteRecordInventoryStore,
 )
 from aleo_shield_swap import ShieldSwap
 from aleo_shield_swap._core import record_nonce
@@ -47,7 +45,6 @@ pytestmark = [pytest.mark.live, pytest.mark.slow]
 
 WRITE_TIMEOUT = 600.0        # proving, confirmation, and scanner indexing for one write
 REBALANCE_TIMEOUT = 2400.0   # a bounded sequence of dependent joins and splits
-EXAMPLE = Path(__file__).parents[2] / "examples" / "concurrent-swaps" / "concurrent_swaps.py"
 _failed = False
 
 
@@ -60,15 +57,6 @@ def _abort_after_first_failure(request: pytest.FixtureRequest) -> Any:
     report = getattr(request.node, "rep_call", None)
     if report is not None and report.failed:
         globals()["_failed"] = True
-
-
-def _example() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("concurrent_swaps_example_live", EXAMPLE)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
 
 
 def poll(label: str, read: Callable[[], Any], ready: Callable[[Any], bool], timeout: float = WRITE_TIMEOUT) -> Any:
@@ -129,7 +117,6 @@ class Harness:
         self.directory = Path(os.environ.get("SHIELD_SWAP_INVENTORY_E2E_DIR")
                               or Path(__file__).parents[2] / ".shield-swap" / "inventory-e2e" / "testnet" / self.address)
         self.directory.mkdir(parents=True, exist_ok=True)
-        self.example = _example()
         self.scope = f'["aleo:testnet","{self.address}"]'
         self.connect()
         unresolved = [e for e in self.aleo.inventory.reconcile_record_inventory()
@@ -154,7 +141,10 @@ class Harness:
 
     def connect(self) -> None:
         """Bind a fresh client to the same account, journal file, and swap journal."""
-        self.file_store = self.example.JsonFileRecordInventoryStore(self.directory / "inventory.json")
+        previous = getattr(self, "file_store", None)
+        if previous is not None:
+            previous.close()
+        self.file_store = SqliteRecordInventoryStore(self.directory / "inventory.sqlite")
         # The client holds this wrapper, so a test can interpose on acquisition
         # without rebuilding the client's frozen management settings.
         self.store = SwitchableStore(self.file_store)

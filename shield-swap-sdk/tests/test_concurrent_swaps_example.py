@@ -1,4 +1,4 @@
-"""Offline checks of the concurrent-swaps example: batch orchestration and the file store.
+"""Offline checks of the concurrent-swaps example: batch orchestration.
 
 _source: ProvableHQ/veil examples/shield-swap/concurrent-swaps.test.ts, PR #172 @ 2e324d5.
 Network, proving, and the DEX are replaced; the example's own code runs.
@@ -14,7 +14,6 @@ from typing import Any
 
 import pytest
 
-from aleo.inventory import RecordSpend
 from aleo_shield_swap.types import ClaimResult, SwapHandle
 
 EXAMPLE = Path(__file__).parents[1] / "examples" / "concurrent-swaps" / "concurrent_swaps.py"
@@ -82,40 +81,3 @@ def test_batch_reports_every_trade_and_keeps_handles_of_failed_claims() -> None:
     assert claim_failed[0].handle is not None and claim_failed[0].handle.transaction_id == "at1swap3"
     assert len(claimed) == 2 and all(o.claim is not None and o.claim.amount_out == 5 for o in claimed)
     assert sorted(dex.claimed) == ["at1swap1", "at1swap3", "at1swap4"]  # the failed claim was attempted, not skipped
-
-
-def test_json_file_store_reserves_atomically_and_survives_reopen(tmp_path: Path) -> None:
-    example = load_example()
-    path = tmp_path / "inventory.json"
-    store = example.JsonFileRecordInventoryStore(path)
-    scope = '["aleo:testnet","aleo1owner"]'
-
-    def entry(*records: str) -> RecordSpend:
-        return RecordSpend(id="", scope=scope, records=records, program="credits.aleo", function="join",
-                           status="reserved", created_at=1)
-
-    first = store.acquire(entry("1group", "2group"))
-    assert first is not None and first.id == "1"
-    assert store.acquire(entry("2group", "3group")) is None
-    store.update(scope, first.id, {"status": "prepared", "transaction_id": "at1x", "transaction": {"id": "at1x"}, "fee_microcredits": "100"})
-    reopened = example.JsonFileRecordInventoryStore(path)
-    saved = reopened.list(scope)[0]
-    assert (saved.status, saved.transaction_id, saved.transaction, saved.fee_microcredits) == ("prepared", "at1x", {"id": "at1x"}, "100")
-    reopened.update(scope, first.id, {"status": "confirmed", "transaction": None})
-    assert reopened.list(scope)[0].transaction is None
-    with pytest.raises(KeyError):
-        reopened.update(scope, "99", {"status": "cancelled"})
-
-    results: list[RecordSpend | None] = []
-    barrier = threading.Barrier(6)
-
-    def race() -> None:
-        barrier.wait()
-        results.append(example.JsonFileRecordInventoryStore(path).acquire(entry("9group")))
-
-    threads = [threading.Thread(target=race) for _ in range(6)]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
-    assert sum(result is not None for result in results) == 1

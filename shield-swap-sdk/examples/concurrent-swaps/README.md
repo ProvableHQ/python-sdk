@@ -40,18 +40,21 @@ submission. Trades and inventory maintenance then share one journal.
 
 ```python
 from aleo import Aleo, HTTPProvider
-from aleo.inventory import RecordManagementConfig
+from aleo.inventory import RecordManagementConfig, SqliteRecordInventoryStore
 
-store = JsonFileRecordInventoryStore(directory / "inventory.json")
+store = SqliteRecordInventoryStore(directory / "inventory.sqlite")
 aleo = Aleo(HTTPProvider("https://edge.provable.com/api", network="testnet"),
             record_management=RecordManagementConfig(enabled=True, store=store, chain_id="aleo:testnet"))
 ```
 
 The SDK's default store is in memory and lasts for one process. The example
-defines `JsonFileRecordInventoryStore`, a file-backed store under a file lock,
-to show what a durable backend provides: reservations and proved transactions
-that survive a restart. A database with a uniqueness constraint on held record
-nonces gives the same guarantees across machines.
+uses the SDK's SQLite store so reservations and proved transactions survive a
+restart and several processes on the machine share one journal; its layout
+matches Veil's store, so a Veil client can read the same file.
+`JsonFileRecordInventoryStore` is the alternative when a journal that can be
+read in an editor matters more than throughput. A custom store, such as a
+database with a uniqueness constraint on held record nonces, extends the same
+guarantees across machines.
 
 ## 2. Refuse to start over unresolved work
 
@@ -120,7 +123,7 @@ Reuse it for the same account.
 
 | File | Purpose |
 | --- | --- |
-| `inventory.json` | Record reservations and proved transactions awaiting broadcast, for reconciliation. |
+| `inventory.sqlite` | Record reservations and proved transactions awaiting broadcast, for reconciliation. |
 | `swaps.jsonl` | Blinded identities and swap handles needed to claim outputs. Treat it as key material. |
 | `batch.pending` | Remains after an interrupted batch so a later run cannot repeat it unnoticed. |
 

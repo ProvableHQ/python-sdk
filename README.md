@@ -266,14 +266,25 @@ transaction where one exists (up to 16 credits or dedicated stablecoin records,
 15 for other ARC-20 and ARC-22 tokens). `join_records`, `split_record`, and
 `auto_join` perform single operations without a plan.
 
-The default journal is in memory and lasts for one process. Supply any object
-with `list`, `acquire`, and `update` methods as `store` to share reservations
-across processes or to resume after a restart; `acquire` must reserve all of an
-entry's records or none. After an interruption, `reconcile_record_inventory()`
-checks each pending entry against the chain and, with `rebroadcast=True`,
-resubmits a saved proved transaction with its original id. A write that finds
-its record already reserved raises `RecordReservationConflictError` before any
-proof is built, so the caller can choose another record.
+The journal is kept by a store chosen with `RecordManagementConfig(store=...)`.
+Three ship with the SDK; the choice decides what survives a restart and which
+processes coordinate.
+
+| Store | Survives a restart | Coordinates | Choose it when |
+| --- | --- | --- | --- |
+| `MemoryRecordInventoryStore` (default) | No | Threads in one process | A script runs to completion and nothing else trades for the account. |
+| `JsonFileRecordInventoryStore(path)` | Yes | Processes on one machine | The journal should be readable in an editor; one JSON file under a file lock. |
+| `SqliteRecordInventoryStore(path)` | Yes | Processes on one machine | A long-running service, or a journal shared with a Veil client; same layout as Veil's store. |
+
+Both file-backed stores release a reservation left by a process on the same
+machine that exited before it proved anything. Any object with `list`,
+`acquire`, and `update` methods works as a store for other backends, such as a
+database shared across machines; `acquire` must reserve all of an entry's
+records or none. After an interruption, `reconcile_record_inventory()` checks
+each pending entry against the chain and, with `rebroadcast=True`, resubmits a
+saved proved transaction with its original id. A write that finds its record
+already reserved raises `RecordReservationConflictError` before any proof is
+built, so the caller can choose another record.
 
 The [Shield Swap guide](shield-swap-sdk/README.md#concurrent-swaps) shows the
 same mechanism preparing records for several trades submitted at once.

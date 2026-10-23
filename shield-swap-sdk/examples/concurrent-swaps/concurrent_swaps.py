@@ -17,21 +17,15 @@ steps after an interruption.
 from __future__ import annotations
 
 import argparse
-import fcntl
-import json
 import os
 import sys
-import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
 
 from aleo import Aleo, HTTPProvider, testnet
-from aleo.inventory import (
-    InventoryPlan, InventoryTarget, RecordManagementConfig, RecordSpend, RecordSpendPatch, held_record_ids,
-)
+from aleo.inventory import InventoryPlan, InventoryTarget, RecordManagementConfig, SqliteRecordInventoryStore
 from aleo_shield_swap import ShieldSwap
 from aleo_shield_swap.journal import Journal
 from aleo_shield_swap.types import ClaimResult, SwapHandle, SwapQuote
@@ -39,86 +33,6 @@ from aleo_shield_swap.types import ClaimResult, SwapHandle, SwapQuote
 NETWORK = "testnet"
 ENDPOINT = "https://edge.provable.com/api"
 UNRESOLVED = ("reserved", "prepared", "submitted")
-
-
-class JsonFileRecordInventoryStore:
-    """A reservation journal in one JSON file, shared by processes on one machine.
-
-    The SDK ships only an in-memory store. This class shows what a durable
-    backend needs: every mutation finishes before the method returns, and
-    ``acquire`` checks and inserts under one file lock so two processes can
-    never hold the same record. A database with a uniqueness constraint on
-    held nonces serves the same contract across machines.
-
-    The file holds record nonces, program and function names, and proved
-    transactions awaiting broadcast; never keys or record plaintext.
-    """
-
-    def __init__(self, path: Path) -> None:
-        self.path = path
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._lock_path = path.with_suffix(path.suffix + ".lock")
-        self._thread_lock = threading.Lock()
-
-    def _read(self) -> list[RecordSpend]:
-        if not self.path.exists():
-            return []
-        return [RecordSpend.from_dict(item) for item in json.loads(self.path.read_text() or "[]")]
-
-    def _write(self, entries: list[RecordSpend]) -> None:
-        tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps([entry.to_dict() for entry in entries], indent=2))
-        os.replace(tmp, self.path)
-
-    def _locked(self) -> Any:
-        store = self
-
-        class _Guard:
-            def __enter__(self) -> None:
-                store._thread_lock.acquire()
-                self.handle = open(store._lock_path, "a+")
-                fcntl.flock(self.handle, fcntl.LOCK_EX)
-
-            def __exit__(self, *exc: object) -> None:
-                fcntl.flock(self.handle, fcntl.LOCK_UN)
-                self.handle.close()
-                store._thread_lock.release()
-        return _Guard()
-
-    def list(self, scope: str) -> list[RecordSpend]:
-        with self._locked():
-            return [entry for entry in self._read() if entry.scope == scope]
-
-    def acquire(self, entry: RecordSpend) -> RecordSpend | None:
-        if len(set(entry.records)) != len(entry.records):
-            raise ValueError("Duplicate record inputs")
-        with self._locked():
-            entries = self._read()
-            wanted = set(entry.records)
-            for old in entries:
-                if old.scope == entry.scope and wanted.intersection(held_record_ids(old)):
-                    return None
-            saved = RecordSpend(**{**entry.__dict__, "id": str(len(entries) + 1)})
-            entries.append(saved)
-            self._write(entries)
-            return saved
-
-    def update(self, scope: str, entry_id: str, patch: RecordSpendPatch) -> None:
-        with self._locked():
-            entries = self._read()
-            for entry in entries:
-                if entry.scope == scope and entry.id == entry_id:
-                    if "status" in patch:
-                        entry.status = patch["status"]
-                    if "transaction_id" in patch:
-                        entry.transaction_id = patch["transaction_id"]
-                    if "transaction" in patch:
-                        entry.transaction = patch["transaction"]
-                    if "fee_microcredits" in patch:
-                        entry.fee_microcredits = patch["fee_microcredits"]
-                    self._write(entries)
-                    return
-        raise KeyError("Unknown record reservation")
 
 
 @dataclass(frozen=True)
@@ -165,7 +79,11 @@ def submit_concurrent_swaps(dex: ShieldSwap, quote: SwapQuote, count: int, *, cl
 
 def build_client(private_key: str, directory: Path) -> tuple[Aleo, ShieldSwap]:
     """Bind an account, a durable reservation journal, and a swap journal to one client."""
-    store = JsonFileRecordInventoryStore(directory / "inventory.json")
+    # The SDK's default journal is in memory and lasts one process. A SQLite
+    # journal keeps reservations and proved transactions across restarts and
+    # coordinates processes on this machine; JsonFileRecordInventoryStore is
+    # the inspectable alternative.
+    store = SqliteRecordInventoryStore(directory / "inventory.sqlite")
     aleo = Aleo(HTTPProvider(ENDPOINT, network=NETWORK),
                 record_management=RecordManagementConfig(enabled=True, store=store, chain_id=f"aleo:{NETWORK}"))
     key = testnet.PrivateKey.from_string(private_key)
@@ -185,7 +103,7 @@ def refuse_unresolved_work(aleo: Aleo, dex: ShieldSwap, directory: Path) -> None
     journal = aleo.inventory.reconcile_record_inventory()
     pending = [entry for entry in journal if entry.status in UNRESOLVED]
     if pending:
-        raise SystemExit(f"Reconcile {len(pending)} unresolved operations in {directory / 'inventory.json'} before another batch")
+        raise SystemExit(f"Reconcile {len(pending)} unresolved operations in {directory / 'inventory.sqlite'} before another batch")
     if dex.journal is not None and dex.journal.pending_claims():
         raise SystemExit(f"Claim the pending swaps in {directory / 'swaps.jsonl'} (dex.collect_all()) before another batch")
 

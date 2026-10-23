@@ -36,6 +36,7 @@ from .inventory import (
     InventoryRecord as InventoryRecord,
     InventoryResult as InventoryResult,
     InventoryTarget as InventoryTarget,
+    JsonFileRecordInventoryStore as JsonFileRecordInventoryStore,
     MemoryRecordInventoryStore as MemoryRecordInventoryStore,
     RecordAsset as RecordAsset,
     RecordInventory as RecordInventory,
@@ -45,6 +46,7 @@ from .inventory import (
     RecordManagementConfig as RecordManagementConfig,
     RecordReservationConflictError as RecordReservationConflictError,
     RecordSpend as RecordSpend,
+    SqliteRecordInventoryStore as SqliteRecordInventoryStore,
     TokenJoinRouter as TokenJoinRouter,
 )
 
