@@ -2,7 +2,9 @@
 
 _source: ProvableHQ/veil packages/core/test/inventory/inventory.test.ts
 ("inventory planning") and configuration/autojoin suites, PR #172 @ 2e324d5.
-Amounts and step shapes are copied as-is; the planner is a line-for-line port.
+Amounts and step shapes are copied as-is; the planner is a line-for-line port
+with one extension, the whole-lot split (python-sdk#83), which only changes
+plans Veil would reject.
 """
 from __future__ import annotations
 
@@ -59,6 +61,25 @@ def test_preserves_exact_balanced_lots_and_repacks_small_records() -> None:
     )
     assert [step.kind for step in result.steps] == ["join", "split", "split"]
     assert [record.amount for record in result.steps[-1].outputs] == [2, 2]
+
+
+def test_splits_whole_lots_when_halving_would_strand_value_below_the_minimum() -> None:
+    """Python extends Veil here: the same inputs raise in Veil's planner (python-sdk#83)."""
+    result = build_inventory_plan(
+        scope=SCOPE, asset=ARC20, inputs=[PlannedRecord("1group", 9), PlannedRecord("2group", 3)],
+        target=InventoryTarget(records=4, min_record_amount=3, distribution="preserve"),
+    )
+    assert [[o.amount for o in step.outputs] for step in result.steps] == [[3, 6], [3, 3]]
+    # Credits: 20,003 microcredits fund two 10,000 deductions and three lots of 1,
+    # but a first halving would leave neither half able to pay the second split.
+    credits = build_inventory_plan(
+        scope=SCOPE, asset=CREDITS, inputs=[PlannedRecord("1group", 20_003)],
+        target=InventoryTarget(records=3, min_record_amount=1, distribution="preserve"),
+    )
+    assert [[o.amount for o in step.outputs] for step in credits.steps] == [[1, 10_002], [1, 1]]
+    assert credits.deduction == 20_000
+    # Halving still wins whenever it can finish, so existing plans are unchanged.
+    assert [[o.amount for o in step.outputs] for step in plan([100], 2, ARC20, "preserve").steps] == [[50, 50]]
 
 
 def test_rejects_impossible_counts_deductions_overflow_and_operation_limits() -> None:

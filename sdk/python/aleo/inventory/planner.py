@@ -4,8 +4,10 @@ The planner is deterministic: the same records, target, and helpers always
 produce the same steps, so a plan built for review can be rebuilt at
 execution time and compared. It follows one bounded strategy: keep records
 that already fit, split large records directly into the missing lots when
-the amounts divide exactly, and otherwise consolidate and then split. Every
-amount stays within the asset's declared width.
+the amounts divide exactly, and otherwise consolidate and then split. A split
+halves the record unless halving would strand value below the minimum, in
+which case it cuts whole lots. Every amount stays within the asset's
+declared width.
 """
 from __future__ import annotations
 
@@ -187,6 +189,11 @@ def build_inventory_plan(
                 kind="join", inputs=tuple(item.id for item in consumed), outputs=(output,), join_program=helper,
             ))
             working = working[batch:] + [output]
+        def lots(amount: int) -> int:
+            # The most records of at least `minimum` that `amount` can still be
+            # split into, counting the deduction each further split costs.
+            return (amount + deduction) // (minimum + deduction)
+
         # Split the largest remaining record and leave enough in its remainder
         # for any dependent splits, including their credits deductions.
         while len(working) < count:
@@ -195,7 +202,19 @@ def build_inventory_plan(
             outputs_needed = count - len(working) + 1 if repack else 2
             usable = record.amount - deduction * (outputs_needed - 1)
             amount = usable // outputs_needed
-            push("split", [record], [amount, record.amount - amount - deduction], amount)
+            remainder = record.amount - amount - deduction
+            # Halving a record that is small relative to the minimum can strand
+            # value below it: [9, 3] towards four lots of at least 3 would go
+            # 9 -> [4, 5] -> [2, 3]. When the two halves could no longer yield
+            # the lots still required, cut whole lots instead; a first output
+            # of exactly j lots keeps every lot the record can fund. (Veil's
+            # planner halves unconditionally and rejects these targets.)
+            required = count - sum(lots(item.amount) for item in working[1:])
+            if lots(amount) + lots(remainder) < required:
+                whole = max(1, lots(record.amount) // 2)
+                amount = whole * (minimum + deduction) - deduction
+                remainder = record.amount - amount - deduction
+            push("split", [record], [amount, remainder], amount)
         if any(item.amount < minimum for item in working):
             raise InventoryPlanError("Insufficient balance after split deductions")
     return finish()
