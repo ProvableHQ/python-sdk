@@ -132,10 +132,12 @@ class TransactionResult:
         """Release the record reservation of a built transaction that will not be submitted.
 
         Only meaningful on a managed client. It does nothing once
-        ``submit_transaction`` has been attempted, whether the node accepted
-        the transaction or the attempt ended without an answer, because the
-        network may have spent the records; use
-        ``reconcile_record_inventory`` to settle such a spend.
+        ``submit_transaction`` has started, whether the attempt is still in
+        flight, the node accepted the transaction, or the attempt ended
+        without an answer, because the network may have spent the records;
+        use ``reconcile_record_inventory`` to settle such a spend. A result
+        that was discarded is refused by ``submit_transaction`` afterwards,
+        since its records may already belong to another transaction.
         """
         if self.checkpoint is not None:
             self.checkpoint.discard()

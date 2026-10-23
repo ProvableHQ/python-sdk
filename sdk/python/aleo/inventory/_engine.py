@@ -19,6 +19,7 @@ them where they matter.
 from __future__ import annotations
 
 import re
+import threading
 import time
 from dataclasses import dataclass, replace
 from typing import Any, Callable, Generator, Literal, Mapping, Sequence, TypeVar, Union, cast
@@ -321,6 +322,8 @@ class SpendCheckpoint:
     Attributes:
         entry: The journal entry holding the reservation.
         transaction_id: The id recorded at preparation or submission.
+        is_broadcasting: A broadcast attempt is in flight; the reservation
+            cannot be released until its outcome is known.
         is_uncertain: A broadcast attempt ended without a definite answer,
             so the network may hold the transaction; the reservation stays.
     """
@@ -337,9 +340,13 @@ class SpendCheckpoint:
         self.entry = entry
         self.transaction_id: str | None = None
         self.is_prepared = False
+        self.is_broadcasting = False
         self.is_submitted = False
         self.is_uncertain = False
         self.is_closed = False
+        # Serialises the lifecycle flags against a concurrent ``discard`` from
+        # another thread while a broadcast is in flight.
+        self._state = threading.RLock()
         self._fee_candidates: list[InventoryRecord] = []
         self._fee_choice: InventoryRecord | None = None
         self.fee_record_selector: FeeRecordSelector | None = None
@@ -434,15 +441,33 @@ class SpendCheckpoint:
         self.is_prepared = True
         return fee
 
+    def begin_broadcast(self) -> None:
+        """Mark a broadcast attempt as in flight, before the request is sent.
+
+        From here until :meth:`submitted` or :meth:`broadcast_failed`,
+        :meth:`discard` does nothing, so a concurrent cleanup cannot release
+        inputs the node may be accepting at that moment.
+
+        Raises:
+            InventoryError: The spend was already discarded; its inputs may
+                belong to another transaction now, so it must not be sent.
+        """
+        with self._state:
+            if self.is_closed:
+                raise InventoryError("Transaction was discarded before broadcast; build it again")
+            self.is_broadcasting = True
+
     def submitted(self, tx_id: str) -> None:
         """Record that the network accepted the broadcast; the reservation now outlives any error."""
-        if self.is_submitted and self.transaction_id == tx_id:
-            return
-        # Mark before touching the store: a storage failure must not release
-        # inputs the network may already have accepted.
-        self.is_submitted = True
-        self.transaction_id = tx_id
-        self._store.update(self._scope, self.entry.id, {"status": "submitted", "transaction_id": tx_id})
+        with self._state:
+            if self.is_submitted and self.transaction_id == tx_id:
+                return
+            # Mark before touching the store: a storage failure must not release
+            # inputs the network may already have accepted.
+            self.is_submitted = True
+            self.is_broadcasting = False
+            self.transaction_id = tx_id
+            self._store.update(self._scope, self.entry.id, {"status": "submitted", "transaction_id": tx_id})
 
     def confirmed(self, tx_id: str) -> None:
         """Record acceptance and drop the saved transaction."""
@@ -460,22 +485,25 @@ class SpendCheckpoint:
         """
         status = getattr(error, "status", None)
         refused = isinstance(error, AleoNetworkError) and isinstance(status, int) and 400 <= status < 500
-        if refused and not self.is_uncertain:
-            self.discard()
-        else:
-            self.is_uncertain = True
+        with self._state:
+            self.is_broadcasting = False
+            if refused and not self.is_uncertain:
+                self.discard()
+            else:
+                self.is_uncertain = True
 
     def discard(self) -> None:
         """Release the reservation of a spend that never reached the network.
 
-        Safe to call more than once. Does nothing after :meth:`submitted`
-        or after a broadcast attempt with an unknown outcome, because the
-        network may have spent the records.
+        Safe to call more than once. Does nothing while a broadcast is in
+        flight, after :meth:`submitted`, or after a broadcast attempt with an
+        unknown outcome, because the network may have spent the records.
         """
-        if self.is_submitted or self.is_uncertain or self.is_closed:
-            return
-        self.is_closed = True
-        self._store.update(self._scope, self.entry.id, {"status": "cancelled"})
+        with self._state:
+            if self.is_broadcasting or self.is_submitted or self.is_uncertain or self.is_closed:
+                return
+            self.is_closed = True
+            self._store.update(self._scope, self.entry.id, {"status": "cancelled"})
 
 
 def open_spend(
@@ -698,6 +726,10 @@ class InventoryEngine:
             if observed is not None:
                 observed.append(prepared.id)
             try:
+                # Marked in flight here as well as in the facade's broadcast,
+                # so a driver that performs the request itself gets the same
+                # protection against a concurrent discard.
+                checkpoint.begin_broadcast()
                 tx_id = yield Broadcast(prepared.transaction, checkpoint)
             except BaseException as exc:
                 checkpoint.broadcast_failed(exc)

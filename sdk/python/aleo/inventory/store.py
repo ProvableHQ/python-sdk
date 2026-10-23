@@ -170,12 +170,18 @@ def _process_alive(pid: int) -> bool:
 
 
 def _private_file(path: Path) -> None:
-    """Create *path* and its parent readable by the owner only, keeping an existing file's contents."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        path.parent.chmod(0o700)
-    except OSError:  # pragma: no cover - not every filesystem honours modes
-        pass
+    """Create *path* readable by the owner only, keeping an existing file's contents.
+
+    A parent directory this call creates is owner-only as well; an existing
+    directory keeps its permissions, since it may be the application's own
+    directory or the working directory.
+    """
+    if not path.parent.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            path.parent.chmod(0o700)
+        except OSError:  # pragma: no cover - not every filesystem honours modes
+            pass
     if not path.exists():
         fd = os.open(path, os.O_CREAT | os.O_WRONLY, 0o600)
         os.close(fd)
@@ -190,13 +196,24 @@ class _FileLock:
 
     def __enter__(self) -> None:
         self._thread_lock.acquire()
-        self._handle = open(self._path, "a+")
-        if sys.platform == "win32":  # pragma: no cover - exercised on Windows only
-            import msvcrt
-            msvcrt.locking(self._handle.fileno(), msvcrt.LK_LOCK, 1)  # type: ignore[attr-defined]
-        else:
-            import fcntl
-            fcntl.flock(self._handle, fcntl.LOCK_EX)
+        # ``__exit__`` never runs when ``__enter__`` raises, so release what
+        # was taken before an open or lock failure propagates; the next call
+        # then gets a fresh attempt instead of blocking on this thread lock.
+        try:
+            self._handle = open(self._path, "a+")
+            try:
+                if sys.platform == "win32":  # pragma: no cover - exercised on Windows only
+                    import msvcrt
+                    msvcrt.locking(self._handle.fileno(), msvcrt.LK_LOCK, 1)  # type: ignore[attr-defined]
+                else:
+                    import fcntl
+                    fcntl.flock(self._handle, fcntl.LOCK_EX)
+            except BaseException:
+                self._handle.close()
+                raise
+        except BaseException:
+            self._thread_lock.release()
+            raise
 
     def __exit__(self, *exc: object) -> None:
         try:
@@ -311,8 +328,15 @@ class JsonFileRecordInventoryStore(_DurableStore):
         class _Guard:
             def __enter__(self) -> None:
                 store._lock.__enter__()
-                text = store.path.read_text() or "[]"
-                store._cache = [dict(item) for item in json.loads(text)]
+                try:
+                    text = store.path.read_text() or "[]"
+                    store._cache = [dict(item) for item in json.loads(text)]
+                except BaseException:
+                    # A journal that cannot be read must not leave the locks
+                    # held; once the file is repaired the next call proceeds.
+                    store._cache = None
+                    store._lock.__exit__(None, None, None)
+                    raise
 
             def __exit__(self, kind: object, exc: object, tb: object) -> None:
                 try:

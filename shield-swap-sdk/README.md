@@ -203,12 +203,18 @@ plans the joins and splits that reshape the token's underlying records, and
 time through `aleo.inventory`:
 
 ```python
+from pathlib import Path
+
 from aleo.inventory import InventoryTarget, RecordManagementConfig
+from aleo_shield_swap.journal import Journal
 
 aleo = Aleo(Aleo.HTTPProvider("https://edge.provable.com/api", network="testnet"),
             record_management=RecordManagementConfig(enabled=True))
 aleo.default_account = account
 dex = ShieldSwap(aleo)
+# One journal per account and network, outside version control: it holds the
+# claim secrets and hands each concurrent swap its own blinded identity.
+dex.journal = Journal(Path.home() / ".shield-swap" / "testnet" / str(account.address) / "swaps.jsonl")
 
 plan = dex.plan_inventory("USDCx", InventoryTarget(records=4, min_record_amount=100_000, distribution="balanced"))
 result = dex.rebalance_inventory("USDCx", InventoryTarget(records=4, min_record_amount=100_000, distribution="balanced"))

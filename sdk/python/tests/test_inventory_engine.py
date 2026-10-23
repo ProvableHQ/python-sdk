@@ -1017,6 +1017,22 @@ def test_a_refusal_after_an_uncertain_broadcast_attempt_keeps_the_reservation() 
     assert w.journal()[-1].status == "cancelled"            # a first-attempt refusal still releases
 
 
+def test_a_checkpoint_in_flight_ignores_discard_and_a_discarded_one_refuses_to_broadcast() -> None:
+    w = World([1_000_000, 500])
+    first, second = w.inventory.get_record_inventory(CREDITS).available
+    with w.inventory.reserve("credits.aleo", "split", [first.id]) as checkpoint:
+        checkpoint.prepared("at1x", w.build("credits.aleo", "split", (first.plaintext, "1u64"), None, 0))
+        checkpoint.begin_broadcast()                        # the request is on the wire
+        checkpoint.discard()
+        assert checkpoint.is_broadcasting and not checkpoint.is_closed
+        checkpoint.submitted("at1x")
+    assert w.journal()[0].status == "submitted" and first.id in w.inventory.reserved_record_ids()
+    with w.inventory.reserve("credits.aleo", "split", [second.id]) as dropped:
+        pass                                                # left the block: released
+    with pytest.raises(InventoryError, match="discarded"):
+        dropped.begin_broadcast()
+
+
 def test_rebalance_stops_before_proving_once_the_fee_budget_is_spent() -> None:
     w = World([100] * 3)
     plan = w.inventory.plan_record_inventory(CREDITS, InventoryTarget(records=1))

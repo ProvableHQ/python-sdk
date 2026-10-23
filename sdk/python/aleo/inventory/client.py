@@ -186,9 +186,13 @@ def broadcast_checkpointed(submit_once: Callable[[], Any], checkpoint: Any) -> s
     errors (5xx) are retried here with the SDK's usual backoff, and the
     checkpoint learns of each failed attempt first, so a refusal that follows
     an attempt with an unknown outcome keeps the reservation instead of
-    releasing it. A successful answer is recorded as submitted.
+    releasing it. The checkpoint is marked in flight before every attempt,
+    so ``discard`` cannot release the inputs while the node may be accepting
+    them, and a spend already discarded is refused rather than sent. A
+    successful answer is recorded as submitted.
     """
     def attempt() -> str:
+        checkpoint.begin_broadcast()
         try:
             return str(submit_once())
         except BaseException as exc:
@@ -203,6 +207,7 @@ def broadcast_checkpointed(submit_once: Callable[[], Any], checkpoint: Any) -> s
 async def async_broadcast_checkpointed(submit_once: Callable[[], Awaitable[Any]], checkpoint: Any) -> str:
     """Awaited twin of :func:`broadcast_checkpointed`."""
     async def attempt() -> str:
+        checkpoint.begin_broadcast()
         try:
             return str(await submit_once())
         except BaseException as exc:

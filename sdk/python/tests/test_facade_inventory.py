@@ -257,6 +257,64 @@ def test_discard_keeps_the_reservation_after_a_broadcast_attempt_with_no_answer(
     assert entry.status == "prepared" and aleo.inventory.reserved_record_ids() == {"1group"}
 
 
+def test_discard_during_an_in_flight_broadcast_does_not_release_the_inputs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Another thread's cleanup while the request is pending must not free inputs the node may be accepting."""
+    aleo, _, credits, seen = setup(monkeypatch)
+    result = transfer(credits, aleo).build_transaction()
+
+    def slow_node(raw: Any, **_: Any) -> str:
+        # The request is on the wire; a concurrent discard arrives now.
+        result.discard()
+        assert aleo.inventory.store.list(aleo.inventory.scope())[0].status == "prepared"
+        tx = json.loads(raw if isinstance(raw, str) else raw.to_json())
+        seen["submits"].append(tx)
+        return str(tx["id"])
+
+    monkeypatch.setattr(aleo._client, "submit_transaction", slow_node)
+    assert aleo.network.submit_transaction(result) == "at1tx1"
+    entry = aleo.inventory.store.list(aleo.inventory.scope())[0]
+    assert entry.status == "submitted" and aleo.inventory.reserved_record_ids() == {"1group"}
+    with pytest.raises(RecordReservationConflictError):
+        transfer(credits, aleo).build_transaction()                       # the input is still held
+
+
+def test_a_discarded_result_is_refused_by_submit(monkeypatch: pytest.MonkeyPatch) -> None:
+    aleo, _, credits, seen = setup(monkeypatch)
+    result = transfer(credits, aleo).build_transaction()
+    result.discard()
+    second = transfer(credits, aleo).build_transaction()                  # the record is free again
+    with pytest.raises(InventoryError, match="discarded"):
+        aleo.network.submit_transaction(result)                           # must not spend a record now held by `second`
+    assert seen["submits"] == [] and second.checkpoint is not None and second.checkpoint.is_prepared
+
+
+@pytest.mark.asyncio
+async def test_async_discard_during_an_in_flight_broadcast_does_not_release_the_inputs(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = RecordManagementConfig(enabled=True, store=MemoryRecordInventoryStore())
+    aleo = AsyncAleo(HTTPProvider(BASE), record_management=config)
+    account = aleo.account.from_private_key(PrivateKey.random())
+    aleo.default_account = account
+    aleo.record_provider = AsyncProvider([record(str(account.address), 1_000_000, 1)])
+    built: list[Any] = []
+
+    async def prove(self: AsyncBoundCall, acct: Any = None, **kw: Any) -> FakeTransaction:
+        return FakeTransaction(fake_transaction("at1async"))
+
+    async def slow_node(raw: Any, **_: Any) -> str:
+        built[0].discard()                                                # a concurrent task's cleanup mid-flight
+        return "at1async"
+
+    monkeypatch.setattr(AsyncBoundCall, "_prove_transaction", prove)
+    monkeypatch.setattr(aleo.network_client, "submit_transaction", slow_node)
+    from aleo.facade.async_client import AsyncProgram
+    credits = AsyncProgram(aleo, RawProgram.from_source(CREDITS_SOURCE))
+    call: Any = credits.functions.transfer_private(aleo.record_provider.records[0]["record_plaintext"], str(account.address), 1)
+    built.append(await call.build_transaction())
+    assert await aleo.network.submit_transaction(built[0]) == "at1async"
+    entry = aleo.inventory.store.list(aleo.inventory.scope())[0]
+    assert entry.status == "submitted" and aleo.inventory.reserved_record_ids() == {"1group"}
+
+
 def test_a_refusal_after_a_retried_node_error_keeps_the_reservation(monkeypatch: pytest.MonkeyPatch) -> None:
     """The raw client retries 5xx; the first attempt may have been admitted, so the later 4xx is not a clean refusal."""
     from aleo import AleoNetworkError

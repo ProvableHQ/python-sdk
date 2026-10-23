@@ -218,6 +218,36 @@ def test_sqlite_layout_matches_veil(tmp_path: Path) -> None:
     assert entries[1].records == ("9group",) and entries[1].transaction_id == "at1veil"
 
 
+def test_durable_stores_keep_an_existing_directory_s_permissions(tmp_path: Path) -> None:
+    if sys.platform == "win32":
+        pytest.skip("POSIX permission bits")
+    existing = tmp_path / "app"
+    existing.mkdir(mode=0o755)
+    SqliteRecordInventoryStore(existing / "inventory.sqlite").close()
+    assert (existing.stat().st_mode & 0o777) == 0o755, "an application's own directory is left alone"
+    JsonFileRecordInventoryStore(existing / "nested" / "journal" / "inventory.json")
+    assert ((existing / "nested" / "journal").stat().st_mode & 0o077) == 0, "a directory the store creates is owner-only"
+
+
+def test_json_store_releases_its_locks_when_the_journal_cannot_be_read(tmp_path: Path) -> None:
+    path = tmp_path / "inventory.json"
+    store = JsonFileRecordInventoryStore(path)
+    path.write_text("{not json")
+    with pytest.raises(json.JSONDecodeError):
+        store.list(SCOPE)
+    path.write_text("[]")
+    assert store.list(SCOPE) == [], "the repaired journal is usable without a restart"
+    # Nor does a failure to take the lock itself leave the thread lock held.
+    lock = store._lock  # pyright: ignore[reportPrivateUsage]
+    lock_path = lock._path  # pyright: ignore[reportPrivateUsage]
+    lock_path.unlink()
+    lock_path.mkdir()                                                     # opening a directory for append fails
+    with pytest.raises(OSError):
+        store.list(SCOPE)
+    assert lock._thread_lock.acquire(blocking=False)  # pyright: ignore[reportPrivateUsage]
+    lock._thread_lock.release()  # pyright: ignore[reportPrivateUsage]
+
+
 def test_json_file_is_plain_json_with_writer_metadata(tmp_path: Path) -> None:
     path = tmp_path / "inventory.json"
     store = JsonFileRecordInventoryStore(path)
