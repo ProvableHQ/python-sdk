@@ -37,12 +37,13 @@ class Aleo:
         configures the underlying network connection.
     record_management:
         Optional :class:`~aleo.inventory.RecordManagementConfig`. With
-        ``enabled=True`` every ``transact`` and ``delegate`` on this client
-        reserves its record inputs before proving, saves the proved
-        transaction before broadcast, and journals the submission, so
-        writers sharing the store never spend the same record. ``None``
-        (the default) leaves writes unchanged; ``aleo.inventory`` still
-        reads, plans, and performs single joins or splits.
+        ``enabled=True`` the journal follows each write's two halves:
+        ``build_transaction`` reserves the record inputs before proving and
+        saves the proved transaction, ``submit_transaction`` records the
+        broadcast, and ``delegate`` does both through the prover, so writers
+        sharing the store never spend the same record. ``None`` (the
+        default) leaves writes unchanged; ``aleo.inventory`` still reads,
+        plans, and performs single joins or splits.
     """
 
     # Expose HTTPProvider as a nested class attribute so callers can write

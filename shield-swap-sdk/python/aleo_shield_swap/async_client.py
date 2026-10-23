@@ -19,7 +19,6 @@ from aleo import AleoNetworkError, ProgramNotFound
 from aleo.compliance import AsyncFreezeListProofs, ComplianceProofContext, async_freezelist_program
 from aleo.inventory import (
     AsyncRecordInventory, InventoryPlan, InventoryResult, InventoryTarget, RecordAsset, RecordReservationConflictError,
-    managed_inventory,
 )
 
 from . import _generated as g
@@ -134,10 +133,8 @@ class AsyncDexCall(Generic[R]):
         a reservation conflict; see :meth:`~aleo_shield_swap._calls.DexCall.transact`.
         """
         async def submit(bound: Any) -> tuple[str, Any]:
-            if managed_inventory(self._aleo) is not None:
-                return await bound.transact_with_result(account, **fee_kwargs)
             tx = await bound.build_transaction(account, **fee_kwargs)
-            await self._aleo.network.submit_transaction(tx.raw)
+            await self._aleo.network.submit_transaction(tx)
             return tx.id, tx
 
         tx_id, tx = await self._submit(submit)

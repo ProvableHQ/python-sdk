@@ -51,19 +51,15 @@ def fake_transaction(tx_id: str, fee_tag: str | None = None, fee: int = 100) -> 
             "fee": {"transition": {"program": "credits.aleo", "function": function, "inputs": inputs}}}
 
 
-class FakeResult:
+class FakeTransaction:
+    """Stands in for the proved network ``Transaction``: an id and a JSON form."""
+
     def __init__(self, tx: dict[str, Any]) -> None:
         self.id = tx["id"]
-        self.raw = self
+        self._tx = tx
 
     def to_json(self) -> str:
         return json.dumps(self._tx)
-
-    @classmethod
-    def of(cls, tx: dict[str, Any]) -> "FakeResult":
-        result = cls(tx)
-        result._tx = tx
-        return result
 
 
 def setup(monkeypatch: pytest.MonkeyPatch, *, enabled: bool = True, max_fee: int | None = None, fee: int = 100,
@@ -78,8 +74,8 @@ def setup(monkeypatch: pytest.MonkeyPatch, *, enabled: bool = True, max_fee: int
     seen: dict[str, Any] = {"builds": [], "submits": [], "nonce_tag": {}}
     sequence = [0]
 
-    def build_transaction(self: BoundCall, acct: Any = None, *, priority_fee: int = 0, fee_record: Any = None,
-                          private_fee: bool = False, base_fee: int | None = None) -> FakeResult:
+    def prove(self: BoundCall, acct: Any = None, *, priority_fee: int = 0, fee_record: Any = None,
+              private_fee: bool = False, base_fee: int | None = None) -> FakeTransaction:
         sequence[0] += 1
         tag = None
         if private_fee or fee_record is not None:
@@ -87,17 +83,17 @@ def setup(monkeypatch: pytest.MonkeyPatch, *, enabled: bool = True, max_fee: int
             tag = next(r["tag"] for r in aleo.record_provider.records if r["record_plaintext"] == chosen)
         tx = fake_transaction(f"at1tx{sequence[0]}", tag, fee + priority_fee)
         seen["builds"].append({"args": list(self.args), "private_fee": private_fee, "fee_record": fee_record, "tx": tx})
-        return FakeResult.of(tx)
+        return FakeTransaction(tx)
 
-    monkeypatch.setattr(BoundCall, "build_transaction", build_transaction)
+    # Replace only the proving step, so the managed build and submit halves run for real.
+    monkeypatch.setattr(BoundCall, "_prove_transaction", prove)
 
     def submit_transaction(raw: Any) -> str:
-        # The managed path submits JSON text; the plain path submits the result object.
         tx = json.loads(raw if isinstance(raw, str) else raw.to_json())
         seen["submits"].append(tx)
         return str(tx["id"])
 
-    monkeypatch.setattr(aleo.network, "submit_transaction", submit_transaction)
+    monkeypatch.setattr(aleo._client, "submit_transaction", submit_transaction)  # the raw node client
     # The synthetic records cannot be authorized by snarkVM, so a prover-side
     # delegate (broadcast=False) is answered directly; the broadcasting call
     # still runs the real hook.
@@ -143,6 +139,54 @@ def test_managed_transact_reserves_inputs_saves_the_transaction_and_journals_sub
     assert entry.transaction == seen["builds"][0]["tx"]
     assert aleo.inventory.reserved_record_ids() == {"1group"}
     assert aleo.inventory.get_record_inventory(RecordAsset("credits.aleo")).available[0].id == "2group"
+
+
+def test_build_and_submit_halves_are_managed_on_their_own(monkeypatch: pytest.MonkeyPatch) -> None:
+    aleo, _, credits, seen = setup(monkeypatch)
+    result = transfer(credits, aleo).build_transaction()
+    assert result.checkpoint is not None and result.checkpoint.is_prepared
+    entry = aleo.inventory.store.list(aleo.inventory.scope())[0]
+    assert (entry.status, entry.transaction_id) == ("prepared", "at1tx1") and entry.transaction == seen["builds"][0]["tx"]
+    assert seen["submits"] == []
+    tx_id = aleo.network.submit_transaction(result)
+    assert tx_id == "at1tx1" and aleo.inventory.store.list(aleo.inventory.scope())[0].status == "submitted"
+    result.discard()                                                      # no effect after submission
+    assert aleo.inventory.store.list(aleo.inventory.scope())[0].status == "submitted"
+
+
+def test_a_built_transaction_can_be_discarded_before_submission(monkeypatch: pytest.MonkeyPatch) -> None:
+    aleo, _, credits, _ = setup(monkeypatch)
+    result = transfer(credits, aleo).build_transaction()
+    assert aleo.inventory.reserved_record_ids() == {"1group"}
+    result.discard()
+    assert aleo.inventory.store.list(aleo.inventory.scope())[0].status == "cancelled"
+    assert aleo.inventory.reserved_record_ids() == set()
+    assert transfer(credits, aleo).transact() == "at1tx2"                 # the record is free again
+
+
+def test_a_node_refusal_on_submit_releases_the_reservation(monkeypatch: pytest.MonkeyPatch) -> None:
+    from aleo import AleoNetworkError
+    aleo, _, credits, _ = setup(monkeypatch)
+
+    def refuse(raw: Any) -> str:
+        raise AleoNetworkError("POST /transaction/broadcast returned 400", status=400)
+
+    monkeypatch.setattr(aleo._client, "submit_transaction", refuse)
+    with pytest.raises(AleoNetworkError):
+        transfer(credits, aleo).transact()
+    assert aleo.inventory.store.list(aleo.inventory.scope())[0].status == "cancelled"
+
+
+def test_a_proving_failure_releases_the_reservation(monkeypatch: pytest.MonkeyPatch) -> None:
+    aleo, _, credits, _ = setup(monkeypatch)
+
+    def fail(self: BoundCall, acct: Any = None, **kw: Any) -> Any:
+        raise RuntimeError("proving failed")
+
+    monkeypatch.setattr(BoundCall, "_prove_transaction", fail)
+    with pytest.raises(RuntimeError):
+        transfer(credits, aleo).build_transaction()
+    assert aleo.inventory.store.list(aleo.inventory.scope())[0].status == "cancelled"
 
 
 def test_managed_transact_refuses_a_reserved_input_before_proving(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -206,10 +250,10 @@ def test_delegate_without_broadcast_stays_unmanaged(monkeypatch: pytest.MonkeyPa
 def test_lost_broadcast_response_keeps_the_prepared_transaction(monkeypatch: pytest.MonkeyPatch) -> None:
     aleo, _, credits, _ = setup(monkeypatch)
 
-    def lost(raw: str) -> str:
+    def lost(raw: Any) -> str:
         raise ConnectionError("response lost")
 
-    monkeypatch.setattr(aleo.network, "submit_transaction", lost)
+    monkeypatch.setattr(aleo._client, "submit_transaction", lost)
     with pytest.raises(ConnectionError):
         transfer(credits, aleo).transact()
     entry = aleo.inventory.store.list(aleo.inventory.scope())[0]
@@ -233,21 +277,22 @@ async def test_async_managed_transact_runs_the_same_hook(monkeypatch: pytest.Mon
     aleo.record_provider = AsyncProvider([record(str(account.address), 1_000_000, 1)])
     submits: list[dict[str, Any]] = []
 
-    async def build_transaction(self: AsyncBoundCall, acct: Any = None, **kw: Any) -> FakeResult:
-        return FakeResult.of(fake_transaction("at1async"))
+    async def prove(self: AsyncBoundCall, acct: Any = None, **kw: Any) -> FakeTransaction:
+        return FakeTransaction(fake_transaction("at1async"))
 
-    async def submit_transaction(raw: str) -> str:
-        submits.append(json.loads(raw))
+    async def submit_transaction(raw: Any) -> str:
+        submits.append(json.loads(raw if isinstance(raw, str) else raw.to_json()))
         return "at1async"
 
-    monkeypatch.setattr(AsyncBoundCall, "build_transaction", build_transaction)
-    monkeypatch.setattr(aleo.network, "submit_transaction", submit_transaction)
+    monkeypatch.setattr(AsyncBoundCall, "_prove_transaction", prove)
+    monkeypatch.setattr(aleo.network_client, "submit_transaction", submit_transaction)
     from aleo.facade.async_client import AsyncProgram
     credits = AsyncProgram(aleo, RawProgram.from_source(CREDITS_SOURCE))
-    call = credits.functions.transfer_private(aleo.record_provider.records[0]["record_plaintext"], str(account.address), 1)
-    assert await call.transact() == "at1async"
+    def call() -> Any:  # the async program's callers are typed as the sync bound call
+        return credits.functions.transfer_private(aleo.record_provider.records[0]["record_plaintext"], str(account.address), 1)
+    assert await call().transact() == "at1async"
     assert [s["id"] for s in submits] == ["at1async"]
     entry = aleo.inventory.store.list(aleo.inventory.scope())[0]
     assert (entry.status, entry.records) == ("submitted", ("1group",))
     with pytest.raises(RecordReservationConflictError):
-        await credits.functions.transfer_private(aleo.record_provider.records[0]["record_plaintext"], str(account.address), 1).transact()
+        await call().transact()

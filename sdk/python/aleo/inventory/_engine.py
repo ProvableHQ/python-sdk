@@ -291,6 +291,178 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+class SpendCheckpoint:
+    """The journal state of one spend, from reservation to submission.
+
+    A spend is the two halves snarkVM separates: proving a transaction and
+    broadcasting it. :meth:`open_spend` reserves the record inputs before
+    proving; :meth:`prepared` saves the proved transaction before broadcast
+    and enforces the fee ceiling; :meth:`submitted` records that the network
+    accepted it. A spend that never reaches the network is released with
+    :meth:`discard`, or by :meth:`broadcast_failed` when the node refuses
+    the transaction outright. Under a private fee, :attr:`fee_record_selector`
+    chooses and reserves the credits record once the exact fee is known.
+
+    Attributes:
+        entry: The journal entry holding the input reservation.
+        entries: Every entry this spend holds; a pinned fee record adds one.
+        transaction_id: The id recorded at preparation or submission.
+    """
+
+    def __init__(
+        self, store: RecordInventoryStore, scope: str, scope_now: Callable[[], str], entry: RecordSpend, *,
+        fee_limit: int | None,
+    ) -> None:
+        self._store = store
+        self._scope = scope
+        self._scope_now = scope_now
+        self._fee_limit = fee_limit
+        self._base = entry
+        self.entry = entry
+        self.entries: list[RecordSpend] = [entry]
+        self.transaction_id: str | None = None
+        self.is_prepared = False
+        self.is_submitted = False
+        self.is_closed = False
+        self._fee_candidates: list[InventoryRecord] = []
+        self._fee_choice: InventoryRecord | None = None
+        self.fee_record_selector: FeeRecordSelector | None = None
+
+    @property
+    def input_ids(self) -> tuple[str, ...]:
+        """The reserved execution input nonces."""
+        return self._base.records
+
+    def use_fee_candidates(self, available: Sequence[InventoryRecord], preferred: str | None = None) -> FeeRecordSelector:
+        """Prepare private-fee selection from the credits records available now.
+
+        The returned callable is handed to the prover as ``fee_record``. It
+        runs once the execution is proved and the exact fee is known, picks
+        the smallest sufficient record (the preferred nonce first when it is
+        eligible), and reserves it as its own journal entry so a rejected
+        execution can keep it held while releasing the inputs.
+        """
+        inputs = set(self._base.records)
+        self._fee_candidates = sorted(
+            (item for item in available if item.id not in inputs and item.plaintext and item.tag),
+            key=lambda item: (item.id != preferred, item.amount, item.id),
+        )
+
+        def select(required: int) -> str:
+            if self._fee_limit is not None and required > self._fee_limit:
+                raise InventoryError("Estimated transaction exceeds max_fee_microcredits")
+            if self._scope_now() != self._scope:
+                raise InventoryError("Account or chain changed during private fee selection")
+            for candidate in self._fee_candidates:
+                if candidate.amount < required:
+                    continue
+                fee_entry = self._store.acquire(replace(self._base, records=(candidate.id,), fee_record_id=candidate.id))
+                if fee_entry is not None:
+                    self.entries.append(fee_entry)
+                    self._fee_choice = candidate
+                    return candidate.plaintext
+            raise InventoryError(
+                "No available credits record covers the private fee separately from the transaction inputs; "
+                "refresh records or fund private credits"
+            )
+
+        self.fee_record_selector = select
+        return select
+
+    def prepared(self, tx_id: str, transaction: Mapping[str, Any], fee_microcredits: int | None = None) -> int:
+        """Save the proved transaction before broadcast; returns the fee in microcredits.
+
+        Raises:
+            InventoryError: The account or chain changed, the prover did not
+                spend the reserved fee record, the fee exceeds the pinned
+                record or ``max_fee_microcredits``, or the fee cannot be read.
+                Call :meth:`discard` (or let the caller's cleanup do it)
+                because nothing was broadcast.
+        """
+        if self._scope_now() != self._scope:
+            raise InventoryError("Account or chain changed during record spending")
+        chosen = self._fee_choice
+        if chosen is not None:
+            # Check the prover honoured the pinned record before saving a
+            # transaction that recovery could broadcast.
+            fee_transition = _dict(_dict(transaction.get("fee")).get("transition"))
+            fee_inputs = _list(fee_transition.get("inputs"))
+            first = _dict(fee_inputs[0]) if fee_inputs else {}
+            if (
+                fee_transition.get("program") != CREDITS_PROGRAM or fee_transition.get("function") != "fee_private"
+                or first.get("type") != "record" or first.get("tag") != chosen.tag
+            ):
+                raise InventoryError("Prover did not spend the reserved private fee record")
+        fee = transaction_fee(transaction) if fee_microcredits is None else fee_microcredits
+        if chosen is not None and fee > chosen.amount:
+            raise InventoryError("Private fee exceeds the reserved credits record balance")
+        if self._fee_limit is not None and fee > self._fee_limit:
+            raise InventoryError("Proved transaction exceeds max_fee_microcredits")
+        for item in self.entries:
+            self._store.update(self._scope, item.id, {
+                "status": "prepared", "transaction_id": tx_id, "transaction": dict(transaction), "fee_microcredits": str(fee),
+            })
+        self.transaction_id = tx_id
+        self.is_prepared = True
+        return fee
+
+    def submitted(self, tx_id: str) -> None:
+        """Record that the network accepted the broadcast; the reservation now outlives any error."""
+        # Mark before touching the store: a storage failure must not release
+        # inputs the network may already have accepted.
+        self.is_submitted = True
+        self.transaction_id = tx_id
+        for item in self.entries:
+            self._store.update(self._scope, item.id, {"status": "submitted", "transaction_id": tx_id})
+
+    def confirmed(self, tx_id: str) -> None:
+        """Record acceptance and drop the saved transaction."""
+        for item in self.entries:
+            self._store.update(self._scope, item.id, {"status": "confirmed", "transaction_id": tx_id, "transaction": None})
+
+    def broadcast_failed(self, error: BaseException) -> None:
+        """Decide what a failed broadcast means for the reservation.
+
+        A 4xx from the broadcast endpoint means the node refused the
+        transaction before admitting it, so nothing can reach the chain and
+        the inputs are released. Any other failure (timeout, lost response,
+        5xx) is uncertain and keeps them for reconciliation.
+        """
+        status = getattr(error, "status", None)
+        if isinstance(error, AleoNetworkError) and isinstance(status, int) and 400 <= status < 500:
+            self.discard()
+
+    def discard(self) -> None:
+        """Release the reservation of a spend that was never submitted.
+
+        Safe to call more than once. Does nothing after :meth:`submitted`,
+        because the network may have spent the records.
+        """
+        if self.is_submitted or self.is_closed:
+            return
+        self.is_closed = True
+        for item in self.entries:
+            self._store.update(self._scope, item.id, {"status": "cancelled"})
+
+
+def open_spend(
+    store: RecordInventoryStore, scope: str, scope_now: Callable[[], str], ids: Sequence[str], program: str, function: str,
+    *, asset_program: str | None = None, fee_limit: int | None = None,
+) -> SpendCheckpoint:
+    """Reserve the input nonces of one spend before any proving starts.
+
+    Raises:
+        RecordReservationConflictError: Another operation holds one of them.
+    """
+    entry = store.acquire(RecordSpend(
+        id="", scope=scope, records=tuple(ids), program=program, function=function, status="reserved",
+        created_at=_now_ms(), asset_program=asset_program,
+    ))
+    if entry is None:
+        raise RecordReservationConflictError(tuple(ids))
+    return SpendCheckpoint(store, scope, scope_now, entry, fee_limit=fee_limit)
+
+
 # ── The engine ───────────────────────────────────────────────────────────────
 
 
@@ -477,103 +649,34 @@ class InventoryEngine:
             if observed is not None:
                 observed.append(prepared.id)
             return (yield Broadcast(prepared.transaction))
-        store = self.management.store
-        scope = self.scope
-        base = RecordSpend(
-            id="", scope=scope, records=tuple(ids), program=program, function=function, status="reserved",
-            created_at=_now_ms(), asset_program=asset_program,
-        )
         # Acquire every input nonce together before any proving starts.
-        entry = store.acquire(base)
-        if entry is None:
-            raise RecordReservationConflictError(ids)
-        entries = [entry]
-        fee_choice: list[InventoryRecord] = []
+        checkpoint = open_spend(
+            self.management.store, self.scope, lambda: self.scope, ids, program, function,
+            asset_program=asset_program, fee_limit=limit,
+        )
         selector: FeeRecordSelector | None = None
-        if private_fee:
-            credits = yield from self.get_record_inventory(RecordAsset(CREDITS_PROGRAM))
-            preferred = inventory_record_id({"record_plaintext": preferred_fee_record}) if preferred_fee_record else None
-            candidates = sorted(
-                (item for item in credits.available if item.id not in ids and item.plaintext and item.tag),
-                key=lambda item: (item.id != preferred, item.amount, item.id),
-            )
-
-            def select(required: int) -> str:
-                # Called once the execution is proved and the exact fee is
-                # known. The chosen record joins the journal as its own entry,
-                # so a rejected execution can keep it held while releasing the
-                # inputs.
-                if limit is not None and required > limit:
-                    raise InventoryError("Estimated transaction exceeds max_fee_microcredits")
-                if self.scope != scope:
-                    raise InventoryError("Account or chain changed during private fee selection")
-                for candidate in candidates:
-                    if candidate.amount < required:
-                        continue
-                    fee_entry = store.acquire(replace(base, records=(candidate.id,), fee_record_id=candidate.id))
-                    if fee_entry is not None:
-                        entries.append(fee_entry)
-                        fee_choice.append(candidate)
-                        return candidate.plaintext
-                raise InventoryError(
-                    "No available credits record covers the private fee separately from the transaction inputs; "
-                    "refresh records or fund private credits"
-                )
-
-            selector = select
-        prepared_flag = False
-        submitted = False
         try:
+            if private_fee:
+                credits = yield from self.get_record_inventory(RecordAsset(CREDITS_PROGRAM))
+                preferred = inventory_record_id({"record_plaintext": preferred_fee_record}) if preferred_fee_record else None
+                selector = checkpoint.use_fee_candidates(credits.available, preferred)
             prepared = yield BuildTransaction(program, function, tuple(inputs), tuple(imports), private_fee, selector)
-            if self.scope != scope:
-                raise InventoryError("Account or chain changed during record spending")
-            transaction = prepared.transaction
-            if fee_choice:
-                # Check the prover honoured the pinned record before saving a
-                # transaction that recovery could broadcast.
-                chosen = fee_choice[0]
-                fee_transition = _dict(_dict(transaction.get("fee")).get("transition"))
-                fee_inputs = _list(fee_transition.get("inputs"))
-                first = _dict(fee_inputs[0]) if fee_inputs else {}
-                if (
-                    fee_transition.get("program") != CREDITS_PROGRAM or fee_transition.get("function") != "fee_private"
-                    or first.get("type") != "record" or first.get("tag") != chosen.tag
-                ):
-                    raise InventoryError("Prover did not spend the reserved private fee record")
-            fee = transaction_fee(transaction)
-            if fee_choice and fee > fee_choice[0].amount:
-                raise InventoryError("Private fee exceeds the reserved credits record balance")
-            if limit is not None and fee > limit:
-                raise InventoryError("Proved transaction exceeds max_fee_microcredits")
-            for item in entries:
-                store.update(scope, item.id, {
-                    "status": "prepared", "transaction_id": prepared.id, "transaction": transaction, "fee_microcredits": str(fee),
-                })
-            prepared_flag = True
+            checkpoint.prepared(prepared.id, prepared.transaction)
             if observed is not None:
                 observed.append(prepared.id)
             try:
-                tx_id = yield Broadcast(transaction)
-            except AleoNetworkError as exc:
-                # A 4xx from the broadcast endpoint means the node refused the
-                # transaction before admitting it, so nothing can reach the
-                # chain and the inputs can be released. Any other failure
-                # (timeout, lost response, 5xx) is uncertain and keeps them.
-                if exc.status is not None and 400 <= exc.status < 500:
-                    prepared_flag = False
+                tx_id = yield Broadcast(prepared.transaction)
+            except BaseException as exc:
+                checkpoint.broadcast_failed(exc)
                 raise
-            # Mark submission before touching the store: a storage failure must
-            # not release inputs the network may already have accepted.
-            submitted = True
-            for item in entries:
-                store.update(scope, item.id, {"status": "submitted", "transaction_id": tx_id})
+            checkpoint.submitted(tx_id)
             return tx_id
         except BaseException as exc:
             # Nothing was broadcast before the prepared checkpoint; afterwards
-            # the outcome is uncertain and the reservations stay.
-            if not prepared_flag and not submitted:
-                for item in entries:
-                    store.update(scope, item.id, {"status": "cancelled"})
+            # the outcome is uncertain and the reservations stay unless the
+            # node refused the transaction outright.
+            if not checkpoint.is_prepared:
+                checkpoint.discard()
             if isinstance(exc, RecordReservationConflictError):
                 # A nested write or a callback raised its own conflict after this
                 # spend acquired its inputs; it must not authorise a retry.
@@ -788,6 +891,7 @@ class InventoryEngine:
 
 __all__ = [
     "DEFAULT", "Broadcast", "BuildTransaction", "ConfirmedTransaction", "FeeRecordSelector", "FindRecords",
-    "InventoryEngine", "Management", "PreparedTransaction", "ProgramSource", "Request", "Sleep", "Step",
-    "WaitForScannerSync", "inventory_output_commitments", "positive_integer", "record_input_ids", "transaction_fee",
+    "InventoryEngine", "Management", "PreparedTransaction", "ProgramSource", "Request", "Sleep", "SpendCheckpoint", "Step",
+    "WaitForScannerSync", "inventory_output_commitments", "open_spend", "positive_integer", "record_input_ids",
+    "transaction_fee",
 ]

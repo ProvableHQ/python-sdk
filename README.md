@@ -229,10 +229,14 @@ reads an asset's spendable records, plans the joins and splits that reach a
 chosen layout, executes that plan one confirmed transaction at a time, and
 keeps writers that share a journal from spending the same record.
 
-Build the client with record management enabled so every `transact` and
-`delegate` reserves its record inputs before proving and saves the proved
-transaction before broadcast. The example below reshapes the account's private
-credits into four equal records of at least one credit each:
+Build the client with record management enabled and the two halves of a
+write each do their part of the journal work, the way snarkVM separates
+building a transaction from broadcasting it: `build_transaction` reserves the
+call's record inputs before proving and saves the proved transaction, and
+`submit_transaction` records the broadcast. `transact` is the two in sequence;
+`delegate` does the same through the prover. A built transaction that will not
+be sent is released with `result.discard()`. The example below reshapes the
+account's private credits into four equal records of at least one credit each:
 
 ```python
 from aleo import Aleo, HTTPProvider

@@ -18,66 +18,19 @@ from .._scanner_common import net_module
 from ..facade.errors import ProgramNotFound, TransactionNotFound
 from ._engine import (
     Broadcast, BuildTransaction, ConfirmedTransaction, FindRecords, InventoryEngine, Management, PreparedTransaction,
-    ProgramSource, Request, Sleep, Step, transaction_fee,
+    ProgramSource, Request, Sleep, SpendCheckpoint, Step, open_spend, record_input_ids,
 )
 from .assets import CREDITS_PROGRAM
 from .interface import parse_program_interface
 from .store import MemoryRecordInventoryStore
 from .types import (
     InventoryError, InventoryPlan, InventoryRecord, InventoryResult, InventoryTarget, RecordAsset,
-    RecordInventorySnapshot, RecordInventoryStore, RecordJoinProgram, RecordManagementConfig,
-    RecordReservationConflictError, RecordSpend,
+    RecordInventorySnapshot, RecordInventoryStore, RecordJoinProgram, RecordManagementConfig, RecordSpend,
 )
 
 Proving = Literal["delegated", "local"]
 Builder = Callable[[BuildTransaction], PreparedTransaction]
 AsyncBuilder = Callable[[BuildTransaction], "PreparedTransaction | Awaitable[PreparedTransaction]"]
-
-
-class SpendCheckpoint:
-    """Report a self-managed write's progress to the journal.
-
-    Yielded by :meth:`RecordInventory.reserve`. Call :meth:`prepared` as soon
-    as the proved transaction exists and before it is broadcast, then
-    :meth:`submitted`; recovery can then resubmit the saved transaction
-    without building a second spend.
-
-    Attributes:
-        entry: The journal entry holding the reservation.
-    """
-
-    def __init__(self, store: RecordInventoryStore, scope: str, entry: RecordSpend, fee_limit: int | None) -> None:
-        self._store = store
-        self._scope = scope
-        self._fee_limit = fee_limit
-        self.entry = entry
-        self.is_prepared = False
-        self.is_submitted = False
-
-    def prepared(self, tx_id: str, transaction: Mapping[str, Any], fee_microcredits: int | None = None) -> None:
-        """Save the proved transaction before broadcast and enforce the fee ceiling.
-
-        Raises:
-            InventoryError: The fee exceeds ``max_fee_microcredits`` or cannot
-                be read from the transaction. The reservation is released on
-                exit because nothing was broadcast.
-        """
-        fee = transaction_fee(transaction) if fee_microcredits is None else fee_microcredits
-        if self._fee_limit is not None and fee > self._fee_limit:
-            raise InventoryError("Proved transaction exceeds max_fee_microcredits")
-        self._store.update(self._scope, self.entry.id, {
-            "status": "prepared", "transaction_id": tx_id, "transaction": dict(transaction), "fee_microcredits": str(fee),
-        })
-        self.is_prepared = True
-
-    def submitted(self, tx_id: str) -> None:
-        """Record that the network accepted the broadcast; the reservation now outlives any error."""
-        self.is_submitted = True
-        self._store.update(self._scope, self.entry.id, {"status": "submitted", "transaction_id": tx_id})
-
-    def confirmed(self, tx_id: str) -> None:
-        """Record acceptance and drop the saved transaction."""
-        self._store.update(self._scope, self.entry.id, {"status": "confirmed", "transaction_id": tx_id, "transaction": None})
 
 
 class _InventoryBase:
@@ -152,30 +105,31 @@ class _InventoryBase:
         Use it around a write that proves and broadcasts through another
         path. Inside the block, call ``checkpoint.prepared`` once the proved
         transaction exists and ``checkpoint.submitted`` after broadcast.
-        Leaving the block before ``prepared``, by return or by exception,
+        Leaving the block before ``submitted``, by return or by exception,
         releases the reservation because nothing can have reached the
-        network; afterwards it is kept for reconciliation.
+        network through this checkpoint.
 
         Raises:
             InventoryError: Management is disabled.
             RecordReservationConflictError: A record is already held.
         """
-        store = self._management.store
-        if not self._management.enabled or store is None:
-            raise InventoryError("reserve requires record management to be enabled with a shared store")
-        scope = self.scope(account)
-        entry = store.acquire(RecordSpend(
-            id="", scope=scope, records=tuple(record_ids), program=program, function=function, status="reserved",
-            created_at=int(time.time() * 1000), asset_program=asset_program,
-        ))
-        if entry is None:
-            raise RecordReservationConflictError(tuple(record_ids))
-        checkpoint = SpendCheckpoint(store, scope, entry, self._management.max_fee_microcredits)
+        checkpoint = self._open_spend(record_ids, program, function, asset_program=asset_program, account=account)
         try:
             yield checkpoint
         finally:
-            if not checkpoint.is_prepared and not checkpoint.is_submitted:
-                store.update(scope, entry.id, {"status": "cancelled"})
+            checkpoint.discard()
+
+    def _open_spend(
+        self, record_ids: Sequence[str], program: str, function: str, *, asset_program: str | None, account: Any,
+    ) -> SpendCheckpoint:
+        store = self._management.store
+        if not self._management.enabled or store is None:
+            raise InventoryError("Record reservation requires record management to be enabled with a shared store")
+        engine = self._engine(account)
+        return open_spend(
+            store, engine.scope, lambda: engine.scope, record_ids, program, function,
+            asset_program=asset_program, fee_limit=self._management.max_fee_microcredits,
+        )
 
     # ── Program registration for local authorization ─────────────────────────
 
@@ -332,6 +286,36 @@ class RecordInventory(_InventoryBase):
             sources[program_id] = str(self._aleo.programs.get(program_id).source)
             stack.extend(parse_program_interface(sources[program_id]).imports)
         self._register_sources(sources)
+
+    def begin_spend(
+        self, program: str, function: str, inputs: Sequence[str], *, account: Any = None,
+        private_fee: bool = False, fee_record: str | None = None,
+    ) -> SpendCheckpoint:
+        """Reserve a call's record inputs before it is proved; the first half of a managed spend.
+
+        The facade's ``build_transaction`` calls this on a managed client.
+        Record plaintexts among *inputs* owned by the signer are reserved
+        together. With a private fee, the credits inventory is scanned now and
+        ``checkpoint.fee_record_selector`` chooses and reserves the fee record
+        once the exact fee is known (*fee_record* is preferred when eligible).
+        Call ``checkpoint.prepared`` after proving, pass the result to
+        ``aleo.network.submit_transaction`` to record the broadcast, or
+        ``checkpoint.discard()`` to release a spend that is never sent.
+
+        Raises:
+            RecordReservationConflictError: An input is already held.
+        """
+        engine = self._engine(account)
+        checkpoint = self._open_spend(record_input_ids(inputs, engine.address), program, function, asset_program=None, account=account)
+        if private_fee or fee_record is not None:
+            try:
+                credits = self.get_record_inventory(RecordAsset(CREDITS_PROGRAM), account=account)
+                preferred = record_input_ids([fee_record], engine.address)[0] if fee_record else None
+                checkpoint.use_fee_candidates(credits.available, preferred)
+            except BaseException:
+                checkpoint.discard()
+                raise
+        return checkpoint
 
     # ── Actions ──────────────────────────────────────────────────────────────
 
@@ -634,6 +618,23 @@ class AsyncRecordInventory(_InventoryBase):
             sources[program_id] = str((await self._aleo.programs.get(program_id)).source)
             stack.extend(parse_program_interface(sources[program_id]).imports)
         self._register_sources(sources)
+
+    async def begin_spend(
+        self, program: str, function: str, inputs: Sequence[str], *, account: Any = None,
+        private_fee: bool = False, fee_record: str | None = None,
+    ) -> SpendCheckpoint:
+        """Reserve a call's record inputs before it is proved (awaited). See :meth:`RecordInventory.begin_spend`."""
+        engine = self._engine(account)
+        checkpoint = self._open_spend(record_input_ids(inputs, engine.address), program, function, asset_program=None, account=account)
+        if private_fee or fee_record is not None:
+            try:
+                credits = await self.get_record_inventory(RecordAsset(CREDITS_PROGRAM), account=account)
+                preferred = record_input_ids([fee_record], engine.address)[0] if fee_record else None
+                checkpoint.use_fee_candidates(credits.available, preferred)
+            except BaseException:
+                checkpoint.discard()
+                raise
+        return checkpoint
 
     async def get_record_inventory(self, asset: RecordAsset, *, account: Any = None) -> RecordInventorySnapshot:
         """Read the account's spendable records of one asset (awaited). See :meth:`RecordInventory.get_record_inventory`."""

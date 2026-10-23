@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Generic, Optional, TypeVar
 
-from aleo.inventory import RecordReservationConflictError, managed_inventory
+from aleo.inventory import RecordReservationConflictError
 
 from ._core import record_nonce
 
@@ -165,20 +165,17 @@ class DexCall(Generic[R]):
         before broadcast, so the result is complete without waiting for
         confirmation. Set ``wait=True`` to confirm and update an attached claim journal.
 
-        On a facade with record management enabled the record inputs are
-        reserved before proving and the proved transaction is saved before
-        broadcast. When another writer holds the selected record, a swap
-        that chose its record automatically moves to the next eligible one
-        before proving; an explicit record is never replaced.
+        On a facade with record management enabled the build reserves the
+        record inputs and saves the proved transaction, and the broadcast
+        records the submission. When another writer holds the selected
+        record, a swap that chose its record automatically moves to the next
+        eligible one before proving; an explicit record is never replaced.
         """
         def submit(bound: Any) -> tuple[str, Any]:
-            if managed_inventory(self._aleo) is not None:
-                # The facade verb reserves, journals, and broadcasts; it hands
-                # back the built transaction for output harvesting.
-                return bound.transact_with_result(account, **fee_kwargs)
+            # The facade's own two halves: on a managed client the build
+            # reserves the inputs and the submit records the broadcast.
             tx = bound.build_transaction(account, **fee_kwargs)
-            # Same submit path the facade's BoundCall.transact uses.
-            self._aleo.network.submit_transaction(tx.raw)
+            self._aleo.network.submit_transaction(tx)
             return tx.id, tx
 
         tx_id, tx = self._submit(submit)

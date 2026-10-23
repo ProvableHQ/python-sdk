@@ -123,19 +123,20 @@ class _ManagedBound:
         self._world.inventory.managed_write(self.program_id, self.function_name, self.args, account=account, builder=build)
         return payloads[0]
 
-    def transact_with_result(self, account: Any = None, **kw: Any) -> tuple[str, Any]:
-        built: list[Any] = []
-
-        def build(request: Any) -> PreparedTransaction:
-            result = self.build_transaction(account)
-            built.append(result)
-            return PreparedTransaction(result.id, json.loads(result.raw.to_json()))
-
-        tx_id = self._world.inventory.managed_write(self.program_id, self.function_name, self.args, account=account, builder=build)
-        return tx_id, built[0]
-
     def build_transaction(self, account: Any = None, **kw: Any) -> Any:
-        tx = self._prove()
+        # The facade contract: on a managed client the build reserves inputs
+        # and saves the proved transaction; the submit records the broadcast.
+        checkpoint = None
+        if self._world.record_management.enabled:
+            checkpoint = self._world.inventory.begin_spend(self.program_id, self.function_name, self.args, account=account)
+        try:
+            tx = self._prove()
+            if checkpoint is not None:
+                checkpoint.prepared(tx["id"], tx)
+        except BaseException:
+            if checkpoint is not None:
+                checkpoint.discard()
+            raise
         outer = self
 
         class _Result:
@@ -148,7 +149,9 @@ class _ManagedBound:
 
             def decoded(self) -> list[dict[str, Any]]:
                 return [{"program": outer.program_id, "function": outer.function_name, "outputs": [{"value": "77field"}]}]
-        return _Result()
+        result = _Result()
+        result.checkpoint = checkpoint  # type: ignore[attr-defined]
+        return result
 
 
 class _ManagedFunctions:
@@ -189,7 +192,18 @@ class ManagedStubAleo(StubAleo):
         self.prove_error: Exception | None = None
         self.submitted_json: list[dict[str, Any]] = []
         original = self.network.submit_transaction
-        self.network.submit_transaction = lambda raw: (self.submitted_json.append(json.loads(raw)) or json.loads(raw)["id"]) if isinstance(raw, str) else original(raw)  # type: ignore[method-assign]
+
+        def submit(raw: Any) -> str:
+            checkpoint = getattr(raw, "checkpoint", None)
+            if isinstance(raw, str) or checkpoint is not None:
+                tx = json.loads(raw if isinstance(raw, str) else raw.raw.to_json())
+                self.submitted_json.append(tx)
+                if checkpoint is not None:
+                    checkpoint.submitted(tx["id"])
+                return tx["id"]
+            return original(raw)
+
+        self.network.submit_transaction = submit  # type: ignore[method-assign]
 
 
 def dex_for(world: ManagedStubAleo) -> ShieldSwap:
