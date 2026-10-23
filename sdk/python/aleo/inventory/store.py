@@ -16,9 +16,9 @@ Three stores ship with the SDK:
 
 Anything else that satisfies :class:`~aleo.inventory.types.RecordInventoryStore`
 can replace them, such as a database shared across machines. The two
-file-backed stores also release reservations left by a process on the same
-machine that exited before proving, since such a reservation cannot have
-reached the network.
+file-backed stores also release reservations left by an SDK process on the
+same machine that exited before proving, since such a reservation cannot
+have reached the network; reservations written by a wallet client are kept.
 """
 from __future__ import annotations
 
@@ -114,15 +114,7 @@ class MemoryRecordInventoryStore:
         with self._lock:
             for entry in self._entries:
                 if entry.scope == scope and entry.id == entry_id:
-                    if "status" in patch:
-                        entry.status = patch["status"]
-                    if "transaction_id" in patch:
-                        entry.transaction_id = patch["transaction_id"]
-                    if "transaction" in patch:
-                        # ``None`` removes a transaction that recovery no longer needs.
-                        entry.transaction = copy.deepcopy(patch["transaction"])
-                    if "fee_microcredits" in patch:
-                        entry.fee_microcredits = patch["fee_microcredits"]
+                    _apply_patch(entry, patch)
                     return
         raise KeyError("Unknown record reservation")
 
@@ -141,11 +133,17 @@ def reserved_record_ids(store: RecordInventoryStore | None, scope: str) -> set[s
 
 
 def _apply_patch(entry: RecordSpend, patch: RecordSpendPatch) -> None:
+    """Copy every key present in *patch* onto *entry*; absent keys leave the field alone."""
     if "status" in patch:
         entry.status = patch["status"]
+    if "records" in patch:
+        entry.records = tuple(patch["records"])
+    if "fee_record_id" in patch:
+        entry.fee_record_id = patch["fee_record_id"]
     if "transaction_id" in patch:
         entry.transaction_id = patch["transaction_id"]
     if "transaction" in patch:
+        # ``None`` removes a transaction that recovery no longer needs.
         entry.transaction = copy.deepcopy(patch["transaction"])
     if "fee_microcredits" in patch:
         entry.fee_microcredits = patch["fee_microcredits"]
@@ -218,8 +216,11 @@ class _DurableStore:
 
     Each entry is stored with the process id and host that wrote it. On every
     read under *scope*, a ``reserved`` entry written on this host by a process
-    that no longer runs is cancelled: the prepared checkpoint is always
-    written before broadcast, so such an entry never reached the network.
+    that no longer runs is cancelled when its ``account_type`` is ``local``:
+    an SDK-held key always writes the prepared checkpoint before broadcast,
+    so such an entry never reached the network. An entry a wallet client
+    wrote (Veil's ``rpc`` account type) is kept, because the wallet may have
+    broadcast before its response was lost.
     """
 
     def __init__(self) -> None:
@@ -242,7 +243,7 @@ class _DurableStore:
     def _recover(self, scope: str) -> list[RecordSpend]:
         entries: list[RecordSpend] = []
         for entry, pid, host in self._rows(scope):
-            if entry.status == "reserved" and host == self._host and not _process_alive(pid):
+            if entry.status == "reserved" and entry.account_type == "local" and host == self._host and not _process_alive(pid):
                 entry.status = "cancelled"
                 self._store(entry)
             entries.append(entry)

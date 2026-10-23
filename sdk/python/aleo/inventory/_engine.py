@@ -105,9 +105,19 @@ class BuildTransaction:
 
 @dataclass(frozen=True)
 class Broadcast:
-    """Submit a proved transaction; the answer is the transaction id the node returned."""
+    """Submit a proved transaction; the answer is the transaction id the node returned.
+
+    Attributes:
+        transaction: The transaction as JSON data.
+        checkpoint: The journal checkpoint of a managed spend, when there is
+            one. A driver that retries the broadcast should report every
+            attempt's failure to ``checkpoint.broadcast_failed`` so a
+            refusal that follows an uncertain attempt does not release the
+            inputs; the engine reports the final outcome itself either way.
+    """
 
     transaction: Mapping[str, Any]
+    checkpoint: "SpendCheckpoint | None" = None
 
 
 @dataclass(frozen=True)
@@ -303,10 +313,16 @@ class SpendCheckpoint:
     the transaction outright. Under a private fee, :attr:`fee_record_selector`
     chooses and reserves the credits record once the exact fee is known.
 
+    One journal entry holds everything the spend reserves, the execution
+    inputs and the fee record alike, as in Veil. Every checkpoint is one
+    store update, so a crash between two of them can never leave the proved
+    transaction retained while its fee record is released.
+
     Attributes:
-        entry: The journal entry holding the input reservation.
-        entries: Every entry this spend holds; a pinned fee record adds one.
+        entry: The journal entry holding the reservation.
         transaction_id: The id recorded at preparation or submission.
+        is_uncertain: A broadcast attempt ended without a definite answer,
+            so the network may hold the transaction; the reservation stays.
     """
 
     def __init__(
@@ -317,12 +333,12 @@ class SpendCheckpoint:
         self._scope = scope
         self._scope_now = scope_now
         self._fee_limit = fee_limit
-        self._base = entry
+        self._inputs = entry.records
         self.entry = entry
-        self.entries: list[RecordSpend] = [entry]
         self.transaction_id: str | None = None
         self.is_prepared = False
         self.is_submitted = False
+        self.is_uncertain = False
         self.is_closed = False
         self._fee_candidates: list[InventoryRecord] = []
         self._fee_choice: InventoryRecord | None = None
@@ -330,8 +346,8 @@ class SpendCheckpoint:
 
     @property
     def input_ids(self) -> tuple[str, ...]:
-        """The reserved execution input nonces."""
-        return self._base.records
+        """The reserved execution input nonces, without the fee record."""
+        return self._inputs
 
     def use_fee_candidates(self, available: Sequence[InventoryRecord], preferred: str | None = None) -> FeeRecordSelector:
         """Prepare private-fee selection from the credits records available now.
@@ -339,10 +355,11 @@ class SpendCheckpoint:
         The returned callable is handed to the prover as ``fee_record``. It
         runs once the execution is proved and the exact fee is known, picks
         the smallest sufficient record (the preferred nonce first when it is
-        eligible), and reserves it as its own journal entry so a rejected
-        execution can keep it held while releasing the inputs.
+        eligible), and adds it to this spend's journal entry as its
+        ``fee_record_id``, so a rejected execution keeps the fee record held
+        while releasing the inputs.
         """
-        inputs = set(self._base.records)
+        inputs = set(self._inputs)
         self._fee_candidates = sorted(
             (item for item in available if item.id not in inputs and item.plaintext and item.tag),
             key=lambda item: (item.id != preferred, item.amount, item.id),
@@ -356,11 +373,23 @@ class SpendCheckpoint:
             for candidate in self._fee_candidates:
                 if candidate.amount < required:
                     continue
-                fee_entry = self._store.acquire(replace(self._base, records=(candidate.id,), fee_record_id=candidate.id))
-                if fee_entry is not None:
-                    self.entries.append(fee_entry)
-                    self._fee_choice = candidate
-                    return candidate.plaintext
+                # The store only reserves through ``acquire``, so win the fee
+                # record with a short-lived entry first, then fold it into the
+                # entry that holds the inputs and cancel the short-lived one.
+                # Between the two updates both entries hold the record for this
+                # spend; a crash there leaves a duplicate hold, never a gap.
+                claim = self._store.acquire(replace(self.entry, records=(candidate.id,), fee_record_id=candidate.id))
+                if claim is None:
+                    continue
+                try:
+                    self._store.update(self._scope, self.entry.id, {
+                        "records": (*self._inputs, candidate.id), "fee_record_id": candidate.id,
+                    })
+                finally:
+                    self._store.update(self._scope, claim.id, {"status": "cancelled"})
+                self.entry = replace(self.entry, records=(*self._inputs, candidate.id), fee_record_id=candidate.id)
+                self._fee_choice = candidate
+                return candidate.plaintext
             raise InventoryError(
                 "No available credits record covers the private fee separately from the transaction inputs; "
                 "refresh records or fund private credits"
@@ -398,51 +427,55 @@ class SpendCheckpoint:
             raise InventoryError("Private fee exceeds the reserved credits record balance")
         if self._fee_limit is not None and fee > self._fee_limit:
             raise InventoryError("Proved transaction exceeds max_fee_microcredits")
-        for item in self.entries:
-            self._store.update(self._scope, item.id, {
-                "status": "prepared", "transaction_id": tx_id, "transaction": dict(transaction), "fee_microcredits": str(fee),
-            })
+        self._store.update(self._scope, self.entry.id, {
+            "status": "prepared", "transaction_id": tx_id, "transaction": dict(transaction), "fee_microcredits": str(fee),
+        })
         self.transaction_id = tx_id
         self.is_prepared = True
         return fee
 
     def submitted(self, tx_id: str) -> None:
         """Record that the network accepted the broadcast; the reservation now outlives any error."""
+        if self.is_submitted and self.transaction_id == tx_id:
+            return
         # Mark before touching the store: a storage failure must not release
         # inputs the network may already have accepted.
         self.is_submitted = True
         self.transaction_id = tx_id
-        for item in self.entries:
-            self._store.update(self._scope, item.id, {"status": "submitted", "transaction_id": tx_id})
+        self._store.update(self._scope, self.entry.id, {"status": "submitted", "transaction_id": tx_id})
 
     def confirmed(self, tx_id: str) -> None:
         """Record acceptance and drop the saved transaction."""
-        for item in self.entries:
-            self._store.update(self._scope, item.id, {"status": "confirmed", "transaction_id": tx_id, "transaction": None})
+        self._store.update(self._scope, self.entry.id, {"status": "confirmed", "transaction_id": tx_id, "transaction": None})
 
     def broadcast_failed(self, error: BaseException) -> None:
-        """Decide what a failed broadcast means for the reservation.
+        """Decide what a failed broadcast attempt means for the reservation.
 
-        A 4xx from the broadcast endpoint means the node refused the
-        transaction before admitting it, so nothing can reach the chain and
-        the inputs are released. Any other failure (timeout, lost response,
-        5xx) is uncertain and keeps them for reconciliation.
+        A 4xx from the broadcast endpoint on the first attempt means the node
+        refused the transaction before admitting it, so nothing can reach the
+        chain and the inputs are released. Any other failure (timeout, lost
+        response, 5xx) is uncertain: the transaction may be in the node, so
+        the reservation is kept for reconciliation and stays kept even if a
+        later attempt is refused, since the earlier one may have gone through.
         """
         status = getattr(error, "status", None)
-        if isinstance(error, AleoNetworkError) and isinstance(status, int) and 400 <= status < 500:
+        refused = isinstance(error, AleoNetworkError) and isinstance(status, int) and 400 <= status < 500
+        if refused and not self.is_uncertain:
             self.discard()
+        else:
+            self.is_uncertain = True
 
     def discard(self) -> None:
-        """Release the reservation of a spend that was never submitted.
+        """Release the reservation of a spend that never reached the network.
 
-        Safe to call more than once. Does nothing after :meth:`submitted`,
-        because the network may have spent the records.
+        Safe to call more than once. Does nothing after :meth:`submitted`
+        or after a broadcast attempt with an unknown outcome, because the
+        network may have spent the records.
         """
-        if self.is_submitted or self.is_closed:
+        if self.is_submitted or self.is_uncertain or self.is_closed:
             return
         self.is_closed = True
-        for item in self.entries:
-            self._store.update(self._scope, item.id, {"status": "cancelled"})
+        self._store.update(self._scope, self.entry.id, {"status": "cancelled"})
 
 
 def open_spend(
@@ -665,7 +698,7 @@ class InventoryEngine:
             if observed is not None:
                 observed.append(prepared.id)
             try:
-                tx_id = yield Broadcast(prepared.transaction)
+                tx_id = yield Broadcast(prepared.transaction, checkpoint)
             except BaseException as exc:
                 checkpoint.broadcast_failed(exc)
                 raise
@@ -766,7 +799,7 @@ class InventoryEngine:
                     tx_id = yield from self.split_record(plan.asset, inputs[0], step.amount, fee_limit=limit, observed=transaction_ids)
                 if tx_id not in transaction_ids:
                     transaction_ids.append(tx_id)
-                entry = next((item for item in store.list(plan.scope) if item.transaction_id == tx_id and item.fee_record_id is None), None)
+                entry = next((item for item in store.list(plan.scope) if item.transaction_id == tx_id), None)
                 if entry is None:
                     raise InventoryError("Submitted transaction is missing its reservation")
                 fees += int(entry.fee_microcredits or "0")
@@ -825,10 +858,13 @@ class InventoryEngine:
             if entry.status in ("confirmed", "rejected", "cancelled"):
                 continue
             if entry.transaction_id is None:
-                # A reserved entry never reached the prepared checkpoint, so
-                # nothing was broadcast. It is released only on request, because
-                # another process may still be proving against it.
-                if release_reserved and entry.status == "reserved":
+                # A reserved entry from an SDK-held key never reached the
+                # prepared checkpoint, so nothing was broadcast. It is released
+                # only on request, because another process may still be proving
+                # against it. A wallet client's entry (Veil's ``rpc`` account
+                # type) is kept: the wallet may have broadcast before its
+                # response was lost.
+                if release_reserved and entry.status == "reserved" and entry.account_type == "local":
                     store.update(scope, entry.id, {"status": "cancelled"})
                 continue
             # Only a definitive chain result changes the reservation; a missing

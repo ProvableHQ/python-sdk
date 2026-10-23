@@ -129,8 +129,10 @@ class _Network:
     def __init__(self, world: "World") -> None:
         self.world = world
 
-    def submit_transaction(self, raw: str) -> str:
-        return self.world.submit(json.loads(raw))
+    def submit_transaction(self, raw: Any) -> str:
+        # The facade accepts a built result, a transaction, or a string; the
+        # node client stringifies whatever it is given.
+        return self.world.submit(json.loads(str(raw)))
 
     def get_confirmed_transaction(self, tx_id: str) -> dict[str, Any]:
         if self.world.on_confirmed is not None:
@@ -288,10 +290,10 @@ class World:
         assert self.store is not None
         return self.store.list(self.scope)
 
-    def hold(self, *nonces: str, fee: str | None = None, status: str = "reserved") -> RecordSpend | None:
+    def hold(self, *nonces: str, fee: str | None = None, status: str = "reserved", account_type: str = "local") -> RecordSpend | None:
         assert self.store is not None
         return self.store.acquire(RecordSpend(id="", scope=self.scope, records=nonces, program="credits.aleo", function="join",
-                                              status=status, created_at=1, fee_record_id=fee))  # type: ignore[arg-type]
+                                              status=status, created_at=1, fee_record_id=fee, account_type=account_type))  # type: ignore[arg-type]
 
     def available_amounts(self, asset: RecordAsset | None = None) -> list[int]:
         return sorted(r.amount for r in self.inventory.get_record_inventory(asset or self.asset).available)
@@ -753,26 +755,34 @@ def managed(w: World, *, fee_record: str | None = None, priority: int = 0, input
     return w.inventory.managed_write("credits.aleo", "transfer_private", spend, private_fee=True, fee_record=fee_record, builder=builder)
 
 
-def test_selects_and_journals_a_separate_fee_record_including_priority_fees() -> None:
+def spends(w: World) -> list[RecordSpend]:
+    """Journal entries that are spends, without the short-lived claims that win a fee record."""
+    return [entry for entry in w.journal() if entry.status != "cancelled" or entry.transaction_id is not None]
+
+
+def test_selects_the_fee_record_and_journals_it_in_the_same_entry_as_the_inputs() -> None:
     w = private_fee_world()
     managed(w, priority=20)
-    inputs_entry, fee_entry = w.journal()
-    assert (inputs_entry.records, inputs_entry.fee_record_id, inputs_entry.fee_microcredits, inputs_entry.status) == (("1group",), None, "120", "submitted")
-    assert (fee_entry.records, fee_entry.fee_record_id, fee_entry.status) == (("3group",), "3group", "submitted")
+    (entry,) = spends(w)
+    # One entry holds inputs and fee, as Veil writes it, so a crash between
+    # checkpoints can never keep the transaction while releasing its fee record.
+    assert (entry.records, entry.fee_record_id, entry.fee_microcredits, entry.status) == (("1group", "3group"), "3group", "120", "submitted")
     assert "microcredits:" not in json.dumps([entry.to_dict() for entry in w.journal()])
+    claims = [entry for entry in w.journal() if entry not in spends(w)]
+    assert [(claim.records, claim.status) for claim in claims] == [(("3group",), "cancelled")]
 
 
 def test_uses_a_supplied_fee_record_when_eligible_and_replaces_a_reserved_or_input_one() -> None:
     w = private_fee_world()
     managed(w, fee_record=w.records[2]["record_plaintext"])
-    assert w.journal()[1].fee_record_id == "3group"
+    assert spends(w)[-1].fee_record_id == "3group"
     w = private_fee_world()
     w.hold("3group", status="prepared")
     managed(w, fee_record=w.records[2]["record_plaintext"])
-    assert w.journal()[-1].fee_record_id == "2group"
+    assert spends(w)[-1].fee_record_id == "2group"
     w = private_fee_world()
     managed(w, fee_record=w.records[0]["record_plaintext"])
-    assert w.journal()[-1].fee_record_id == "2group"
+    assert spends(w)[-1].fee_record_id == "2group"
 
 
 def test_chooses_disjoint_fee_records_when_independent_writes_race() -> None:
@@ -793,7 +803,7 @@ def test_chooses_disjoint_fee_records_when_independent_writes_race() -> None:
     for thread in threads:
         thread.join()
     assert errors == []
-    assert {entry.fee_record_id for entry in w.journal() if entry.fee_record_id} == {"1group", "2group"}
+    assert {entry.fee_record_id for entry in spends(w)} == {"1group", "2group"}
 
 
 def test_excludes_reserved_records_and_fails_before_proving_when_nothing_covers_the_fee() -> None:
@@ -845,7 +855,30 @@ def test_preserves_both_reservations_when_the_broadcast_outcome_is_unknown() -> 
     w.submit_mode = "offline"
     with pytest.raises(ConnectionError, match="offline"):
         managed(w)
-    assert [(entry.status, entry.records) for entry in w.journal()] == [("prepared", ("1group",)), ("prepared", ("2group",))]
+    assert [(entry.status, entry.records) for entry in spends(w)] == [("prepared", ("1group", "2group"))]
+    assert w.inventory.reserved_record_ids() == {"1group", "2group"}
+
+
+def test_the_fee_record_is_never_held_apart_from_the_inputs_once_the_transaction_is_saved() -> None:
+    """Every checkpoint after fee selection is one store update (the reviewer's crash probe)."""
+    w = private_fee_world()
+    updates: list[tuple[str, dict[str, Any]]] = []
+    store = w.store
+    assert store is not None
+    original = store.update
+
+    def record_update(scope: str, entry_id: str, patch: Any) -> None:
+        updates.append((entry_id, dict(patch)))
+        original(scope, entry_id, patch)
+
+    store.update = record_update  # type: ignore[method-assign]
+    managed(w)
+    (entry,) = spends(w)
+    # From the prepared checkpoint on, only the spend's own entry is touched,
+    # and it already carries the fee record when the transaction is saved.
+    after_fee = [(entry_id, patch) for entry_id, patch in updates if "transaction" in patch or patch.get("status") == "submitted"]
+    assert after_fee and all(entry_id == entry.id for entry_id, _ in after_fee)
+    assert entry.records == ("1group", "2group") and entry.fee_record_id == "2group"
 
 
 def test_a_nested_conflict_after_acquisition_is_not_reported_as_retryable() -> None:
@@ -904,7 +937,7 @@ class AsyncFakeAleo:
                 return outer._fake.record_provider.find(account, **kw)
 
         class _N:
-            async def submit_transaction(self, raw: str) -> str:
+            async def submit_transaction(self, raw: Any) -> str:
                 return outer._fake.network.submit_transaction(raw)
 
             async def get_confirmed_transaction(self, tx_id: str) -> dict[str, Any]:
@@ -957,6 +990,31 @@ def test_reconcile_releases_reserved_entries_only_on_request() -> None:
     assert w.journal()[0].status == "reserved"
     w.inventory.reconcile_record_inventory(release_reserved=True)
     assert w.journal()[0].status == "cancelled" and w.inventory.reserved_record_ids() == set()
+
+
+def test_reconcile_keeps_a_wallet_clients_reservation_even_on_request() -> None:
+    w = World([1_000_000])
+    w.hold("1group", account_type="rpc")                    # a Veil wallet entry in a shared journal
+    w.inventory.reconcile_record_inventory(release_reserved=True)
+    # The wallet may have broadcast before its response was lost; only the
+    # SDK's own reserved entries provably never reached the network.
+    assert w.journal()[0].status == "reserved" and w.inventory.reserved_record_ids() == {"1group"}
+
+
+def test_a_refusal_after_an_uncertain_broadcast_attempt_keeps_the_reservation() -> None:
+    from aleo import AleoNetworkError
+    w = World([1_000_000])
+    record = w.inventory.get_record_inventory(CREDITS).available[0]
+    with w.inventory.reserve("credits.aleo", "split", [record.id]) as checkpoint:
+        checkpoint.prepared("at1x", w.build("credits.aleo", "split", (record.plaintext, "1u64"), None, 0))
+        checkpoint.broadcast_failed(AleoNetworkError("POST returned 503", status=503))
+        assert checkpoint.is_uncertain and not checkpoint.is_closed
+        checkpoint.broadcast_failed(AleoNetworkError("POST returned 400: already exists", status=400))
+        checkpoint.discard()                                # cleanup after a timeout must not release it
+    assert w.journal()[0].status == "prepared" and w.inventory.reserved_record_ids() == {record.id}
+    with w.inventory.reserve("credits.aleo", "split", ["2000group"]) as fresh:
+        fresh.broadcast_failed(AleoNetworkError("POST returned 400", status=400))
+    assert w.journal()[-1].status == "cancelled"            # a first-attempt refusal still releases
 
 
 def test_rebalance_stops_before_proving_once_the_fee_budget_is_spent() -> None:

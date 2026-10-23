@@ -311,6 +311,8 @@ class AsyncAleoNetworkClient:
         body: str,
         method_name: str,
         extra_headers: dict[str, str] | None = None,
+        *,
+        retry: bool = True,
     ) -> Any:
         hdrs = {
             **self._request_headers(method_name),
@@ -327,7 +329,7 @@ class AsyncAleoNetworkClient:
                 )
             return resp
 
-        return await async_retry_with_backoff(_do)
+        return await async_retry_with_backoff(_do) if retry else await _do()
 
     # ── JWT refresh ───────────────────────────────────────────────────────
 
@@ -903,7 +905,7 @@ class AsyncAleoNetworkClient:
 
     # ── POST endpoints ────────────────────────────────────────────────────
 
-    async def submit_transaction(self, transaction: Any) -> str:
+    async def submit_transaction(self, transaction: Any, *, retry: bool = True) -> str:
         """Broadcast a proven transaction to the network.
 
         This spends the transaction's fee and is not reversible. Returning
@@ -917,6 +919,9 @@ class AsyncAleoNetworkClient:
         Args:
             transaction: The proven transaction; stringified before broadcast, so
                 either a ``Transaction`` or its serialized form works.
+            retry: Retry transient node errors (5xx) with backoff. Pass
+                ``False`` to make exactly one attempt, when the caller needs
+                to see each outcome itself.
 
         Returns:
             The broadcast transaction ID (``at1…``).
@@ -931,7 +936,7 @@ class AsyncAleoNetworkClient:
             if self._verbose_errors
             else f"{self._host}/transaction/broadcast"
         )
-        resp = await self._post(endpoint, tx_str, "submitTransaction")
+        resp = await self._post(endpoint, tx_str, "submitTransaction", retry=retry)
         return json.loads(resp.text)
 
     async def submit_solution(self, solution: str) -> str:

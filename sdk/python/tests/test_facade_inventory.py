@@ -88,7 +88,7 @@ def setup(monkeypatch: pytest.MonkeyPatch, *, enabled: bool = True, max_fee: int
     # Replace only the proving step, so the managed build and submit halves run for real.
     monkeypatch.setattr(BoundCall, "_prove_transaction", prove)
 
-    def submit_transaction(raw: Any) -> str:
+    def submit_transaction(raw: Any, **_: Any) -> str:
         tx = json.loads(raw if isinstance(raw, str) else raw.to_json())
         seen["submits"].append(tx)
         return str(tx["id"])
@@ -168,7 +168,7 @@ def test_a_node_refusal_on_submit_releases_the_reservation(monkeypatch: pytest.M
     from aleo import AleoNetworkError
     aleo, _, credits, _ = setup(monkeypatch)
 
-    def refuse(raw: Any) -> str:
+    def refuse(raw: Any, **_: Any) -> str:
         raise AleoNetworkError("POST /transaction/broadcast returned 400", status=400)
 
     monkeypatch.setattr(aleo._client, "submit_transaction", refuse)
@@ -213,21 +213,66 @@ def test_fee_ceiling_is_enforced_before_broadcast(monkeypatch: pytest.MonkeyPatc
     assert aleo.inventory.reserved_record_ids() == set()
 
 
-def test_private_fee_record_is_chosen_after_proving_and_reserved_beside_the_inputs(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_private_fee_record_is_chosen_after_proving_and_held_in_the_same_entry_as_the_inputs(monkeypatch: pytest.MonkeyPatch) -> None:
     aleo, _, credits, seen = setup(monkeypatch)
     transfer(credits, aleo).transact(private_fee=True, priority_fee=20)
     build = seen["builds"][0]
     assert build["private_fee"] is True and callable(build["fee_record"])
-    inputs_entry, fee_entry = aleo.inventory.store.list(aleo.inventory.scope())
-    assert (inputs_entry.records, inputs_entry.fee_record_id, inputs_entry.fee_microcredits) == (("1group",), None, "120")
-    assert (fee_entry.records, fee_entry.fee_record_id, fee_entry.status) == (("3group",), "3group", "submitted")
+    entry = aleo.inventory.store.list(aleo.inventory.scope())[0]
+    assert (entry.records, entry.fee_record_id, entry.fee_microcredits, entry.status) == (("1group", "3group"), "3group", "120", "submitted")
     assert build["tx"]["fee"]["transition"]["inputs"][0]["tag"] == "3field"
+    assert aleo.inventory.reserved_record_ids() == {"1group", "3group"}
 
 
 def test_supplied_fee_record_is_preferred_when_eligible(monkeypatch: pytest.MonkeyPatch) -> None:
     aleo, _, credits, _ = setup(monkeypatch, records=[1_000_000, 500, 200])
     transfer(credits, aleo).transact(fee_record=aleo.record_provider.records[1]["record_plaintext"])
-    assert aleo.inventory.store.list(aleo.inventory.scope())[1].fee_record_id == "2group"
+    assert aleo.inventory.store.list(aleo.inventory.scope())[0].fee_record_id == "2group"
+
+
+def test_inventory_actions_prove_locally_on_a_managed_client_without_reserving_twice(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The engine reserves the inputs itself, so the facade's managed build must not run again underneath it."""
+    aleo, _, credits, seen = setup(monkeypatch, records=[1_000_000])
+    monkeypatch.setattr(aleo.inventory, "proving", "local")
+    monkeypatch.setattr(aleo.programs, "get", lambda program_id: credits)
+    record = aleo.inventory.get_record_inventory(RecordAsset("credits.aleo")).available[0]
+    tx_id = aleo.inventory.split_record(RecordAsset("credits.aleo"), record, 400_000)
+    assert tx_id == "at1tx1" and [s["id"] for s in seen["submits"]] == ["at1tx1"]
+    (entry,) = aleo.inventory.store.list(aleo.inventory.scope())
+    assert (entry.function, entry.records, entry.status) == ("split", ("1group",), "submitted")
+
+
+def test_discard_keeps_the_reservation_after_a_broadcast_attempt_with_no_answer(monkeypatch: pytest.MonkeyPatch) -> None:
+    aleo, _, credits, _ = setup(monkeypatch)
+    result = transfer(credits, aleo).build_transaction()
+
+    def lost(raw: Any, **_: Any) -> str:
+        raise TimeoutError("no response")
+
+    monkeypatch.setattr(aleo._client, "submit_transaction", lost)
+    with pytest.raises(TimeoutError):
+        aleo.network.submit_transaction(result)
+    result.discard()                                                      # a cleanup path after the timeout
+    entry = aleo.inventory.store.list(aleo.inventory.scope())[0]
+    assert entry.status == "prepared" and aleo.inventory.reserved_record_ids() == {"1group"}
+
+
+def test_a_refusal_after_a_retried_node_error_keeps_the_reservation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The raw client retries 5xx; the first attempt may have been admitted, so the later 4xx is not a clean refusal."""
+    from aleo import AleoNetworkError
+    aleo, _, credits, _ = setup(monkeypatch)
+    answers = [AleoNetworkError("POST returned 503", status=503), AleoNetworkError("POST returned 400: exists", status=400)]
+    attempts: list[bool] = []
+
+    def flaky(raw: Any, *, retry: bool = True) -> str:
+        attempts.append(retry)
+        raise answers[len(attempts) - 1]
+
+    monkeypatch.setattr(aleo._client, "submit_transaction", flaky)
+    with pytest.raises(AleoNetworkError, match="400"):
+        transfer(credits, aleo).transact()
+    assert attempts == [False, False]                                     # one node attempt per report
+    assert aleo.inventory.store.list(aleo.inventory.scope())[0].status == "prepared"
 
 
 def test_managed_delegate_proves_without_broadcast_and_submits_from_the_client(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -250,7 +295,7 @@ def test_delegate_without_broadcast_stays_unmanaged(monkeypatch: pytest.MonkeyPa
 def test_lost_broadcast_response_keeps_the_prepared_transaction(monkeypatch: pytest.MonkeyPatch) -> None:
     aleo, _, credits, _ = setup(monkeypatch)
 
-    def lost(raw: Any) -> str:
+    def lost(raw: Any, **_: Any) -> str:
         raise ConnectionError("response lost")
 
     monkeypatch.setattr(aleo._client, "submit_transaction", lost)
@@ -280,7 +325,7 @@ async def test_async_managed_transact_runs_the_same_hook(monkeypatch: pytest.Mon
     async def prove(self: AsyncBoundCall, acct: Any = None, **kw: Any) -> FakeTransaction:
         return FakeTransaction(fake_transaction("at1async"))
 
-    async def submit_transaction(raw: Any) -> str:
+    async def submit_transaction(raw: Any, **_: Any) -> str:
         submits.append(json.loads(raw if isinstance(raw, str) else raw.to_json()))
         return "at1async"
 

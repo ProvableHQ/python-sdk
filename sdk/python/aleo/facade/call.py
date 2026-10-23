@@ -131,8 +131,11 @@ class TransactionResult:
     def discard(self) -> None:
         """Release the record reservation of a built transaction that will not be submitted.
 
-        Only meaningful on a managed client; after ``submit_transaction`` it
-        does nothing, because the network may have spent the records.
+        Only meaningful on a managed client. It does nothing once
+        ``submit_transaction`` has been attempted, whether the node accepted
+        the transaction or the attempt ended without an answer, because the
+        network may have spent the records; use
+        ``reconcile_record_inventory`` to settle such a spend.
         """
         if self.checkpoint is not None:
             self.checkpoint.discard()
@@ -421,7 +424,7 @@ class BoundCall(PreparedCall):
         chosen and reserved once the exact fee is known. Submit the result
         with ``aleo.network.submit_transaction(result)`` to record the
         broadcast, or call ``result.discard()`` to release the reservation of
-        a transaction that will not be sent. A record another writer holds
+        a transaction that was never sent. A record another writer holds
         raises :class:`~aleo.inventory.RecordReservationConflictError` before
         any proof is built.
 

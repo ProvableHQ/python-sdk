@@ -46,6 +46,7 @@ from .client import (
     managed_inventory as managed_inventory,
     prepared_from_payload as prepared_from_payload,
     prepared_from_result as prepared_from_result,
+    prepared_from_transaction as prepared_from_transaction,
 )
 from .planner import build_inventory_plan as build_inventory_plan
 from .store import (
@@ -86,6 +87,7 @@ __all__ = [
     "ResolvedRecordAsset", "SpendCheckpoint", "SqliteRecordInventoryStore", "TokenJoinRouter", "build_inventory_plan",
     "decode_record", "held_record_ids", "holds_records",
     "inventory_output_commitments", "inventory_record_id", "managed_inventory", "parse_program_interface",
-    "prepared_from_payload", "prepared_from_result", "record_input_ids", "scope_for", "transaction_fee",
+    "prepared_from_payload", "prepared_from_result", "prepared_from_transaction", "record_input_ids", "scope_for",
+    "transaction_fee",
     "validate_asset", "validate_record_join_program", "validate_token_join_router",
 ]

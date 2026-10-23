@@ -455,9 +455,14 @@ class RecordSpendPatch(TypedDict, total=False):
 
     A key that is present replaces the stored value; ``transaction: None``
     removes a stored transaction once it is no longer needed for recovery.
+    ``records`` and ``fee_record_id`` change together when a private fee
+    record is folded into the entry that holds the execution inputs, so one
+    entry carries everything a crash must keep together.
     """
 
     status: RecordSpendStatus
+    records: tuple[str, ...]
+    fee_record_id: str | None
     transaction_id: str
     transaction: dict[str, Any] | None
     fee_microcredits: str
@@ -472,7 +477,8 @@ class RecordInventoryStore(Protocol):
 
     Two guarantees are required. ``acquire`` MUST reserve every nonce in the
     entry or none of them, atomically with respect to other callers. Each
-    mutation MUST be finished before the method returns. Entries whose status
+    mutation MUST be finished before the method returns, and ``update`` MUST
+    apply every key present in the patch in one step. Entries whose status
     is not ``rejected`` or ``cancelled`` keep their records excluded from
     selection; a rejected entry keeps only its ``fee_record_id`` excluded.
     """

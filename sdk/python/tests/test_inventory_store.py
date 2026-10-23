@@ -75,6 +75,10 @@ def test_update_patches_fields_and_clears_transactions(make_store: Factory) -> N
     assert (stored.status, stored.transaction_id, stored.transaction, stored.fee_microcredits) == ("prepared", "at1x", {"id": "at1x"}, "100")
     store.update(SCOPE, saved.id, {"status": "confirmed", "transaction": None})
     assert make_store().list(SCOPE)[0].transaction is None
+    # Folding a fee record into the entry changes both fields in one update.
+    store.update(SCOPE, saved.id, {"records": ("1group", "7group"), "fee_record_id": "7group"})
+    folded = make_store().list(SCOPE)[0]
+    assert (folded.records, folded.fee_record_id) == (("1group", "7group"), "7group")
     with pytest.raises(KeyError):
         store.update(SCOPE, "99", {"status": "cancelled"})
 
@@ -168,11 +172,18 @@ def test_durable_stores_release_reservations_of_dead_local_processes(durable: tu
     prepared = live.acquire(entry("2group"))
     assert prepared is not None
     live.update(SCOPE, prepared.id, {"status": "prepared", "transaction_id": "at1y", "transaction": {"id": "at1y"}})
+    wallet = make()
+    wallet._pid = dead_pid()  # pyright: ignore[reportPrivateUsage]
+    rpc = entry("3group")
+    rpc.account_type = "rpc"                                              # a Veil wallet client's entry
+    assert wallet.acquire(rpc) is not None
     journal = make().list(SCOPE)
-    # The dead writer's reserved entry never reached the network; a prepared
-    # entry from a dead writer would be kept, and anything from a live one is.
-    assert [(e.records, e.status) for e in journal] == [(("1group",), "cancelled"), (("2group",), "prepared")]
+    # The dead SDK writer's reserved entry never reached the network; a prepared
+    # entry from a dead writer is kept, anything from a live one is kept, and a
+    # wallet's reserved entry is kept because the wallet may have broadcast.
+    assert [(e.records, e.status) for e in journal] == [(("1group",), "cancelled"), (("2group",), "prepared"), (("3group",), "reserved")]
     assert make().acquire(entry("1group")) is not None
+    assert make().acquire(entry("3group")) is None
 
 
 def dead_pid() -> int:

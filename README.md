@@ -234,8 +234,10 @@ write each do their part of the journal work, the way snarkVM separates
 building a transaction from broadcasting it: `build_transaction` reserves the
 call's record inputs before proving and saves the proved transaction, and
 `submit_transaction` records the broadcast. `transact` is the two in sequence;
-`delegate` does the same through the prover. A built transaction that will not
-be sent is released with `result.discard()`. The example below reshapes the
+`delegate` does the same through the prover. A built transaction that was never
+sent is released with `result.discard()`; once a broadcast has been attempted,
+even one that timed out, the reservation stays until
+`reconcile_record_inventory()` settles it. The example below reshapes the
 account's private credits into four equal records of at least one credit each:
 
 ```python
@@ -280,8 +282,10 @@ processes coordinate.
 | `JsonFileRecordInventoryStore(path)` | Yes | Processes on one machine | The journal should be readable in an editor; one JSON file under a file lock. |
 | `SqliteRecordInventoryStore(path)` | Yes | Processes on one machine | A long-running service, or a journal shared with a Veil client; same layout as Veil's store. |
 
-Both file-backed stores release a reservation left by a process on the same
-machine that exited before it proved anything. Any object with `list`,
+Both file-backed stores release a reservation left by an SDK process on the
+same machine that exited before it proved anything; an entry a Veil wallet
+client wrote is kept, since the wallet may have broadcast before its answer
+arrived. Any object with `list`,
 `acquire`, and `update` methods works as a store for other backends, such as a
 database shared across machines; `acquire` must reserve all of an entry's
 records or none. After an interruption, `reconcile_record_inventory()` checks

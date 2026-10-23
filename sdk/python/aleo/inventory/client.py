@@ -14,6 +14,7 @@ import time
 from contextlib import contextmanager
 from typing import Any, Awaitable, Callable, Generator, Literal, Mapping, Sequence, cast
 
+from .._client_common import async_retry_with_backoff, retry_with_backoff
 from .._scanner_common import net_module
 from ..facade.errors import ProgramNotFound, TransactionNotFound
 from ._engine import (
@@ -155,9 +156,62 @@ class _InventoryBase:
             add(program_id)
 
 
+def prepared_from_transaction(transaction: Any) -> PreparedTransaction:
+    """A proved network ``Transaction`` that has not been broadcast, ready for the journal."""
+    return PreparedTransaction(str(transaction.id), json.loads(str(transaction.to_json())))
+
+
 def prepared_from_result(result: Any) -> PreparedTransaction:
     """The unbroadcast transaction behind a facade ``TransactionResult``, ready for the journal."""
-    return PreparedTransaction(str(result.id), json.loads(str(result.raw.to_json())))
+    return prepared_from_transaction(result.raw)
+
+
+class _Submission:
+    """A serialised transaction paired with its checkpoint, in the shape ``network.submit_transaction`` reads."""
+
+    __slots__ = ("raw", "checkpoint")
+
+    def __init__(self, raw: str, checkpoint: SpendCheckpoint | None) -> None:
+        self.raw = raw
+        self.checkpoint = checkpoint
+
+    def __str__(self) -> str:
+        return self.raw
+
+
+def broadcast_checkpointed(submit_once: Callable[[], Any], checkpoint: Any) -> str:
+    """Broadcast a managed transaction, reporting every attempt to its checkpoint.
+
+    *submit_once* performs one broadcast without retrying. Transient node
+    errors (5xx) are retried here with the SDK's usual backoff, and the
+    checkpoint learns of each failed attempt first, so a refusal that follows
+    an attempt with an unknown outcome keeps the reservation instead of
+    releasing it. A successful answer is recorded as submitted.
+    """
+    def attempt() -> str:
+        try:
+            return str(submit_once())
+        except BaseException as exc:
+            checkpoint.broadcast_failed(exc)
+            raise
+
+    tx_id = retry_with_backoff(attempt)
+    checkpoint.submitted(tx_id)
+    return tx_id
+
+
+async def async_broadcast_checkpointed(submit_once: Callable[[], Awaitable[Any]], checkpoint: Any) -> str:
+    """Awaited twin of :func:`broadcast_checkpointed`."""
+    async def attempt() -> str:
+        try:
+            return str(await submit_once())
+        except BaseException as exc:
+            checkpoint.broadcast_failed(exc)
+            raise
+
+    tx_id = str(await async_retry_with_backoff(attempt))
+    checkpoint.submitted(tx_id)
+    return tx_id
 
 
 def _json_dict(value: Any) -> dict[str, Any]:
@@ -186,10 +240,6 @@ def managed_inventory(aleo: Any) -> Any:
     """
     inventory = getattr(aleo, "inventory", None)
     return inventory if inventory is not None and getattr(inventory, "enabled", False) else None
-
-
-_prepared_from_transaction = prepared_from_result
-_prepared_from_payload = prepared_from_payload
 
 
 def _scanner_synced(status: Any) -> bool:
@@ -244,7 +294,9 @@ class RecordInventory(_InventoryBase):
         if isinstance(request, BuildTransaction):
             return builder(request) if builder is not None else self._build(request, account)
         if isinstance(request, Broadcast):
-            return str(self._aleo.network.submit_transaction(json.dumps(request.transaction)))
+            # The facade's broadcast reports each attempt to the checkpoint;
+            # the engine records the final outcome itself for other drivers.
+            return str(self._aleo.network.submit_transaction(_Submission(json.dumps(request.transaction), request.checkpoint)))
         if isinstance(request, ConfirmedTransaction):
             try:
                 return self._aleo.network.get_confirmed_transaction(request.tx_id)
@@ -264,15 +316,19 @@ class RecordInventory(_InventoryBase):
     def _build(self, request: BuildTransaction, account: Any) -> PreparedTransaction:
         self._register_programs([request.program, *request.imports])
         bound = self._aleo.programs.get(request.program).functions[request.function](*request.inputs)
+        # The engine has already reserved this call's inputs, so prove through
+        # the facade's unmanaged paths: ``build_transaction`` would try to
+        # reserve them a second time, and ``delegate`` is only managed when it
+        # broadcasts. This is the Python form of Veil's ``withoutManagement``.
         if self.proving == "local":
-            result = bound.build_transaction(
+            transaction = bound._prove_transaction(  # pyright: ignore[reportPrivateUsage]
                 account, priority_fee=self.priority_fee, fee_record=request.fee_record, private_fee=request.private_fee,
             )
-            return _prepared_from_transaction(result)
+            return prepared_from_transaction(transaction)
         payload = bound.delegate(
             account, broadcast=False, pay_own_fee=self.pay_own_fee, fee_record=request.fee_record, priority_fee=self.priority_fee,
         )
-        return _prepared_from_payload(payload)
+        return prepared_from_payload(payload)
 
     def _register_programs(self, program_ids: Sequence[str]) -> None:
         if getattr(self._aleo, "process", None) is None:
@@ -300,7 +356,8 @@ class RecordInventory(_InventoryBase):
         once the exact fee is known (*fee_record* is preferred when eligible).
         Call ``checkpoint.prepared`` after proving, pass the result to
         ``aleo.network.submit_transaction`` to record the broadcast, or
-        ``checkpoint.discard()`` to release a spend that is never sent.
+        ``checkpoint.discard()`` to release a spend that was never sent;
+        after a broadcast attempt, ``discard`` does nothing.
 
         Raises:
             RecordReservationConflictError: An input is already held.
@@ -575,7 +632,7 @@ class AsyncRecordInventory(_InventoryBase):
             built = builder(request)
             return await built if inspect.isawaitable(built) else built
         if isinstance(request, Broadcast):
-            return str(await self._aleo.network.submit_transaction(json.dumps(request.transaction)))
+            return str(await self._aleo.network.submit_transaction(_Submission(json.dumps(request.transaction), request.checkpoint)))
         if isinstance(request, ConfirmedTransaction):
             try:
                 return await self._aleo.network.get_confirmed_transaction(request.tx_id)
@@ -596,15 +653,16 @@ class AsyncRecordInventory(_InventoryBase):
         await self._register_programs([request.program, *request.imports])
         program = await self._aleo.programs.get(request.program)
         bound = program.functions[request.function](*request.inputs)
+        # Unmanaged proving paths only; see RecordInventory._build.
         if self.proving == "local":
-            result = await bound.build_transaction(
+            transaction = await bound._prove_transaction(  # pyright: ignore[reportPrivateUsage]
                 account, priority_fee=self.priority_fee, fee_record=request.fee_record, private_fee=request.private_fee,
             )
-            return _prepared_from_transaction(result)
+            return prepared_from_transaction(transaction)
         payload = await bound.delegate(
             account, broadcast=False, pay_own_fee=self.pay_own_fee, fee_record=request.fee_record, priority_fee=self.priority_fee,
         )
-        return _prepared_from_payload(payload)
+        return prepared_from_payload(payload)
 
     async def _register_programs(self, program_ids: Sequence[str]) -> None:
         if getattr(self._aleo, "process", None) is None:

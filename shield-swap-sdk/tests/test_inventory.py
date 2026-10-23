@@ -196,7 +196,8 @@ class ManagedStubAleo(StubAleo):
         def submit(raw: Any) -> str:
             checkpoint = getattr(raw, "checkpoint", None)
             if isinstance(raw, str) or checkpoint is not None:
-                tx = json.loads(raw if isinstance(raw, str) else raw.raw.to_json())
+                payload = raw if isinstance(raw, str) else raw.raw
+                tx = json.loads(payload if isinstance(payload, str) else payload.to_json())
                 self.submitted_json.append(tx)
                 if checkpoint is not None:
                     checkpoint.submitted(tx["id"])

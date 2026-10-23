@@ -448,9 +448,11 @@ class NetworkModule:
 
         A result built on a client with record management enabled carries
         its journal checkpoint: an accepted broadcast is recorded as
-        submitted, a transaction the node refuses with a 4xx releases its
-        reservation, and any other failure keeps the reservation for
-        reconciliation because the outcome is unknown.
+        submitted, a transaction the node refuses with a 4xx on the first
+        attempt releases its reservation, and any other failure keeps the
+        reservation for reconciliation because the outcome is unknown. Each
+        retry of a transient node error is reported to the checkpoint, so a
+        refusal after an uncertain attempt also keeps the reservation.
 
         Parameters
         ----------
@@ -465,15 +467,12 @@ class NetworkModule:
         """
         checkpoint = getattr(transaction, "checkpoint", None)
         raw = getattr(transaction, "raw", transaction)
-        try:
-            tx_id = str(self._nc().submit_transaction(raw))
-        except BaseException as exc:
-            if checkpoint is not None:
-                checkpoint.broadcast_failed(exc)
-            raise
-        if checkpoint is not None:
-            checkpoint.submitted(tx_id)
-        return tx_id
+        if checkpoint is None:
+            return str(self._nc().submit_transaction(raw))
+        from ..inventory.client import broadcast_checkpointed
+        # One attempt per call so the checkpoint sees every outcome; the
+        # helper applies the same backoff the raw client would.
+        return broadcast_checkpointed(lambda: self._nc().submit_transaction(raw, retry=False), checkpoint)
 
     # ``send_raw_transaction`` is the web3.py-parity alias — same callable.
     send_raw_transaction = submit_transaction

@@ -694,15 +694,12 @@ class AsyncNetworkModule:
         """
         checkpoint = getattr(transaction, "checkpoint", None)
         raw = getattr(transaction, "raw", transaction)
-        try:
-            tx_id = str(await self._nc().submit_transaction(raw))
-        except BaseException as exc:
-            if checkpoint is not None:
-                checkpoint.broadcast_failed(exc)
-            raise
-        if checkpoint is not None:
-            checkpoint.submitted(tx_id)
-        return tx_id
+        if checkpoint is None:
+            return str(await self._nc().submit_transaction(raw))
+        from ..inventory.client import async_broadcast_checkpointed
+        # One attempt per call so the checkpoint sees every outcome; see the
+        # sync NetworkModule.submit_transaction.
+        return await async_broadcast_checkpointed(lambda: self._nc().submit_transaction(raw, retry=False), checkpoint)
 
     send_raw_transaction = submit_transaction
 
