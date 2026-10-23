@@ -43,7 +43,7 @@ pip install -e "shield-swap-sdk[async]"        # + AsyncShieldSwap (httpx)
 pip install -e "shield-swap-sdk[mcp]"          # + the MCP server
 ```
 
-Requires `aleo-sdk>=0.5.1` (this repo's SDK; imports as `aleo`) and Python 3.10+.
+Requires `aleo-sdk>=0.8.0` (this repo's SDK; imports as `aleo`) and Python 3.10+.
 
 ## First swap example
 

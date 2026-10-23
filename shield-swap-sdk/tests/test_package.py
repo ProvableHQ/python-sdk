@@ -2,7 +2,7 @@ import aleo_shield_swap
 
 
 def test_version():
-    assert aleo_shield_swap.__version__ == "0.7.0"
+    assert aleo_shield_swap.__version__ == "0.8.0"
 
 
 def test_lifecycle_exports():
@@ -32,7 +32,7 @@ def test_import_guard_names_the_aleo_sdk_upgrade(monkeypatch):
     import pytest
 
     import aleo_shield_swap
-    aleo_shield_swap._require_aleo_sdk()                               # the installed sdk has aleo.compliance
-    monkeypatch.setitem(sys.modules, "aleo.compliance", None)          # simulate an aleo-sdk without it
-    with pytest.raises(ImportError, match=r'needs aleo-sdk>=0\.7\.0 \(found .*\); run: pip install -U "aleo-sdk>=0\.7\.0"'):
+    aleo_shield_swap._require_aleo_sdk()                               # the installed sdk has aleo.inventory
+    monkeypatch.setitem(sys.modules, "aleo.inventory", None)           # simulate an aleo-sdk without it
+    with pytest.raises(ImportError, match=r'needs aleo-sdk>=0\.8\.0 \(found .*\); run: pip install -U "aleo-sdk>=0\.8\.0"'):
         aleo_shield_swap._require_aleo_sdk()
