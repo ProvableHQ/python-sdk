@@ -283,6 +283,19 @@ executions and is the fast path (~5 minutes). Without it, executions are
 fully proven locally: expect SNARK parameter downloads and key synthesis on
 first use.
 
+The record inventory suite (`tests/integration/test_record_inventory_live.py`,
+`-m "live and slow"`) keeps six equal USDCx and ETH records in the
+`ALEO_E2E_PRIVATE_KEY` account, trades one explicit round trip, then submits
+six swaps at once in each direction with automatic record selection and
+reopens the journal to check recovery. Each run sells 0.6 USDCx forward and
+buys it back, so the account ends the run down the pool fees of twelve trades
+plus the network fees the delegated prover pays. A run takes tens of minutes
+and keeps its journals under `.shield-swap/inventory-e2e/testnet/<address>/`.
+`SHIELD_SWAP_INVENTORY_RECORDS` (3 to 16) and `SHIELD_SWAP_INVENTORY_SWAP_USDCX`
+(default `0.1`) set the batch size and the amount per trade. Run it alone:
+another trader on the same account competes for its records and blinded
+identities.
+
 <a id="compliance"></a>
 
 ## Compliance
