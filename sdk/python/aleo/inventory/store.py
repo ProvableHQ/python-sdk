@@ -316,8 +316,11 @@ class JsonFileRecordInventoryStore(_DurableStore):
             def __exit__(self, kind: object, exc: object, tb: object) -> None:
                 try:
                     if exc is None and store._cache is not None:
+                        # Write a private temporary file, then replace, so the
+                        # journal is never partially written and keeps mode 0600.
                         tmp = store.path.with_suffix(store.path.suffix + ".tmp")
-                        with open(tmp, "w") as handle:
+                        descriptor = os.open(tmp, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+                        with os.fdopen(descriptor, "w") as handle:
                             json.dump(store._cache, handle, indent=2)
                             handle.flush()
                             os.fsync(handle.fileno())

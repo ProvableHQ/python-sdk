@@ -150,6 +150,8 @@ def test_durable_stores_create_private_files_and_survive_reopen(durable: tuple[F
     saved = store.acquire(entry("1group"))
     assert saved is not None
     store.update(SCOPE, saved.id, {"status": "submitted", "transaction_id": "at1x", "transaction": {"id": "at1x"}})
+    if sys.platform != "win32":
+        assert (path.stat().st_mode & 0o077) == 0, "writes keep the journal owner-only"
     reopened = make().list(SCOPE)
     assert len(reopened) == 1 and reopened[0].status == "submitted" and reopened[0].transaction == {"id": "at1x"}
     assert make().acquire(entry("1group")) is None                    # still held after reopening
