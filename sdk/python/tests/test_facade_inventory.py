@@ -278,6 +278,32 @@ def test_discard_during_an_in_flight_broadcast_does_not_release_the_inputs(monke
         transfer(credits, aleo).build_transaction()                       # the input is still held
 
 
+def test_a_duplicate_refusal_does_not_release_inputs_while_the_first_submission_is_pending(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Two submits of one result overlap; the node refuses the second as a duplicate because it admitted the first."""
+    from aleo import AleoNetworkError
+    aleo, _, credits, seen = setup(monkeypatch)
+    result = transfer(credits, aleo).build_transaction()
+    answers: list[str] = []
+
+    def node(raw: Any, **_: Any) -> str:
+        if answers:                                                       # the overlapping second request
+            raise AleoNetworkError("POST returned 400: transaction already exists", status=400)
+        answers.append("first")
+        with pytest.raises(AleoNetworkError):
+            aleo.network.submit_transaction(result)                       # arrives while the first is still pending
+        assert aleo.inventory.store.list(aleo.inventory.scope())[0].status == "prepared"
+        assert aleo.inventory.reserved_record_ids() == {"1group"}
+        tx = json.loads(raw if isinstance(raw, str) else raw.to_json())
+        seen["submits"].append(tx)
+        return str(tx["id"])
+
+    monkeypatch.setattr(aleo._client, "submit_transaction", node)
+    assert aleo.network.submit_transaction(result) == "at1tx1"
+    assert aleo.inventory.store.list(aleo.inventory.scope())[0].status == "submitted"
+    with pytest.raises(RecordReservationConflictError):
+        transfer(credits, aleo).build_transaction()
+
+
 def test_a_discarded_result_is_refused_by_submit(monkeypatch: pytest.MonkeyPatch) -> None:
     aleo, _, credits, seen = setup(monkeypatch)
     result = transfer(credits, aleo).build_transaction()

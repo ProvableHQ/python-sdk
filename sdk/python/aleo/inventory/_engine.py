@@ -322,8 +322,8 @@ class SpendCheckpoint:
     Attributes:
         entry: The journal entry holding the reservation.
         transaction_id: The id recorded at preparation or submission.
-        is_broadcasting: A broadcast attempt is in flight; the reservation
-            cannot be released until its outcome is known.
+        is_broadcasting: At least one broadcast attempt is in flight; the
+            reservation cannot be released until every attempt has resolved.
         is_uncertain: A broadcast attempt ended without a definite answer,
             so the network may hold the transaction; the reservation stays.
     """
@@ -340,16 +340,24 @@ class SpendCheckpoint:
         self.entry = entry
         self.transaction_id: str | None = None
         self.is_prepared = False
-        self.is_broadcasting = False
         self.is_submitted = False
         self.is_uncertain = False
         self.is_closed = False
+        # Unresolved broadcast attempts. The same result may be submitted
+        # twice at once, and the engine's attempt wraps the facade's, so this
+        # is a count rather than a flag: the last attempt to resolve decides.
+        self._in_flight = 0
         # Serialises the lifecycle flags against a concurrent ``discard`` from
         # another thread while a broadcast is in flight.
         self._state = threading.RLock()
         self._fee_candidates: list[InventoryRecord] = []
         self._fee_choice: InventoryRecord | None = None
         self.fee_record_selector: FeeRecordSelector | None = None
+
+    @property
+    def is_broadcasting(self) -> bool:
+        """Whether any broadcast attempt of this spend is still unresolved."""
+        return self._in_flight > 0
 
     @property
     def input_ids(self) -> tuple[str, ...]:
@@ -455,7 +463,7 @@ class SpendCheckpoint:
         with self._state:
             if self.is_closed:
                 raise InventoryError("Transaction was discarded before broadcast; build it again")
-            self.is_broadcasting = True
+            self._in_flight += 1
 
     def submitted(self, tx_id: str) -> None:
         """Record that the network accepted the broadcast; the reservation now outlives any error."""
@@ -465,7 +473,7 @@ class SpendCheckpoint:
             # Mark before touching the store: a storage failure must not release
             # inputs the network may already have accepted.
             self.is_submitted = True
-            self.is_broadcasting = False
+            self._in_flight = 0
             self.transaction_id = tx_id
             self._store.update(self._scope, self.entry.id, {"status": "submitted", "transaction_id": tx_id})
 
@@ -482,13 +490,18 @@ class SpendCheckpoint:
         response, 5xx) is uncertain: the transaction may be in the node, so
         the reservation is kept for reconciliation and stays kept even if a
         later attempt is refused, since the earlier one may have gone through.
+        A refusal while another attempt of the same spend is still pending
+        releases nothing either: the pending one may be the request the node
+        admitted (a duplicate is refused for exactly that reason), so the
+        last attempt to resolve decides.
         """
         status = getattr(error, "status", None)
         refused = isinstance(error, AleoNetworkError) and isinstance(status, int) and 400 <= status < 500
         with self._state:
-            self.is_broadcasting = False
+            self._in_flight = max(0, self._in_flight - 1)
             if refused and not self.is_uncertain:
-                self.discard()
+                if self._in_flight == 0:
+                    self.discard()
             else:
                 self.is_uncertain = True
 

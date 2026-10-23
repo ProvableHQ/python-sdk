@@ -1033,6 +1033,29 @@ def test_a_checkpoint_in_flight_ignores_discard_and_a_discarded_one_refuses_to_b
         dropped.begin_broadcast()
 
 
+def test_overlapping_attempts_are_counted_and_the_last_to_resolve_decides() -> None:
+    from aleo import AleoNetworkError
+    w = World([1_000_000, 500])
+    first, second = w.inventory.get_record_inventory(CREDITS).available
+    refusal = AleoNetworkError("POST returned 400: transaction already exists", status=400)
+    with w.inventory.reserve("credits.aleo", "split", [first.id]) as checkpoint:
+        checkpoint.prepared("at1x", w.build("credits.aleo", "split", (first.plaintext, "1u64"), None, 0))
+        checkpoint.begin_broadcast()                        # request A on the wire
+        checkpoint.begin_broadcast()                        # request B overlaps it
+        checkpoint.broadcast_failed(refusal)                # B is refused as a duplicate: A was admitted
+        assert checkpoint.is_broadcasting and not checkpoint.is_closed
+        checkpoint.submitted("at1x")                        # A succeeds
+    assert w.journal()[0].status == "submitted"
+    with w.inventory.reserve("credits.aleo", "split", [second.id]) as both_refused:
+        both_refused.begin_broadcast()
+        both_refused.begin_broadcast()
+        both_refused.broadcast_failed(refusal)
+        assert not both_refused.is_closed
+        both_refused.broadcast_failed(refusal)              # nothing left pending: never admitted
+        assert both_refused.is_closed
+    assert w.journal()[-1].status == "cancelled"
+
+
 def test_rebalance_stops_before_proving_once_the_fee_budget_is_spent() -> None:
     w = World([100] * 3)
     plan = w.inventory.plan_record_inventory(CREDITS, InventoryTarget(records=1))
