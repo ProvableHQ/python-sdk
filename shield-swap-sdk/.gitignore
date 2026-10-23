@@ -1,2 +1,5 @@
 __pycache__/
 *.pyc
+
+# Live inventory suite and example journals (reservations, swap handles)
+.shield-swap/

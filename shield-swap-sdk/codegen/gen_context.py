@@ -30,6 +30,7 @@ TIER1 = ["from_profile", "onboard", "status", "get_positions",
 TIER2_CLIENT = ["confirm_airdrop", "quote", "swap", "claim_swap_output", "create_pool", "mint",
                 "increase_liquidity", "decrease_liquidity", "collect", "burn",
                 "plan_rebalance", "rebalance_position",
+                "plan_inventory", "rebalance_inventory",
                 "get_pool", "get_slot", "get_swap_output", "get_swap_execution",
                 "get_balances", "get_public_balances",
                 "get_private_balances", "derive_pool_key", "derive_tick_key"]

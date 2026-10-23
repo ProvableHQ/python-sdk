@@ -43,7 +43,7 @@ pip install -e "shield-swap-sdk[async]"        # + AsyncShieldSwap (httpx)
 pip install -e "shield-swap-sdk[mcp]"          # + the MCP server
 ```
 
-Requires `aleo-sdk>=0.5.1` (this repo's SDK; imports as `aleo`) and Python 3.10+.
+Requires `aleo-sdk>=0.8.0` (this repo's SDK; imports as `aleo`) and Python 3.10+.
 
 ## First swap example
 
@@ -52,6 +52,10 @@ account, swaps USDCx for ETH, and claims the output using SDK calls directly.
 It uses an in-memory account and swap handle by default; `ENABLE_JOURNAL` optionally attaches the SDK journal.
 Releases containing the example support
 `python -m aleo_shield_swap.examples.first_swap.swap`.
+
+The [concurrent-swaps example](./examples/concurrent-swaps) prepares six equal
+USDCx records and submits six swaps at once; see
+[Concurrent swaps](#concurrent-swaps) for the mechanism.
 
 ## Agents
 
@@ -176,6 +180,56 @@ Two conveniences trade secret material for service:
   `aleo.records.register` shares the account's **view key** with the
   scanning service, which can then see everything the account owns.
 
+## Concurrent swaps
+
+A private trade spends one record, so trades submitted at the same time need
+separate input records and separate blinded identities.
+
+Record management on the facade covers the records. Build the `Aleo` client
+with `record_management=RecordManagementConfig(enabled=True, store=...)` and
+every swap reserves its input record before proving. When two automatic
+selections pick the same record, the swap that loses the reservation moves to
+the next eligible record from the same scan, smallest first, before any proof
+is built. An explicit `token_record` is never replaced, and proving or
+broadcast errors are never retried.
+
+A swap journal covers the identities. `ShieldSwap.from_profile()` or
+`dex.journal = Journal(path)` issues each swap its own blinded identity and
+keeps the handle needed to claim the output.
+
+Trades need one covering record each. `dex.plan_inventory(token, target)`
+plans the joins and splits that reshape the token's underlying records, and
+`dex.rebalance_inventory(...)` executes them one confirmed transaction at a
+time through `aleo.inventory`:
+
+```python
+from pathlib import Path
+
+from aleo.inventory import InventoryTarget, RecordManagementConfig
+from aleo_shield_swap.journal import Journal
+
+aleo = Aleo(Aleo.HTTPProvider("https://edge.provable.com/api", network="testnet"),
+            record_management=RecordManagementConfig(enabled=True))
+aleo.default_account = account
+dex = ShieldSwap(aleo)
+# One journal per account and network, outside version control: it holds the
+# claim secrets and hands each concurrent swap its own blinded identity.
+dex.journal = Journal(Path.home() / ".shield-swap" / "testnet" / str(account.address) / "swaps.jsonl")
+
+plan = dex.plan_inventory("USDCx", InventoryTarget(records=4, min_record_amount=100_000, distribution="balanced"))
+result = dex.rebalance_inventory("USDCx", InventoryTarget(records=4, min_record_amount=100_000, distribution="balanced"))
+
+quote = dex.quote(token_in="USDCx", token_out="ETH", amount_in="0.1")
+handles = [dex.swap(quote).delegate(wait=False) for _ in range(4)]   # or on a thread pool
+```
+
+Record coordination is off by default. Without it, concurrent swaps must be
+given disjoint `token_record` inputs or run in sequence. The
+[concurrent-swaps example](./examples/concurrent-swaps) runs the whole flow on
+testnet, with a file-backed reservation store and the recovery steps after an
+interruption. The SDK's [record management section](../README.md#manage-private-records)
+covers the journal, stores, and reconciliation.
+
 ## Async
 
 `AsyncShieldSwap` / `AsyncApiClient` mirror the sync **read, swap and claim**
@@ -234,6 +288,19 @@ skips certificate verification); `ALEO_DEVNODE_UNPROVEN=1` extends that to
 executions and is the fast path (~5 minutes). Without it, executions are
 fully proven locally: expect SNARK parameter downloads and key synthesis on
 first use.
+
+The record inventory suite (`tests/integration/test_record_inventory_live.py`,
+`-m "live and slow"`) keeps six equal USDCx and ETH records in the
+`ALEO_E2E_PRIVATE_KEY` account, trades one explicit round trip, then submits
+six swaps at once in each direction with automatic record selection and
+reopens the journal to check recovery. Each run sells 0.6 USDCx forward and
+buys it back, so the account ends the run down the pool fees of twelve trades
+plus the network fees the delegated prover pays. A run takes tens of minutes
+and keeps its journals under `.shield-swap/inventory-e2e/testnet/<address>/`.
+`SHIELD_SWAP_INVENTORY_RECORDS` (3 to 16) and `SHIELD_SWAP_INVENTORY_SWAP_USDCX`
+(default `0.1`) set the batch size and the amount per trade. Run it alone:
+another trader on the same account competes for its records and blinded
+identities.
 
 <a id="compliance"></a>
 

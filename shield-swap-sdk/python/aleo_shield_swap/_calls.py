@@ -12,9 +12,63 @@ output.
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Generic, TypeVar
+from typing import Any, Callable, Generic, Optional, TypeVar
+
+from aleo.inventory import RecordReservationConflictError
+
+from ._core import record_nonce
 
 R = TypeVar("R")
+T = TypeVar("T")
+
+
+class RecordReselection:
+    """Move a prepared swap to its next eligible input record after a reservation conflict.
+
+    Built by ``swap()`` when the facade has record management enabled and the
+    caller let the SDK choose the record. The candidates come from one scan,
+    smallest first, so the number of attempts is bounded. Only a conflict
+    that names the current record advances the selection; every other error
+    propagates, and an explicit ``token_record`` never reselects.
+
+    Args:
+        candidates: Eligible record plaintexts, smallest first.
+        assemble: Rebuilds the bound call for a record; the swap's amount,
+            slippage floor, identity, and nonce are fixed inside it.
+        guard: Raises when the account, network, or record management
+            changed since the swap was prepared.
+    """
+
+    def __init__(self, candidates: list[str], assemble: Callable[[str], Any],
+                 guard: Callable[[], None]) -> None:
+        if not candidates:
+            raise ValueError("RecordReselection needs at least one candidate")
+        self._candidates = list(candidates)
+        self._index = 0
+        self._assemble = assemble
+        self._guard = guard
+
+    @property
+    def current(self) -> str:
+        """The record plaintext the prepared call currently spends."""
+        return self._candidates[self._index]
+
+    @property
+    def remaining(self) -> int:
+        """Candidates not yet tried after the current one."""
+        return len(self._candidates) - self._index - 1
+
+    def next_bound(self, error: RecordReservationConflictError) -> Any:
+        """The bound call for the next candidate, or ``None`` when the error is not about this record or none remain."""
+        if record_nonce(self.current) not in error.record_ids:
+            return None
+        if self._index + 1 >= len(self._candidates):
+            return None
+        self._index += 1
+        self._guard()
+        return self._assemble(self.current)
+
+
 
 
 def extract_tx_id(payload: Any) -> str:
@@ -76,12 +130,14 @@ class DexCall(Generic[R]):
     def __init__(self, aleo: Any, bound: Any,
                  build_result: Callable[[str, list[str]], R], *,
                  build_before_wait: bool = False,
-                 on_confirmed: Callable[[R], None] | None = None) -> None:
+                 on_confirmed: Callable[[R], None] | None = None,
+                 reselect: Optional[RecordReselection] = None) -> None:
         self._aleo = aleo
         self._bound = bound
         self._build = build_result
         self._build_before_wait = build_before_wait
         self._on_confirmed = on_confirmed
+        self._reselect = reselect
 
     def __repr__(self) -> str:
         return f"DexCall({self._bound!r})"
@@ -90,6 +146,17 @@ class DexCall(Generic[R]):
         """Local authorization — no proof, no send; inspect before spending."""
         return self._bound.simulate(account)
 
+    def _submit(self, submit: Callable[[Any], T]) -> T:
+        """Run *submit* on the bound call, moving to the next candidate record on a reservation conflict."""
+        while True:
+            try:
+                return submit(self._bound)
+            except RecordReservationConflictError as exc:
+                replacement = self._reselect.next_bound(exc) if self._reselect is not None else None
+                if replacement is None:
+                    raise
+                self._bound = replacement
+
     def transact(self, account: Any = None, *, wait: bool = False,
                  wait_timeout: float = 180.0, **fee_kwargs: Any) -> R:
         """Prove locally, broadcast, and build the typed result.
@@ -97,15 +164,26 @@ class DexCall(Generic[R]):
         Root-transition outputs are harvested from the built transaction
         before broadcast, so the result is complete without waiting for
         confirmation. Set ``wait=True`` to confirm and update an attached claim journal.
+
+        On a facade with record management enabled the build reserves the
+        record inputs and saves the proved transaction, and the broadcast
+        records the submission. When another writer holds the selected
+        record, a swap that chose its record automatically moves to the next
+        eligible one before proving; an explicit record is never replaced.
         """
-        tx = self._bound.build_transaction(account, **fee_kwargs)
+        def submit(bound: Any) -> tuple[str, Any]:
+            # The facade's own two halves: on a managed client the build
+            # reserves the inputs and the submit records the broadcast.
+            tx = bound.build_transaction(account, **fee_kwargs)
+            self._aleo.network.submit_transaction(tx)
+            return tx.id, tx
+
+        tx_id, tx = self._submit(submit)
         outputs = root_outputs(tx.decoded(), self._bound.program_id,
                                self._bound.function_name)
-        # Same submit path the facade's BoundCall.transact uses.
-        self._aleo.network.submit_transaction(tx.raw)
-        result = self._build(tx.id, outputs)
+        result = self._build(tx_id, outputs)
         if wait:
-            self._aleo.network.wait_for_transaction(tx.id, timeout=wait_timeout)
+            self._aleo.network.wait_for_transaction(tx_id, timeout=wait_timeout)
             if self._on_confirmed is not None:
                 self._on_confirmed(result)
         return result
@@ -119,8 +197,13 @@ class DexCall(Generic[R]):
         the full transaction, so ``wait=False`` returns as soon as the
         broadcast is accepted — callers that read chain state later (e.g.
         ``collect_all``) don't need to block on confirmation here.
+
+        On a facade with record management enabled the prover returns the
+        transaction, the journal saves it, and this client broadcasts it;
+        a reservation conflict on an automatically selected record moves the
+        swap to its next eligible record before proving.
         """
-        payload = self._bound.delegate(account, **fee_kwargs)
+        payload = self._submit(lambda bound: bound.delegate(account, **fee_kwargs))
         tx_id = extract_tx_id(payload)
         decoded = _payload_transitions(payload)
         confirmed = wait or decoded is None

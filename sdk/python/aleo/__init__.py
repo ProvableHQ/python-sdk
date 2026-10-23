@@ -47,6 +47,27 @@ from .facade.errors import (
     ExecutionError as ExecutionError,
     TransactionConfirmationTimeout as TransactionConfirmationTimeout,
 )
+from .inventory import (
+    AsyncRecordInventory as AsyncRecordInventory,
+    InventoryError as InventoryError,
+    InventoryPlan as InventoryPlan,
+    InventoryPlanError as InventoryPlanError,
+    InventoryRecord as InventoryRecord,
+    InventoryResult as InventoryResult,
+    InventoryTarget as InventoryTarget,
+    JsonFileRecordInventoryStore as JsonFileRecordInventoryStore,
+    MemoryRecordInventoryStore as MemoryRecordInventoryStore,
+    RecordAsset as RecordAsset,
+    RecordInventory as RecordInventory,
+    RecordInventorySnapshot as RecordInventorySnapshot,
+    RecordInventoryStore as RecordInventoryStore,
+    RecordJoinProgram as RecordJoinProgram,
+    RecordManagementConfig as RecordManagementConfig,
+    RecordReservationConflictError as RecordReservationConflictError,
+    RecordSpend as RecordSpend,
+    SqliteRecordInventoryStore as SqliteRecordInventoryStore,
+    TokenJoinRouter as TokenJoinRouter,
+)
 
 
 def __getattr__(name: str) -> object:

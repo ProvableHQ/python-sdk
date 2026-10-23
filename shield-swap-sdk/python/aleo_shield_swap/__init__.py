@@ -14,18 +14,18 @@
                       amount_in=10**9).delegate()
     out = dex.claim_swap_output(handle).delegate()
 """
-_ALEO_SDK_MINIMUM = "0.7.0"
+_ALEO_SDK_MINIMUM = "0.8.0"
 
 
 def _require_aleo_sdk() -> None:
-    """Fail at import, naming the fix, when the installed aleo-sdk predates ``aleo.compliance``.
+    """Fail at import, naming the fix, when the installed aleo-sdk predates ``aleo.inventory``.
 
-    Freeze-list proofs come from ``aleo.compliance``, which first shipped in aleo-sdk 0.7.0. An
-    older install would otherwise fail on the first import of the client with a bare
-    ``ModuleNotFoundError``.
+    Record management comes from ``aleo.inventory``, which first shipped in aleo-sdk 0.8.0
+    (freeze-list proofs, from ``aleo.compliance``, arrived in 0.7.0). An older install would
+    otherwise fail on the first import of the client with a bare ``ModuleNotFoundError``.
     """
     try:
-        import aleo.compliance  # noqa: F401
+        import aleo.inventory  # noqa: F401
     except ImportError as exc:
         from importlib.metadata import PackageNotFoundError, version
         try:
@@ -118,7 +118,7 @@ def agent_guide() -> str:
     return files(__name__).joinpath("AGENTS.md").read_text()
 
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 
 __all__ = [
     "ShieldSwap", "AsyncShieldSwap", "ApiClient", "AsyncApiClient",

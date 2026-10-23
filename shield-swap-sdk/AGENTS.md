@@ -546,6 +546,48 @@ Raises:
         with the wrong number of compliance proof bundles.
     InsufficientRecordsError: If no record covers a funded side.
 
+### `plan_inventory(self, token: 'str', target: 'InventoryTarget', *, max_transactions: 'Optional[int]' = None, account: 'Any' = None) -> 'InventoryPlan'`
+
+Plan the joins and splits that give *token* the record layout trades need.
+
+One trade spends one record, so several trades sold at the same time
+need several records that each cover a trade. The plan targets the
+token's underlying record program (the records a trader holds), not
+the AMM wrapper. Reads the token registry, the program, and the
+scanner; signs and reserves nothing. Review ``plan.steps`` and
+``plan.deduction`` before executing with :meth:`rebalance_inventory`.
+
+Args:
+    token: Symbol such as ``"USDCx"`` or the on-chain token id.
+    target: Desired count, minimum amount in base units, and distribution.
+    max_transactions: Operation ceiling, 1 through 10000. Defaults to 100.
+    account: Signer; defaults to ``aleo.default_account``.
+
+Raises:
+    ShieldSwapError: The token is unknown or has no underlying program.
+    InventoryPlanError: The target cannot be reached from the available records.
+
+Example::
+
+    plan = dex.plan_inventory("USDCx", InventoryTarget(records=6, min_record_amount=100_000, distribution="balanced"))
+
+### `rebalance_inventory(self, token: 'str', target: 'InventoryTarget', *, max_transactions: 'Optional[int]' = None, timeout: 'float' = 120.0, poll_interval: 'float' = 1.0, max_fee_microcredits: 'Optional[int]' = None, cancel: 'Any' = None, account: 'Any' = None) -> 'InventoryResult'`
+
+Reshape *token*'s underlying records to *target*, one confirmed transaction at a time.
+
+Plans as :meth:`plan_inventory` does, then executes through the
+facade's record inventory: each step reserves its inputs, proves,
+broadcasts, and waits for the scanner to show its outputs before the
+next step. Requires the facade to be built with record management
+enabled. No accepted step is rolled back; an interrupted result names
+the reason and every submitted transaction.
+
+Example::
+
+    result = dex.rebalance_inventory("USDCx", InventoryTarget(records=6), max_fee_microcredits=5_000_000)
+    if result.status == "interrupted":
+        dex.inventory.reconcile_record_inventory()
+
 ### `get_pool(self, pool_key: 'str') -> 'g.PoolState'`
 
 Static pool configuration (token pair, fee, decimal scales).

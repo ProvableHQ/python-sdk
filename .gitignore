@@ -12,3 +12,5 @@ tmp/
 .superpowers/
 docs/superpowers/
 .worktrees/
+# Shield Swap journals (claim secrets) written by the examples when run from the repo root
+.shield-swap/

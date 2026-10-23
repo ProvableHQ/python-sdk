@@ -110,17 +110,37 @@ class TransactionResult:
     ----------
     raw:
         The underlying network :class:`Transaction` (escape hatch).
+    checkpoint:
+        On a client with record management enabled, the journal entry that
+        reserved this transaction's record inputs and saved the proved
+        transaction. ``aleo.network.submit_transaction(result)`` records the
+        broadcast against it; ``None`` on an unmanaged client.
     """
 
-    __slots__ = ("_raw",)
+    __slots__ = ("_raw", "checkpoint")
 
-    def __init__(self, raw: Any) -> None:
+    def __init__(self, raw: Any, checkpoint: Any = None) -> None:
         self._raw = raw
+        self.checkpoint = checkpoint
 
     @property
     def raw(self) -> Any:
         """The underlying network ``Transaction`` object (escape hatch)."""
         return self._raw
+
+    def discard(self) -> None:
+        """Release the record reservation of a built transaction that will not be submitted.
+
+        Only meaningful on a managed client. It does nothing once
+        ``submit_transaction`` has started, whether the attempt is still in
+        flight, the node accepted the transaction, or the attempt ended
+        without an answer, because the network may have spent the records;
+        use ``reconcile_record_inventory`` to settle such a spend. A result
+        that was discarded is refused by ``submit_transaction`` afterwards,
+        since its records may already belong to another transaction.
+        """
+        if self.checkpoint is not None:
+            self.checkpoint.discard()
 
     @property
     def id(self) -> str:
@@ -337,6 +357,10 @@ class BoundCall(PreparedCall):
         private fee is requested but no record can be sourced.
         """
         net = self._net()
+        if callable(fee_record):
+            # Record management chooses the fee record once the exact fee is
+            # known; the callable reserves it and returns its plaintext.
+            fee_record = fee_record(int(min_microcredits or 0))
         if fee_record is not None:
             if isinstance(fee_record, str):
                 return net.RecordPlaintext.from_string(fee_record)
@@ -396,11 +420,51 @@ class BoundCall(PreparedCall):
         private_fee:
             Force a private fee sourced from ``aleo.record_provider``.
 
+        On a client built with record management enabled, the call's record
+        inputs are reserved before proving and the proved transaction is
+        saved to the journal before this returns; a private fee record is
+        chosen and reserved once the exact fee is known. Submit the result
+        with ``aleo.network.submit_transaction(result)`` to record the
+        broadcast, or call ``result.discard()`` to release the reservation of
+        a transaction that was never sent. A record another writer holds
+        raises :class:`~aleo.inventory.RecordReservationConflictError` before
+        any proof is built.
+
         Returns
         -------
         TransactionResult
             Inspectable wrapper over the assembled ``Transaction``.
         """
+        managed = _managed_inventory(self._client)
+        if managed is None:
+            return TransactionResult(self._prove_transaction(
+                account, priority_fee=priority_fee, fee_record=fee_record, private_fee=private_fee, base_fee=base_fee,
+            ))
+        checkpoint = managed.begin_spend(
+            self.program_id, self.function_name, self.args, account=account,
+            private_fee=private_fee or fee_record is not None, fee_record=_fee_record_text(fee_record),
+        )
+        try:
+            tx = self._prove_transaction(
+                account, priority_fee=priority_fee, fee_record=checkpoint.fee_record_selector or fee_record,
+                private_fee=private_fee, base_fee=base_fee,
+            )
+            checkpoint.prepared(str(tx.id), _transaction_json(tx))
+        except BaseException as exc:
+            checkpoint.discard()
+            raise _after_acquisition(exc) from exc
+        return TransactionResult(tx, checkpoint)
+
+    def _prove_transaction(
+        self,
+        account: Any = None,
+        *,
+        priority_fee: int = 0,
+        fee_record: Any = None,
+        private_fee: bool = False,
+        base_fee: int | None = None,
+    ) -> Any:
+        """Authorize, execute, prove, and assemble the ``Transaction`` locally; no journal, no broadcast."""
         net = self._net()
         process = self._client.process
         auth = self._build_authorization(account)
@@ -439,7 +503,7 @@ class BoundCall(PreparedCall):
                 detail=str(exc),
             ) from exc
 
-        return TransactionResult(tx)
+        return tx
 
     # ``.prove`` is the documented alias of build_transaction.
     prove = build_transaction
@@ -457,6 +521,10 @@ class BoundCall(PreparedCall):
     ) -> str:
         """Build the transaction (:meth:`build_transaction`) and broadcast it.
 
+        On a client built with record management enabled this is the two
+        managed halves in sequence: the build reserves the record inputs and
+        saves the proved transaction, the broadcast records the submission.
+
         Returns
         -------
         str
@@ -469,7 +537,7 @@ class BoundCall(PreparedCall):
             private_fee=private_fee,
             base_fee=base_fee,
         )
-        return self._client.network.submit_transaction(result.raw)
+        return self._client.network.submit_transaction(result)
 
     # ── Verb: delegate (the flagship DPS path) ──────────────────────────────
 
@@ -511,7 +579,28 @@ class BoundCall(PreparedCall):
         -------
         Any
             The prover's result payload (the data dict) from the DPS.
+
+        On a client built with record management enabled, a broadcasting
+        call asks the prover not to broadcast, reserves the record inputs
+        before proving, saves the returned transaction, and submits it from
+        this client; the payload then carries the proved ``transaction``.
         """
+        managed = _managed_inventory(self._client) if broadcast else None
+        if managed is not None:
+            payloads: list[Any] = []
+
+            def build(request: Any) -> Any:
+                payload = self.delegate(
+                    account, broadcast=False, pay_own_fee=pay_own_fee, fee_record=request.fee_record,
+                    priority_fee=priority_fee,
+                )
+                payloads.append(payload)
+                return _prepared_from_payload(payload)
+            managed.managed_write(
+                self.program_id, self.function_name, self.args, account=account,
+                private_fee=fee_record is not None, fee_record=_fee_record_text(fee_record), builder=build,
+            )
+            return payloads[0]
         net = self._net()
         auth = self._build_authorization(account)
 
@@ -544,6 +633,38 @@ class BoundCall(PreparedCall):
 
         request = net.ProvingRequest(auth, fee_authorization, bool(broadcast))
         return self._client.network_client.submit_proving_request(request)
+
+
+# ── Record management hook helpers (shared with the async client) ────────────
+
+
+def _managed_inventory(client: Any) -> Any:
+    """The client's inventory when record management is enabled, else ``None``."""
+    from ..inventory.client import managed_inventory
+    return managed_inventory(client)
+
+
+def _fee_record_text(fee_record: Any) -> str | None:
+    """A caller's preferred fee record as plaintext, for the journal's selector."""
+    return None if fee_record is None else str(fee_record)
+
+
+def _transaction_json(transaction: Any) -> dict[str, Any]:
+    import json
+    return json.loads(str(transaction.to_json()))
+
+
+def _after_acquisition(error: BaseException) -> BaseException:
+    """A conflict raised after this call reserved its inputs must not look retryable."""
+    from ..inventory import InventoryError, RecordReservationConflictError
+    if isinstance(error, RecordReservationConflictError):
+        return InventoryError("Record spending failed after acquiring inputs")
+    return error
+
+
+def _prepared_from_payload(payload: Any) -> Any:
+    from ..inventory.client import prepared_from_payload
+    return prepared_from_payload(payload)
 
 
 __all__ = [

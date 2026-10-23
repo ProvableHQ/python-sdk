@@ -13,14 +13,21 @@ import math
 import time
 import logging
 from decimal import Decimal
-from typing import Any, Callable, Generic, Optional, TypeVar
+from typing import Any, Awaitable, Callable, Generic, Optional, TypeVar
 
 from aleo import AleoNetworkError, ProgramNotFound
 from aleo.compliance import AsyncFreezeListProofs, ComplianceProofContext, async_freezelist_program
+from aleo.inventory import (
+    AsyncRecordInventory, InventoryPlan, InventoryResult, InventoryTarget, RecordAsset, RecordReservationConflictError,
+)
 
 from . import _generated as g
-from ._calls import extract_tx_id, root_outputs
+from ._calls import RecordReselection, extract_tx_id, root_outputs
 from ._core import (
+    reserved_nonces,
+    swap_context_guard,
+    token_record_candidates,
+    underlying_program_for,
     _amount_to_base_units,
     decode_position_record,
     default_merkle_proofs,
@@ -62,6 +69,7 @@ from .errors import (
     InsufficientRecordsError,
     PoolNotFoundError,
     PoolNotInitializedError,
+    ShieldSwapError,
     SwapOutputNotFinalizedError,
 )
 from ._quotes import quote_request, build_quote, quote_amounts, resolve_quote, multi_hop_inputs
@@ -80,14 +88,19 @@ _log = logging.getLogger(__name__)
 R = TypeVar("R")
 
 
+T = TypeVar("T")
+
+
 class AsyncDexCall(Generic[R]):
     """Async mirror of :class:`~aleo_shield_swap._calls.DexCall`."""
 
     def __init__(self, aleo: Any, bound: Any,
-                 build_result: Callable[[str, list[Any]], R]) -> None:
+                 build_result: Callable[[str, list[Any]], R], *,
+                 reselect: Optional[RecordReselection] = None) -> None:
         self._aleo = aleo
         self._bound = bound
         self._build = build_result
+        self._reselect = reselect
 
     def simulate(self, account: Any = None) -> Any:
         """Local authorization — no proof, no send; inspect before spending.
@@ -97,6 +110,17 @@ class AsyncDexCall(Generic[R]):
         """
         return self._bound.simulate(account)
 
+    async def _submit(self, submit: Callable[[Any], Awaitable[T]]) -> T:
+        """Run *submit* on the bound call, moving to the next candidate record on a reservation conflict."""
+        while True:
+            try:
+                return await submit(self._bound)
+            except RecordReservationConflictError as exc:
+                replacement = self._reselect.next_bound(exc) if self._reselect is not None else None
+                if replacement is None:
+                    raise
+                self._bound = replacement
+
     async def transact(self, account: Any = None, *, wait: bool = False,
                        wait_timeout: float = 180.0, **fee_kwargs: Any) -> R:
         """Prove locally, broadcast, and build the typed result.
@@ -104,14 +128,21 @@ class AsyncDexCall(Generic[R]):
         Root-transition outputs are harvested from the built transaction
         before broadcast, so the result is complete without waiting for
         confirmation. Set ``wait=True`` to wait for acceptance on chain.
+        With record management enabled on the facade, inputs are reserved
+        before proving and an automatically selected record is replaced on
+        a reservation conflict; see :meth:`~aleo_shield_swap._calls.DexCall.transact`.
         """
-        tx = await self._bound.build_transaction(account, **fee_kwargs)
+        async def submit(bound: Any) -> tuple[str, Any]:
+            tx = await bound.build_transaction(account, **fee_kwargs)
+            await self._aleo.network.submit_transaction(tx)
+            return tx.id, tx
+
+        tx_id, tx = await self._submit(submit)
         outputs = root_outputs(tx.decoded(), self._bound.program_id,
                                self._bound.function_name)
-        await self._aleo.network.submit_transaction(tx.raw)
-        result = self._build(tx.id, outputs)
+        result = self._build(tx_id, outputs)
         if wait:
-            await self._aleo.network.wait_for_transaction(tx.id, timeout=wait_timeout)
+            await self._aleo.network.wait_for_transaction(tx_id, timeout=wait_timeout)
         return result
 
     async def delegate(self, account: Any = None, **fee_kwargs: Any) -> R:
@@ -121,9 +152,14 @@ class AsyncDexCall(Generic[R]):
         Outputs are harvested from the DPS payload itself when it carries
         the full transaction, so ``wait=False`` returns as soon as the
         broadcast is accepted — callers that read chain state later (e.g.
-        ``collect_all``) don't need to block on confirmation here.
+        ``collect_all``) don't need to block on confirmation here. With
+        record management enabled, an automatically selected record is
+        replaced on a reservation conflict before proving.
         """
-        payload = await self._bound.delegate(account, **fee_kwargs)
+        async def submit(bound: Any) -> Any:
+            return await bound.delegate(account, **fee_kwargs)
+
+        payload = await self._submit(submit)
         tx_id = extract_tx_id(payload)
         await self._aleo.network.wait_for_transaction(tx_id)
         tx = await self._aleo.network.get_transaction_object(tx_id)
@@ -150,6 +186,10 @@ class AsyncShieldSwap:
         self.amm_freezelist_program: str = SHIELD_SWAP_FREEZELIST
         #: Freeze-list exclusion proofs, cached per list until its root changes.
         self.freezelist = AsyncFreezeListProofs(aleo)
+        #: Private record inventory of the bound client; see :attr:`ShieldSwap.inventory`.
+        self.inventory: AsyncRecordInventory = (
+            aleo.inventory if hasattr(aleo, "inventory") else AsyncRecordInventory(aleo)
+        )
         # allow_token relationships are immutable — cache probes for the
         # client's lifetime.
         self._wrapped_cache: dict[str, bool] = {}
@@ -344,21 +384,24 @@ class AsyncShieldSwap:
         amount = _amount_to_base_units(amount_in, token_in_id, tokens)
         program = await self._token_program(token_in_id)
         records = await provider.find(acct, program=program, unspent=True)
-        return pick_covering_record(records, min_amount=amount, token_id=token_in_id) is not None
+        return pick_covering_record(records, min_amount=amount, token_id=token_in_id,
+                                    exclude_nonces=reserved_nonces(self._aleo, acct)) is not None
 
-    async def _select_token_record(self, *, program: str, min_amount: int,
-                                   token_id: Optional[str], account: Any) -> str:
+    async def _select_token_records(self, *, program: str, min_amount: int,
+                                    token_id: Optional[str], account: Any) -> list[str]:
+        """Eligible, unreserved record plaintexts covering *min_amount*, smallest first, from one scan."""
         provider = self._aleo.record_provider
         if provider is None:
             raise InsufficientRecordsError(
                 "No record provider configured — pass token_record= explicitly.")
         records = await provider.find(account, program=program, unspent=True)
-        chosen = pick_covering_record(records, min_amount=min_amount, token_id=token_id)
-        if chosen is None:
+        candidates = token_record_candidates(records, min_amount=min_amount, token_id=token_id,
+                                             exclude_nonces=reserved_nonces(self._aleo, account))
+        if not candidates:
             raise InsufficientRecordsError(
                 f"No unspent {program} record covers {min_amount} "
                 f"(token_id={token_id or 'any'}) — privatize funds or pass token_record=.")
-        return chosen
+        return candidates
 
     async def _select_position_record(self, pool_key: str, account: Any,
                                       position_token_id: Optional[str] = None) -> str:
@@ -777,11 +820,15 @@ class AsyncShieldSwap:
 
         record = token_record
         program = token_in_program
+        candidates: list[str] = []
         if record is None:
             program = program or await self._token_program(token_in_id)
-            record = await self._select_token_record(
+            # Keep every eligible candidate from one scan so a reservation
+            # conflict at submission can move to the next record.
+            candidates = await self._select_token_records(
                 program=program, min_amount=amount_in,
                 token_id=token_in_id, account=acct)
+            record = candidates[0]
             token_programs = [program]
         else:
             token_programs = [token_in_program] if token_in_program else []
@@ -807,26 +854,34 @@ class AsyncShieldSwap:
             compliance_proofs, wrapper_proofs, {token_in_id: program})
         sender_proof = proofs[0] if proofs else default_merkle_proofs()
 
-        inputs = [
-            record, identity.blinding_factor, identity.blinded_address,
-            pool_key, resolved.zero_for_one,
-            f"{amount_in}u128", f"{resolved.amount_out_min}u128",
-            int_to_u256_plaintext(resolved.sqrt_price_limit),
-            f"{swap_nonce}u64", f"{deadline}u32",
-            pool.token0, pool.token1,
-        ]
-        if route.program != self.program:
-            if resolved.amount_out_min <= 0:
-                raise ValueError(
-                    "routed swaps require amount_out_min > 0 — pass "
-                    "expected_out or a slippage below 100%")
-            inputs = [record, sender_proof, *inputs[1:]]
-        if multi_hop:
-            inputs = multi_hop_inputs(quote, hop_literals, record, identity, amount_in,
-                                      resolved.amount_out_min, swap_nonce, deadline,
-                                      sender_proof, route.program != self.program)
+        if route.program != self.program and resolved.amount_out_min <= 0:
+            raise ValueError(
+                "routed swaps require amount_out_min > 0 — pass "
+                "expected_out or a slippage below 100%")
         prog = await self._program(route.program)
-        bound = getattr(prog.functions, route.function)(*inputs)
+
+        def assemble(spend: str) -> Any:
+            """Bind the call for one input record; every other term is fixed above."""
+            inputs = [
+                spend, identity.blinding_factor, identity.blinded_address,
+                pool_key, resolved.zero_for_one,
+                f"{amount_in}u128", f"{resolved.amount_out_min}u128",
+                int_to_u256_plaintext(resolved.sqrt_price_limit),
+                f"{swap_nonce}u64", f"{deadline}u32",
+                pool.token0, pool.token1,
+            ]
+            if route.program != self.program:
+                inputs = [spend, sender_proof, *inputs[1:]]
+            if multi_hop:
+                inputs = multi_hop_inputs(quote, hop_literals, spend, identity, amount_in,
+                                          resolved.amount_out_min, swap_nonce, deadline,
+                                          sender_proof, route.program != self.program)
+            return getattr(prog.functions, route.function)(*inputs)
+
+        bound = assemble(record)
+        reselect = None
+        if token_record is None and self.inventory.enabled:
+            reselect = RecordReselection(candidates, assemble, self._swap_context_guard(acct, account is None))
 
         def build_result(tx_id: str, outputs: list[Any]) -> SwapHandle:
             """Assemble the swap handle, carrying the blinding secret forward.
@@ -846,7 +901,33 @@ class AsyncShieldSwap:
                 transaction_id=tx_id, program=self.program,
                 pool_keys=tuple(h.pool_key for h in quote.hops) if multi_hop else ())
 
-        return AsyncDexCall(self._aleo, bound, build_result)
+        return AsyncDexCall(self._aleo, bound, build_result, reselect=reselect)
+
+    def _swap_context_guard(self, acct: Any, from_default: bool) -> Callable[[], None]:
+        """A check that the signer, network, and journal are the ones a swap was prepared for."""
+        return swap_context_guard(self._aleo, acct, (lambda: self._account(None)) if from_default else None)
+
+    # ── Record inventory ─────────────────────────────────────────────────────
+
+    async def _underlying_program(self, token: str) -> str:
+        return underlying_program_for(await self.api.get_tokens(), token)
+
+    async def plan_inventory(self, token: str, target: InventoryTarget, *,
+                             max_transactions: Optional[int] = None, account: Any = None) -> InventoryPlan:
+        """Plan joins and splits for *token*'s underlying records (awaited). See :meth:`ShieldSwap.plan_inventory`."""
+        program = await self._underlying_program(token)
+        return await self.inventory.plan_record_inventory(
+            RecordAsset(program), target, max_transactions=max_transactions, account=account)
+
+    async def rebalance_inventory(self, token: str, target: InventoryTarget, *,
+                                  max_transactions: Optional[int] = None, timeout: float = 120.0,
+                                  poll_interval: float = 1.0, max_fee_microcredits: Optional[int] = None,
+                                  cancel: Any = None, account: Any = None) -> InventoryResult:
+        """Reshape *token*'s underlying records to *target* (awaited). See :meth:`ShieldSwap.rebalance_inventory`."""
+        plan = await self.plan_inventory(token, target, max_transactions=max_transactions, account=account)
+        return await self.inventory.rebalance_record_inventory(
+            plan, timeout=timeout, poll_interval=poll_interval,
+            max_fee_microcredits=max_fee_microcredits, cancel=cancel, account=account)
 
     async def claim_swap_output(self, handle: SwapHandle, *,
                                 timeout: float = 0.0,
