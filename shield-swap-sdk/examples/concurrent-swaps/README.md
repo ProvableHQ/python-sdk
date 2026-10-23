@@ -109,12 +109,20 @@ An explicit `token_record` is never replaced.
 
 ```python
 quote = dex.quote(token_in="USDCx", token_out="ETH", amount_in="0.1", slippage_bps=50)
-outcomes = submit_concurrent_swaps(dex, quote, count=6)
+
+def trade(index):
+    handle = dex.swap(quote).delegate(wait=False)
+    claim = dex.claim_swap_output(handle, timeout=600.0).delegate(wait=True)
+    return index, handle, claim
+
+with ThreadPoolExecutor(max_workers=6) as pool:
+    outcomes = list(pool.map(trade, range(1, 7)))
 ```
 
-`submit_concurrent_swaps` runs the swaps on a thread pool, waits for each
-successful swap's output, and claims it. One failed trade never discards a
-sibling's handle, and a failed claim keeps the handle for a later attempt.
+The script runs the swaps on a thread pool, waits for each successful swap's
+output, and claims it. In the script each trade catches its own errors, so one
+failed trade never discards a sibling's handle, and a failed claim keeps the
+handle for a later attempt.
 
 ## Keep recovery data
 
