@@ -64,4 +64,6 @@ def test_page_stays_compact():
     # graph, and the indexer's unclaimed/protocol-state views.  32k → 34k
     # (2026-10) for compliance proofs: six write methods gained a
     # ``compliance_proofs`` parameter and a one-line note on what it takes.
-    assert len(_render()) < 34_000
+    # 34k → 36k (2026-10-23) for record inventory: ``plan_inventory`` and
+    # ``rebalance_inventory`` plus the reservation note on ``swap``.
+    assert len(_render()) < 36_000

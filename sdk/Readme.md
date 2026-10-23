@@ -164,6 +164,23 @@ credits.functions.transfer_private(record, str(recipient.address), 1) \
 
 `aleo.record_provider` is swappable: set it to your own object implementing the `RecordProvider` protocol (`get_unspent_credits_record` / `find`), and the whole facade (including private-fee auto-sourcing) uses it, with no view-key sharing.
 
+### Record inventory — join, split, plan, reserve, recover
+
+One transaction spends whole records, so a large payment needs one record that covers it and several payments submitted together need one record each. `aleo.inventory` reads an asset's spendable records, plans the joins and splits that reach a target layout, and executes that plan one confirmed transaction at a time. Build the client with `record_management` enabled to make every `transact` and `delegate` reserve its record inputs before proving and save the proved transaction before broadcast; writers sharing the same store never spend the same record.
+
+```python
+from aleo.inventory import InventoryTarget, RecordAsset, RecordManagementConfig
+
+aleo = Aleo(HTTPProvider(ENDPOINT, network="testnet"),
+            record_management=RecordManagementConfig(enabled=True))
+credits = RecordAsset("credits.aleo")
+plan = aleo.inventory.plan_record_inventory(
+    credits, InventoryTarget(records=4, min_record_amount=1_000_000, distribution="balanced"))
+result = aleo.inventory.rebalance_record_inventory(plan, max_fee_microcredits=1_000_000)
+```
+
+`get_record_inventory` reads; `plan_record_inventory` plans without signing; `join_records`, `split_record`, and `auto_join` run single operations; `reconcile_record_inventory` settles pending journal entries against the chain and can rebroadcast a saved proved transaction. The journal is in memory by default; pass any object with `list`, `acquire`, and `update` as `store` for a database or file. The top-level [README](../README.md#manage-private-records) explains the choices and the recovery steps.
+
 ## Async (`AsyncAleo`)
 
 The async facade mirrors the sync surface. Construction and the local, CPU-bound steps stay synchronous; everything that touches the network is awaitable.

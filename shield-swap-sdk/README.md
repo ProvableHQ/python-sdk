@@ -53,6 +53,10 @@ It uses an in-memory account and swap handle by default; `ENABLE_JOURNAL` option
 Releases containing the example support
 `python -m aleo_shield_swap.examples.first_swap.swap`.
 
+The [concurrent-swaps example](./examples/concurrent-swaps) prepares six equal
+USDCx records and submits six swaps at once; see
+[Concurrent swaps](#concurrent-swaps) for the mechanism.
+
 ## Agents
 
 `AGENTS.md` (generated from the SDK's docstrings — always current) is the
@@ -175,6 +179,50 @@ Two conveniences trade secret material for service:
 - The hosted record scanner behind `get_private_balances` /
   `aleo.records.register` shares the account's **view key** with the
   scanning service, which can then see everything the account owns.
+
+## Concurrent swaps
+
+A private trade spends one record, so trades submitted at the same time need
+separate input records and separate blinded identities.
+
+Record management on the facade covers the records. Build the `Aleo` client
+with `record_management=RecordManagementConfig(enabled=True, store=...)` and
+every swap reserves its input record before proving. When two automatic
+selections pick the same record, the swap that loses the reservation moves to
+the next eligible record from the same scan, smallest first, before any proof
+is built. An explicit `token_record` is never replaced, and proving or
+broadcast errors are never retried.
+
+A swap journal covers the identities. `ShieldSwap.from_profile()` or
+`dex.journal = Journal(path)` issues each swap its own blinded identity and
+keeps the handle needed to claim the output.
+
+Trades need one covering record each. `dex.plan_inventory(token, target)`
+plans the joins and splits that reshape the token's underlying records, and
+`dex.rebalance_inventory(...)` executes them one confirmed transaction at a
+time through `aleo.inventory`:
+
+```python
+from aleo.inventory import InventoryTarget, RecordManagementConfig
+
+aleo = Aleo(Aleo.HTTPProvider("https://edge.provable.com/api", network="testnet"),
+            record_management=RecordManagementConfig(enabled=True))
+aleo.default_account = account
+dex = ShieldSwap(aleo)
+
+plan = dex.plan_inventory("USDCx", InventoryTarget(records=4, min_record_amount=100_000, distribution="balanced"))
+result = dex.rebalance_inventory("USDCx", InventoryTarget(records=4, min_record_amount=100_000, distribution="balanced"))
+
+quote = dex.quote(token_in="USDCx", token_out="ETH", amount_in="0.1")
+handles = [dex.swap(quote).delegate(wait=False) for _ in range(4)]   # or on a thread pool
+```
+
+Record coordination is off by default. Without it, concurrent swaps must be
+given disjoint `token_record` inputs or run in sequence. The
+[concurrent-swaps example](./examples/concurrent-swaps) runs the whole flow on
+testnet, with a file-backed reservation store and the recovery steps after an
+interruption. The SDK's [record management section](../README.md#manage-private-records)
+covers the journal, stores, and reconciliation.
 
 ## Async
 

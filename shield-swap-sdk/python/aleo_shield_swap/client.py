@@ -13,13 +13,15 @@ from dataclasses import replace
 import math
 from decimal import Decimal
 import time
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from aleo import AleoNetworkError, ProgramNotFound
 from aleo.codegen.runtime import parse_plaintext
 from aleo.compliance import FreezeListProofs, ComplianceProofContext, freezelist_program
+from aleo.inventory import InventoryPlan, InventoryResult, InventoryTarget, RecordAsset, RecordInventory
 
 from . import _generated as g
+from ._calls import RecordReselection
 from ._core import (
     _amount_to_base_units,
     decode_position_record,
@@ -36,8 +38,12 @@ from ._core import (
     parse_token_record_info,
     parse_unsigned_literal,
     read_mapping_value,
+    reserved_nonces,
     resolve_swap_params,
     select_token_record,
+    select_token_records,
+    swap_context_guard,
+    underlying_program_for,
     unreadable_airdrop_transactions,
 )
 from .api import ApiClient, ConfirmAirdropResult, api_url_for
@@ -144,6 +150,12 @@ class ShieldSwap:
         self.amm_freezelist_program: str = SHIELD_SWAP_FREEZELIST
         #: Freeze-list exclusion proofs, cached per list until its root changes.
         self.freezelist = FreezeListProofs(aleo)
+        #: Private record inventory of the bound client. Build the facade with
+        #: ``record_management=RecordManagementConfig(enabled=True, ...)`` so
+        #: trades and inventory maintenance share one reservation journal.
+        self.inventory: RecordInventory = (
+            aleo.inventory if hasattr(aleo, "inventory") else RecordInventory(aleo)
+        )
 
     def __repr__(self) -> str:
         return f"ShieldSwap(program={self.program!r}, api={self.api.base_url!r})"
@@ -699,7 +711,8 @@ class ShieldSwap:
         amount = _amount_to_base_units(amount_in, token_in_id, tokens)
         program = self._token_program(token_in_id)
         records = provider.find(acct, program=program, unspent=True)
-        return pick_covering_record(records, min_amount=amount, token_id=token_in_id) is not None
+        return pick_covering_record(records, min_amount=amount, token_id=token_in_id,
+                                    exclude_nonces=reserved_nonces(self._aleo, acct)) is not None
 
     def get_private_balances(self, programs: list[str],
                              account: Any = None) -> dict[str, int]:
@@ -941,15 +954,19 @@ class ShieldSwap:
 
         # Resolve the record-funding program lazily: an explicit record
         # needs no registry lookup (its program registration comes from
-        # token_in_program= or imports=).
+        # token_in_program= or imports=). Automatic selection keeps every
+        # eligible candidate from one scan so a reservation conflict at
+        # submission can move to the next record without rescanning.
         program = token_in_program
         record = token_record
+        candidates: list[str] = []
         if record is None:
             program = program or self._token_program(token_in_id)
-            record = select_token_record(
+            candidates = select_token_records(
                 self._aleo, program=program, min_amount=amount_in,
                 token_id=token_in_id, account=acct,
             )
+            record = candidates[0]
 
         deadline = get_deadline(self._aleo, deadline_offset_blocks)
         swap_nonce = nonce if nonce is not None else generate_swap_nonce()
@@ -986,32 +1003,41 @@ class ShieldSwap:
             compliance_proofs, wrapper_proofs, {token_in_id: program})
         sender_proof = proofs[0] if proofs else default_merkle_proofs()
 
-        # Core input order per the contract's swap entrypoint:
-        # record, blinding slots, then pool/direction/amounts/bounds/timing/tokens.
-        inputs = [
-            record,
-            identity.blinding_factor,
-            identity.blinded_address,
-            pool_key,
-            resolved.zero_for_one,
-            f"{amount_in}u128",
-            f"{resolved.amount_out_min}u128",
-            int_to_u256_plaintext(resolved.sqrt_price_limit),
-            f"{swap_nonce}u64",
-            f"{deadline}u32",
-            pool.token0,
-            pool.token1,
-        ]
-        if route.program != self.program:
-            # Router deposits the underlying, swaps, and burns the empty
-            # wrapper change record in one transaction.
-            inputs = [record, sender_proof, *inputs[1:]]
-        if multi_hop:
-            inputs = multi_hop_inputs(quote, hop_literals, record, identity, amount_in,
-                                      resolved.amount_out_min, swap_nonce, deadline,
-                                      sender_proof, route.program != self.program)
-        bound = getattr(self._program(route.program).functions,
-                        route.function)(*inputs)
+        def assemble(spend: str) -> Any:
+            """Bind the call for one input record; every other term is fixed above."""
+            # Core input order per the contract's swap entrypoint:
+            # record, blinding slots, then pool/direction/amounts/bounds/timing/tokens.
+            inputs = [
+                spend,
+                identity.blinding_factor,
+                identity.blinded_address,
+                pool_key,
+                resolved.zero_for_one,
+                f"{amount_in}u128",
+                f"{resolved.amount_out_min}u128",
+                int_to_u256_plaintext(resolved.sqrt_price_limit),
+                f"{swap_nonce}u64",
+                f"{deadline}u32",
+                pool.token0,
+                pool.token1,
+            ]
+            if route.program != self.program:
+                # Router deposits the underlying, swaps, and burns the empty
+                # wrapper change record in one transaction.
+                inputs = [spend, sender_proof, *inputs[1:]]
+            if multi_hop:
+                inputs = multi_hop_inputs(quote, hop_literals, spend, identity, amount_in,
+                                          resolved.amount_out_min, swap_nonce, deadline,
+                                          sender_proof, route.program != self.program)
+            return getattr(self._program(route.program).functions, route.function)(*inputs)
+
+        bound = assemble(record)
+        # With record management enabled, a conflict on the chosen record at
+        # submission moves to the next candidate from the same scan. An
+        # explicit token_record is never replaced.
+        reselect = None
+        if token_record is None and self.inventory.enabled:
+            reselect = RecordReselection(candidates, assemble, self._swap_context_guard(acct, account is None))
 
         def build_result(tx_id: str, outputs: list[Any]) -> SwapHandle:
             """Assemble the swap handle, carrying the blinding secret forward.
@@ -1045,7 +1071,77 @@ class ShieldSwap:
                 self.journal.record_swap(handle, counter)
             return handle
 
-        return DexCall(self._aleo, bound, build_result, build_before_wait=True)
+        return DexCall(self._aleo, bound, build_result, build_before_wait=True, reselect=reselect)
+
+    def _swap_context_guard(self, acct: Any, from_default: bool) -> Callable[[], None]:
+        """A check that the signer, network, and journal are the ones a swap was prepared for.
+
+        Run before a replacement record is bound, so a retry never carries a
+        prepared identity or quote into a different account, chain, or
+        coordination store.
+        """
+        return swap_context_guard(self._aleo, acct, (lambda: self._account(None)) if from_default else None)
+
+    # ── Record inventory ─────────────────────────────────────────────────────
+
+    def _underlying_program(self, token: str) -> str:
+        """The program whose records fund trades of *token* (symbol or on-chain id)."""
+        return underlying_program_for(self.api.get_tokens(), token)
+
+    def plan_inventory(self, token: str, target: InventoryTarget, *,
+                       max_transactions: Optional[int] = None, account: Any = None) -> InventoryPlan:
+        """Plan the joins and splits that give *token* the record layout trades need.
+
+        One trade spends one record, so several trades sold at the same time
+        need several records that each cover a trade. The plan targets the
+        token's underlying record program (the records a trader holds), not
+        the AMM wrapper. Reads the token registry, the program, and the
+        scanner; signs and reserves nothing. Review ``plan.steps`` and
+        ``plan.deduction`` before executing with :meth:`rebalance_inventory`.
+
+        Args:
+            token: Symbol such as ``"USDCx"`` or the on-chain token id.
+            target: Desired count, minimum amount in base units, and distribution.
+            max_transactions: Operation ceiling, 1 through 10000. Defaults to 100.
+            account: Signer; defaults to ``aleo.default_account``.
+
+        Raises:
+            ShieldSwapError: The token is unknown or has no underlying program.
+            InventoryPlanError: The target cannot be reached from the available records.
+
+        Example::
+
+            plan = dex.plan_inventory("USDCx", InventoryTarget(records=6, min_record_amount=100_000, distribution="balanced"))
+        """
+        program = self._underlying_program(token)
+        return self.inventory.plan_record_inventory(
+            RecordAsset(program), target, max_transactions=max_transactions, account=account,
+        )
+
+    def rebalance_inventory(self, token: str, target: InventoryTarget, *,
+                            max_transactions: Optional[int] = None, timeout: float = 120.0,
+                            poll_interval: float = 1.0, max_fee_microcredits: Optional[int] = None,
+                            cancel: Any = None, account: Any = None) -> InventoryResult:
+        """Reshape *token*'s underlying records to *target*, one confirmed transaction at a time.
+
+        Plans as :meth:`plan_inventory` does, then executes through the
+        facade's record inventory: each step reserves its inputs, proves,
+        broadcasts, and waits for the scanner to show its outputs before the
+        next step. Requires the facade to be built with record management
+        enabled. No accepted step is rolled back; an interrupted result names
+        the reason and every submitted transaction.
+
+        Example::
+
+            result = dex.rebalance_inventory("USDCx", InventoryTarget(records=6), max_fee_microcredits=5_000_000)
+            if result.status == "interrupted":
+                dex.inventory.reconcile_record_inventory()
+        """
+        plan = self.plan_inventory(token, target, max_transactions=max_transactions, account=account)
+        return self.inventory.rebalance_record_inventory(
+            plan, timeout=timeout, poll_interval=poll_interval,
+            max_fee_microcredits=max_fee_microcredits, cancel=cancel, account=account,
+        )
 
     def claim_swap_output(
         self,
@@ -1378,7 +1474,8 @@ class ShieldSwap:
                     time.sleep(3.0 * (attempt + 1))
             return pick_covering_record(records, min_amount=amount_in,
                                         token_id=token_in_id,
-                                        exclude=used_records)
+                                        exclude=used_records,
+                                        exclude_nonces=reserved_nonces(self._aleo, acct))
 
         handles: list[SwapHandle] = []
         failures: list[dict] = []

@@ -220,6 +220,64 @@ already held by the application, or assign a custom `RecordProvider` to
 `aleo.record_provider`. Choose local proving separately if transaction contents
 must also stay out of the proving service.
 
+## Manage private records
+
+A private balance is a set of records, and one transaction spends whole
+records. A large payment needs one record that covers it; several payments
+submitted at the same time need several records, one each. `aleo.inventory`
+reads an asset's spendable records, plans the joins and splits that reach a
+chosen layout, executes that plan one confirmed transaction at a time, and
+keeps writers that share a journal from spending the same record.
+
+Build the client with record management enabled so every `transact` and
+`delegate` reserves its record inputs before proving and saves the proved
+transaction before broadcast. The example below reshapes the account's private
+credits into four equal records of at least one credit each:
+
+```python
+from aleo import Aleo, HTTPProvider
+from aleo.inventory import InventoryTarget, RecordAsset, RecordManagementConfig
+
+aleo = Aleo(HTTPProvider("https://edge.provable.com/api", network="testnet"),
+            record_management=RecordManagementConfig(enabled=True))
+aleo.default_account = account
+aleo.records.register(account)  # The scanner can decrypt the account's records.
+
+credits = RecordAsset("credits.aleo")
+snapshot = aleo.inventory.get_record_inventory(credits)
+print(snapshot.balance, len(snapshot.available), len(snapshot.reserved))
+
+plan = aleo.inventory.plan_record_inventory(
+    credits, InventoryTarget(records=4, min_record_amount=1_000_000, distribution="balanced"))
+print(plan.deduction)  # Microcredits the native splits remove; network fees are separate.
+result = aleo.inventory.rebalance_record_inventory(plan, max_fee_microcredits=1_000_000)
+```
+
+Planning reads the scanner and the deployed program and submits nothing.
+Execution requires record management to be enabled. Each step reserves its
+inputs, proves, broadcasts, waits for confirmation, and waits until the scanner
+shows the exact outputs before the next step spends them. No accepted step is
+rolled back. An `interrupted` result names the reason and every submitted
+transaction. After an interruption, reconcile, rescan, and plan again; the old
+plan describes records that the completed steps have already spent.
+
+More than two records join through deployed helper programs in one
+transaction where one exists (up to 16 credits or dedicated stablecoin records,
+15 for other ARC-20 and ARC-22 tokens). `join_records`, `split_record`, and
+`auto_join` perform single operations without a plan.
+
+The default journal is in memory and lasts for one process. Supply any object
+with `list`, `acquire`, and `update` methods as `store` to share reservations
+across processes or to resume after a restart; `acquire` must reserve all of an
+entry's records or none. After an interruption, `reconcile_record_inventory()`
+checks each pending entry against the chain and, with `rebroadcast=True`,
+resubmits a saved proved transaction with its original id. A write that finds
+its record already reserved raises `RecordReservationConflictError` before any
+proof is built, so the caller can choose another record.
+
+The [Shield Swap guide](shield-swap-sdk/README.md#concurrent-swaps) shows the
+same mechanism preparing records for several trades submitted at once.
+
 ## Bridge assets
 
 Bring assets from Ethereum or Solana to Aleo for use in Aleo applications, or

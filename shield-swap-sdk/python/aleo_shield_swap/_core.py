@@ -14,11 +14,12 @@ import re
 import secrets
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from aleo.codegen.runtime import parse_plaintext
+from aleo.inventory import managed_inventory
 
-from .errors import InsufficientRecordsError
+from .errors import InsufficientRecordsError, ShieldSwapError
 from .tick_math import MAX_SQRT_RATIO_X128, MIN_SQRT_RATIO_X128, u256_to_int
 
 
@@ -218,19 +219,33 @@ def parse_unsigned_literal(raw: Optional[str], program: str, key: str) -> int:
     return int(match.group(1))
 
 
-def pick_covering_record(records: Any, *, min_amount: int,
-                         token_id: Optional[str],
-                         exclude: Optional[set[str]] = None) -> Optional[str]:
-    """Smallest unspent token-record plaintext covering *min_amount*, or None.
+_NONCE_FIELD = re.compile(r"_nonce:\s*(\d+group)")
+
+
+def record_nonce(plaintext: str) -> Optional[str]:
+    """The ``_nonce`` of a record plaintext, the identity a reservation journal uses."""
+    match = _NONCE_FIELD.search(plaintext)
+    return match.group(1) if match else None
+
+
+def token_record_candidates(records: Any, *, min_amount: int,
+                            token_id: Optional[str],
+                            exclude: Optional[set[str]] = None,
+                            exclude_nonces: Optional[set[str]] = None) -> list[str]:
+    """Eligible token-record plaintexts covering *min_amount*, smallest first.
 
     *token_id* filters registry-style records; wrapper-program records carry
-    no ``token_id`` and match any.  *exclude* skips records already assigned
-    (e.g. to earlier swaps of a concurrent batch).
+    no ``token_id`` and match any.  *exclude* skips plaintexts already
+    assigned (earlier swaps of a batch); *exclude_nonces* skips records held
+    by a reservation journal even though the scanner still reports them
+    unspent.  One scan bounds a swap's reselection attempts.
     """
     candidates: list[tuple[int, str]] = []
     for rec in records:
         plaintext = record_plaintext(rec)
         if not plaintext or (exclude and plaintext in exclude):
+            continue
+        if exclude_nonces and record_nonce(plaintext) in exclude_nonces:
             continue
         info = parse_token_record_info(plaintext)
         if info is None or info["amount"] < min_amount:
@@ -240,7 +255,20 @@ def pick_covering_record(records: Any, *, min_amount: int,
         if token_id is not None and "token_id" in info and info["token_id"] != token_id:
             continue
         candidates.append((info["amount"], plaintext))
-    return min(candidates)[1] if candidates else None
+    return [plaintext for _, plaintext in sorted(candidates)]
+
+
+def pick_covering_record(records: Any, *, min_amount: int,
+                         token_id: Optional[str],
+                         exclude: Optional[set[str]] = None,
+                         exclude_nonces: Optional[set[str]] = None) -> Optional[str]:
+    """Smallest unspent token-record plaintext covering *min_amount*, or None.
+
+    See :func:`token_record_candidates` for the filters.
+    """
+    candidates = token_record_candidates(records, min_amount=min_amount, token_id=token_id,
+                                         exclude=exclude, exclude_nonces=exclude_nonces)
+    return candidates[0] if candidates else None
 
 
 def record_plaintext(rec: Any) -> Optional[str]:
@@ -435,6 +463,96 @@ def parse_token_record_info(plaintext: str) -> Optional[dict[str, Any]]:
     return info
 
 
+def reserved_nonces(aleo: Any, account: Any = None) -> set[str]:
+    """Record nonces the client's reservation journal currently holds.
+
+    Empty when the facade was built without record management, so selection
+    behaves as before on an unmanaged client.
+    """
+    inventory = managed_inventory(aleo)
+    return set() if inventory is None else set(inventory.reserved_record_ids(account))
+
+
+def underlying_program_for(tokens: Any, token: str) -> str:
+    """The program whose records fund trades of *token*, from the token registry.
+
+    *token* is a symbol (case-insensitive) or an on-chain token id. Inventory
+    maintenance works on the underlying program a trader holds records of,
+    not on the AMM wrapper used while routing a swap.
+
+    Raises:
+        ShieldSwapError: The token is not listed or has no underlying program.
+    """
+    wanted = token.strip()
+    for tok in tokens:
+        symbol = str(getattr(tok, "symbol", "") or "")
+        if wanted == str(tok.address) or symbol.lower() == wanted.lower():
+            program = getattr(tok, "underlying_program", None)
+            if not program:
+                raise ShieldSwapError(f"Token {symbol or wanted} has no underlying record program")
+            return str(program)
+    raise ShieldSwapError(f"Unknown token {token!r}; pass a symbol or on-chain token id from api.get_tokens()")
+
+
+def swap_context_guard(aleo: Any, acct: Any, resolve_default: Optional[Callable[[], Any]]) -> Callable[[], None]:
+    """A check that a swap's signer, network, and reservation journal are unchanged.
+
+    Run before a replacement record is bound after a reservation conflict, so
+    a retry never carries a prepared identity or quote into a different
+    account, chain, or coordination store. *resolve_default* re-reads the
+    client's default account when the swap was prepared without an explicit
+    one.
+
+    Raises:
+        ShieldSwapError: From the returned check, when anything changed.
+    """
+    address = str(acct.address)
+    network = str(aleo.network_name)
+    management = getattr(aleo, "record_management", None)
+
+    def check() -> None:
+        current = resolve_default() if resolve_default is not None else acct
+        if (str(current.address) != address or str(aleo.network_name) != network
+                or getattr(aleo, "record_management", None) is not management):
+            raise ShieldSwapError("Account, chain, or record management changed during swap preparation")
+
+    return check
+
+
+def select_token_records(
+    aleo: Any,
+    *,
+    program: str,
+    min_amount: int,
+    token_id: Optional[str] = None,
+    account: Any = None,
+) -> list[str]:
+    """Every unspent record plaintext from *program* covering *min_amount*, smallest first.
+
+    Scans once via ``aleo.record_provider.find`` and skips records the
+    reservation journal holds. The list bounds how many times a swap may
+    reselect after a reservation conflict.
+
+    Raises:
+        InsufficientRecordsError: No provider is configured or no record covers the amount.
+    """
+    provider = aleo.record_provider
+    if provider is None:
+        raise InsufficientRecordsError(
+            "No record provider configured (aleo.record_provider is None) — "
+            "pass token_record= explicitly or configure a scanner."
+        )
+    records = provider.find(account, program=program, unspent=True)
+    candidates = token_record_candidates(records, min_amount=min_amount, token_id=token_id,
+                                         exclude_nonces=reserved_nonces(aleo, account))
+    if not candidates:
+        raise InsufficientRecordsError(
+            f"No unspent {program} record covers {min_amount} "
+            f"(token_id={token_id or 'any'}) — privatize funds or pass token_record=."
+        )
+    return candidates
+
+
 def select_token_record(
     aleo: Any,
     *,
@@ -446,21 +564,9 @@ def select_token_record(
     """One unspent record plaintext from *program* covering *min_amount*.
 
     Scans via ``aleo.record_provider.find`` and picks the smallest covering
-    record (leaves larger records intact for larger trades).  *token_id*
-    filters registry-style records; wrapper-program records carry no
-    ``token_id`` and match any.
+    record (leaves larger records intact for larger trades), skipping records
+    the reservation journal holds.  *token_id* filters registry-style records;
+    wrapper-program records carry no ``token_id`` and match any.
     """
-    provider = aleo.record_provider
-    if provider is None:
-        raise InsufficientRecordsError(
-            "No record provider configured (aleo.record_provider is None) — "
-            "pass token_record= explicitly or configure a scanner."
-        )
-    records = provider.find(account, program=program, unspent=True)
-    chosen = pick_covering_record(records, min_amount=min_amount, token_id=token_id)
-    if chosen is None:
-        raise InsufficientRecordsError(
-            f"No unspent {program} record covers {min_amount} "
-            f"(token_id={token_id or 'any'}) — privatize funds or pass token_record=."
-        )
-    return chosen
+    return select_token_records(aleo, program=program, min_amount=min_amount,
+                                token_id=token_id, account=account)[0]

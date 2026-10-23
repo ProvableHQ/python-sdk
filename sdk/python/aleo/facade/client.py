@@ -35,18 +35,31 @@ class Aleo:
     provider:
         A :class:`~aleo.facade.provider.HTTPProvider` instance that
         configures the underlying network connection.
+    record_management:
+        Optional :class:`~aleo.inventory.RecordManagementConfig`. With
+        ``enabled=True`` every ``transact`` and ``delegate`` on this client
+        reserves its record inputs before proving, saves the proved
+        transaction before broadcast, and journals the submission, so
+        writers sharing the store never spend the same record. ``None``
+        (the default) leaves writes unchanged; ``aleo.inventory`` still
+        reads, plans, and performs single joins or splits.
     """
 
     # Expose HTTPProvider as a nested class attribute so callers can write
     # ``Aleo.HTTPProvider(...)`` without a separate import.
     HTTPProvider = HTTPProvider
 
-    def __init__(self, provider: object) -> None:
+    def __init__(self, provider: object, *, record_management: Any = None) -> None:
         if not isinstance(provider, HTTPProvider):
             raise TypeError(
                 f"provider must be an HTTPProvider, got {type(provider).__name__}"
             )
         self._provider: HTTPProvider = provider
+        self._record_management: Any = record_management
+        # Built eagerly so every thread sharing the client sees one journal;
+        # construction reads nothing from the network.
+        from ..inventory.client import RecordInventory
+        self._inventory: Any = RecordInventory(self, record_management)
         # Access the build helper via name to avoid pyright's private-access error;
         # _build_client is intentionally package-private (single leading underscore).
         self._client: Any = provider._build_client()  # pyright: ignore[reportPrivateUsage]
@@ -139,6 +152,27 @@ class Aleo:
             ``fee_record``.
         """
         self._record_provider = provider
+
+    # ── Record inventory ─────────────────────────────────────────────────────
+
+    @property
+    def record_management(self) -> Any:
+        """The :class:`~aleo.inventory.RecordManagementConfig` this client was built with, or ``None``.
+
+        Fixed at construction so every writer sharing the client uses one
+        journal and scope. Build a new client to change it.
+        """
+        return self._record_management
+
+    @property
+    def inventory(self) -> Any:
+        """The :class:`~aleo.inventory.RecordInventory` bound to this client.
+
+        Reads, plans, joins, splits, reservations, and recovery for private
+        records, configured by ``record_management``; with no configuration it
+        reads and plans but reserves nothing.
+        """
+        return self._inventory
 
     # ── Network identity ───────────────────────────────────────────────────
 

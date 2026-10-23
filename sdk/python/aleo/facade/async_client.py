@@ -899,15 +899,51 @@ class AsyncBoundCall(PreparedCall):
         private_fee: bool = False,
         base_fee: int | None = None,
     ) -> str:
-        """Build and broadcast; return the transaction id (async)."""
-        result = await self.build_transaction(
-            account,
-            priority_fee=priority_fee,
-            fee_record=fee_record,
-            private_fee=private_fee,
-            base_fee=base_fee,
+        """Build and broadcast; return the transaction id (async).
+
+        On a client built with record management enabled, record inputs are
+        reserved before proving and the proved transaction is saved before
+        broadcast; see :meth:`~aleo.facade.call.BoundCall.transact`.
+        """
+        tx_id, _ = await self.transact_with_result(
+            account, priority_fee=priority_fee, fee_record=fee_record, private_fee=private_fee, base_fee=base_fee,
         )
-        return await self._client.network.submit_transaction(result.raw)
+        return tx_id
+
+    async def transact_with_result(
+        self,
+        account: Any = None,
+        *,
+        priority_fee: int = 0,
+        fee_record: Any = None,
+        private_fee: bool = False,
+        base_fee: int | None = None,
+    ) -> tuple[str, TransactionResult]:
+        """Build, broadcast, and also return the built transaction (async).
+
+        See :meth:`~aleo.facade.call.BoundCall.transact_with_result`.
+        """
+        from .call import _managed_inventory, _fee_record_text, _prepared_from_result  # pyright: ignore[reportPrivateUsage]
+        managed = _managed_inventory(self._client)
+        if managed is None:
+            result = await self.build_transaction(
+                account, priority_fee=priority_fee, fee_record=fee_record, private_fee=private_fee, base_fee=base_fee,
+            )
+            return await self._client.network.submit_transaction(result.raw), result
+        built: list[TransactionResult] = []
+
+        async def build(request: Any) -> Any:
+            result = await self.build_transaction(
+                account, priority_fee=priority_fee, fee_record=request.fee_record,
+                private_fee=request.private_fee, base_fee=base_fee,
+            )
+            built.append(result)
+            return _prepared_from_result(result)
+        tx_id = await managed.managed_write(
+            self.program_id, self.function_name, self.args, account=account,
+            private_fee=private_fee or fee_record is not None, fee_record=_fee_record_text(fee_record), builder=build,
+        )
+        return tx_id, built[0]
 
     async def delegate(
         self,
@@ -923,8 +959,27 @@ class AsyncBoundCall(PreparedCall):
         By default ``fee_authorization=None`` — the prover's fee master pays.
         Self-paid fees require proving locally (blocking, in ``asyncio.to_thread``).
         The only self-paid fee knob is *priority_fee*; delegate never overrides
-        the base fee.
+        the base fee. On a client built with record management enabled, a
+        broadcasting call reserves its record inputs, has the prover return
+        the transaction, saves it, and submits from this client.
         """
+        from .call import _managed_inventory, _fee_record_text, _prepared_from_payload  # pyright: ignore[reportPrivateUsage]
+        managed = _managed_inventory(self._client) if broadcast else None
+        if managed is not None:
+            payloads: list[Any] = []
+
+            async def build(request: Any) -> Any:
+                payload = await self.delegate(
+                    account, broadcast=False, pay_own_fee=pay_own_fee, fee_record=request.fee_record,
+                    priority_fee=priority_fee,
+                )
+                payloads.append(payload)
+                return _prepared_from_payload(payload)
+            await managed.managed_write(
+                self.program_id, self.function_name, self.args, account=account,
+                private_fee=fee_record is not None, fee_record=_fee_record_text(fee_record), builder=build,
+            )
+            return payloads[0]
         net = self._net()
         auth = self._build_authorization(account)
 
@@ -1021,6 +1076,10 @@ class AsyncBoundCall(PreparedCall):
         self, fee_record: Any, *, min_microcredits: int | None = None
     ) -> Any:
         net = self._net()
+        if callable(fee_record):
+            # Record management chooses the fee record once the exact fee is
+            # known; the callable reserves it and returns its plaintext.
+            fee_record = fee_record(int(min_microcredits or 0))
         if fee_record is not None:
             if isinstance(fee_record, str):
                 return net.RecordPlaintext.from_string(fee_record)
@@ -1124,17 +1183,26 @@ class AsyncAleo:
     ----------
     provider:
         An :class:`~aleo.facade.provider.HTTPProvider`.
+    record_management:
+        Optional :class:`~aleo.inventory.RecordManagementConfig`; see
+        :class:`~aleo.facade.client.Aleo`. With ``enabled=True`` every
+        awaited ``transact`` and ``delegate`` reserves its record inputs and
+        journals its progress.
     """
 
     # Expose HTTPProvider as a nested class attribute for ``AsyncAleo.HTTPProvider(...)``
     HTTPProvider = HTTPProvider
 
-    def __init__(self, provider: object) -> None:
+    def __init__(self, provider: object, *, record_management: Any = None) -> None:
         if not isinstance(provider, HTTPProvider):
             raise TypeError(
                 f"provider must be an HTTPProvider, got {type(provider).__name__}"
             )
         self._provider: HTTPProvider = provider
+        self._record_management: Any = record_management
+        # Built eagerly so every task sharing the client sees one journal.
+        from ..inventory.client import AsyncRecordInventory
+        self._inventory: Any = AsyncRecordInventory(self, record_management)
         # Async network client (httpx-based)
         self._async_client: Any = provider._build_async_client()  # pyright: ignore[reportPrivateUsage]
         self._process: Any = None  # lazy
@@ -1212,6 +1280,18 @@ class AsyncAleo:
             private fees require an explicit ``fee_record``.
         """
         self._record_provider = provider
+
+    # ── Record inventory ─────────────────────────────────────────────────────
+
+    @property
+    def record_management(self) -> Any:
+        """The :class:`~aleo.inventory.RecordManagementConfig` this client was built with, or ``None``."""
+        return self._record_management
+
+    @property
+    def inventory(self) -> Any:
+        """The :class:`~aleo.inventory.AsyncRecordInventory` bound to this client."""
+        return self._inventory
 
     # ── Network identity (sync — local) ────────────────────────────────────
 

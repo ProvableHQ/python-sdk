@@ -337,6 +337,10 @@ class BoundCall(PreparedCall):
         private fee is requested but no record can be sourced.
         """
         net = self._net()
+        if callable(fee_record):
+            # Record management chooses the fee record once the exact fee is
+            # known; the callable reserves it and returns its plaintext.
+            fee_record = fee_record(int(min_microcredits or 0))
         if fee_record is not None:
             if isinstance(fee_record, str):
                 return net.RecordPlaintext.from_string(fee_record)
@@ -457,19 +461,63 @@ class BoundCall(PreparedCall):
     ) -> str:
         """Build the transaction (:meth:`build_transaction`) and broadcast it.
 
+        On a client built with record management enabled, the call's record
+        inputs are reserved before proving, the proved transaction is saved
+        before broadcast, and a private fee record is chosen and reserved
+        once the exact fee is known. A record another writer holds raises
+        :class:`~aleo.inventory.RecordReservationConflictError` before any
+        proof is built.
+
         Returns
         -------
         str
             The transaction id returned by the node.
         """
-        result = self.build_transaction(
-            account,
-            priority_fee=priority_fee,
-            fee_record=fee_record,
-            private_fee=private_fee,
-            base_fee=base_fee,
+        return self.transact_with_result(
+            account, priority_fee=priority_fee, fee_record=fee_record, private_fee=private_fee, base_fee=base_fee,
+        )[0]
+
+    def transact_with_result(
+        self,
+        account: Any = None,
+        *,
+        priority_fee: int = 0,
+        fee_record: Any = None,
+        private_fee: bool = False,
+        base_fee: int | None = None,
+    ) -> tuple[str, TransactionResult]:
+        """Build, broadcast, and also return the built transaction.
+
+        The same as :meth:`transact`, for callers that read the transaction's
+        outputs without waiting for confirmation. The returned result is the
+        transaction as proved locally; on a managed client it is also the
+        transaction saved to the journal before broadcast.
+
+        Returns
+        -------
+        tuple[str, TransactionResult]
+            The transaction id returned by the node and the built transaction.
+        """
+        managed = _managed_inventory(self._client)
+        if managed is None:
+            result = self.build_transaction(
+                account, priority_fee=priority_fee, fee_record=fee_record, private_fee=private_fee, base_fee=base_fee,
+            )
+            return self._client.network.submit_transaction(result.raw), result
+        built: list[TransactionResult] = []
+
+        def build(request: Any) -> Any:
+            result = self.build_transaction(
+                account, priority_fee=priority_fee, fee_record=request.fee_record,
+                private_fee=request.private_fee, base_fee=base_fee,
+            )
+            built.append(result)
+            return _prepared_from_result(result)
+        tx_id = managed.managed_write(
+            self.program_id, self.function_name, self.args, account=account,
+            private_fee=private_fee or fee_record is not None, fee_record=_fee_record_text(fee_record), builder=build,
         )
-        return self._client.network.submit_transaction(result.raw)
+        return tx_id, built[0]
 
     # ── Verb: delegate (the flagship DPS path) ──────────────────────────────
 
@@ -511,7 +559,28 @@ class BoundCall(PreparedCall):
         -------
         Any
             The prover's result payload (the data dict) from the DPS.
+
+        On a client built with record management enabled, a broadcasting
+        call asks the prover not to broadcast, reserves the record inputs
+        before proving, saves the returned transaction, and submits it from
+        this client; the payload then carries the proved ``transaction``.
         """
+        managed = _managed_inventory(self._client) if broadcast else None
+        if managed is not None:
+            payloads: list[Any] = []
+
+            def build(request: Any) -> Any:
+                payload = self.delegate(
+                    account, broadcast=False, pay_own_fee=pay_own_fee, fee_record=request.fee_record,
+                    priority_fee=priority_fee,
+                )
+                payloads.append(payload)
+                return _prepared_from_payload(payload)
+            managed.managed_write(
+                self.program_id, self.function_name, self.args, account=account,
+                private_fee=fee_record is not None, fee_record=_fee_record_text(fee_record), builder=build,
+            )
+            return payloads[0]
         net = self._net()
         auth = self._build_authorization(account)
 
@@ -544,6 +613,30 @@ class BoundCall(PreparedCall):
 
         request = net.ProvingRequest(auth, fee_authorization, bool(broadcast))
         return self._client.network_client.submit_proving_request(request)
+
+
+# ── Record management hook helpers (shared with the async client) ────────────
+
+
+def _managed_inventory(client: Any) -> Any:
+    """The client's inventory when record management is enabled, else ``None``."""
+    from ..inventory.client import managed_inventory
+    return managed_inventory(client)
+
+
+def _fee_record_text(fee_record: Any) -> str | None:
+    """A caller's preferred fee record as plaintext, for the journal's selector."""
+    return None if fee_record is None else str(fee_record)
+
+
+def _prepared_from_result(result: Any) -> Any:
+    from ..inventory.client import prepared_from_result
+    return prepared_from_result(result)
+
+
+def _prepared_from_payload(payload: Any) -> Any:
+    from ..inventory.client import prepared_from_payload
+    return prepared_from_payload(payload)
 
 
 __all__ = [
