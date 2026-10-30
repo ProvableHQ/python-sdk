@@ -305,7 +305,7 @@ def _recover_from_state(bridge: Any, state: LiveState, *, benchmark: LiveBenchma
 def _drive(bridge: Any, progress: Any, state: LiveState, state_path: Path, *, spec: CaseSpec,
            secret_nonce: str | None, benchmark: LiveBenchmark, save: Callable[[Any], None],
            wait_timeout_seconds: float, wait_poll_seconds: float,
-           log: Callable[[str], None]) -> Any:
+           log: Callable[[str], None], derived_nonce: bool = False) -> Any:
     """``wait`` / ``resume`` / ``complete`` until the transfer is done. Never calls ``execute``.
 
     A ``failed`` verdict whose receipt says ``dropped`` (the source transaction was replaced or
@@ -326,7 +326,7 @@ def _drive(bridge: Any, progress: Any, state: LiveState, state_path: Path, *, sp
             benchmark.mark("resume-returned")
             continue
         if progress.next == "complete":
-            if not secret_nonce:
+            if not secret_nonce and not derived_nonce:
                 raise LiveCaseError(
                     "The private mint needs the secret nonce kept beside this case's state file; "
                     "it is missing, so the mint cannot be completed here")
@@ -432,7 +432,8 @@ def _evm_transfer_tx(bridge: Any, asset: Asset, recipient: str, amount_atomic: i
 def run_case(bridge: Any, case: str, route_id: str, *, state_path: Path | str, recipient: str | None = None,
              amount: str | None = None, execute: bool, benchmark: LiveBenchmark | None = None,
              wait_timeout_seconds: float = WAIT_TIMEOUT_SECONDS, wait_poll_seconds: float = WAIT_POLL_SECONDS,
-             stop_after_execute: bool = False, log: Callable[[str], None] = print) -> LiveState:
+             stop_after_execute: bool = False, derived_nonce: bool = False,
+             log: Callable[[str], None] = print) -> LiveState:
     """Run one case over one route, resuming from ``state_path``. See the module docstring for the flow.
 
     ``stop_after_execute=True`` returns as soon as the source transaction is on chain and its
@@ -460,16 +461,18 @@ def run_case(bridge: Any, case: str, route_id: str, *, state_path: Path | str, r
     benchmark.mark("plan-prepared")
 
     # The private-mint nonce is created only when we are actually going to deposit: a quote-only
-    # rehearsal leaves no secret file behind. An existing one is always reused.
+    # rehearsal leaves no secret file behind. An existing one is always reused. A ``derived_nonce``
+    # case supplies none at all: the bridge derives it for its own account and keeps it beside the
+    # journal, which is exactly what the case verifies.
     secret_nonce = None
-    if spec.private_mint:
+    if spec.private_mint and not derived_nonce:
         secret_nonce = ensure_secret_nonce(state_path) if execute else load_secret_nonce(state_path)
-        state.secret_nonce_present = secret_nonce is not None
+    state.secret_nonce_present = secret_nonce is not None
 
     progress = None
     if state.checkpoint is None:
         quote = bridge.quote(route=route, amount=amount, recipient=recipient, sender=sender,
-                             mint_mode=spec.mint_mode, secret_nonce=secret_nonce or "0scalar")
+                             mint_mode=spec.mint_mode, secret_nonce=secret_nonce)
         benchmark.mark("quote-returned")
         print_quote(bridge, quote, case=case, route_id=route_id, log=log)
         balances = precheck(bridge, quote, case=case, log=log)
@@ -532,7 +535,7 @@ def run_case(bridge: Any, case: str, route_id: str, *, state_path: Path | str, r
 
     progress = _drive(bridge, progress, state, state_path, spec=spec, secret_nonce=secret_nonce,
                       benchmark=benchmark, save=save, wait_timeout_seconds=wait_timeout_seconds,
-                      wait_poll_seconds=wait_poll_seconds, log=log)
+                      wait_poll_seconds=wait_poll_seconds, log=log, derived_nonce=derived_nonce)
     benchmark.mark("destination-delivered")
 
     receipt = progress.receipt
