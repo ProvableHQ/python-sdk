@@ -223,11 +223,17 @@ still in flight and check again later.
 ### Private mints and the secret nonce
 
 6. `mint_mode="private"` (USDC → USDCx) commits `(recipient, secret_nonce)` on
-   Ethereum.  The same `secret_nonce` is required by `complete`; the SDK
-   **never stores** it and checkpoints exclude it (and every other secret).
-   Tell the user to keep it (the default `0scalar` needs no storage but adds
-   no entropy).  Only the recipient's Aleo key can complete a private mint —
-   make sure the recipient IS the configured Aleo address before depositing.
+   Ethereum, and `complete` must reveal the same nonce.  When the recipient IS
+   the bridge's own Aleo address and a journal directory is bound (the
+   profile's, or `BRIDGE_CHECKPOINT_DIR`), the bridge derives the nonce from
+   the account's view key the way the Shield wallet does, keeps it in
+   `.private-mint-identities.json` beside the journal, and re-derives it if
+   that file is lost — no `secret_nonce` is needed anywhere.  A user-supplied
+   `secret_nonce` overrides that: the SDK **never stores** it and checkpoints
+   exclude it (and every other secret), so tell the user to keep it for
+   `complete` (the default `0scalar` adds no entropy).  A deposit to any other
+   recipient needs a supplied nonce — only the recipient's Aleo key can
+   complete a private mint, so confirm the recipient before depositing.
 7. Aleo-origin Hyperlane transfers spend PUBLIC balances: `unshield` a private
    record first.  Hyperlane delivers into public balances; `shield` afterwards
    if the user wants privacy.  Private xReserve burns spend records directly.

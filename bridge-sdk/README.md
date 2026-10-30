@@ -259,8 +259,9 @@ if progress.next == "resume":
 ```
 
 A Private Bridge USDCx deposit needs the recipient to claim the funds with
-their Aleo account and original secret nonce. The [USDC Bridging Guide](#usdc-bridging-guide)
-explains that choice and the `complete` call used to claim.
+their Aleo account; the bridge derives and keeps the claim nonce for its own
+account. The [USDC Bridging Guide](#usdc-bridging-guide) explains that choice
+and the `complete` call used to claim.
 
 ## Recover Funds
 
@@ -336,12 +337,14 @@ funds. It does not authorize those actions. Follow `progress.next`:
 | --- | --- |
 | `wait` | Call `bridge.wait(progress)` to continue monitoring. |
 | `resume` | Call `bridge.resume(progress)` to submit the unfinished source operation. |
-| `complete` | Call `bridge.complete(progress, secret_nonce=secret_nonce)` to mint private USDCx on Aleo. |
+| `complete` | Call `bridge.complete(progress)` to mint private USDCx on Aleo (add `secret_nonce=` only if you supplied one at deposit). |
 | `done` | Delivery is complete; no further action is needed. |
 | `failed` | Inspect `progress.error` before deciding what to do. |
 
-`resume` and `complete` can submit transactions. A private USDCx mint requires
-the original secret nonce, which must be stored separately from the journal.
+`resume` and `complete` can submit transactions. A private USDCx mint deposited
+under a nonce you supplied requires that same nonce, which must be stored
+separately from the journal; a derived nonce is found again from the identities
+file beside the journal or re-derived from the account's view key.
 **Do not call `execute` again after an ambiguous submission.** A timeout or lost
 RPC response does not establish that the original transaction failed.
 
@@ -429,9 +432,10 @@ above supplies the same transfer details that a journal would have retained.
 Other routes may need additional information:
 
 - **Private USDCx deposits:** recover the original commitment data from the
-  Ethereum deposit and retain the original secret nonce for the claim. A lost
-  nonce cannot be reconstructed from public chain data; the recipient cannot
-  complete the claim through this flow without it.
+  Ethereum deposit. A nonce the bridge derived is re-derived from the account's
+  view key at claim time. A nonce the application supplied cannot be
+  reconstructed from public chain data; the recipient cannot complete the
+  claim through this flow without it.
 - **Aleo-origin transfers:** recovery can track source confirmation, but some
   delivery checks depend on the destination balance recorded before submission.
   Without that information, confirm receipt on the destination chain; the SDK
@@ -444,9 +448,11 @@ The SDK does not yet reconstruct every route from a transaction hash alone.
 The example above applies specifically to confirmed Ethereum-to-Aleo Hyperlane
 transfers; do not reuse its recovery data for a different route.
 
-Keep any private-mint nonce separately: restoring a checkpoint cannot replace
-that claim secret. Checkpoints exclude private keys and private record
-plaintext, but can include an authorized Aleo transaction awaiting broadcast.
+Keep any private-mint nonce you supplied yourself separately: restoring a
+checkpoint cannot replace that claim secret. Derived nonces sit beside the
+journal in `.private-mint-identities.json`; back it up with the journal.
+Checkpoints exclude private keys and private record plaintext, but can include
+an authorized Aleo transaction awaiting broadcast.
 Protect the journal accordingly. Applications with existing storage can save
 checkpoints from `on_checkpoint` using `checkpoint.to_json()`.
 
@@ -535,33 +541,22 @@ Private Bridge conceals the recipient's Aleo address in the Ethereum deposit
 and delivers funds as a private balance. Unlike automatic delivery, it requires
 the recipient to claim the funds before spending them.
 
-The flow has three stages: retain a secret nonce, submit the deposit using
-that nonce, and claim the USDCx when it is ready. The nonce is a random value
-used to conceal the address; the claim requires both the original nonce and
-the recipient's Aleo account.
-
-**Save the nonce before sending funds and retain it until the claim completes.**
-Losing it prevents the recipient from completing the claim through this flow.
-The bridge journal does not save it, so restoring the journal alone is not
-enough. The default `0scalar` provides no secrecy; use a securely generated
-nonce for this option.
-
-This is an alternative to the automatic delivery example above. Store the
-nonce as an Aleo scalar literal in `BRIDGE_MINT_SECRET_NONCE`. The example uses
-the configured Aleo account as the recipient, so that account can claim the
-funds later. Request a quote with `mint_mode="private"`:
+The deposit commits the recipient to a secret nonce, and the claim reveals that
+nonce. When the recipient is the bridge's own Aleo account and the client keeps
+a journal (`Bridge.from_profile()`, or `checkpoints=FileCheckpointStore(...)`),
+the bridge derives the nonce from the account's view key the way the Shield
+wallet does, keeps it beside the journal, and supplies it again at claim time.
+Nothing needs to be saved by hand. Request a quote with `mint_mode="private"`:
 
 ```python
-secret_nonce = os.environ["BRIDGE_MINT_SECRET_NONCE"]  # Aleo scalar: decimal digits + "scalar".
 private_quote = bridge.quote(
     source_chain="ethereum",
     source_asset="usdc",
     destination_chain="aleo",
     destination_asset="usdcx",
     amount="2",  # 2 USDC, not 2 atomic units.
-    recipient=bridge.aleo_address(),
+    recipient=bridge.aleo_address(),  # The bridge's own account: the nonce is derived for it.
     mint_mode="private",
-    secret_nonce=secret_nonce,
 )
 print(private_quote.fees)  # Review Ethereum fees before submitting.
 print(private_quote.amount_out)  # Expected USDCx amount in display units.
@@ -573,19 +568,48 @@ ready. Claiming requires the recipient to authorize an Aleo transaction and
 can incur an Aleo fee:
 
 ```python
-private_progress = bridge.execute(private_quote.plan, secret_nonce=secret_nonce)
+private_progress = bridge.execute(private_quote.plan)
 private_progress = bridge.wait(private_progress)
 
 if private_progress.next == "complete":  # The deposit is ready for the recipient to claim.
-    private_progress = bridge.complete(private_progress, secret_nonce=secret_nonce)
+    private_progress = bridge.complete(private_progress)
     private_progress = bridge.wait(private_progress)
 
 print(private_progress.next, private_progress.error)  # done None after the claim confirms.
 ```
 
+Derived nonces live in `.private-mint-identities.json` inside the journal
+directory, with a `.counter` file beside it. Treat both like a view key: the
+file holds the secrets that open the deposits, so protect it and back it up
+with the journal. Losing it does not lose the funds. The claim re-derives the
+nonce from the view key by counting up, then saves it again. Pass
+`private_mint_identities=` to `Bridge(...)` to keep the identities elsewhere.
+
+#### Bring your own nonce
+
+Pass `secret_nonce=` to deposit under a nonce the application manages. This is
+required when the recipient is not the bridge's own account, since only the
+recipient's wallet should hold its secrets, and useful when an application keeps
+its own secret store. The same value must come back on `execute`, `resume` and
+`complete`; the bridge never stores a supplied nonce and the journal excludes
+it. Generate it with `str(aleo.mainnet.Scalar.random())` and save it before
+sending funds. The default `0scalar` provides no secrecy.
+
+```python
+secret_nonce = os.environ["BRIDGE_MINT_SECRET_NONCE"]  # Aleo scalar: decimal digits + "scalar".
+private_quote = bridge.quote(
+    source_chain="ethereum", source_asset="usdc",
+    destination_chain="aleo", destination_asset="usdcx",
+    amount="2", recipient=recipient, mint_mode="private", secret_nonce=secret_nonce,
+)
+private_progress = bridge.wait(bridge.execute(private_quote.plan, secret_nonce=secret_nonce))
+if private_progress.next == "complete":
+    private_progress = bridge.wait(bridge.complete(private_progress, secret_nonce=secret_nonce))
+```
+
 If the application closes or monitoring times out, the deposit may still be
-in progress. Recover the existing transfer rather than sending USDC again.
-Keep the same nonce for any remaining deposit or claim step; see
+in progress. Recover the existing transfer rather than sending USDC again; a
+supplied nonce must be given again for any remaining deposit or claim step. See
 [Recover Funds](#recover-funds).
 
 ## Shielding Assets
@@ -921,7 +945,7 @@ does not prove delivery: the matching message event and exact USDC mint are requ
 
 For Arc → Aleo, select `source_chain="arc"`, `source_asset="usdc"`, and
 `destination_chain="aleo"`; public, record, and private mint modes work as on
-Ethereum. Private mint completion still requires the original secret nonce.
+Ethereum, including the derived claim nonce for the bridge's own account.
 Aleo → Arc burns use domain 26, enforce a two-USDCx minimum, and fetch a live
 withdrawal fee estimate again before proving. Provider errors are surfaced instead
 of presenting a static estimate as current. Public outbound xReserve delivery is

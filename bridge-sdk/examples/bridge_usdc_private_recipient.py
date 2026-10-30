@@ -3,7 +3,9 @@
 Choose Private Bridge when the Ethereum deposit should conceal the Aleo
 recipient. The Ethereum sender and amount remain public. Unlike automatic
 private-record delivery, this option requires the recipient to claim USDCx
-with the original secret nonce and Aleo account. Save that nonce before sending.
+with the recipient's Aleo account. The bridge derives the claim nonce from that
+account's view key and keeps it beside the journal, so nothing needs saving by
+hand; set BRIDGE_MINT_SECRET_NONCE to deposit under a nonce you manage instead.
 """
 import os
 import sys
@@ -40,12 +42,12 @@ def main(argv=None):
     store = FileCheckpointStore(args.journal) if args.execute else None
     bridge = Bridge(aleo, ethereum=ethereum, checkpoints=store)
     # The nonce conceals the Aleo address in the Ethereum deposit and unlocks the later claim.
-    # Retain the securely generated value separately BEFORE depositing; the journal omits it.
-    # Losing it prevents completion of the private claim through this flow.
-    nonce = os.environ.get("BRIDGE_MINT_SECRET_NONCE")
-    if not nonce:
-        parser.error("Set BRIDGE_MINT_SECRET_NONCE to the securely generated and saved Aleo scalar.")
-    if str(mainnet.Scalar.from_string(nonce)) == "0scalar":
+    # Left unset, the bridge derives it from the recipient account's view key and keeps it in
+    # .private-mint-identities.json beside the journal (re-deriving it if that file is lost).
+    # Set BRIDGE_MINT_SECRET_NONCE to use a nonce you manage: then retain it yourself BEFORE
+    # depositing, because the journal omits it and the claim needs the same value.
+    nonce = os.environ.get("BRIDGE_MINT_SECRET_NONCE") or None
+    if nonce and str(mainnet.Scalar.from_string(nonce)) == "0scalar":
         parser.error("The nonce must be a securely generated, nonzero scalar.")
     if args.execute and args.recipient != bridge.aleo_address():
         parser.error("ALEO_PRIVATE_KEY must belong to --recipient for this example's claim.")
@@ -82,7 +84,8 @@ def main(argv=None):
     if progress.next == "wait":
         progress = bridge.wait(progress, timeout_seconds=args.timeout)
     # "complete" means the deposit is ready to claim. The recipient signs an Aleo
-    # transaction using the same nonce; retain enough Aleo credits for its fee.
+    # transaction with the nonce the deposit committed to (derived again from the view key, or
+    # the value you supplied); retain enough Aleo credits for its fee.
     if progress.next == "complete":
         progress = bridge.complete(
             progress, secret_nonce=nonce,
@@ -102,7 +105,7 @@ def main(argv=None):
     if progress.next == "resume":
         print("Recover this journal entry with --action resume to finish the source submission.")
     elif progress.next == "complete":
-        print("Recover with --action complete and the original nonce to claim private USDCx.")
+        print("Recover with --action complete to claim private USDCx (pass the original nonce if you supplied one).")
     return 2  # Pending or awaiting another action, not a reason to deposit again.
 
 
