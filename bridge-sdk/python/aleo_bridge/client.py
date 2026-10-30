@@ -520,14 +520,23 @@ class Bridge:
     def from_profile(cls, home: Any = None, *, network: str | None = None, endpoint: str | None = None,
                      ethereum: Any = None, solana: Any = None, evm: Any = None) -> "Bridge":
         """The client for the local profile (spec §3.4), created on first use. *network*/*endpoint* apply only when
-        creating. Side-chain connections come from the arguments or the same env variables as ``from_env``."""
+        creating. Side-chain connections come from the arguments or the same env variables as ``from_env``;
+        a chain neither names falls back to a read-only connection over the profile's ``rpc_urls``."""
         kwargs = {k: v for k, v in (("network", network), ("endpoint", endpoint)) if v is not None}
         profile = Profile.load_or_create(home, **kwargs)
         aleo = build_aleo(profile.endpoint, profile.network, profile.private_key,
                           api_key=os.environ.get("ALEO_API_KEY"), consumer_id=os.environ.get("ALEO_CONSUMER_ID"))
         evm = _evm_connections.from_env(evm, environment=aleo.network_name)
-        bridge = cls(aleo, ethereum=ethereum if ethereum is not None else
-                     ethereum_from_env() if _evm_connections.needs_legacy_environment(evm) else None, evm=evm,
+        if ethereum is None and _evm_connections.needs_legacy_environment(evm):
+            ethereum = ethereum_from_env()
+        ethereum_chain = "ethereum" if aleo.network_name == "mainnet" else "sepolia"
+        for chain_id, url in getattr(profile, "rpc_urls", {}).items():       # lowest priority: profile URLs
+            if chain_id == ethereum_chain:
+                if ethereum is None and ethereum_chain not in evm:
+                    ethereum = Ethereum(url)
+            elif chain_id not in evm:
+                evm[chain_id] = Ethereum(url)
+        bridge = cls(aleo, ethereum=ethereum, evm=evm,
                      solana=solana if solana is not None else solana_from_env(),
                      checkpoints=_checkpoints_for_profile(profile))
         bridge.profile = profile

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -51,9 +52,11 @@ class Profile:
 
     @classmethod
     def load_or_create(cls, home: "Path | str | None" = None, *, network: str = "mainnet",
-                       endpoint: str = DEFAULT_ENDPOINT) -> "Profile":
+                       endpoint: str = DEFAULT_ENDPOINT, rpc_urls: "Mapping[str, str] | None" = None) -> "Profile":
         if network not in NETWORKS:
             raise ConfigurationError(f"Profile network must be one of {NETWORKS}, got {network!r}")
+        for chain_id, url in (rpc_urls or {}).items():
+            _check_rpc_url(chain_id, url)
         home_path = Path(home).expanduser() if home is not None else cls.default_home()
         path = home_path / _PROFILE
         if path.exists():
@@ -67,6 +70,8 @@ class Profile:
                 home_path.chmod(0o700)              # mkdir's mode is subject to umask; make it exact
             private_key, address = _initial_key(network)
             data = {"address": address, "private_key": private_key, "network": network, "endpoint": endpoint}
+            if rpc_urls:
+                data["rpc_urls"] = dict(rpc_urls)
             try:
                 fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             except FileExistsError:
@@ -102,6 +107,29 @@ class Profile:
     def checkpoint_dir(self) -> Path:
         """Directory plan 4 binds as ``FileCheckpointStore``; created with the profile."""
         return self.home / _CHECKPOINTS
+
+    @property
+    def rpc_urls(self) -> dict[str, str]:
+        """Read-only RPC URLs per registry chain id, used by ``Bridge.from_profile`` for chains with no other
+        connection (pause-switch reads on the far side of an Aleo-origin route). URLs only; never a key."""
+        return dict(self._data.get("rpc_urls", {}))
+
+    def set_rpc_url(self, chain_id: str, url: str) -> None:
+        """Persist *url* for *chain_id* (explicit ``ethereum=``/``evm=`` arguments and env variables still win)."""
+        _check_rpc_url(chain_id, url)
+        self._data.setdefault("rpc_urls", {})[chain_id] = url
+        path = self.home / _PROFILE
+        tmp = path.with_suffix(".json.tmp")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as handle:
+            handle.write(json.dumps(self._data, indent=1))
+        os.replace(tmp, path)
+        path.chmod(0o600)
+
+
+def _check_rpc_url(chain_id: str, url: str) -> None:
+    if not isinstance(url, str) or not url.startswith(("https://", "http://")):
+        raise ConfigurationError(f"RPC URL for {chain_id!r} must start with https:// (or http:// for a local node), got {url!r}")
 
 
 __all__ = ["DEFAULT_ENDPOINT", "Profile"]
