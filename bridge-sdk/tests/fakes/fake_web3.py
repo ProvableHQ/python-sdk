@@ -28,6 +28,8 @@ SELECTORS = {
     keccak(text="quoteTransferRemote(uint32,bytes32,uint256)")[:4]: "quoteTransferRemote",
     keccak(text="delivered(bytes32)")[:4]: "delivered",
 }
+# Hyperlane Mailbox hook / ISM tree getters the pause reader walks; unscripted, they answer the zero address.
+_TREE_GETTERS = {keccak(text=sig)[:4] for sig in ("defaultHook()", "requiredHook()", "defaultIsm()", "hooks(uint32)", "module(uint32)")}
 TOPIC_DISPATCH_ID = "0x" + keccak(text="DispatchId(bytes32)").hex()
 TOPIC_SENT_TRANSFER_REMOTE = "0x" + keccak(text="SentTransferRemote(uint32,bytes32,uint256)").hex()
 TOPIC_DEPOSITED_TO_REMOTE = "0x" + keccak(
@@ -342,6 +344,10 @@ class FakeRpcProvider(BaseProvider):
         if name == "delivered":
             (message_id,) = decode(["bytes32"], args)
             return "0x" + encode(["bool"], [("0x" + message_id.hex()) in self.delivered]).hex()
+        if data[:4] == bytes.fromhex("5c975abb"):            # paused(): every unscripted contract is unpaused
+            return "0x" + encode(["bool"], [False]).hex()
+        if data[:4] in _TREE_GETTERS:                        # Mailbox hook / ISM getters: nothing configured
+            return "0x" + encode(["address"], [ZERO_ADDRESS]).hex()
         raise NotImplementedError(f"eth_call selector {data[:4].hex()} to {to}")
 
 

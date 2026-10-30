@@ -172,6 +172,8 @@ def _walk(w3: Any, address: str, *, far_domain: int, kind: str, depth: int, slee
     pausable member. Routing nodes resolve *far_domain*; aggregation nodes expand their members."""
     if depth > TREE_DEPTH_LIMIT:
         raise _TreeTooDeep(address)
+    if int(address, 16) == 0:
+        return                                  # nothing configured at this slot (no hook / no ISM for the domain)
     if kind == "hook":
         node_type = _evm_call(w3, address, "hookType", sleep=sleep)
         if node_type in (HOOK_ROUTING, HOOK_FALLBACK_ROUTING):
