@@ -17,7 +17,10 @@ Assumption stated once: the deployed Solana warp programs match Hyperlane's publ
 from __future__ import annotations
 
 import time
-from typing import Callable, Sequence, TypeVar
+from typing import Any, Callable, Sequence, TypeVar
+
+from .errors import ConfigurationError
+from .types import PauseSwitch
 
 T = TypeVar("T")
 
@@ -57,4 +60,51 @@ def rotate(urls: Sequence[str], attempt: int) -> str:
     return urls[attempt % len(urls)]
 
 
-__all__ = ["BACKOFF_SECONDS", "IMMEDIATE_RETRIES", "ReadFailed", "read_with_retry", "rotate"]
+# ── Aleo ─────────────────────────────────────────────────────────────────────
+
+def _aleo_mapping_value(bridge: Any, program: str, mapping: str, key: str, sleep: Callable[[float], None]) -> str | None:
+    """The mapping value, after confirming the program declares *mapping*.
+
+    The node answers ``null`` for a missing key, for a mapping the program never declared and for a
+    program that does not exist, so a typo in a pinned mapping name would read as "open" forever.
+    Checking the declared list first turns that into a ``ConfigurationError``.
+    """
+    from aleo.facade.errors import ProgramNotFound
+
+    def declared(_attempt: int) -> list[str]:
+        try:
+            return list(bridge.program(program).mappings())
+        except ProgramNotFound:
+            return []
+    if mapping not in read_with_retry(declared, sleep=sleep):
+        raise ConfigurationError(
+            f"{program} does not declare mapping {mapping!r}; the registry pins a program this node does not serve")
+    return read_with_retry(lambda _attempt: bridge.mapping_value(program, mapping, key), sleep=sleep)
+
+
+def read_aleo_flag(bridge: Any, *, chain_id: str, side: str, program: str, mapping: str, key: str,
+                   sleep: Callable[[float], None] = time.sleep) -> PauseSwitch:
+    """A boolean pause mapping (``pause[true]``, ``paused[true]``, the ARC-20 ``pause__[false]``): ``true`` is paused."""
+    switch = f"{mapping}[{key}]"
+    try:
+        value = _aleo_mapping_value(bridge, program, mapping, key, sleep)
+    except ReadFailed as exc:
+        return PauseSwitch(chain_id, side, program, switch, "unknown", str(exc))
+    if value not in (None, "true", "false"):
+        raise ConfigurationError(f"{program}.{switch} expected a boolean literal, got {value!r}")
+    return PauseSwitch(chain_id, side, program, switch, "paused" if value == "true" else "open", value)
+
+
+def read_aleo_remote_router(bridge: Any, *, chain_id: str, side: str, program: str, domain: int,
+                            sleep: Callable[[float], None] = time.sleep) -> PauseSwitch:
+    """The warp program's enrolled router for *domain*; a missing entry means the operator un-enrolled the route."""
+    switch = f"remote_routers[{domain}u32]"
+    try:
+        value = _aleo_mapping_value(bridge, program, "remote_routers", f"{domain}u32", sleep)
+    except ReadFailed as exc:
+        return PauseSwitch(chain_id, side, program, switch, "unknown", str(exc))
+    return PauseSwitch(chain_id, side, program, switch, "open" if value is not None else "paused", value)
+
+
+__all__ = ["BACKOFF_SECONDS", "IMMEDIATE_RETRIES", "ReadFailed", "read_aleo_flag", "read_aleo_remote_router",
+           "read_with_retry", "rotate"]
