@@ -176,7 +176,7 @@ def test_from_env_side_chain_variables(monkeypatch, tmp_path):
                 "BRIDGE_CHECKPOINT_DIR"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("EVM_PRIVATE_KEY", "0x" + "11" * 32)
-    with pytest.raises(ConfigurationError, match="both EVM_PRIVATE_KEY and ETHEREUM_RPC_URL"):
+    with pytest.raises(ConfigurationError, match="EVM_PRIVATE_KEY is set but ETHEREUM_RPC_URL"):
         Bridge.from_env()
     monkeypatch.setenv("ETHEREUM_RPC_URL", "https://eth.example")
     bridge = Bridge.from_env()                                   # plan 2: real Ethereum connection now constructed

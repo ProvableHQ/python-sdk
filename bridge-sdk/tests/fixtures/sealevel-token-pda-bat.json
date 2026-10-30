@@ -1,0 +1,7 @@
+{
+ "_source": "api.mainnet-beta.solana.com getAccountInfo (base64); layout hyperlane-monorepo 45c0988 hyperlane-sealevel-token HyperlaneToken<T>",
+ "pubkey": "DLMYtaKyG5w7djyib9XhrbkiSvMfV4AmniQHFnAetsZB",
+ "slot": 463380351,
+ "owner": "7CJFBsNC49upnVfMga2gj53deAjuuVchdceJQrJg5oA5",
+ "data_base64": "Af/CNlAM8QxAnfVmsUFbmWeckoUHK/hW/jEbPMG7lGJ5pWUpg90yXBITuVVzxwtOLbhYj44vo9wmjGNOr2+7HnkJ/wgSAbJozqeeSI7d9vs9KgqvWxeBSUHax7QFFDDySWZpjdi7AAGe7IpE4dCXOqBVjVfv38itLCrdcznl6pJFtAKB6bScRQGQ508C725EsLr5s1vwyOMe+xqezJJdKbLverxaY6pTdgIAAAABAAAAoAkBAAAAAABvZWxhYOoAAAAAAAACAAAAAQAAAAAAAAAAAAAAAAAAAFFuFW6YcXXXRhTMK8lg8UimEPCzb2VsYZ6tLf8xW8IxukgLsH8Ii+w3JueNoMbuc661PZMegB0SBt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKnG9RM0TGMMBg5IeOiWmKl1c0Hmjg8Y8LMKPbxZWSrTdwWKLJWZ4Exi7l4WS/pyPKqaEQUSodeXvkP0RrCrcPvK/f8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+}

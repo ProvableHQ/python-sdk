@@ -26,7 +26,7 @@ from .privacy import PrivacyModule
 from .profile import DEFAULT_ENDPOINT, Profile
 from .registry import DEFAULT_REGISTRY, Asset, Chain, Registry, validate_registry
 from .sol import Solana, SolModule
-from .types import BridgeStatus, ChainStatus, PrivacyReceipt
+from .types import BridgeStatus, ChainStatus, PauseStatus, PrivacyReceipt
 from .units import format_decimal_amount, parse_decimal_amount
 from .xreserve import XReserveModule
 
@@ -70,7 +70,7 @@ def build_aleo(endpoint: str, network: str, private_key: str, *, api_key: str | 
 
 
 def ethereum_from_env() -> Any:
-    """``Ethereum(ETHEREUM_RPC_URL, private_key=EVM_PRIVATE_KEY)`` or None; both variables or neither."""
+    """``Ethereum(ETHEREUM_RPC_URL, private_key=EVM_PRIVATE_KEY)``; the URL alone is read-only; neither → None."""
     return Ethereum.from_env()
 
 
@@ -350,6 +350,22 @@ class Bridge:
                                     bridge_protocol=bridge_protocol, symbol=symbol,
                                     include_unavailable=include_unavailable, environment=self.environment)
 
+    def pause_status(self, route, *, sides=("source", "destination")) -> PauseStatus:
+        """Read every operator pause switch governing ``route`` (a ``Route``, its id, or a ``Plan``), live.
+
+        Both ends are read unless ``sides`` narrows it: the ``pause`` mapping and enrolled router of the
+        Aleo warp program (plus the ARC-20 token's ``pause__``), the USDCx bridge and stablecoin pauses,
+        ``paused()`` on xReserve and the CCTP transmitter, any ``PausableHook`` / ``PausableIsm`` in the
+        Ethereum Mailbox's trees, and the Solana token PDA's enrolled router. Nothing is cached and the
+        result never raises for a pause: ``status.paused`` / ``status.unknown`` say so and
+        ``status.reason`` names the switch. ``quote``, ``execute``, ``resume`` and ``complete`` run this same
+        check and refuse with ``RoutePausedError`` or ``PauseCheckError``. A far-side EVM chain with no
+        configured connection is read over the profile's ``rpc_urls`` or the registry's public endpoints.
+        """
+        from .pause import PauseReader
+        route_id = getattr(route, "route_id", None) or getattr(route, "id", None) or route
+        return PauseReader(self).status(self.registry.route(route_id), sides=tuple(sides))
+
     def quote(self, *, source_chain: str | None = None, source_asset: str | None = None,
               destination_chain: str | None = None, destination_asset: str | None = None,
               bridge_protocol: str | None = None, route=None, amount=None, amount_atomic=None, recipient: str,
@@ -368,7 +384,9 @@ class Bridge:
         kind-specific ``Quote`` (``quote.kind`` in evm-hyperlane /
         solana-hyperlane / aleo-hyperlane / evm-xreserve / aleo-xreserve) with
         ``fees`` and ``amount_out`` in human units and ``quote.plan``.  Show the
-        user fees + amount before ``execute``.
+        user fees + amount before ``execute``.  Refuses with ``RoutePausedError`` /
+        ``PauseCheckError`` when a pause switch on either end reads paused or
+        cannot be read (see ``pause_status``).
         """
         return _lifecycle.quote(self, source_chain=source_chain, source_asset=source_asset,
                                 destination_chain=destination_chain, destination_asset=destination_asset,
@@ -397,8 +415,10 @@ class Bridge:
         the list changes; ``merkle_proof`` is the earlier name for one literal
         bundle).  The Hyperlane hook payment is
         re-quoted right before proving unless ``gas_payment_microcredits`` is
-        pinned.  Irreversible once the source step is broadcast: afterwards use
-        ``wait`` / ``recover``, never ``execute`` again.
+        pinned.  Refuses with ``RoutePausedError`` / ``PauseCheckError`` when a
+        pause switch on either end reads paused or cannot be read.  Irreversible
+        once the source step is broadcast: afterwards use ``wait`` / ``recover``,
+        never ``execute`` again.
         """
         return _lifecycle.execute(self, plan, on_checkpoint=on_checkpoint, proving=proving, mode=mode,
                                   record=record, compliance_proofs=compliance_proofs, merkle_proof=merkle_proof,
@@ -443,7 +463,9 @@ class Bridge:
 
         Rebroadcasts the identical proved Aleo transaction (a duplicate response is
         success) or, on EVM, re-scans history and only then authorizes the single
-        missing deposit/dispatch.  Never repeats a confirmed step.
+        missing deposit/dispatch.  Never repeats a confirmed step.  Refuses with
+        ``RoutePausedError`` / ``PauseCheckError`` when a pause switch on either
+        end reads paused or cannot be read.
         """
         return _lifecycle.resume(self, progress, on_checkpoint=on_checkpoint, secret_nonce=secret_nonce,
                                  poll_seconds=poll_seconds, timeout_seconds=timeout_seconds, proving=proving)
@@ -458,6 +480,8 @@ class Bridge:
         nonce, but requires a destination signer and gas. Set ``manual_mint=True``
         to explicitly authorize fallback for stalled forwarding; an already
         submitted destination transaction is observed rather than repeated.
+        Refuses with ``RoutePausedError`` / ``PauseCheckError`` when a pause switch
+        on the destination side reads paused or cannot be read.
         """
         options = {"manual_mint": manual_mint} if manual_mint else {}
         return _lifecycle.complete(self, progress, secret_nonce=secret_nonce, on_checkpoint=on_checkpoint,
@@ -520,14 +544,23 @@ class Bridge:
     def from_profile(cls, home: Any = None, *, network: str | None = None, endpoint: str | None = None,
                      ethereum: Any = None, solana: Any = None, evm: Any = None) -> "Bridge":
         """The client for the local profile (spec §3.4), created on first use. *network*/*endpoint* apply only when
-        creating. Side-chain connections come from the arguments or the same env variables as ``from_env``."""
+        creating. Side-chain connections come from the arguments or the same env variables as ``from_env``;
+        a chain neither names falls back to a read-only connection over the profile's ``rpc_urls``."""
         kwargs = {k: v for k, v in (("network", network), ("endpoint", endpoint)) if v is not None}
         profile = Profile.load_or_create(home, **kwargs)
         aleo = build_aleo(profile.endpoint, profile.network, profile.private_key,
                           api_key=os.environ.get("ALEO_API_KEY"), consumer_id=os.environ.get("ALEO_CONSUMER_ID"))
         evm = _evm_connections.from_env(evm, environment=aleo.network_name)
-        bridge = cls(aleo, ethereum=ethereum if ethereum is not None else
-                     ethereum_from_env() if _evm_connections.needs_legacy_environment(evm) else None, evm=evm,
+        if ethereum is None and _evm_connections.needs_legacy_environment(evm):
+            ethereum = ethereum_from_env()
+        ethereum_chain = "ethereum" if aleo.network_name == "mainnet" else "sepolia"
+        for chain_id, url in getattr(profile, "rpc_urls", {}).items():       # lowest priority: profile URLs
+            if chain_id == ethereum_chain:
+                if ethereum is None and ethereum_chain not in evm:
+                    ethereum = Ethereum(url)
+            elif chain_id not in evm:
+                evm[chain_id] = Ethereum(url)
+        bridge = cls(aleo, ethereum=ethereum, evm=evm,
                      solana=solana if solana is not None else solana_from_env(),
                      checkpoints=_checkpoints_for_profile(profile))
         bridge.profile = profile

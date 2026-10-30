@@ -105,6 +105,33 @@ class _Cursor:
         return b58encode(self.take(32))
 
 
+def decode_hyperlane_token_remote_routers(data: bytes) -> dict[int, bytes]:
+    """``remote_routers`` of a warp program's ``HyperlaneToken<T>`` account (hyperlane-monorepo 45c0988).
+
+    Layout, Borsh little-endian, as ``AccountData<HyperlaneToken<T>>``: u8 initialized; u8 bump; 32 mailbox;
+    32 mailbox_process_authority; u8 dispatch_authority_bump; u8 decimals; u8 remote_decimals;
+    Option<Pubkey> owner; Option<Pubkey> interchain_security_module; Option<(Pubkey, IgpType)>
+    interchain_gas_paymaster (enum tag u8 + Pubkey); HashMap<u32, u64> destination_gas; HashMap<u32, H256>
+    remote_routers. ``plugin_data`` and ``fee_config`` follow and are not decoded. A missing domain means the
+    operator un-enrolled that route — the Sealevel program has no pause flag of its own.
+    """
+    try:
+        cursor = _Cursor(data)
+        if cursor.u8() != 1:
+            raise ConfigurationError("malformed Sealevel token account data: account is not initialized")
+        cursor.take(1 + 32 + 32 + 1 + 1 + 1)                      # bump, mailbox, process authority, bump, decimals x2
+        for _ in range(2):                                         # owner, ISM
+            if cursor.u8() == 1:
+                cursor.take(32)
+        if cursor.u8() == 1:                                       # IGP: (Pubkey, enum tag, Pubkey)
+            cursor.take(32 + 1 + 32)
+        for _ in range(cursor.u32()):                              # destination_gas: u32 -> u64
+            cursor.take(4 + 8)
+        return {cursor.u32(): cursor.take(32) for _ in range(cursor.u32())}
+    except ConfigurationError as exc:
+        raise ConfigurationError(f"malformed Sealevel token account data: {exc}") from exc
+
+
 def decode_igp_account(data: bytes) -> IgpAccount:
     """Decode the terminal ``Igp`` account (the ``inner`` of an OverheadIgp), SEALEVEL_NOTES §4."""
     cursor = _Cursor(data)

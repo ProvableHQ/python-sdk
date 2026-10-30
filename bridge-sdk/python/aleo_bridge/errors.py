@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:  # pragma: no cover
-    from .types import Progress, Status
+    from .types import PauseStatus, Progress, Status
 
 
 class BridgeError(Exception):
@@ -48,6 +48,22 @@ class AmbiguousRouteError(BridgeError):
 
 class RouteUnavailableError(BridgeError):
     """The route exists but is metadata-required, disabled, or carries placeholder configuration."""
+
+
+class RoutePausedError(RouteUnavailableError):
+    """An operator pause switch on the source or destination side of the route is set; ``status`` names it."""
+
+    def __init__(self, message: str, *, status: "PauseStatus") -> None:
+        self.status = status
+        super().__init__(message)
+
+
+class PauseCheckError(RouteUnavailableError):
+    """A pause switch could not be read after retries; the SDK never proceeds on an unreadable switch."""
+
+    def __init__(self, message: str, *, status: "PauseStatus") -> None:
+        self.status = status
+        super().__init__(message)
 
 
 class RegistryVersionMismatchError(BridgeError):
@@ -101,7 +117,8 @@ class PollingTimeoutError(BridgeError):
 
 __all__ = [
     "BridgeError", "ConfigurationError", "MissingExtraError", "RouteNotFoundError", "AmbiguousRouteError",
-    "RouteUnavailableError", "RegistryVersionMismatchError", "UnsupportedRouteError", "InvalidAmountError",
+    "RouteUnavailableError", "RoutePausedError", "PauseCheckError", "RegistryVersionMismatchError",
+    "UnsupportedRouteError", "InvalidAmountError",
     "InvalidRecipientError", "InsufficientBalanceError", "ChainMismatchError", "NotResumableError",
     "CheckpointInvalidError", "AttestationError", "DeliveryUnknownError", "PollingTimeoutError",
 ]

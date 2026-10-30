@@ -26,7 +26,7 @@ from aleo_bridge.errors import (AttestationError, ConfigurationError, InvalidRec
 from aleo_bridge.registry import DEFAULT_REGISTRY, Route
 from aleo_bridge.types import (Attestation, BridgeStatus, BurnReceipt, ChainStatus, DepositReceipt,
                                DispatchReceipt, EvmHyperlaneQuote, EvmXReserveQuote, GasQuote,
-                               MintReceipt, PreparedTx, PrivacyReceipt, Receipt,
+                               MintReceipt, PauseStatus, PauseSwitch, PreparedTx, PrivacyReceipt, Receipt,
                                SolanaHyperlaneQuote, Status)
 
 from tests.conftest import FakeAleo as _ConftestFakeAleo
@@ -487,6 +487,21 @@ class FakeBridge:
         self.solana = FakeConnection(SOL_ADDRESS) if solana else None
         self._sol = FakeSol(self, SOL_ADDRESS) if solana else None
         self.public_balances: dict[str, int] = {}
+        # Pause gate: route_id -> PauseStatus to answer with (default: one open switch per requested side).
+        # Checks are recorded in pause_checks, NOT in calls, so module-call assertions stay untouched.
+        self.pause_statuses: dict[str, PauseStatus] = {}
+        self.pause_checks: list[tuple[str, tuple[str, ...]]] = []
+
+    def pause_status(self, route, *, sides=("source", "destination")) -> PauseStatus:
+        """Mirrors ``Bridge.pause_status``: returns the stored status filtered to the requested sides."""
+        route_id = getattr(route, "route_id", None) or getattr(route, "id", None) or route
+        self.pause_checks.append((route_id, tuple(sides)))
+        stored = self.pause_statuses.get(route_id)
+        if stored is None:
+            switches = tuple(PauseSwitch("aleo", side, "fake.aleo", "pause[true]", "open", "false") for side in sides)
+        else:
+            switches = tuple(s for s in stored.switches if s.side in sides)
+        return PauseStatus(route_id, switches)
 
     @property
     def eth(self) -> FakeEth:

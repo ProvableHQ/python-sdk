@@ -19,7 +19,7 @@ import json
 import re
 import time
 from dataclasses import dataclass, replace
-from typing import Any, Callable, cast
+from typing import Any, Callable, Sequence, cast
 
 from . import _sealevel
 from ._calls import is_duplicate_submission
@@ -36,8 +36,10 @@ from .errors import (
     InvalidAmountError,
     InvalidRecipientError,
     NotResumableError,
+    PauseCheckError,
     PollingTimeoutError,
     RegistryVersionMismatchError,
+    RoutePausedError,
     RouteUnavailableError,
     UnsupportedRouteError,
 )
@@ -92,6 +94,23 @@ def _require_active(route: Route) -> None:
             f"Route {route.id} is '{route.availability}': it is listed by the registry "
             "but cannot move funds until its deployment is reviewed. Pick an active route "
             "(bridge.registry.routes()).")
+
+
+def _require_unpaused(bridge, route: Route, *, sides: Sequence[str] = ("source", "destination")) -> None:
+    """Read the operator pause switches on *sides* of *route* right now and refuse on paused or unreadable.
+
+    Fail closed: a switch that could not be read after retries blocks exactly like a set one — the SDK
+    never commits funds on a guess. Both raise ``RouteUnavailableError`` subclasses carrying ``.status``.
+    """
+    status = bridge.pause_status(route, sides=tuple(sides))
+    if status.paused:
+        raise RoutePausedError(
+            f"Route {route.id} is paused: {status.reason}. Wait for the operator to unpause; "
+            "bridge.pause_status() shows every switch.", status=status)
+    if status.unknown:
+        raise PauseCheckError(
+            f"Could not read a pause switch on {route.id}: {status.reason}. The SDK never proceeds on an "
+            "unreadable switch; retry later or point the client at another endpoint.", status=status)
 
 
 # ── prepare ───────────────────────────────────────────────────────────────────
@@ -235,6 +254,7 @@ def quote(bridge, *, source_chain: str | None = None, source_asset: str | None =
                    recipient=recipient, sender=sender, mint_mode=mint_mode, cctp=cctp)
     resolved = resolve_route(bridge.registry, plan)
     _require_active(resolved.route)
+    _require_unpaused(bridge, resolved.route)
     family = resolved.source_chain.family
 
     if plan.protocol == "cctp":
@@ -579,6 +599,7 @@ def execute(bridge, plan: Plan, *, on_checkpoint: Callable | None = None, provin
     """
     resolved = resolve_route(bridge.registry, plan)
     _require_active(resolved.route)
+    _require_unpaused(bridge, resolved.route)
     family = resolved.source_chain.family
     store = getattr(bridge, "checkpoints", None)
     if plan.protocol == "cctp":
@@ -927,6 +948,8 @@ def _is_transient_error(exc: Exception) -> bool:
     about an actual on-chain failure, ``CheckpointInvalidError``, ``RouteUnavailableError`` —
     propagates immediately.
     """
+    if isinstance(exc, (RoutePausedError, PauseCheckError)):
+        return False            # a pause verdict may quote an HTTP status; it is a decision, not a hiccup
     try:
         import requests
         if isinstance(exc, requests.RequestException):
@@ -1420,6 +1443,7 @@ def resume(bridge, progress: Progress, *, on_checkpoint: Callable | None = None,
             "SOURCE_SUBMISSION_PENDING); call wait() or recover() to refresh it")
     resolved = resolve_route(bridge.registry, plan)
     _require_active(resolved.route)
+    _require_unpaused(bridge, resolved.route)      # funds are not committed yet; a proved tx into a pause burns its fee
     _check_receipt(plan, receipt)
     emit = _Emitter(bridge, plan, on_checkpoint)
     state = receipt.protocol_state
@@ -1541,6 +1565,7 @@ def complete(bridge, progress: Progress, *, secret_nonce: str | None = None,
     """
     if progress.plan.protocol == "cctp":
         plan = progress.plan
+        _require_unpaused(bridge, resolve_route(bridge.registry, plan).route, sides=("destination",))
         emit = _Emitter(bridge, plan, on_checkpoint)
         receipt = bridge.cctp.complete(plan, progress.receipt, manual_mint=manual_mint, on_checkpoint=emit)
         emit(receipt)
@@ -1557,7 +1582,10 @@ def complete(bridge, progress: Progress, *, secret_nonce: str | None = None,
     # DESTINATION_ACTION_REQUIRED the USDC is already deposited on Ethereum, and refusing the mint
     # because the registry has since parked the route would strand it. The proving path still hits
     # XReserveModule's own availability check; a rebroadcast of already-proved bytes needs none.
+    # The pause gate does run, destination side only: the deposit is committed, so a source-side pause has
+    # no bearing, but a paused usdcx_bridge_v2 / usdcx_stablecoin would reject the mint and burn its fee.
     resolved = resolve_route(bridge.registry, plan)
+    _require_unpaused(bridge, resolved.route, sides=("destination",))
     _check_receipt(plan, receipt)
     action = receipt.next_action or {}
     if (receipt.status is not Status.DESTINATION_ACTION_REQUIRED

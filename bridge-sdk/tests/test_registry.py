@@ -468,3 +468,25 @@ def test_solana_spl_collateral_routes_need_their_collateral_fields_to_be_active(
     inactive = Route(zec.id, zec.protocol, zec.environment, zec.source_asset_id, zec.destination_asset_id, "metadata-required",
                      zec.deployment_id, zec.source, {})
     validate_registry(Registry(base["version"], base["chains"], base["assets"], [inactive]))
+
+
+def test_public_read_rpc_urls_cover_every_evm_chain():
+    for chain in REG.chains():
+        urls = REG.public_read_rpc_urls(chain.id)
+        if chain.family == "evm":
+            assert urls and all(u.startswith("https://") for u in urls), chain.id
+        else:
+            assert urls == ()
+    assert REG.public_read_rpc_urls("ETHEREUM") == REG.public_read_rpc_urls("ethereum")
+
+
+def test_registry_without_public_urls_still_constructs_and_validation_catches_bad_tables():
+    routes = REG.routes(include_unavailable=True)
+    bare = Registry(REG.version, REG.chains(), REG.assets(), routes)
+    assert bare.public_read_rpc_urls("ethereum") == () and validate_registry(bare) is bare
+    with pytest.raises(ConfigurationError, match="https"):
+        validate_registry(Registry(REG.version, REG.chains(), REG.assets(), routes,
+                                   public_read_rpc_urls={"ethereum": ["http://insecure"]}))
+    with pytest.raises(ConfigurationError, match="unknown chain"):
+        validate_registry(Registry(REG.version, REG.chains(), REG.assets(), routes,
+                                   public_read_rpc_urls={"nochain": ["https://x"]}))
