@@ -53,6 +53,8 @@ from .checkpoint import (Checkpoint, CheckpointLoadResult, CheckpointProblem, Ch
 from .circle import CircleClient  # noqa: E402
 from .client import Bridge  # noqa: E402
 from .eth import Ethereum, EthModule  # noqa: E402
+from .private_mint import (FilePrivateMintIdentityStore, MemoryPrivateMintIdentityStore, PrivateMintIdentity,  # noqa: E402
+                           PrivateMintIdentityStore)
 from .freezelist import EMPTY_MERKLE_PROOF_PAIR, ComplianceProof, ComplianceProofs, FreezeList, MerkleProofInput, MerkleProofPair  # noqa: E402
 from .hyperlane import HyperlaneModule  # noqa: E402
 from . import lifecycle  # noqa: E402
@@ -78,6 +80,7 @@ __all__ = [
     "ComplianceProof", "ComplianceProofs", "MerkleProofInput", "MerkleProofPair",
     "HyperlaneModule", "PrivacyModule", "Profile", "XReserveModule",
     "Checkpoint", "CheckpointLoadResult", "CheckpointProblem", "CheckpointStore", "FileCheckpointStore", "create_checkpoint",
+    "FilePrivateMintIdentityStore", "MemoryPrivateMintIdentityStore", "PrivateMintIdentity", "PrivateMintIdentityStore",
     "EthModule", "Ethereum", "EvmCall",
     "DEFAULT_SOLANA_RPC_URL", "Solana", "SolCall", "SolModule",
     "lifecycle", "prepare",

@@ -86,13 +86,15 @@ def test_tool_surface_and_schemas():
     assert "private key" not in json.dumps(tools).lower()
 
 
-def test_private_mint_descriptions_state_the_nonce_requirement():
+def test_private_mint_descriptions_state_the_nonce_is_derived_or_supplied():
     tools = {t["name"]: t for t in bridge_tools()}
-    for name in ("bridge_quote", "bridge_execute", "bridge_complete"):
+    for name in ("bridge_quote", "bridge_execute", "bridge_resume", "bridge_complete"):
         assert "secret_nonce" in tools[name]["input_schema"]["properties"]
-    for name in ("bridge_execute", "bridge_complete"):
+        assert "secret_nonce" not in tools[name]["input_schema"].get("required", [])
+    for name in ("bridge_execute", "bridge_resume", "bridge_complete"):
         description = tools[name]["input_schema"]["properties"]["secret_nonce"]["description"].lower()
-        assert "required" in description and "0scalar" not in description
+        assert "deriv" in description and "0scalar" not in description
+    assert "there is no default" not in tools["bridge_quote"]["description"]
 
 
 # ── _serialize ────────────────────────────────────────────────────────────────
@@ -352,10 +354,12 @@ def test_unknown_tool():
 def test_private_mint_never_defaults_the_secret_nonce():
     b = FakeBridge()
     private = {**QUOTE_ARGS, "mint_mode": "private"}
-    for tool in ("bridge_quote", "bridge_execute"):
-        out = dispatch_tool(b, tool, dict(private))
-        assert "secret_nonce" in out["error"] and out["how_to_fix"]
-        assert "confirmation_required" not in out and "quote" not in out
+    # a quote prices the transfer regardless: nothing is deposited under its placeholder hook
+    assert dispatch_tool(b, "bridge_quote", dict(private))["kind"] == "evm-xreserve"
+    b.calls.clear()
+    out = dispatch_tool(b, "bridge_execute", dict(private))
+    assert "secret_nonce" in out["error"] and "private_mint_identities" in out["error"] and out["how_to_fix"]
+    assert "confirmation_required" not in out and "quote" not in out
     out = dispatch_tool(b, "bridge_execute", {**private, "confirm": True})
     assert "secret_nonce" in out["error"]
     assert b.calls == [] and b.events == []                                   # nothing quoted, nothing moved
@@ -366,6 +370,23 @@ def test_private_mint_never_defaults_the_secret_nonce():
     cp2 = _inbound_private_checkpoint(b2)
     out = dispatch_tool(b2, "bridge_complete", {"checkpoint": cp2, "confirm": True})
     assert "secret_nonce" in out["error"] and out["how_to_fix"] and b2.events == []
+
+
+def test_execute_and_complete_derive_for_the_bridge_account_with_a_store():
+    """With an identity store bound and the recipient being the bridge's own account, the tools
+    need no secret_nonce — and the derived scalar never appears in a result."""
+    import aleo
+    from aleo_bridge import private_mint as pm
+    b = FakeBridge()
+    account = aleo.mainnet.Account.from_private_key(aleo.mainnet.PrivateKey.random())
+    b.aleo.default_account = account
+    b.private_mint_identities = pm.MemoryPrivateMintIdentityStore()
+    args = {**QUOTE_ARGS, "mint_mode": "private", "recipient": str(account.address)}
+    out = dispatch_tool(b, "bridge_execute", {**args, "confirm": True})
+    assert "error" not in out
+    [identity] = b.private_mint_identities.load()
+    text = json.dumps(out)
+    assert "secret_nonce" not in text and identity.secret_nonce not in text
 
 
 def test_no_write_tool_ever_echoes_the_secret_nonce():
@@ -476,6 +497,7 @@ def test_resume_refuses_a_missing_private_nonce_before_any_rpc():
 
     out = dispatch_tool(b, "bridge_resume", {"checkpoint": cp, "confirm": True})
     assert out["error_type"] == "ConfigurationError" and "secret_nonce" in out["error"]
+    assert "private_mint_identities" in out["error"]              # the other fix: let the bridge derive
     assert out.get("next") != "recover" and "how_to_fix" in out
     # recover()'s read-only history scan ran; nothing that re-quotes or sends the deposit did
     assert not any(name in ("eth.deposit_usdc", "eth.quote_deposit_usdc") for name, *_ in b.calls)

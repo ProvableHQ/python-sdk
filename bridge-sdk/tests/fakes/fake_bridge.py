@@ -474,6 +474,7 @@ class FakeBridge:
         self.registry = DEFAULT_REGISTRY
         self.environment = self.network = environment
         self.checkpoints = checkpoints
+        self.private_mint_identities = None   # set by tests that exercise derived private mints
         self.events: list[tuple] = []        # ordered side effects (prove/submit/checkpoint...)
         self.calls: list[tuple] = []         # module method calls with kwargs
         self.submitted: list[str] = []

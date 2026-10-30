@@ -58,13 +58,13 @@ def main(argv=None):
     # Recovery reads the existing transfer; it never sends a replacement deposit.
     progress = bridge.recover(cp)
     if args.action in ("resume", "complete") and progress.next == args.action:
-        # Private USDCx still needs the original claim secret; the journal cannot replace it.
+        # A private USDCx deposit made under a nonce you supplied needs that ORIGINAL value again;
+        # the journal cannot replace it. A nonce the bridge derived is found in the identities
+        # file beside the journal, or re-derived from the account's view key.
         nonce = None
         if cp.intent.get("mintMode") == "private":
-            nonce = os.environ.get("BRIDGE_MINT_SECRET_NONCE")
-            if not nonce:
-                parser.error("Set BRIDGE_MINT_SECRET_NONCE to the ORIGINAL saved nonce.")
-            if str(mainnet.Scalar.from_string(nonce)) == "0scalar":
+            nonce = os.environ.get("BRIDGE_MINT_SECRET_NONCE") or None
+            if nonce and str(mainnet.Scalar.from_string(nonce)) == "0scalar":
                 parser.error("The private claim nonce must be nonzero.")
         # Only perform the step the transfer currently requests and the caller selected.
         if args.action == "resume":
@@ -74,7 +74,7 @@ def main(argv=None):
                 on_checkpoint=lambda checkpoint: print("Journal ID:", checkpoint.id, flush=True),
             )
         elif args.action == "complete":
-            # Claim private USDCx with the recipient account and original nonce; pays an Aleo fee.
+            # Claim private USDCx with the recipient account and its nonce; pays an Aleo fee.
             progress = bridge.complete(
                 progress, secret_nonce=nonce,
                 on_checkpoint=lambda checkpoint: print("Journal ID:", checkpoint.id, flush=True),
@@ -93,7 +93,7 @@ def main(argv=None):
     if progress.next == "resume":
         print("Recover this journal entry with --action resume to finish the source submission.")
     elif progress.next == "complete":
-        print("Recover with --action complete and the original nonce to claim private USDCx.")
+        print("Recover with --action complete to claim private USDCx (pass the original nonce if you supplied one).")
     return 2  # Pending or awaiting another action, not a reason to deposit again.
 
 
