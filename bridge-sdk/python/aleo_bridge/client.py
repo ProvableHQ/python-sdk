@@ -70,7 +70,7 @@ def build_aleo(endpoint: str, network: str, private_key: str, *, api_key: str | 
 
 
 def ethereum_from_env() -> Any:
-    """``Ethereum(ETHEREUM_RPC_URL, private_key=EVM_PRIVATE_KEY)`` or None; both variables or neither."""
+    """``Ethereum(ETHEREUM_RPC_URL, private_key=EVM_PRIVATE_KEY)``; the URL alone is read-only; neither → None."""
     return Ethereum.from_env()
 
 

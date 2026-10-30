@@ -53,12 +53,12 @@ def test_from_env_requires_both_evm_variables(monkeypatch):
     monkeypatch.delenv("BRIDGE_LIVE_ETHEREUM_RPC_URL", raising=False)
     monkeypatch.setenv("EVM_PRIVATE_KEY", KEY)
     monkeypatch.delenv("ETHEREUM_RPC_URL", raising=False)
-    with pytest.raises(ConfigurationError, match="both EVM_PRIVATE_KEY and ETHEREUM_RPC_URL"):
+    with pytest.raises(ConfigurationError, match="EVM_PRIVATE_KEY is set but ETHEREUM_RPC_URL"):
         Bridge.from_env()
     monkeypatch.delenv("EVM_PRIVATE_KEY")
     monkeypatch.setenv("ETHEREUM_RPC_URL", "http://127.0.0.1:1")
-    with pytest.raises(ConfigurationError, match="both EVM_PRIVATE_KEY and ETHEREUM_RPC_URL"):
-        Bridge.from_env()
+    read_only = Bridge.from_env()                     # a URL alone is a read-only connection
+    assert read_only.ethereum is not None and read_only.ethereum.can_sign is False
     monkeypatch.setenv("EVM_PRIVATE_KEY", KEY)
     bridge = Bridge.from_env()
     assert bridge.ethereum.address == ACCT.address and isinstance(bridge.ethereum.w3.provider, HTTPProvider)

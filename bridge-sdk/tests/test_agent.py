@@ -415,6 +415,15 @@ def test_unconfigured_chain_returns_a_structured_error():
     assert "SOLANA_PRIVATE_KEY" in out["how_to_fix"]
 
 
+def test_read_only_evm_connection_is_reported_as_a_signing_gap():
+    b = FakeBridge()
+    b.ethereum.can_sign = False                                               # ETHEREUM_RPC_URL without a key
+    assert "error" not in dispatch_tool(b, "bridge_quote", dict(QUOTE_ARGS))  # reads still work
+    out = dispatch_tool(b, "bridge_execute", {**QUOTE_ARGS, "confirm": True})
+    assert out["error_type"] == "ConfigurationError" and "read-only" in out["error"]
+    assert "EVM_PRIVATE_KEY" in out["how_to_fix"] and b.events == []
+
+
 def test_bridge_error_from_a_read_is_structured_too():
     out = dispatch_tool(FakeBridge(), "bridge_quote", {**QUOTE_ARGS, "amount": "0"})
     assert out["error"] and out["error_type"] == "InvalidAmountError"

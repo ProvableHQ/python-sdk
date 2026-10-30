@@ -174,18 +174,24 @@ def _error_payload(exc: Exception, **extra: Any) -> dict[str, Any]:
     return payload
 
 
-def _connection_gap(bridge: Any, source_chain: Any) -> dict[str, Any] | None:
+def _connection_gap(bridge: Any, source_chain: Any, *, signing: bool = False) -> dict[str, Any] | None:
     """Probe the connection a transfer out of *source_chain* would sign with (spec §10: a missing
-    connection is a configuration answer the model can act on, not an exception)."""
+    connection is a configuration answer the model can act on, not an exception). ``signing`` also
+    reports a URL-only (read-only) Ethereum connection, which can quote but never send."""
     try:
         chain = bridge.registry.chain(source_chain)
         family = chain.family
     except (BridgeError, TypeError):
         return None                                   # let the real lookup produce the real error
-    if family == "evm" and getattr(bridge, "ethereum", None) is None:
+    ethereum = getattr(bridge, "ethereum", None)
+    if family == "evm" and ethereum is None:
         return _error_payload(ConfigurationError(
             f"No Ethereum connection is configured, and transfers out of {chain.id} are signed "
             "there."), how_to_fix=EVM_HOW_TO_FIX)
+    if family == "evm" and signing and not getattr(ethereum, "can_sign", True):
+        return _error_payload(ConfigurationError(
+            f"The Ethereum connection is read-only (no EVM_PRIVATE_KEY), and transfers out of {chain.id} "
+            "are signed there."), how_to_fix=EVM_HOW_TO_FIX)
     if family == "solana" and getattr(bridge, "solana", None) is None:
         return _error_payload(ConfigurationError(
             f"No Solana connection is configured, and transfers out of {chain.id} are signed "
@@ -355,7 +361,7 @@ def _h_pending(b, a):
 # ── writes (confirm-gated) ────────────────────────────────────────────────────
 
 def _h_execute(b, a):
-    gap = _private_nonce_gap(a) or _connection_gap(b, a.get("source_chain"))
+    gap = _private_nonce_gap(a) or _connection_gap(b, a.get("source_chain"), signing=True)
     if gap is not None:
         return gap
     quote = lifecycle.quote(b, **_quote_kwargs(a))
