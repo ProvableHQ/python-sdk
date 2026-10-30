@@ -36,8 +36,10 @@ from .errors import (
     InvalidAmountError,
     InvalidRecipientError,
     NotResumableError,
+    PauseCheckError,
     PollingTimeoutError,
     RegistryVersionMismatchError,
+    RoutePausedError,
     RouteUnavailableError,
     UnsupportedRouteError,
 )
@@ -927,6 +929,8 @@ def _is_transient_error(exc: Exception) -> bool:
     about an actual on-chain failure, ``CheckpointInvalidError``, ``RouteUnavailableError`` —
     propagates immediately.
     """
+    if isinstance(exc, (RoutePausedError, PauseCheckError)):
+        return False            # a pause verdict may quote an HTTP status; it is a decision, not a hiccup
     try:
         import requests
         if isinstance(exc, requests.RequestException):

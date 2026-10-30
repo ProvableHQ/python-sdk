@@ -331,9 +331,45 @@ class BridgeStatus:
     pending: list[Progress | dict]
 
 
+@dataclass(frozen=True)
+class PauseSwitch:
+    """One operator pause switch on one end of a route, as read right now (never cached)."""
+    chain_id: str
+    side: str                  # "source" | "destination"
+    locator: str               # program id, contract address or account pubkey
+    switch: str                # "pause[true]", "paused()", "remote_routers[1634493807]", ...
+    state: str                 # "open" | "paused" | "unknown"
+    detail: str | None = None  # the raw value read, or the last error for "unknown"
+
+
+@dataclass(frozen=True)
+class PauseStatus:
+    """Every switch governing a route, read live; ``paused`` or ``unknown`` means the route must not be used."""
+    route_id: str
+    switches: tuple[PauseSwitch, ...]
+
+    @property
+    def paused(self) -> bool:
+        return any(s.state == "paused" for s in self.switches)
+
+    @property
+    def unknown(self) -> bool:
+        return any(s.state == "unknown" for s in self.switches)
+
+    @property
+    def reason(self) -> str:
+        for state in ("paused", "unknown"):
+            for s in self.switches:
+                if s.state == state:
+                    detail = f" ({s.detail})" if s.detail else ""
+                    return f"{s.switch} on {s.locator} ({s.chain_id}, {s.side} side) is {state}{detail}"
+        return f"every pause switch on {self.route_id} is open"
+
+
 __all__ = [
     "CALLER_BOUNDARIES", "TERMINAL", "AleoHyperlaneQuote", "AleoXReserveQuote", "Attestation", "BridgeStatus",
     "BurnReceipt", "ChainStatus", "DepositReceipt", "DispatchReceipt", "EvmHyperlaneQuote", "EvmXReserveQuote",
-    "Fee", "GasQuote", "MintReceipt", "Plan", "PreparedTx", "PrivacyReceipt", "Progress", "Quote", "Receipt",
-    "SolanaHyperlaneQuote", "Status", "Step", "to_progress", "CctpOptions", "EvmCctpQuote",
+    "Fee", "GasQuote", "MintReceipt", "PauseStatus", "PauseSwitch", "Plan", "PreparedTx", "PrivacyReceipt",
+    "Progress", "Quote", "Receipt", "SolanaHyperlaneQuote", "Status", "Step", "to_progress", "CctpOptions",
+    "EvmCctpQuote",
 ]
