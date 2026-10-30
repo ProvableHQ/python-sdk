@@ -42,6 +42,37 @@ def domain_field(network: str) -> str:
         raise ConfigurationError(f"network must be one of {tuple(_DOMAINS)}, got {network!r}") from None
 
 
+class _Deriver:
+    """One account's derivation with every loop invariant parsed once: the wrapper's x-coordinate,
+    the domain field, the view-key field and the recipient's bits. A recovery scan of thousands of
+    counters then costs one Poseidon hash and one BHP commit each, nothing else."""
+
+    def __init__(self, view_key: Any, network: str, program: str, recipient: str | None = None) -> None:
+        domain = domain_field(network)
+        self._net = net = encoding.network_module(network)
+        try:
+            vk = net.ViewKey.from_string(str(view_key))
+        except Exception as exc:
+            raise ConfigurationError("Invalid Aleo view key for private mint derivation") from exc
+        self._fixed = [net.Address.from_program_id(program).to_group().to_x_coordinate(),
+                       net.Field.from_string(domain), vk.to_scalar().to_field()]
+        self._hasher = net.Poseidon8()
+        self._bits = None
+        if recipient is not None:
+            encoding.aleo_address_to_bytes32(recipient)              # InvalidRecipientError before any FFI work
+            self._bits = net.Plaintext.from_string(recipient).to_bits_le()
+            self._committer = net.BHP256()
+
+    def nonce(self, counter: int) -> str:
+        if isinstance(counter, bool) or not isinstance(counter, int) or not 0 <= counter <= MAX_COUNTER:
+            raise ConfigurationError(f"Private mint identity counter must be a u32 (0..{MAX_COUNTER}), got {counter!r}")
+        return str(self._hasher.hash_to_scalar([*self._fixed, self._net.U32(counter).to_field()]))
+
+    def commitment(self, secret_nonce: str) -> str:
+        assert self._bits is not None, "recipient required for commitments"
+        return encoding.field_bytes_le(self._committer.commit(self._bits, self._net.Scalar.from_string(secret_nonce))).hex()
+
+
 def derive_secret_nonce(view_key: Any, counter: int, network: str, program: str = DEFAULT_WRAPPER_PROGRAM) -> str:
     """Shield's ``shielded-usdcx-secret-nonce``: ``Poseidon8.hash_to_scalar([wrapper_x, domain, view_key, counter])``.
 
@@ -49,15 +80,7 @@ def derive_secret_nonce(view_key: Any, counter: int, network: str, program: str 
     """
     if isinstance(counter, bool) or not isinstance(counter, int) or not 0 <= counter <= MAX_COUNTER:
         raise ConfigurationError(f"Private mint identity counter must be a u32 (0..{MAX_COUNTER}), got {counter!r}")
-    domain = domain_field(network)
-    net = encoding.network_module(network)
-    try:
-        vk = net.ViewKey.from_string(str(view_key))
-    except Exception as exc:
-        raise ConfigurationError("Invalid Aleo view key for private mint derivation") from exc
-    program_field = net.Address.from_program_id(program).to_group().to_x_coordinate()
-    inputs = [program_field, net.Field.from_string(domain), vk.to_scalar().to_field(), net.U32(counter).to_field()]
-    return str(net.Poseidon8().hash_to_scalar(inputs))
+    return _Deriver(view_key, network, program).nonce(counter)
 
 
 def derive_address_commitment(recipient: str, secret_nonce: str, network: str) -> str:
@@ -305,14 +328,15 @@ def recover_identity(store: PrivateMintIdentityStore, *, view_key: Any, recipien
                 "The stored private mint identity for this deposit names a different recipient than the "
                 "transfer; refusing to mint under it")
         return stored
+    deriver = _Deriver(view_key, network, program, recipient)
     for counter in range(min(scan_limit, MAX_COUNTER + 1)):
-        secret_nonce = derive_secret_nonce(view_key, counter, network, program)
-        if derive_address_commitment(recipient, secret_nonce, network) == address_commitment:
+        secret_nonce = deriver.nonce(counter)
+        if deriver.commitment(secret_nonce) == address_commitment:
             identity = PrivateMintIdentity(counter=counter, recipient=recipient, secret_nonce=secret_nonce,
                                            address_commitment=address_commitment)
             with _process_lock(store), _exclusive(store):
                 current = store.load()
-                if find_identity(store, address_commitment) is None:
+                if not any(i.address_commitment == address_commitment for i in current):
                     store.save([*current, identity])
             return identity
     raise ConfigurationError(
@@ -372,6 +396,12 @@ def resolve_secret_nonce(bridge: Any, *, recipient: str, program: str, address_c
     """
     if secret_nonce is not None:
         return encoding.validate_scalar(secret_nonce)
+    network = bridge.network
+    if address_commitment is not None and address_commitment == derive_address_commitment(recipient, "0scalar", network):
+        # The deposit was made under the Tier-2 ``0scalar`` default (``eth.deposit_usdc``), the
+        # value ``private_mint`` itself used to assume. The commitment is already public on chain,
+        # so answering it costs nothing and keeps those callers working without a store.
+        return "0scalar"
     store = getattr(bridge, "private_mint_identities", None)
     account = derivable_account(bridge, recipient)
     if store is None or account is None:
@@ -382,7 +412,6 @@ def resolve_secret_nonce(bridge: Any, *, recipient: str, program: str, address_c
             "Either pass secret_nonce= (and keep it — complete() needs the same value), or let the bridge derive "
             "and keep it for its own account by binding a checkpoint directory (FileCheckpointStore) or "
             "private_mint_identities= to Bridge(...)")
-    network = bridge.network
     if placeholder:
         return peek_secret_nonce(store, view_key=account.view_key, recipient=recipient, network=network, program=program)
     if address_commitment is None:

@@ -128,3 +128,13 @@ def test_counter_space_exhaustion(tmp_path):
 def test_memory_store_is_explicit_only():
     store = pm.MemoryPrivateMintIdentityStore()
     assert pm.reserve_identity(store, **KW).counter == 0 and pm.reserve_identity(store, **KW).counter == 1
+
+
+def test_recovery_scan_is_fast_enough_to_use_the_default_limit(tmp_path):
+    """Hoisted invariants: 2,000 counters in well under the time one would take re-parsing everything."""
+    import time
+    store = _file_store(tmp_path)
+    started = time.perf_counter()
+    with pytest.raises(ConfigurationError, match="2000 counters"):
+        pm.recover_identity(store, address_commitment="ab" * 32, scan_limit=2000, **KW)
+    assert time.perf_counter() - started < 5.0

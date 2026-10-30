@@ -581,9 +581,13 @@ print(private_progress.next, private_progress.error)  # done None after the clai
 Derived nonces live in `.private-mint-identities.json` inside the journal
 directory, with a `.counter` file beside it. Treat both like a view key: the
 file holds the secrets that open the deposits, so protect it and back it up
-with the journal. Losing it does not lose the funds. The claim re-derives the
-nonce from the view key by counting up, then saves it again. Pass
-`private_mint_identities=` to `Bridge(...)` to keep the identities elsewhere.
+with the journal. Losing the identities file does not lose the funds. The claim
+re-derives the nonce from the view key by counting up, then saves it again. The
+`.counter` file is what keeps every deposit on a fresh nonce; if it is lost too,
+set it to a number above the last counter you used before depositing again,
+otherwise a later deposit can reuse a nonce and be linked to an earlier one.
+Pass `private_mint_identities=` to `Bridge(...)` to keep the identities
+elsewhere.
 
 #### Bring your own nonce
 

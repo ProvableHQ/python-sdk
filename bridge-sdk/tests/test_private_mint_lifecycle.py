@@ -168,3 +168,16 @@ def test_tier2_private_mint_resolves_when_no_nonce_is_given():
                       message_hash=bytes.fromhex(receipt.id[2:]), attestation=b"\x33" * 65, status="complete")
     inputs = XReserveModule(b).build_private_mint_inputs(route, att, ME, None)
     assert inputs[3] == identity.secret_nonce and inputs[4] == ME
+
+
+def test_tier2_private_mint_without_a_nonce_still_opens_a_zero_scalar_deposit():
+    """Before derivation existed ``private_mint(att, recipient)`` defaulted to ``0scalar``; a bare bridge
+    that deposited under that default must still be able to mint without passing anything."""
+    from aleo_bridge.xreserve import XReserveModule
+    b = FakeBridge()                                   # no store, no view key
+    plan, receipt = _ready(b, "0scalar")
+    route = next(r for r in b.registry.routes(bridge_protocol="xreserve", environment="mainnet") if r.id == plan.route_id)
+    att = Attestation(payload=bytes.fromhex(receipt.protocol_state["payload"][2:]),
+                      message_hash=bytes.fromhex(receipt.id[2:]), attestation=b"\x33" * 65, status="complete")
+    inputs = XReserveModule(b).build_private_mint_inputs(route, att, ME, None)
+    assert inputs[3] == "0scalar"

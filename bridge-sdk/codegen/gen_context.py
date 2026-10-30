@@ -129,7 +129,12 @@ still in flight and check again later.
    profile's, or `BRIDGE_CHECKPOINT_DIR`), the bridge derives the nonce from
    the account's view key the way the Shield wallet does, keeps it in
    `.private-mint-identities.json` beside the journal, and re-derives it if
-   that file is lost — no `secret_nonce` is needed anywhere.  A user-supplied
+   that file is lost — no `secret_nonce` is needed anywhere.  Its `.counter`
+   companion is what keeps each deposit on a fresh nonce: if BOTH files are
+   lost, tell the user to set the counter above the last one used before
+   depositing again, or a later deposit can be linked to an earlier one.  A
+   deposit made under `eth.deposit_usdc`'s Tier-2 `0scalar` default still
+   completes without a nonce.  A user-supplied
    `secret_nonce` overrides that: the SDK **never stores** it and checkpoints
    exclude it (and every other secret), so tell the user to keep it for
    `complete` (the default `0scalar` adds no entropy).  A deposit to any other
