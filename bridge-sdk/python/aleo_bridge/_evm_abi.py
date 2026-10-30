@@ -57,4 +57,26 @@ MAILBOX_ABI = [
      "inputs": [{"name": "id", "type": "bytes32"}], "outputs": [{"name": "", "type": "bool"}]},
 ]
 
-__all__ = ["ERC20_ABI", "EVM_CHAIN_BY_ENVIRONMENT", "MAILBOX_ABI", "WARP_ROUTE_ABI", "XRESERVE_ABI", "ZERO_ADDRESS"]
+def _view(name: str, inputs: list[tuple[str, str]], outputs: list[tuple[str, str]]) -> dict:
+    return {"type": "function", "name": name, "stateMutability": "view",
+            "inputs": [{"name": n, "type": t} for n, t in inputs],
+            "outputs": [{"name": n, "type": t} for n, t in outputs]}
+
+
+# Pause switches and the Hyperlane Mailbox hook / ISM tree getters (OpenZeppelin Pausable, Hyperlane
+# IPostDispatchHook / IInterchainSecurityModule, DomainRoutingHook, StaticAggregationHook/Ism, DomainRoutingIsm).
+PAUSE_ABI = [
+    _view("paused", [], [("", "bool")]),
+    _view("hookType", [], [("", "uint8")]),
+    _view("moduleType", [], [("", "uint8")]),
+    _view("defaultHook", [], [("", "address")]),
+    _view("requiredHook", [], [("", "address")]),
+    _view("defaultIsm", [], [("", "address")]),
+    _view("hooks", [("destination", "uint32")], [("", "address")]),
+    _view("hooks", [("message", "bytes")], [("", "address[]")]),
+    _view("modulesAndThreshold", [("message", "bytes")], [("modules", "address[]"), ("threshold", "uint8")]),
+    _view("module", [("origin", "uint32")], [("", "address")]),
+]
+
+__all__ = ["ERC20_ABI", "EVM_CHAIN_BY_ENVIRONMENT", "MAILBOX_ABI", "PAUSE_ABI", "WARP_ROUTE_ABI", "XRESERVE_ABI",
+           "ZERO_ADDRESS"]

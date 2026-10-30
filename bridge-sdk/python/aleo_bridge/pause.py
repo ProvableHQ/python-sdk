@@ -106,5 +106,100 @@ def read_aleo_remote_router(bridge: Any, *, chain_id: str, side: str, program: s
     return PauseSwitch(chain_id, side, program, switch, "open" if value is not None else "paused", value)
 
 
+# ── EVM ──────────────────────────────────────────────────────────────────────
+
+HOOK_ROUTING, HOOK_AGGREGATION, HOOK_FALLBACK_ROUTING, HOOK_PAUSABLE = 1, 2, 5, 7     # Hyperlane IPostDispatchHook.Types
+ISM_ROUTING, ISM_AGGREGATION, ISM_NULL = 1, 2, 6                                      # IInterchainSecurityModule.Types
+TREE_DEPTH_LIMIT = 4
+
+
+class _TreeTooDeep(Exception):
+    pass
+
+
+def _evm_call(w3: Any, address: str, fn: str, *args: Any, sleep: Callable[[float], None]) -> Any:
+    """One view call through the retry loop. A revert is a ``ConfigurationError`` (the registry names a
+    contract that does not answer this getter), never retried."""
+    from .eth import _web3
+    from ._evm_abi import PAUSE_ABI
+    web3 = _web3()
+    contract = w3.eth.contract(address=web3.Web3.to_checksum_address(address), abi=PAUSE_ABI)
+    try:
+        return read_with_retry(lambda _attempt: getattr(contract.functions, fn)(*args).call(), sleep=sleep)
+    except web3.exceptions.ContractLogicError as exc:
+        raise ConfigurationError(f"{fn}() on {address} reverted: {exc}") from exc
+
+
+def read_evm_paused(w3: Any, *, chain_id: str, side: str, address: str,
+                    sleep: Callable[[float], None] = time.sleep) -> PauseSwitch:
+    """OpenZeppelin ``paused()`` on an xReserve or CCTP MessageTransmitter contract."""
+    try:
+        paused = bool(_evm_call(w3, address, "paused", sleep=sleep))
+    except ReadFailed as exc:
+        return PauseSwitch(chain_id, side, address, "paused()", "unknown", str(exc))
+    return PauseSwitch(chain_id, side, address, "paused()", "paused" if paused else "open", str(paused).lower())
+
+
+def _walk(w3: Any, address: str, *, far_domain: int, kind: str, depth: int, sleep: Callable[[float], None],
+          out: list[tuple[str, bool]]) -> None:
+    """Depth-first over a Hyperlane hook (``kind="hook"``) or ISM tree, collecting (address, paused) for every
+    pausable member. Routing nodes resolve *far_domain*; aggregation nodes expand their members."""
+    if depth > TREE_DEPTH_LIMIT:
+        raise _TreeTooDeep(address)
+    if kind == "hook":
+        node_type = _evm_call(w3, address, "hookType", sleep=sleep)
+        if node_type in (HOOK_ROUTING, HOOK_FALLBACK_ROUTING):
+            _walk(w3, _evm_call(w3, address, "hooks", far_domain, sleep=sleep), far_domain=far_domain, kind=kind,
+                  depth=depth + 1, sleep=sleep, out=out)
+        elif node_type == HOOK_AGGREGATION:
+            for member in _evm_call(w3, address, "hooks", b"", sleep=sleep):
+                _walk(w3, member, far_domain=far_domain, kind=kind, depth=depth + 1, sleep=sleep, out=out)
+        elif node_type == HOOK_PAUSABLE:
+            out.append((address, bool(_evm_call(w3, address, "paused", sleep=sleep))))
+        return
+    node_type = _evm_call(w3, address, "moduleType", sleep=sleep)
+    if node_type == ISM_ROUTING:
+        _walk(w3, _evm_call(w3, address, "module", far_domain, sleep=sleep), far_domain=far_domain, kind=kind,
+              depth=depth + 1, sleep=sleep, out=out)
+    elif node_type == ISM_AGGREGATION:
+        for member in _evm_call(w3, address, "modulesAndThreshold", b"", sleep=sleep)[0]:
+            _walk(w3, member, far_domain=far_domain, kind=kind, depth=depth + 1, sleep=sleep, out=out)
+    elif node_type == ISM_NULL:
+        try:                                    # a PausableIsm reports NULL; a plain NullIsm/TrustedRelayerIsm has no paused()
+            out.append((address, bool(_evm_call(w3, address, "paused", sleep=sleep))))
+        except ConfigurationError:
+            pass
+
+
+def _tree_switches(w3: Any, *, chain_id: str, side: str, mailbox: str, far_domain: int, kind: str,
+                   roots: tuple[str, ...], switch: str, sleep: Callable[[float], None]) -> list[PauseSwitch]:
+    found: list[tuple[str, bool]] = []
+    try:
+        for getter in roots:
+            _walk(w3, _evm_call(w3, mailbox, getter, sleep=sleep), far_domain=far_domain, kind=kind, depth=1,
+                  sleep=sleep, out=found)
+    except ReadFailed as exc:
+        return [PauseSwitch(chain_id, side, mailbox, switch, "unknown", str(exc))]
+    except _TreeTooDeep as exc:
+        return [PauseSwitch(chain_id, side, mailbox, switch, "unknown",
+                            f"{kind} tree deeper than depth {TREE_DEPTH_LIMIT} at {exc}")]
+    return [PauseSwitch(chain_id, side, address, switch, "paused" if paused else "open", str(paused).lower())
+            for address, paused in found]
+
+
+def read_mailbox_hook_pauses(w3: Any, *, chain_id: str, side: str, mailbox: str, far_domain: int,
+                             sleep: Callable[[float], None] = time.sleep) -> list[PauseSwitch]:
+    """Every ``PausableHook`` under the Mailbox's default and required hooks for *far_domain* (outbound dispatch)."""
+    return _tree_switches(w3, chain_id=chain_id, side=side, mailbox=mailbox, far_domain=far_domain, kind="hook",
+                          roots=("defaultHook", "requiredHook"), switch="PausableHook.paused()", sleep=sleep)
+
+
+def read_mailbox_ism_pauses(w3: Any, *, chain_id: str, side: str, mailbox: str, far_domain: int,
+                            sleep: Callable[[float], None] = time.sleep) -> list[PauseSwitch]:
+    """Every ``PausableIsm`` under the Mailbox's default ISM for messages from *far_domain* (inbound delivery)."""
+    return _tree_switches(w3, chain_id=chain_id, side=side, mailbox=mailbox, far_domain=far_domain, kind="ism",
+                          roots=("defaultIsm",), switch="PausableIsm.paused()", sleep=sleep)
+
+
 __all__ = ["BACKOFF_SECONDS", "IMMEDIATE_RETRIES", "ReadFailed", "read_aleo_flag", "read_aleo_remote_router",
-           "read_with_retry", "rotate"]
+           "read_evm_paused", "read_mailbox_hook_pauses", "read_mailbox_ism_pauses", "read_with_retry", "rotate"]
