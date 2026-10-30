@@ -76,3 +76,14 @@ def test_default_store_rides_with_a_file_checkpoint_store(tmp_path):
     assert isinstance(store, pm.FilePrivateMintIdentityStore)
     assert store.path == tmp_path / ".private-mint-identities.json"
     assert pm.default_identity_store(None) is None and pm.default_identity_store(object()) is None
+
+
+def test_lookup_recognises_a_deposit_made_under_the_zero_scalar_default():
+    """Tier-2 compatibility: ``eth.deposit_usdc`` still defaults to ``0scalar``; a later look-up for that
+    commitment answers ``0scalar`` at once — with no store, no account, and without scanning."""
+    zero = pm.derive_address_commitment(ME, "0scalar", "mainnet")
+    assert pm.resolve_secret_nonce(_bridge(store=False, account=False), recipient=ME, program=PROGRAM,
+                                   address_commitment=zero) == "0scalar"
+    b = _bridge()
+    assert pm.resolve_secret_nonce(b, recipient=ME, program=PROGRAM, address_commitment=zero) == "0scalar"
+    assert b.private_mint_identities.load() == []
