@@ -266,3 +266,14 @@ def test_routes_filters_the_registry_for_this_environment(fake_aleo):
     assert bridge.routes() == REG.routes(environment="mainnet")
     assert bridge.routes(bridge_protocol="xreserve", include_unavailable=True) == \
         REG.routes(bridge_protocol="xreserve", include_unavailable=True, environment="mainnet")
+
+
+def test_bridge_binds_a_private_mint_store_beside_a_file_journal(tmp_path, fake_aleo):
+    from aleo_bridge.checkpoint import FileCheckpointStore
+    from aleo_bridge.private_mint import FilePrivateMintIdentityStore, MemoryPrivateMintIdentityStore
+    bound = Bridge(fake_aleo, checkpoints=FileCheckpointStore(tmp_path)).private_mint_identities
+    assert isinstance(bound, FilePrivateMintIdentityStore)
+    assert bound.path == tmp_path / ".private-mint-identities.json"
+    assert Bridge(fake_aleo).private_mint_identities is None
+    explicit = MemoryPrivateMintIdentityStore()
+    assert Bridge(fake_aleo, private_mint_identities=explicit).private_mint_identities is explicit
