@@ -74,7 +74,7 @@
   "name": "bridge_list_routes"
  },
  {
-  "description": "Validate and price a transfer: route, fees (human units), amount_out, approval needs. Reads chain state, never signs. ALWAYS quote before bridge_execute and show the user fees and amount_out. A private mint (mint_mode='private') must carry the user's own secret_nonce \u2014 there is no default.",
+  "description": "Validate and price a transfer: route, fees (human units), amount_out, approval needs. Reads chain state, never signs. ALWAYS quote before bridge_execute and show the user fees and amount_out. A private mint (mint_mode='private') needs no secret_nonce to quote.",
   "input_schema": {
    "properties": {
     "amount": {
@@ -119,7 +119,7 @@
      "type": "string"
     },
     "mint_mode": {
-     "description": "xReserve into Aleo only. 'private' requires the user to complete the mint later with the same secret_nonce.",
+     "description": "xReserve into Aleo only. 'private' requires the recipient to complete the mint later with bridge_complete.",
      "enum": [
       "public",
       "record",
@@ -132,7 +132,7 @@
      "type": "string"
     },
     "secret_nonce": {
-     "description": "Private-mint commitment secret, REQUIRED when mint_mode is 'private' (there is no default). The user must keep it for bridge_complete; the SDK never stores it.",
+     "description": "Optional private-mint commitment secret. Omit it when the recipient is the bridge's own Aleo account and a journal directory is bound: the nonce is derived from the view key and kept in the identity store. Pass the user's own to override \u2014 then they must keep it for bridge_complete.",
      "type": "string"
     },
     "sender": {
@@ -201,7 +201,7 @@
   "name": "bridge_pending"
  },
  {
-  "description": "Start a transfer: re-quotes the same inputs, then commits funds on the source chain. Requires confirm=true; without it returns the quote and moves nothing. The source step is IRREVERSIBLE once broadcast \u2014 afterwards use bridge_get_progress with the returned checkpoint, never bridge_execute again. For mint_mode=private the user must supply secret_nonce here (no default) and keep it for bridge_complete.",
+  "description": "Start a transfer: re-quotes the same inputs, then commits funds on the source chain. Requires confirm=true; without it returns the quote and moves nothing. The source step is IRREVERSIBLE once broadcast \u2014 afterwards use bridge_get_progress with the returned checkpoint, never bridge_execute again. For mint_mode=private the bridge derives and keeps the nonce when the recipient is its own Aleo account and a journal is bound; a user-supplied secret_nonce overrides that and must then be kept for bridge_complete.",
   "input_schema": {
    "properties": {
     "amount": {
@@ -253,7 +253,7 @@
      "type": "integer"
     },
     "mint_mode": {
-     "description": "xReserve into Aleo only. 'private' requires the user to complete the mint later with the same secret_nonce.",
+     "description": "xReserve into Aleo only. 'private' requires the recipient to complete the mint later with bridge_complete.",
      "enum": [
       "public",
       "record",
@@ -277,7 +277,7 @@
      "type": "string"
     },
     "secret_nonce": {
-     "description": "Private-mint commitment secret, REQUIRED when mint_mode is 'private' (there is no default). The user must keep it for bridge_complete; the SDK never stores it.",
+     "description": "Optional private-mint commitment secret. Omit it when the recipient is the bridge's own Aleo account and a journal directory is bound: the nonce is derived from the view key and kept in the identity store. Pass the user's own to override \u2014 then they must keep it for bridge_complete.",
      "type": "string"
     },
     "sender": {
@@ -305,7 +305,7 @@
   "name": "bridge_execute"
  },
  {
-  "description": "Finish an interrupted source submission (progress.next == 'resume'): rebroadcasts the identical proved Aleo transaction or authorizes the single missing EVM step after re-scanning history. Requires confirm=true. An interrupted EVM xReserve deposit needs the same secret_nonce used at execute.",
+  "description": "Finish an interrupted source submission (progress.next == 'resume'): rebroadcasts the identical proved Aleo transaction or authorizes the single missing EVM step after re-scanning history. Requires confirm=true. An interrupted private EVM xReserve deposit finds its nonce in the bridge's identity store; only a deposit made with a user-supplied secret_nonce needs that same value again.",
   "input_schema": {
    "properties": {
     "checkpoint": {
@@ -317,7 +317,7 @@
      "type": "boolean"
     },
     "secret_nonce": {
-     "description": "The value used at bridge_execute; required to resume a private-mint xReserve deposit.",
+     "description": "Only for a private-mint deposit made with a user-supplied nonce: the same value. A derived nonce is resolved from the identity store.",
      "type": "string"
     }
    },
@@ -329,7 +329,7 @@
   "name": "bridge_resume"
  },
  {
-  "description": "Complete a private USDCx or CCTP mint. Private USDCx requires the original secret_nonce. CCTP forwarding fallback requires manual_mint=true. Requires confirm=true.",
+  "description": "Complete a private USDCx or CCTP mint. A private USDCx mint to the bridge's own account resolves its nonce from the identity store (re-derived from the view key if the store lost it); a deposit made with a user-supplied secret_nonce needs that value again. CCTP forwarding fallback requires manual_mint=true. Requires confirm=true.",
   "input_schema": {
    "properties": {
     "checkpoint": {
@@ -345,7 +345,7 @@
      "type": "boolean"
     },
     "secret_nonce": {
-     "description": "The private-mint secret used at bridge_execute \u2014 required (there is no default); only an already-proved mint can be rebroadcast without it.",
+     "description": "Only for a private-mint deposit made with a user-supplied nonce: the same value. A derived nonce is resolved from the identity store; an already-proved mint rebroadcasts without one.",
      "type": "string"
     }
    },
