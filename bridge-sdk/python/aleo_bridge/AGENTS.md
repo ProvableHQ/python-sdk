@@ -61,7 +61,7 @@ back are dict entries instead — ``{"next": "failed", "error", "error_type"}`` 
 when no store is bound. Finish any entry with ``recover`` → ``wait`` / ``resume`` / ``complete``,
 never by starting a new transfer.
 
-### `quote(self, *, source_chain: 'str | None' = None, source_asset: 'str | None' = None, destination_chain: 'str | None' = None, destination_asset: 'str | None' = None, bridge_protocol: 'str | None' = None, route=None, amount=None, amount_atomic=None, recipient: 'str', sender: 'str | None' = None, mint_mode: 'str' = 'public', secret_nonce: 'str' = '0scalar', cctp=None)`
+### `quote(self, *, source_chain: 'str | None' = None, source_asset: 'str | None' = None, destination_chain: 'str | None' = None, destination_asset: 'str | None' = None, bridge_protocol: 'str | None' = None, route=None, amount=None, amount_atomic=None, recipient: 'str', sender: 'str | None' = None, mint_mode: 'str' = 'public', secret_nonce: 'str | None' = None, cctp=None)`
 
 Price a transfer and get the plan that ``execute`` takes. Nothing is signed.
 
@@ -73,7 +73,10 @@ only when more than one route fits — or ``route=`` with a ``Route`` from
 or ``amount_atomic`` (int).  ``recipient`` is the destination-chain
 address.  ``mint_mode`` (xReserve into Aleo only): ``"public"`` balance,
 ``"record"`` minted by the relayer, or ``"private"`` — you finish it
-yourself with ``complete`` and must keep ``secret_nonce``.  Returns a
+yourself with ``complete``.  For a private mint to the bridge's own
+account the nonce is derived from the view key and kept in the bound
+identity store, so no ``secret_nonce`` is needed; pass your own to
+override it (then keep it).  Returns a
 kind-specific ``Quote`` (``quote.kind`` in evm-hyperlane /
 solana-hyperlane / aleo-hyperlane / evm-xreserve / aleo-xreserve) with
 ``fees`` and ``amount_out`` in human units and ``quote.plan``.  Show the
@@ -127,14 +130,18 @@ Finish an interrupted source submission (``progress.next == "resume"``).
 
 Rebroadcasts the identical proved Aleo transaction (a duplicate response is
 success) or, on EVM, re-scans history and only then authorizes the single
-missing deposit/dispatch.  Never repeats a confirmed step.
+missing deposit/dispatch.  Never repeats a confirmed step.  A private
+xReserve deposit for the bridge's own account finds its nonce in the bound
+identity store; pass ``secret_nonce`` only if the deposit was made with one.
 
 ### `complete(self, progress, *, secret_nonce: 'str | None' = None, on_checkpoint=None, proving: 'str' = 'delegate', manual_mint: 'bool' = False)`
 
 Claim a private USDCx or native-USDC CCTP destination mint.
 
-Requires the same ``secret_nonce`` given to ``execute``; the SDK never
-stored it.  Submits exactly one ``private_mint`` and returns
+A private USDCx mint to the bridge's own account needs no ``secret_nonce``:
+the scalar comes from the bound identity store, re-derived from the view
+key if the store lost it.  A deposit made with a caller-supplied nonce
+needs that same nonce back.  Submits exactly one ``private_mint`` and returns
 ``DESTINATION_CONFIRMING`` progress to ``wait`` on. CCTP needs no secret
 nonce, but requires a destination signer and gas. Set ``manual_mint=True``
 to explicitly authorize fallback for stalled forwarding; an already
@@ -290,9 +297,14 @@ from the published list and cached until the list changes. Pass one
 must exceed the 2 USDCx withdrawal fee. The Aleo burn-attestation
 service forwards accepted burns to Circle.
 
-### `xreserve.private_mint(self, attestation: 'Attestation', recipient: 'str', *, secret_nonce: 'str' = '0scalar', route: 'Route | None' = None) -> 'AleoCall[MintReceipt]'`
+### `xreserve.private_mint(self, attestation: 'Attestation', recipient: 'str', *, secret_nonce: 'str | None' = None, route: 'Route | None' = None) -> 'AleoCall[MintReceipt]'`
 
 Finish a private-mode deposit: the only user-signed Aleo step of the inbound flow (``wrapper.private_mint``).
+
+An explicit ``secret_nonce`` is used as given. Without one, the bridge resolves the scalar
+for its own account from the identity store that reserved the deposit (re-deriving it from
+the view key when the store lacks it); a deposit made with a caller-supplied nonce needs
+that nonce back.
 
 ### `xreserve.get_attestation(self, message_hash: "'str | bytes'", *, route: 'Route | None' = None) -> 'Attestation | None'`
 
