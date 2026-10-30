@@ -163,3 +163,20 @@ def test_pause_status_never_caches(monkeypatch):
     first = len(reads)
     b.pause_status("hyperlane:aleo/eth->ethereum/eth")
     assert first == 3 and len(reads) == 2 * first
+
+
+def test_warp_program_pause_mapping_follows_what_it_declares():
+    """BAT/USDG/ZEC v2 warp programs and the shield ARC-22 tokens declare the ARC-20 style ``pause__[false]``;
+    ETH/WBTC/SOL warp programs declare ``pause[true]``. The reader follows the declaration."""
+    bat, shield = "hyp_warp_token_bat_v2.aleo", "shield_arc22_bat.aleo"
+    mappings = {bat: {"pause__": {"false": "true"}, "remote_routers": {"1u32": "{ domain: 1u32 }"}, "app_metadata": {}},
+                shield: {"pause__": {}}}
+    b = make_bridge(ethereum=Ethereum(w3=fake_web3(calls=_ism_tree(False))), mappings=mappings)
+    by_program = {(s.locator, s.switch): s.state for s in b.pause_status("hyperlane:aleo/bat->ethereum/bat").switches}
+    assert by_program[(bat, "pause__[false]")] == "paused" and by_program[(shield, "pause__[false]")] == "open"
+    assert (bat, "pause[true]") not in by_program
+    # a warp program with no pause mapping at all is a configuration error, never "open"
+    b = make_bridge(ethereum=Ethereum(w3=fake_web3(calls=_ism_tree(False))),
+                    mappings={bat: {"remote_routers": {"1u32": "x"}}, shield: {}})
+    with pytest.raises(ConfigurationError, match="declares no pause mapping"):
+        b.pause_status("hyperlane:aleo/bat->ethereum/bat")

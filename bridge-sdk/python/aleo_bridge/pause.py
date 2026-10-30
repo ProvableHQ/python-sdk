@@ -85,6 +85,24 @@ def _aleo_mapping_value(bridge: Any, program: str, mapping: str, key: str, sleep
     return read_with_retry(lambda _attempt: bridge.mapping_value(program, mapping, key), sleep=sleep)
 
 
+PAUSE_MAPPINGS = (("pause", "true"), ("paused", "true"), ("pause__", "false"))   # (mapping, key) conventions seen on chain
+
+
+def declared_pause_mapping(bridge: Any, program: str, *, sleep: Callable[[float], None] = time.sleep) -> tuple[str, str] | None:
+    """Which pause convention *program* declares: ``pause[true]`` (ETH/WBTC/SOL warp, usdcx_stablecoin),
+    ``paused[true]`` (usdcx_bridge_v2) or the ARC-20 ``pause__[false]`` (BAT/USDG/ZEC warp, arc20_*/shield_arc22_*
+    tokens); None when it has no pause switch at all."""
+    from aleo.facade.errors import ProgramNotFound
+
+    def declared(_attempt: int) -> list[str]:
+        try:
+            return list(bridge.program(program).mappings())
+        except ProgramNotFound:
+            return []
+    names = read_with_retry(declared, sleep=sleep)
+    return next(((m, k) for m, k in PAUSE_MAPPINGS if m in names), None)
+
+
 def read_aleo_flag(bridge: Any, *, chain_id: str, side: str, program: str, mapping: str, key: str,
                    sleep: Callable[[float], None] = time.sleep) -> PauseSwitch:
     """A boolean pause mapping (``pause[true]``, ``paused[true]``, the ARC-20 ``pause__[false]``): ``true`` is paused."""
@@ -262,13 +280,19 @@ class PauseReader:
         bridge, out = self._bridge, []
         if route.protocol == "hyperlane":
             program = asset.locator.value if asset.locator is not None else route.meta_str("aleoRouterProgram")
-            out.append(read_aleo_flag(bridge, chain_id=asset.chain_id, side=side, program=program, mapping="pause",
-                                      key="true", sleep=self._sleep))
+            convention = declared_pause_mapping(bridge, program, sleep=self._sleep)
+            if convention is None:
+                raise ConfigurationError(f"{program} declares no pause mapping ({[m for m, _ in PAUSE_MAPPINGS]}); "
+                                         "every reviewed warp program has one, so this deployment is not the reviewed one")
+            out.append(read_aleo_flag(bridge, chain_id=asset.chain_id, side=side, program=program,
+                                      mapping=convention[0], key=convention[1], sleep=self._sleep))
             out.append(read_aleo_remote_router(bridge, chain_id=asset.chain_id, side=side, program=program,
                                                domain=far_chain.protocol_domains["hyperlane"], sleep=self._sleep))
-            if asset.privacy is not None and asset.privacy.kind == "arc20":
-                out.append(read_aleo_flag(bridge, chain_id=asset.chain_id, side=side, program=asset.privacy.program,
-                                          mapping="pause__", key="false", sleep=self._sleep))
+            if asset.privacy is not None:                      # the ARC-20 / shield ARC-22 token the warp mints and burns
+                token = declared_pause_mapping(bridge, asset.privacy.program, sleep=self._sleep)
+                if token is not None:
+                    out.append(read_aleo_flag(bridge, chain_id=asset.chain_id, side=side, program=asset.privacy.program,
+                                              mapping=token[0], key=token[1], sleep=self._sleep))
         elif route.protocol == "xreserve":
             out.append(read_aleo_flag(bridge, chain_id=asset.chain_id, side=side, program=route.meta_str("bridgeProgram"),
                                       mapping="paused", key="true", sleep=self._sleep))
