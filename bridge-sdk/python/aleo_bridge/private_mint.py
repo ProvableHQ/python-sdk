@@ -274,8 +274,7 @@ def peek_secret_nonce(store: PrivateMintIdentityStore, *, view_key: Any, recipie
     with _process_lock(store), _exclusive(store):
         identities = store.load()
         minimum = _next_counter(identities)
-        read: Any = getattr(store, "_read_counter", None)
-        counter = max(minimum, int(read())) if callable(read) else minimum
+        counter = max(minimum, store._read_counter()) if isinstance(store, FilePrivateMintIdentityStore) else minimum
     if counter > MAX_COUNTER:
         raise ConfigurationError(_EXHAUSTED)
     return derive_secret_nonce(view_key, counter, network, program)
@@ -323,8 +322,79 @@ def recover_identity(store: PrivateMintIdentityStore, *, view_key: Any, recipien
         "restore the identities file that reserved it")
 
 
+# ── the resolver every verb calls ────────────────────────────────────────────
+
+def default_identity_store(checkpoints: Any) -> PrivateMintIdentityStore | None:
+    """The store a ``Bridge`` binds when none is given: a hidden file inside a ``FileCheckpointStore``
+    directory (journal metadata, skipped by its ``*.json`` listing), or none at all."""
+    from .checkpoint import FileCheckpointStore
+    if isinstance(checkpoints, FileCheckpointStore):
+        return FilePrivateMintIdentityStore(checkpoints.directory / ".private-mint-identities.json")
+    return None
+
+
+def derivable_account(bridge: Any, recipient: str) -> Any | None:
+    """The bridge's default account when it can derive for *recipient*: it exposes a view key and
+    *recipient* is its own address. Derivation is never offered for another recipient — the
+    identity would not be one that recipient's wallet could ever reproduce."""
+    account = getattr(getattr(bridge, "aleo", None), "default_account", None)
+    if not account or getattr(account, "view_key", None) is None:
+        return None
+    if str(getattr(account, "address", "")) != recipient:
+        return None
+    return account
+
+
+def can_derive(bridge: Any, recipient: str) -> bool:
+    """True when a private mint to *recipient* needs no ``secret_nonce`` on this bridge."""
+    return getattr(bridge, "private_mint_identities", None) is not None and derivable_account(bridge, recipient) is not None
+
+
+def _why_not(bridge: Any, recipient: str) -> str:
+    account = getattr(getattr(bridge, "aleo", None), "default_account", None)
+    if not account or getattr(account, "view_key", None) is None:
+        return "the Aleo facade has no default account with a view key to derive from"
+    if str(getattr(account, "address", "")) != recipient:
+        return "the recipient is not the bridge's own Aleo account, and derived nonces apply only to its own mints"
+    return "no identity store is bound to keep the derived nonce"
+
+
+def resolve_secret_nonce(bridge: Any, *, recipient: str, program: str, address_commitment: str | None = None,
+                         secret_nonce: str | None = None, placeholder: bool = False) -> str:
+    """The scalar a private mint uses, from one of three sources in this order.
+
+    1. An explicit *secret_nonce*: validated and returned; no store is read or written.
+    2. Derivation for the bridge's own account with a store bound: a new identity is reserved when
+       *address_commitment* is ``None`` (execute); otherwise the identity behind that commitment is
+       looked up and, when the store lacks it, re-derived by counting up (resume / complete).
+    3. Neither: ``"0scalar"`` when *placeholder* is set (a quote, where nothing is deposited), else a
+       ``ConfigurationError`` naming both fixes.
+    """
+    if secret_nonce is not None:
+        return encoding.validate_scalar(secret_nonce)
+    store = getattr(bridge, "private_mint_identities", None)
+    account = derivable_account(bridge, recipient)
+    if store is None or account is None:
+        if placeholder:
+            return "0scalar"
+        raise ConfigurationError(
+            f"A private mint needs a secret_nonce, and this bridge cannot derive one: {_why_not(bridge, recipient)}. "
+            "Either pass secret_nonce= (and keep it — complete() needs the same value), or let the bridge derive "
+            "and keep it for its own account by binding a checkpoint directory (FileCheckpointStore) or "
+            "private_mint_identities= to Bridge(...)")
+    network = bridge.network
+    if placeholder:
+        return peek_secret_nonce(store, view_key=account.view_key, recipient=recipient, network=network, program=program)
+    if address_commitment is None:
+        return reserve_identity(store, view_key=account.view_key, recipient=recipient, network=network,
+                                program=program).secret_nonce
+    return recover_identity(store, view_key=account.view_key, recipient=recipient, address_commitment=address_commitment,
+                            network=network, program=program).secret_nonce
+
+
 __all__ = [
-    "DEFAULT_SCAN_LIMIT", "DEFAULT_WRAPPER_PROGRAM", "MAX_COUNTER",
+    "DEFAULT_SCAN_LIMIT", "DEFAULT_WRAPPER_PROGRAM", "MAX_COUNTER", "can_derive", "default_identity_store",
+    "derivable_account", "resolve_secret_nonce",
     "SHIELDED_USDCX_DOMAIN_MAINNET", "SHIELDED_USDCX_DOMAIN_TESTNET",
     "FilePrivateMintIdentityStore", "MemoryPrivateMintIdentityStore", "PrivateMintIdentity",
     "PrivateMintIdentityStore", "commitment_from_hook_data", "derive_address_commitment",

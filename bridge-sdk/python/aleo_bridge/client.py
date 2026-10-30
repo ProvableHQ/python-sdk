@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from . import lifecycle as _lifecycle
 from . import _evm_connections
+from . import private_mint as _private_mint
 from ._calls import AleoCall
 from .cctp import CctpModule
 from .errors import BridgeError, ConfigurationError, UnsupportedRouteError
@@ -124,7 +125,8 @@ class Bridge:
     """Typed bridge client over the Aleo facade (and, from plans 2/3, Ethereum/Solana connections)."""
 
     def __init__(self, aleo: Any, *, ethereum: Any = None, solana: Any = None, environment: str | None = None,
-                 registry: Registry | None = None, checkpoints: Any = None, evm: Any = None) -> None:
+                 registry: Registry | None = None, checkpoints: Any = None, evm: Any = None,
+                 private_mint_identities: Any = None) -> None:
         network = getattr(aleo, "network_name", None)
         if network not in NETWORKS:
             raise ConfigurationError(f"The aleo facade must report network_name mainnet or testnet, got {network!r}")
@@ -140,6 +142,10 @@ class Bridge:
         if not self.registry.chains(environment=environment):
             raise ConfigurationError(f"Registry {self.registry.version} has no chains for {environment}")
         self.checkpoints = checkpoints
+        #: Where derived private-mint nonces live: the given store, or a hidden file beside a bound
+        #: ``FileCheckpointStore`` journal, or None (then a private mint needs ``secret_nonce=``).
+        self.private_mint_identities: Any = (private_mint_identities if private_mint_identities is not None
+                                             else _private_mint.default_identity_store(checkpoints))
         self.ethereum: Ethereum | None = _coerce_ethereum(ethereum)
         self._evm_connections = _evm_connections.normalize(self.registry, environment, evm, self.ethereum)
         self._evm_modules: dict[str, EthModule] = {}
@@ -501,7 +507,7 @@ class Bridge:
     @classmethod
     def from_env(cls, **overrides: Any) -> "Bridge":
         """Everything from the environment (spec §3.3); writes nothing to disk. Overrides: ethereum, solana, registry, checkpoints."""
-        unexpected = set(overrides) - {"ethereum", "solana", "registry", "checkpoints", "evm"}
+        unexpected = set(overrides) - {"ethereum", "solana", "registry", "checkpoints", "evm", "private_mint_identities"}
         if unexpected:
             raise TypeError(f"Bridge.from_env() got unexpected overrides: {sorted(unexpected)}")
         private_key = os.environ.get("BRIDGE_PRIVATE_KEY")
@@ -514,7 +520,8 @@ class Bridge:
                     ethereum_from_env() if _evm_connections.needs_legacy_environment(evm) else None)
         solana = overrides["solana"] if "solana" in overrides else solana_from_env()
         checkpoints = overrides["checkpoints"] if "checkpoints" in overrides else checkpoints_from_env()
-        return cls(aleo, ethereum=ethereum, solana=solana, registry=overrides.get("registry"), checkpoints=checkpoints, evm=evm)
+        return cls(aleo, ethereum=ethereum, solana=solana, registry=overrides.get("registry"), checkpoints=checkpoints, evm=evm,
+                   private_mint_identities=overrides.get("private_mint_identities"))
 
     @classmethod
     def from_profile(cls, home: Any = None, *, network: str | None = None, endpoint: str | None = None,
