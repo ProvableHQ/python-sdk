@@ -20,7 +20,10 @@ import time
 from typing import Any, Callable, Sequence, TypeVar
 
 from .errors import ConfigurationError
-from .types import PauseSwitch
+from .eth import Ethereum
+from .registry import Asset, Chain, Route
+from .sol import DEFAULT_SOLANA_RPC_URL, Solana
+from .types import PauseStatus, PauseSwitch
 
 T = TypeVar("T")
 
@@ -118,14 +121,19 @@ class _TreeTooDeep(Exception):
 
 
 def _evm_call(w3: Any, address: str, fn: str, *args: Any, sleep: Callable[[float], None]) -> Any:
-    """One view call through the retry loop. A revert is a ``ConfigurationError`` (the registry names a
-    contract that does not answer this getter), never retried."""
+    """One view call through the retry loop. *w3* is a ``Web3`` or an ``attempt -> Web3`` callable (public
+    endpoints rotate per attempt). A revert is a ``ConfigurationError`` (the registry names a contract that
+    does not answer this getter), never retried."""
     from .eth import _web3
     from ._evm_abi import PAUSE_ABI
     web3 = _web3()
-    contract = w3.eth.contract(address=web3.Web3.to_checksum_address(address), abi=PAUSE_ABI)
+    checksummed = web3.Web3.to_checksum_address(address)
+
+    def call(attempt: int) -> Any:
+        client = w3(attempt) if callable(w3) else w3
+        return getattr(client.eth.contract(address=checksummed, abi=PAUSE_ABI).functions, fn)(*args).call()
     try:
-        return read_with_retry(lambda _attempt: getattr(contract.functions, fn)(*args).call(), sleep=sleep)
+        return read_with_retry(call, sleep=sleep)
     except web3.exceptions.ContractLogicError as exc:
         raise ConfigurationError(f"{fn}() on {address} reverted: {exc}") from exc
 
@@ -201,5 +209,116 @@ def read_mailbox_ism_pauses(w3: Any, *, chain_id: str, side: str, mailbox: str, 
                           roots=("defaultIsm",), switch="PausableIsm.paused()", sleep=sleep)
 
 
-__all__ = ["BACKOFF_SECONDS", "IMMEDIATE_RETRIES", "ReadFailed", "read_aleo_flag", "read_aleo_remote_router",
-           "read_evm_paused", "read_mailbox_hook_pauses", "read_mailbox_ism_pauses", "read_with_retry", "rotate"]
+# ── Solana ───────────────────────────────────────────────────────────────────
+
+def read_solana_remote_router(solana: Any, *, chain_id: str, side: str, token_pda: str, domain: int,
+                              sleep: Callable[[float], None] = time.sleep) -> PauseSwitch:
+    """The warp program's enrolled router for *domain* in its token PDA; a missing account or entry is paused."""
+    from ._sealevel import decode_hyperlane_token_remote_routers
+    from .sol import SolModule
+    switch = f"remote_routers[{domain}]"
+    reader = SolModule(None, solana)
+    try:
+        data = read_with_retry(lambda _attempt: reader._account_data(token_pda), sleep=sleep)
+    except ReadFailed as exc:
+        return PauseSwitch(chain_id, side, token_pda, switch, "unknown", str(exc))
+    router = None if data is None else decode_hyperlane_token_remote_routers(data).get(domain)
+    return PauseSwitch(chain_id, side, token_pda, switch, "open" if router else "paused",
+                       None if router is None else "0x" + router.hex())
+
+
+# ── Per-route assembly ───────────────────────────────────────────────────────
+
+SIDES = ("source", "destination")
+
+
+class PauseReader:
+    """Reads every switch governing a route, on the requested sides, in one pass. Nothing is cached."""
+
+    def __init__(self, bridge: Any, *, sleep: Callable[[float], None] = time.sleep) -> None:
+        self._bridge = bridge
+        self._sleep = sleep
+
+    # -- connections --
+    def evm_w3(self, chain_id: str) -> Any:
+        """A ``Web3`` for *chain_id*, or an ``attempt -> Web3`` callable over the registry's public read
+        endpoints: configured connection (constructor, env or profile) first, public endpoints last."""
+        bridge, registry = self._bridge, self._bridge.registry
+        conn = bridge._evm_connections.get(chain_id)
+        if conn is not None:
+            return conn.w3
+        urls = registry.public_read_rpc_urls(chain_id)
+        if not urls:
+            raise ConfigurationError(
+                f"No RPC connection for {chain_id} to read its pause switches: pass ethereum=/evm= to Bridge(...), "
+                f"save one with profile.set_rpc_url({chain_id!r}, url), or set {chain_id.upper()}_RPC_URL")
+        return lambda attempt: Ethereum(rotate(urls, attempt)).w3
+
+    def _solana(self) -> Any:
+        return self._bridge.solana if self._bridge.solana is not None else Solana(DEFAULT_SOLANA_RPC_URL)
+
+    # -- switches per chain family --
+    def _aleo(self, side: str, route: Route, asset: Asset, far_chain: Chain) -> list[PauseSwitch]:
+        bridge, out = self._bridge, []
+        if route.protocol == "hyperlane":
+            program = asset.locator.value if asset.locator is not None else route.meta_str("aleoRouterProgram")
+            out.append(read_aleo_flag(bridge, chain_id=asset.chain_id, side=side, program=program, mapping="pause",
+                                      key="true", sleep=self._sleep))
+            out.append(read_aleo_remote_router(bridge, chain_id=asset.chain_id, side=side, program=program,
+                                               domain=far_chain.protocol_domains["hyperlane"], sleep=self._sleep))
+            if asset.privacy is not None and asset.privacy.kind == "arc20":
+                out.append(read_aleo_flag(bridge, chain_id=asset.chain_id, side=side, program=asset.privacy.program,
+                                          mapping="pause__", key="false", sleep=self._sleep))
+        elif route.protocol == "xreserve":
+            out.append(read_aleo_flag(bridge, chain_id=asset.chain_id, side=side, program=route.meta_str("bridgeProgram"),
+                                      mapping="paused", key="true", sleep=self._sleep))
+            out.append(read_aleo_flag(bridge, chain_id=asset.chain_id, side=side, program=route.meta_str("remoteToken"),
+                                      mapping="pause", key="true", sleep=self._sleep))
+        return out
+
+    def _evm(self, side: str, route: Route, chain: Chain, far_chain: Chain) -> list[PauseSwitch]:
+        w3 = self.evm_w3(chain.id)
+        if route.protocol == "hyperlane":
+            reader = read_mailbox_hook_pauses if side == "source" else read_mailbox_ism_pauses
+            return reader(w3, chain_id=chain.id, side=side, mailbox=route.meta_str("mailboxAddress"),
+                          far_domain=far_chain.protocol_domains["hyperlane"], sleep=self._sleep)
+        key = "xReserveContract" if route.protocol == "xreserve" else "messageTransmitter"
+        return [read_evm_paused(w3, chain_id=chain.id, side=side, address=route.meta_str(key), sleep=self._sleep)]
+
+    def _solana_switches(self, side: str, route: Route, asset: Asset, far_asset: Asset) -> list[PauseSwitch]:
+        registry = self._bridge.registry
+        if side == "source":
+            token_pda = route.meta_str("tokenPda")
+        else:                                       # the paired Solana -> Aleo route carries the deployment metadata
+            paired = [r for r in registry.routes(bridge_protocol="hyperlane", include_unavailable=True,
+                                                 environment=self._bridge.environment)
+                      if r.source_asset_id == asset.id and r.destination_asset_id == far_asset.id]
+            if not paired:
+                raise ConfigurationError(f"No Solana-origin route pairs with {route.id} to locate its token PDA")
+            token_pda = paired[0].meta_str("tokenPda")
+        aleo_domain = registry.chain(far_asset.chain_id).protocol_domains["hyperlane"]
+        return [read_solana_remote_router(self._solana(), chain_id=asset.chain_id, side=side, token_pda=token_pda,
+                                          domain=aleo_domain, sleep=self._sleep)]
+
+    def status(self, route: Route, *, sides: Sequence[str] = SIDES) -> PauseStatus:
+        registry = self._bridge.registry
+        assets = {"source": registry.asset(route.source_asset_id), "destination": registry.asset(route.destination_asset_id)}
+        chains = {side: registry.chain(a.chain_id) for side, a in assets.items()}
+        switches: list[PauseSwitch] = []
+        for side in SIDES:
+            if side not in sides:
+                continue
+            far = "destination" if side == "source" else "source"
+            family = chains[side].family
+            if family == "aleo":
+                switches += self._aleo(side, route, assets[side], chains[far])
+            elif family == "evm":
+                switches += self._evm(side, route, chains[side], chains[far])
+            elif family == "solana":
+                switches += self._solana_switches(side, route, assets[side], assets[far])
+        return PauseStatus(route.id, tuple(switches))
+
+
+__all__ = ["BACKOFF_SECONDS", "IMMEDIATE_RETRIES", "PauseReader", "ReadFailed", "SIDES", "read_aleo_flag",
+           "read_aleo_remote_router", "read_evm_paused", "read_mailbox_hook_pauses", "read_mailbox_ism_pauses",
+           "read_solana_remote_router", "read_with_retry", "rotate"]

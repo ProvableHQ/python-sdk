@@ -26,7 +26,7 @@ from .privacy import PrivacyModule
 from .profile import DEFAULT_ENDPOINT, Profile
 from .registry import DEFAULT_REGISTRY, Asset, Chain, Registry, validate_registry
 from .sol import Solana, SolModule
-from .types import BridgeStatus, ChainStatus, PrivacyReceipt
+from .types import BridgeStatus, ChainStatus, PauseStatus, PrivacyReceipt
 from .units import format_decimal_amount, parse_decimal_amount
 from .xreserve import XReserveModule
 
@@ -349,6 +349,22 @@ class Bridge:
                                     destination_chain=destination_chain, destination_asset=destination_asset,
                                     bridge_protocol=bridge_protocol, symbol=symbol,
                                     include_unavailable=include_unavailable, environment=self.environment)
+
+    def pause_status(self, route, *, sides=("source", "destination")) -> PauseStatus:
+        """Read every operator pause switch governing ``route`` (a ``Route``, its id, or a ``Plan``), live.
+
+        Both ends are read unless ``sides`` narrows it: the ``pause`` mapping and enrolled router of the
+        Aleo warp program (plus the ARC-20 token's ``pause__``), the USDCx bridge and stablecoin pauses,
+        ``paused()`` on xReserve and the CCTP transmitter, any ``PausableHook`` / ``PausableIsm`` in the
+        Ethereum Mailbox's trees, and the Solana token PDA's enrolled router. Nothing is cached and the
+        result never raises for a pause: ``status.paused`` / ``status.unknown`` say so and
+        ``status.reason`` names the switch. ``quote``, ``execute``, ``resume`` and ``complete`` run this same
+        check and refuse with ``RoutePausedError`` or ``PauseCheckError``. A far-side EVM chain with no
+        configured connection is read over the profile's ``rpc_urls`` or the registry's public endpoints.
+        """
+        from .pause import PauseReader
+        route_id = getattr(route, "route_id", None) or getattr(route, "id", None) or route
+        return PauseReader(self).status(self.registry.route(route_id), sides=tuple(sides))
 
     def quote(self, *, source_chain: str | None = None, source_asset: str | None = None,
               destination_chain: str | None = None, destination_asset: str | None = None,
