@@ -18,7 +18,7 @@ from aleo_bridge.types import Fee, Receipt, Status
 from tests.fakes.fake_bridge import ALEO_RECIPIENT, EVM_ADDRESS, RECORD_PLAINTEXT, FakeBridge
 
 READS = {"bridge_status", "bridge_list_assets", "bridge_list_routes", "bridge_quote", "bridge_get_progress",
-         "bridge_pending"}
+         "bridge_pending", "bridge_pause_status"}
 WRITES = {"bridge_execute", "bridge_resume", "bridge_complete", "bridge_shield", "bridge_unshield"}
 QUOTE_ARGS = {"source_chain": "ethereum", "source_asset": "usdc", "destination_chain": "aleo",
               "destination_asset": "usdcx", "amount": "2", "recipient": ALEO_RECIPIENT}
@@ -508,3 +508,37 @@ def test_complete_write_error_surfaces_recover_guidance_and_the_prepared_checkpo
     # the pre-broadcast checkpoint made it out: the proved mint can be rebroadcast, never re-proved
     assert out["checkpoint"]["destination"]["preparedTransaction"]["transactionId"] == "at1fake1"
     assert NONCE not in json.dumps(out)
+
+
+# ── pause status ──────────────────────────────────────────────────────────────
+
+def test_pause_status_tool_reports_switches_and_write_errors_name_the_fix():
+    from aleo_bridge.agent import PAUSED_HOW_TO_FIX, PAUSE_CHECK_HOW_TO_FIX
+    from aleo_bridge.types import PauseStatus, PauseSwitch
+    b = FakeBridge(ethereum=False)
+    rid = "hyperlane:aleo/eth->ethereum/eth"
+    out = dispatch_tool(b, "bridge_pause_status", {"route": rid})
+    assert out["route_id"] == rid and out["paused"] is False and out["unknown"] is False
+    assert out["switches"][0]["state"] == "open" and "open" in out["reason"]
+    by_selectors = dispatch_tool(b, "bridge_pause_status", {"source_chain": "aleo", "source_asset": "eth",
+                                                              "destination_chain": "ethereum"})
+    assert by_selectors["route_id"] == rid
+    b.pause_statuses[rid] = PauseStatus(rid, (PauseSwitch("aleo", "source", "hyp_warp_token_eth_v2.aleo", "pause[true]",
+                                                          "paused", "true"),))
+    args = {"source_chain": "aleo", "source_asset": "eth", "destination_chain": "ethereum", "destination_asset": "eth",
+            "amount": "0.000000000000000001", "recipient": EVM_ADDRESS, "confirm": True}
+    out = dispatch_tool(b, "bridge_execute", args)
+    assert out["error_type"] == "RoutePausedError" and out["how_to_fix"] == PAUSED_HOW_TO_FIX and b.events == []
+    b.pause_statuses[rid] = PauseStatus(rid, (PauseSwitch("ethereum", "destination", "0x" + "88" * 20, "paused()",
+                                                          "unknown", "ConnectionError: down after 7 attempts"),))
+    out = dispatch_tool(b, "bridge_execute", args)
+    assert out["error_type"] == "PauseCheckError" and out["how_to_fix"] == PAUSE_CHECK_HOW_TO_FIX
+    assert "bridge_pause_status" in {t["name"] for t in bridge_tools(include_writes=False)}
+
+
+def test_existing_tool_schemas_are_byte_identical_to_the_snapshot():
+    snap = {t["name"]: t for t in json.loads((Path(__file__).parent / "fixtures" / "agent-tools-2026-10-30.json").read_text())}
+    now = {t["name"]: t for t in bridge_tools()}
+    assert set(now) - set(snap) == {"bridge_pause_status"}
+    for name, tool in snap.items():
+        assert now[name] == tool, name

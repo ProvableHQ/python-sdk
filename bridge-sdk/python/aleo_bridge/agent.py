@@ -38,7 +38,7 @@ from typing import Any, Callable
 
 from . import lifecycle
 from .checkpoint import Checkpoint, create_checkpoint
-from .errors import BridgeError, ConfigurationError
+from .errors import BridgeError, ConfigurationError, PauseCheckError, RoutePausedError
 from .registry import DEFAULT_REGISTRY, Registry
 from .types import EvmXReserveQuote, Receipt
 from .units import format_decimal_amount
@@ -56,6 +56,10 @@ NONCE_HOW_TO_FIX = ("re-call with secret_nonce set to the value the user kept fr
                     "never stored it, and no other value can open the commitment")
 RECOVER_HOW_TO_FIX = ("the source step may already be on the wire: call bridge_get_progress with the "
                       "checkpoint (or bridge_pending) before doing anything else — never bridge_execute again")
+PAUSED_HOW_TO_FIX = ("the operator has paused this route on chain; wait for it to be unpaused and re-check with "
+                     "bridge_pause_status — no change of input will make it go through")
+PAUSE_CHECK_HOW_TO_FIX = ("a pause switch could not be read after retries; retry later, or point the client at "
+                          "another RPC endpoint (ETHEREUM_RPC_URL / <CHAIN>_RPC_URL, profile.set_rpc_url, or evm=)")
 
 #: Receipt ``protocol_state`` keys that are dropped from every rendered receipt: the private-mint
 #: secret and record plaintext (secret), the Circle attestation body (secret-adjacent and large),
@@ -155,6 +159,10 @@ def _redacted_state(state: Any) -> Any:
 # ── errors ────────────────────────────────────────────────────────────────────
 
 def _how_to_fix(exc: Exception) -> str | None:
+    if isinstance(exc, RoutePausedError):
+        return PAUSED_HOW_TO_FIX
+    if isinstance(exc, PauseCheckError):
+        return PAUSE_CHECK_HOW_TO_FIX
     message = str(exc).lower()
     if "secret_nonce" in message or "secret nonce" in message:
         return NONCE_HOW_TO_FIX
@@ -307,6 +315,15 @@ def _h_list_routes(b, a):
                                         environment=a.get("environment", b.environment)), b.registry)
 
 
+def _h_pause_status(b, a):
+    route = lifecycle.select_route(b.registry, source_chain=a.get("source_chain"), source_asset=a.get("source_asset"),
+                                   destination_chain=a.get("destination_chain"), destination_asset=a.get("destination_asset"),
+                                   bridge_protocol=a.get("bridge_protocol"), route=a.get("route"))
+    status = b.pause_status(route)
+    return {"route_id": status.route_id, "paused": status.paused, "unknown": status.unknown, "reason": status.reason,
+            "switches": [dataclasses.asdict(s) for s in status.switches]}
+
+
 def _h_quote(b, a):
     gap = _private_nonce_gap(a) or _connection_gap(b, a.get("source_chain"))
     if gap is not None:
@@ -455,6 +472,14 @@ _READ_TOOLS: list[tuple[str, str, dict[str, Any], Callable[[Any, dict[str, Any]]
      _schema({"source_chain": _S, "source_asset": _S, "destination_chain": _S, "destination_asset": _S,
               "bridge_protocol": {**_S, "enum": ["xreserve", "hyperlane"]}, "symbol": _S,
               "include_unavailable": _B, "environment": {**_S, "enum": ["mainnet", "testnet"]}}, []), _h_list_routes),
+    ("bridge_pause_status",
+     "Read the operator pause switches on both ends of a route, live (reads only, never cached): the Aleo warp/USDCx "
+     "program pauses and enrolled routers, paused() on xReserve and the CCTP transmitter, any pausable hook/ISM in the "
+     "Ethereum Mailbox, and the Solana warp program's enrolled router. Name the route by route id or by "
+     "source_chain + source_asset + destination_chain. bridge_quote/bridge_execute run this same check and refuse a "
+     "paused or unreadable route.",
+     _schema({"route": _S, "source_chain": _S, "source_asset": _S, "destination_chain": _S, "destination_asset": _S,
+              "bridge_protocol": {**_S, "enum": ["xreserve", "hyperlane", "cctp"]}}, []), _h_pause_status),
     ("bridge_quote",
      "Validate and price a transfer: route, fees (human units), amount_out, approval needs. Reads chain state, "
      "never signs. ALWAYS quote before bridge_execute and show the user fees and amount_out. A private mint "
