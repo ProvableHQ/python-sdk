@@ -90,3 +90,19 @@ def test_rpc_urls_persist_and_old_profiles_load_without_them(tmp_path, monkeypat
     assert Profile.load_or_create(tmp_path / "old").rpc_urls == {}
     with pytest.raises(ConfigurationError, match="https"):
         p.set_rpc_url("base", "ftp://nope")
+
+
+def test_set_rpc_url_rejects_chains_that_would_break_from_profile(tmp_path, monkeypatch):
+    """Review finding: a typo'd, non-EVM or wrong-environment chain id must be refused, not persisted."""
+    monkeypatch.delenv("BRIDGE_PRIVATE_KEY", raising=False)
+    monkeypatch.delenv("BRIDGE_PRIVATE_KEY_FILE", raising=False)
+    p = Profile.load_or_create(tmp_path / "h")
+    with pytest.raises(ConfigurationError, match="unknown"):
+        p.set_rpc_url("etherum", "https://x.example")
+    with pytest.raises(ConfigurationError, match="not an EVM chain"):
+        p.set_rpc_url("aleo", "https://x.example")
+    with pytest.raises(ConfigurationError, match="mainnet"):
+        p.set_rpc_url("sepolia", "https://x.example")
+    with pytest.raises(ConfigurationError, match="unknown"):
+        Profile.load_or_create(tmp_path / "h2", rpc_urls={"nochain": "https://x.example"})
+    assert p.rpc_urls == {}

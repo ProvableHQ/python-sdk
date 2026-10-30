@@ -30,7 +30,7 @@ def test_undeclared_mapping_is_a_configuration_error():
 
 
 def test_missing_program_is_a_configuration_error():
-    with pytest.raises(ConfigurationError, match="does not declare mapping"):
+    with pytest.raises(ConfigurationError, match="is not served by this node"):
         _flag(_bridge({}, missing_programs={WARP}))
 
 

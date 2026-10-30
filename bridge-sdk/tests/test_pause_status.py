@@ -113,8 +113,8 @@ def test_destination_evm_falls_back_to_registry_public_rpc(monkeypatch):
 
     def factory(url):
         urls.append(url)
-        return Ethereum(w3=fake_web3(calls={(XRESERVE, sel("paused()")): boolean(False)}))
-    monkeypatch.setattr("aleo_bridge.pause.Ethereum", factory)
+        return fake_web3(calls={(XRESERVE, sel("paused()")): boolean(False)})
+    monkeypatch.setattr("aleo_bridge.pause._public_web3", factory)
     b = make_bridge(ethereum=None, mappings={"usdcx_bridge_v2.aleo": {"paused": {}}, "usdcx_stablecoin.aleo": {"pause": {}}})
     status = b.pause_status("xreserve:aleo/usdcx->ethereum/usdc")
     assert not status.paused and not status.unknown
@@ -129,8 +129,8 @@ def test_public_rpc_rotation_on_transient_errors(monkeypatch):
     def factory(url):
         urls.append(url)
         scripted = requests.ConnectionError("down") if url == public[0] else boolean(False)
-        return Ethereum(w3=fake_web3(calls={(XRESERVE, sel("paused()")): scripted}))
-    monkeypatch.setattr("aleo_bridge.pause.Ethereum", factory)
+        return fake_web3(calls={(XRESERVE, sel("paused()")): scripted})
+    monkeypatch.setattr("aleo_bridge.pause._public_web3", factory)
     b = make_bridge(ethereum=None, mappings={"usdcx_bridge_v2.aleo": {"paused": {}}, "usdcx_stablecoin.aleo": {"pause": {}}})
     status = b.pause_status("xreserve:aleo/usdcx->ethereum/usdc")       # first retry is immediate, so no real wait
     assert not status.unknown and urls == [public[0], public[1]]
@@ -180,3 +180,17 @@ def test_warp_program_pause_mapping_follows_what_it_declares():
                     mappings={bat: {"remote_routers": {"1u32": "x"}}, shield: {}})
     with pytest.raises(ConfigurationError, match="declares no pause mapping"):
         b.pause_status("hyperlane:aleo/bat->ethereum/bat")
+
+
+def test_token_program_the_node_does_not_serve_is_a_configuration_error():
+    """Review finding: a privacy/token program missing from the node must never be skipped as 'no switch'."""
+    b = make_bridge(ethereum=Ethereum(w3=fake_web3(calls=_hook_tree(False))),
+                    mappings=_warp("hyp_warp_token_eth_v2.aleo", 1), missing_programs={"arc20_eth.aleo"})
+    with pytest.raises(ConfigurationError, match="arc20_eth.aleo is not served"):
+        b.pause_status("hyperlane:ethereum/eth->aleo/eth")
+
+
+def test_public_endpoint_connections_use_a_short_request_timeout():
+    from aleo_bridge.pause import PUBLIC_RPC_TIMEOUT_SECONDS, _public_web3
+    w3 = _public_web3("https://ethereum-rpc.publicnode.com")
+    assert w3.provider.get_request_kwargs()["timeout"] == PUBLIC_RPC_TIMEOUT_SECONDS == 10

@@ -20,7 +20,6 @@ import time
 from typing import Any, Callable, Sequence, TypeVar
 
 from .errors import ConfigurationError
-from .eth import Ethereum
 from .registry import Asset, Chain, Route
 from .sol import DEFAULT_SOLANA_RPC_URL, Solana
 from .types import PauseStatus, PauseSwitch
@@ -72,17 +71,26 @@ def _aleo_mapping_value(bridge: Any, program: str, mapping: str, key: str, sleep
     program that does not exist, so a typo in a pinned mapping name would read as "open" forever.
     Checking the declared list first turns that into a ``ConfigurationError``.
     """
-    from aleo.facade.errors import ProgramNotFound
-
-    def declared(_attempt: int) -> list[str]:
-        try:
-            return list(bridge.program(program).mappings())
-        except ProgramNotFound:
-            return []
-    if mapping not in read_with_retry(declared, sleep=sleep):
+    if mapping not in _declared_mappings(bridge, program, sleep):
         raise ConfigurationError(
             f"{program} does not declare mapping {mapping!r}; the registry pins a program this node does not serve")
     return read_with_retry(lambda _attempt: bridge.mapping_value(program, mapping, key), sleep=sleep)
+
+
+def _declared_mappings(bridge: Any, program: str, sleep: Callable[[float], None]) -> list[str]:
+    """The mapping names *program* declares; a program the node does not serve is a ``ConfigurationError``
+    (never "no switches"), so a registry typo can never make a switch vanish."""
+    from aleo.facade.errors import ProgramNotFound
+
+    def declared(_attempt: int) -> list[str] | None:
+        try:
+            return list(bridge.program(program).mappings())
+        except ProgramNotFound:
+            return None
+    names = read_with_retry(declared, sleep=sleep)
+    if names is None:
+        raise ConfigurationError(f"{program} is not served by this node; the registry pins a program that is not deployed here")
+    return names
 
 
 PAUSE_MAPPINGS = (("pause", "true"), ("paused", "true"), ("pause__", "false"))   # (mapping, key) conventions seen on chain
@@ -91,15 +99,8 @@ PAUSE_MAPPINGS = (("pause", "true"), ("paused", "true"), ("pause__", "false"))  
 def declared_pause_mapping(bridge: Any, program: str, *, sleep: Callable[[float], None] = time.sleep) -> tuple[str, str] | None:
     """Which pause convention *program* declares: ``pause[true]`` (ETH/WBTC/SOL warp, usdcx_stablecoin),
     ``paused[true]`` (usdcx_bridge_v2) or the ARC-20 ``pause__[false]`` (BAT/USDG/ZEC warp, arc20_*/shield_arc22_*
-    tokens); None when it has no pause switch at all."""
-    from aleo.facade.errors import ProgramNotFound
-
-    def declared(_attempt: int) -> list[str]:
-        try:
-            return list(bridge.program(program).mappings())
-        except ProgramNotFound:
-            return []
-    names = read_with_retry(declared, sleep=sleep)
+    tokens); None when the (deployed) program has no pause switch at all."""
+    names = _declared_mappings(bridge, program, sleep)
     return next(((m, k) for m, k in PAUSE_MAPPINGS if m in names), None)
 
 
@@ -250,6 +251,14 @@ def read_solana_remote_router(solana: Any, *, chain_id: str, side: str, token_pd
 # ── Per-route assembly ───────────────────────────────────────────────────────
 
 SIDES = ("source", "destination")
+PUBLIC_RPC_TIMEOUT_SECONDS = 10     # a hung public endpoint must not strand a quote for web3's 30 s default per call
+
+
+def _public_web3(url: str) -> Any:
+    """A throwaway read-only ``Web3`` over a registry public endpoint, with a short request timeout."""
+    from .eth import _web3
+    web3 = _web3()
+    return web3.Web3(web3.HTTPProvider(url, request_kwargs={"timeout": PUBLIC_RPC_TIMEOUT_SECONDS}))
 
 
 class PauseReader:
@@ -272,7 +281,7 @@ class PauseReader:
             raise ConfigurationError(
                 f"No RPC connection for {chain_id} to read its pause switches: pass ethereum=/evm= to Bridge(...), "
                 f"save one with profile.set_rpc_url({chain_id!r}, url), or set {chain_id.upper()}_RPC_URL")
-        return lambda attempt: Ethereum(rotate(urls, attempt)).w3
+        return lambda attempt: _public_web3(rotate(urls, attempt))
 
     def _solana(self) -> Any:
         return self._bridge.solana if self._bridge.solana is not None else Solana(DEFAULT_SOLANA_RPC_URL)

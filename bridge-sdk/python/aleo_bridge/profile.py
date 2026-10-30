@@ -56,7 +56,7 @@ class Profile:
         if network not in NETWORKS:
             raise ConfigurationError(f"Profile network must be one of {NETWORKS}, got {network!r}")
         for chain_id, url in (rpc_urls or {}).items():
-            _check_rpc_url(chain_id, url)
+            _check_rpc_url(chain_id, url, network)
         home_path = Path(home).expanduser() if home is not None else cls.default_home()
         path = home_path / _PROFILE
         if path.exists():
@@ -116,7 +116,7 @@ class Profile:
 
     def set_rpc_url(self, chain_id: str, url: str) -> None:
         """Persist *url* for *chain_id* (explicit ``ethereum=``/``evm=`` arguments and env variables still win)."""
-        _check_rpc_url(chain_id, url)
+        _check_rpc_url(chain_id, url, self.network)
         self._data.setdefault("rpc_urls", {})[chain_id] = url
         path = self.home / _PROFILE
         tmp = path.with_suffix(".json.tmp")
@@ -127,7 +127,19 @@ class Profile:
         path.chmod(0o600)
 
 
-def _check_rpc_url(chain_id: str, url: str) -> None:
+def _check_rpc_url(chain_id: str, url: str, network: str) -> None:
+    """Refuse what ``Bridge.from_profile`` could not load: an unknown, non-EVM or other-environment chain."""
+    from .registry import DEFAULT_REGISTRY
+    from .errors import RouteNotFoundError
+    try:
+        chain = DEFAULT_REGISTRY.chain(chain_id)
+    except RouteNotFoundError as exc:
+        raise ConfigurationError(f"RPC URL for unknown chain {chain_id!r}; registry chains: "
+                                 f"{[c.id for c in DEFAULT_REGISTRY.chains() if c.family == 'evm']}") from exc
+    if chain.family != "evm":
+        raise ConfigurationError(f"{chain.id} is not an EVM chain; the profile stores RPC URLs for EVM chains only")
+    if chain.environment != network:
+        raise ConfigurationError(f"{chain.id} is a {chain.environment} chain but this profile is {network}")
     if not isinstance(url, str) or not url.startswith(("https://", "http://")):
         raise ConfigurationError(f"RPC URL for {chain_id!r} must start with https:// (or http:// for a local node), got {url!r}")
 
