@@ -176,6 +176,32 @@ Keep `quote.plan` unchanged when accepting the quote so the submitted transfer
 uses the reviewed asset, amount, and recipient. Request a new quote to change
 those details.
 
+### Paused routes
+
+Every bridge deployment has an operator switch that can halt it: the `pause`
+mapping on the Aleo warp and USDCx programs, `paused()` on Circle's xReserve
+and CCTP transmitters, a pausable hook inside the Ethereum Hyperlane Mailbox,
+and the enrolled-router table of the Solana warp program. `quote`, `execute`,
+`resume` and `complete` read every switch that governs the route, on both
+ends, right before they act, and refuse with `RoutePausedError` naming the
+switch when one is set. A switch that cannot be read after retries refuses
+with `PauseCheckError`; the SDK never proceeds on a guess.
+
+Ask before quoting with `bridge.pause_status(route)`, which returns each
+switch and its value:
+
+```python
+status = bridge.pause_status("hyperlane:aleo/eth->ethereum/eth")
+print(status.paused, status.reason)
+for switch in status.switches:
+    print(switch.chain_id, switch.side, switch.locator, switch.switch, switch.state)
+```
+
+Reading the far side of an Aleo-origin route needs an RPC for that chain:
+the one you configured, one saved with `profile.set_rpc_url("ethereum", url)`,
+or the public read endpoint the registry pins. Those public endpoints are used
+for pause reads only, never for signing.
+
 ### 2. Submit a bridge transaction from the source chain
 
 The source transaction deposits the sender's funds into the bridge so they

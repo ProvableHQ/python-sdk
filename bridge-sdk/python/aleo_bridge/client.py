@@ -384,7 +384,9 @@ class Bridge:
         kind-specific ``Quote`` (``quote.kind`` in evm-hyperlane /
         solana-hyperlane / aleo-hyperlane / evm-xreserve / aleo-xreserve) with
         ``fees`` and ``amount_out`` in human units and ``quote.plan``.  Show the
-        user fees + amount before ``execute``.
+        user fees + amount before ``execute``.  Refuses with ``RoutePausedError`` /
+        ``PauseCheckError`` when a pause switch on either end reads paused or
+        cannot be read (see ``pause_status``).
         """
         return _lifecycle.quote(self, source_chain=source_chain, source_asset=source_asset,
                                 destination_chain=destination_chain, destination_asset=destination_asset,
@@ -413,8 +415,10 @@ class Bridge:
         the list changes; ``merkle_proof`` is the earlier name for one literal
         bundle).  The Hyperlane hook payment is
         re-quoted right before proving unless ``gas_payment_microcredits`` is
-        pinned.  Irreversible once the source step is broadcast: afterwards use
-        ``wait`` / ``recover``, never ``execute`` again.
+        pinned.  Refuses with ``RoutePausedError`` / ``PauseCheckError`` when a
+        pause switch on either end reads paused or cannot be read.  Irreversible
+        once the source step is broadcast: afterwards use ``wait`` / ``recover``,
+        never ``execute`` again.
         """
         return _lifecycle.execute(self, plan, on_checkpoint=on_checkpoint, proving=proving, mode=mode,
                                   record=record, compliance_proofs=compliance_proofs, merkle_proof=merkle_proof,
@@ -459,7 +463,9 @@ class Bridge:
 
         Rebroadcasts the identical proved Aleo transaction (a duplicate response is
         success) or, on EVM, re-scans history and only then authorizes the single
-        missing deposit/dispatch.  Never repeats a confirmed step.
+        missing deposit/dispatch.  Never repeats a confirmed step.  Refuses with
+        ``RoutePausedError`` / ``PauseCheckError`` when a pause switch on either
+        end reads paused or cannot be read.
         """
         return _lifecycle.resume(self, progress, on_checkpoint=on_checkpoint, secret_nonce=secret_nonce,
                                  poll_seconds=poll_seconds, timeout_seconds=timeout_seconds, proving=proving)
@@ -474,6 +480,8 @@ class Bridge:
         nonce, but requires a destination signer and gas. Set ``manual_mint=True``
         to explicitly authorize fallback for stalled forwarding; an already
         submitted destination transaction is observed rather than repeated.
+        Refuses with ``RoutePausedError`` / ``PauseCheckError`` when a pause switch
+        on the destination side reads paused or cannot be read.
         """
         options = {"manual_mint": manual_mint} if manual_mint else {}
         return _lifecycle.complete(self, progress, secret_nonce=secret_nonce, on_checkpoint=on_checkpoint,
