@@ -400,7 +400,7 @@ class Bridge:
     def quote(self, *, source_chain: str | None = None, source_asset: str | None = None,
               destination_chain: str | None = None, destination_asset: str | None = None,
               bridge_protocol: str | None = None, route=None, amount=None, amount_atomic=None, recipient: str,
-              sender: str | None = None, mint_mode: str = "public", secret_nonce: str = "0scalar", cctp=None):
+              sender: str | None = None, mint_mode: str = "public", secret_nonce: str | None = None, cctp=None):
         """Price a transfer and get the plan that ``execute`` takes. Nothing is signed.
 
         Name the route the way veil's ``quote`` does: ``source_chain`` + ``source_asset``
@@ -412,7 +412,10 @@ class Bridge:
         or ``amount_atomic`` (int).  ``recipient`` is the destination-chain
         address.  ``mint_mode`` (xReserve into Aleo only): ``"public"`` balance,
         ``"record"`` minted by the relayer, or ``"private"`` — you finish it
-        yourself with ``complete`` and must keep ``secret_nonce``.  Returns a
+        yourself with ``complete``.  For a private mint to the bridge's own
+        account the nonce is derived from the view key and kept in the bound
+        identity store, so no ``secret_nonce`` is needed; pass your own to
+        override it (then keep it).  Returns a
         kind-specific ``Quote`` (``quote.kind`` in evm-hyperlane /
         solana-hyperlane / aleo-hyperlane / evm-xreserve / aleo-xreserve /
         evm-cctp / aleo-verulink / evm-verulink) with
@@ -510,9 +513,11 @@ class Bridge:
 
         Rebroadcasts the identical proved Aleo transaction (a duplicate response is
         success) or, on EVM, re-scans history and only then authorizes the single
-        missing deposit/dispatch.  Never repeats a confirmed step.  Refuses with
-        ``RoutePausedError`` / ``PauseCheckError`` when a pause switch on either
-        end reads paused or cannot be read.
+        missing deposit/dispatch.  Never repeats a confirmed step.  A private
+        xReserve deposit for the bridge's own account finds its nonce in the bound
+        identity store; pass ``secret_nonce`` only if the deposit was made with one.
+        Refuses with ``RoutePausedError`` / ``PauseCheckError`` when a pause
+        switch on either end reads paused or cannot be read.
         """
         with bridge_context("resume", getattr(progress, "plan", None)):
             return _lifecycle.resume(self, progress, on_checkpoint=on_checkpoint, secret_nonce=secret_nonce,
@@ -522,8 +527,10 @@ class Bridge:
                  manual_mint: bool = False):
         """Claim a private USDCx, native-USDC CCTP, or public Verulink destination.
 
-        Private xReserve requires the same ``secret_nonce`` given to ``execute``; the SDK never
-        stored it.  Submits exactly one ``private_mint`` and returns
+        A private USDCx mint to the bridge's own account needs no ``secret_nonce``:
+        the scalar comes from the bound identity store, re-derived from the view
+        key if the store lost it.  A deposit made with a caller-supplied nonce
+        needs that same nonce back.  Submits exactly one ``private_mint`` and returns
         ``DESTINATION_CONFIRMING`` progress to ``wait`` on. CCTP needs no secret
         nonce, but requires a destination signer and gas. Set ``manual_mint=True``
         to explicitly authorize fallback for stalled forwarding; an already
