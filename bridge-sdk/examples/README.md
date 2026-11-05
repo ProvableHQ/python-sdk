@@ -32,7 +32,7 @@ real funds. Review a quote before submitting a new transfer.
 | [bridge_wbtc.py](bridge_wbtc.py) | Send WBTC and monitor its arrival as a public Aleo balance. |
 | [bridge_sol.py](bridge_sol.py) | Send native SOL from Solana to a public Aleo balance. |
 | [bridge_usdc_private_balance.py](bridge_usdc_private_balance.py) | Receive private USDCx automatically; the Ethereum deposit still reveals the Aleo recipient. |
-| [bridge_usdc_private_recipient.py](bridge_usdc_private_recipient.py) | Hide the Aleo recipient in the deposit, then claim private USDCx using the retained nonce. |
+| [bridge_usdc_private_recipient.py](bridge_usdc_private_recipient.py) | Hide the Aleo recipient in the deposit, then claim private USDCx with a nonce the bridge derives and keeps, or one you supply. |
 | [bridge_wbtc_to_ethereum.py](bridge_wbtc_to_ethereum.py) | Return public Aleo WBTC to Ethereum. |
 | [bridge_sol_to_solana.py](bridge_sol_to_solana.py) | Return public Aleo SOL as native SOL on Solana. |
 | [bridge_arc22_hyperlane.py](bridge_arc22_hyperlane.py) | Move BAT, USDG, or ZEC between Aleo and Ethereum or Solana, in either direction. |
@@ -93,11 +93,14 @@ For USDC, choose `bridge_usdc_private_balance.py` for automatic private records,
 or `bridge_usdc_private_recipient.py` to hide the Aleo address in the deposit.
 Both default to 2 USDC. The Ethereum sender and deposited amount remain public.
 
-The private recipient example needs `BRIDGE_MINT_SECRET_NONCE`: a securely
-generated, nonzero Aleo scalar retained in your secret store **before** sending.
-`str(aleo.mainnet.Scalar.random())` generates such a value. Supply the same saved
-value when recovering or claiming; the journal deliberately excludes it.
-The script claims automatically if the deposit becomes ready during monitoring.
+The private recipient example derives the claim nonce from the recipient
+account's view key and keeps it in `.private-mint-identities.json` beside the
+journal; back that file up with the journal. To deposit under a nonce you
+manage instead, set `BRIDGE_MINT_SECRET_NONCE` to a securely generated, nonzero
+Aleo scalar (`str(aleo.mainnet.Scalar.random())`) retained in your secret store
+**before** sending, and supply the same value when recovering or claiming; the
+journal deliberately excludes it. The script claims automatically if the
+deposit becomes ready during monitoring.
 
 RPCs default to public Ethereum, Solana, and Provable endpoints. Override
 `ETHEREUM_RPC_URL`, `SOLANA_RPC_URL`, or `ALEO_RPC_URL` when needed; all three must
@@ -242,8 +245,9 @@ checkpoints also remain supported.
 For your own transfer, pass its ID and use `--action wait` to monitor. If the
 reported next step is `resume`, `--action resume` submits the unfinished source
 step. If it is `complete`, `--action complete` claims private USDCx using
-`ALEO_PRIVATE_KEY` and the original `BRIDGE_MINT_SECRET_NONCE`. These actions use
-the existing transfer; neither calls `execute` again.
+`ALEO_PRIVATE_KEY` (and the original `BRIDGE_MINT_SECRET_NONCE` if the deposit
+was made with one). These actions use the existing transfer; neither calls
+`execute` again.
 
 If no files remain, get the confirmed WBTC bridge dispatch hash, original sender,
 recipient, and amount from Ethereum history. Pass those values as

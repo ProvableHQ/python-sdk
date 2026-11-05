@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from . import lifecycle as _lifecycle
 from . import _evm_connections
+from . import private_mint as _private_mint
 from ._calls import AleoCall
 from .cctp import CctpModule
 from .errors import BridgeError, ConfigurationError, UnsupportedRouteError
@@ -124,7 +125,8 @@ class Bridge:
     """Typed bridge client over the Aleo facade (and, from plans 2/3, Ethereum/Solana connections)."""
 
     def __init__(self, aleo: Any, *, ethereum: Any = None, solana: Any = None, environment: str | None = None,
-                 registry: Registry | None = None, checkpoints: Any = None, evm: Any = None) -> None:
+                 registry: Registry | None = None, checkpoints: Any = None, evm: Any = None,
+                 private_mint_identities: Any = None) -> None:
         network = getattr(aleo, "network_name", None)
         if network not in NETWORKS:
             raise ConfigurationError(f"The aleo facade must report network_name mainnet or testnet, got {network!r}")
@@ -140,6 +142,10 @@ class Bridge:
         if not self.registry.chains(environment=environment):
             raise ConfigurationError(f"Registry {self.registry.version} has no chains for {environment}")
         self.checkpoints = checkpoints
+        #: Where derived private-mint nonces live: the given store, or a hidden file beside a bound
+        #: ``FileCheckpointStore`` journal, or None (then a private mint needs ``secret_nonce=``).
+        self.private_mint_identities: Any = (private_mint_identities if private_mint_identities is not None
+                                             else _private_mint.default_identity_store(checkpoints))
         self.ethereum: Ethereum | None = _coerce_ethereum(ethereum)
         self._evm_connections = _evm_connections.normalize(self.registry, environment, evm, self.ethereum)
         self._evm_modules: dict[str, EthModule] = {}
@@ -353,7 +359,7 @@ class Bridge:
     def quote(self, *, source_chain: str | None = None, source_asset: str | None = None,
               destination_chain: str | None = None, destination_asset: str | None = None,
               bridge_protocol: str | None = None, route=None, amount=None, amount_atomic=None, recipient: str,
-              sender: str | None = None, mint_mode: str = "public", secret_nonce: str = "0scalar", cctp=None):
+              sender: str | None = None, mint_mode: str = "public", secret_nonce: str | None = None, cctp=None):
         """Price a transfer and get the plan that ``execute`` takes. Nothing is signed.
 
         Name the route the way veil's ``quote`` does: ``source_chain`` + ``source_asset``
@@ -364,7 +370,10 @@ class Bridge:
         or ``amount_atomic`` (int).  ``recipient`` is the destination-chain
         address.  ``mint_mode`` (xReserve into Aleo only): ``"public"`` balance,
         ``"record"`` minted by the relayer, or ``"private"`` — you finish it
-        yourself with ``complete`` and must keep ``secret_nonce``.  Returns a
+        yourself with ``complete``.  For a private mint to the bridge's own
+        account the nonce is derived from the view key and kept in the bound
+        identity store, so no ``secret_nonce`` is needed; pass your own to
+        override it (then keep it).  Returns a
         kind-specific ``Quote`` (``quote.kind`` in evm-hyperlane /
         solana-hyperlane / aleo-hyperlane / evm-xreserve / aleo-xreserve) with
         ``fees`` and ``amount_out`` in human units and ``quote.plan``.  Show the
@@ -443,7 +452,9 @@ class Bridge:
 
         Rebroadcasts the identical proved Aleo transaction (a duplicate response is
         success) or, on EVM, re-scans history and only then authorizes the single
-        missing deposit/dispatch.  Never repeats a confirmed step.
+        missing deposit/dispatch.  Never repeats a confirmed step.  A private
+        xReserve deposit for the bridge's own account finds its nonce in the bound
+        identity store; pass ``secret_nonce`` only if the deposit was made with one.
         """
         return _lifecycle.resume(self, progress, on_checkpoint=on_checkpoint, secret_nonce=secret_nonce,
                                  poll_seconds=poll_seconds, timeout_seconds=timeout_seconds, proving=proving)
@@ -452,8 +463,10 @@ class Bridge:
                  manual_mint: bool = False):
         """Claim a private USDCx or native-USDC CCTP destination mint.
 
-        Requires the same ``secret_nonce`` given to ``execute``; the SDK never
-        stored it.  Submits exactly one ``private_mint`` and returns
+        A private USDCx mint to the bridge's own account needs no ``secret_nonce``:
+        the scalar comes from the bound identity store, re-derived from the view
+        key if the store lost it.  A deposit made with a caller-supplied nonce
+        needs that same nonce back.  Submits exactly one ``private_mint`` and returns
         ``DESTINATION_CONFIRMING`` progress to ``wait`` on. CCTP needs no secret
         nonce, but requires a destination signer and gas. Set ``manual_mint=True``
         to explicitly authorize fallback for stalled forwarding; an already
@@ -501,7 +514,7 @@ class Bridge:
     @classmethod
     def from_env(cls, **overrides: Any) -> "Bridge":
         """Everything from the environment (spec §3.3); writes nothing to disk. Overrides: ethereum, solana, registry, checkpoints."""
-        unexpected = set(overrides) - {"ethereum", "solana", "registry", "checkpoints", "evm"}
+        unexpected = set(overrides) - {"ethereum", "solana", "registry", "checkpoints", "evm", "private_mint_identities"}
         if unexpected:
             raise TypeError(f"Bridge.from_env() got unexpected overrides: {sorted(unexpected)}")
         private_key = os.environ.get("BRIDGE_PRIVATE_KEY")
@@ -514,7 +527,8 @@ class Bridge:
                     ethereum_from_env() if _evm_connections.needs_legacy_environment(evm) else None)
         solana = overrides["solana"] if "solana" in overrides else solana_from_env()
         checkpoints = overrides["checkpoints"] if "checkpoints" in overrides else checkpoints_from_env()
-        return cls(aleo, ethereum=ethereum, solana=solana, registry=overrides.get("registry"), checkpoints=checkpoints, evm=evm)
+        return cls(aleo, ethereum=ethereum, solana=solana, registry=overrides.get("registry"), checkpoints=checkpoints, evm=evm,
+                   private_mint_identities=overrides.get("private_mint_identities"))
 
     @classmethod
     def from_profile(cls, home: Any = None, *, network: str | None = None, endpoint: str | None = None,

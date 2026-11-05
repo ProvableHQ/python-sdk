@@ -139,8 +139,8 @@ def testnet_client() -> Callable[[], Any]:
 
 # ── the shared body ──────────────────────────────────────────────────────────
 
-def _state_path(case: str, route: Route, environment: str) -> Path:
-    return live_config.live_state_path(environment, live_cases.state_name(case, route.id))
+def _state_path(case: str, route: Route, environment: str, suffix: str = "") -> Path:
+    return live_config.live_state_path(environment, live_cases.state_name(case, route.id) + suffix)
 
 
 def resume_command(state_path: Path | str) -> str:
@@ -167,7 +167,7 @@ def _record(record_property: Callable[[str, Any], None], case: str, route: Route
 
 def _drive_case(make_bridge: Callable[[], Any], case: str, route: Route, *, environment: str,
                 execute: bool, record_property: Callable[[str, Any], None],
-                amount: str | None = None) -> Any:
+                amount: str | None = None, derived_nonce: bool = False) -> Any:
     """Quote (and, when acknowledged, execute) one route, then finish it from disk with a NEW client.
 
     The two phases are the point: whatever ``execute`` returned is dropped with the first client, so
@@ -177,7 +177,8 @@ def _drive_case(make_bridge: Callable[[], Any], case: str, route: Route, *, envi
     if not route.active:
         pytest.skip(f"registry:{route.availability}")
 
-    state_path = _state_path(case, route, environment)
+    # A derived-nonce case keeps its own state file so it never resumes the explicit case's checkpoint.
+    state_path = _state_path(case, route, environment, suffix="-derived" if derived_nonce else "")
     benchmark = LiveBenchmark(f"{case}:{live_cases.route_slug(route.id)}", log=print)
     amount = amount or live_config.case_amount_override(case)
     recipient = live_config.recipient_override(_destination_family(route))
@@ -191,7 +192,7 @@ def _drive_case(make_bridge: Callable[[], Any], case: str, route: Route, *, envi
             bridge, case, route.id, state_path=state_path, recipient=recipient, amount=amount,
             execute=execute, benchmark=benchmark, stop_after_execute=stop_after_execute,
             wait_timeout_seconds=min(live_cases.WAIT_TIMEOUT_SECONDS, remaining()),
-            wait_poll_seconds=live_cases.WAIT_POLL_SECONDS, log=print)
+            wait_poll_seconds=live_cases.WAIT_POLL_SECONDS, derived_nonce=derived_nonce, log=print)
 
     state = None
     try:
@@ -270,13 +271,13 @@ def _mainnet(case: str, route: Route, make_bridge: Callable[[], Any],
 
 
 def _testnet(case: str, route_id: str, make_bridge: Callable[[], Any],
-             record_property: Callable[[str, Any], None], amount: str) -> Any:
+             record_property: Callable[[str, Any], None], amount: str, derived_nonce: bool = False) -> Any:
     """Gate one testnet route: the funds gate alone (veil's testnet file has no mainnet acknowledgement)."""
     if not live_config.live_funds_enabled():
         pytest.skip(f"set {live_config.FUNDS_VAR}=1 and {live_config.STATE_DIR_VAR} to run funded live cases")
     route = DEFAULT_REGISTRY.route(route_id)
     return _drive_case(make_bridge, case, route, environment="testnet", execute=True,
-                       record_property=record_property, amount=amount)
+                       record_property=record_property, amount=amount, derived_nonce=derived_nonce)
 
 
 # ── the five mainnet cases, one test each, over every route they cover ───────
@@ -344,6 +345,15 @@ def test_testnet_evm_xreserve_deposit(testnet_client, record_property):
     """
     _testnet("evm-xreserve", TESTNET_DEPOSIT_ROUTE, testnet_client, record_property,
              TESTNET_DEPOSIT_AMOUNT)
+
+
+def test_testnet_evm_xreserve_deposit_derived(testnet_client, record_property):
+    """Same route and amount as the explicit-nonce case, but no ``secret_nonce`` anywhere: the
+    bridge derives it for its own account (Shield's algorithm), keeps it in
+    ``.private-mint-identities.json`` beside the journal, and the NEW client that recovers from
+    disk completes the mint with it."""
+    _testnet("evm-xreserve", TESTNET_DEPOSIT_ROUTE, testnet_client, record_property,
+             TESTNET_DEPOSIT_AMOUNT, derived_nonce=True)
 
 
 def test_testnet_aleo_xreserve_return(testnet_client, record_property):

@@ -10,15 +10,13 @@ allowlist, not ``protocol_state``.
 from __future__ import annotations
 
 import json
-import os
 import re
-import tempfile
-from contextlib import contextmanager
 from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
+from ._fs import atomic_write_text, counter_lock
 from .errors import BridgeError, CheckpointInvalidError
 from .registry import Registry
 from .types import Plan, Receipt
@@ -260,29 +258,7 @@ class CheckpointStore(Protocol):
 _JOURNAL_ID = re.compile(r"\d{4}-\d{2}-\d{2}_\d{3,}_[A-Za-z0-9_-]+_to_[A-Za-z0-9_-]+_[0-9]+(?:\.[0-9]+)?")
 
 
-@contextmanager
-def _counter_lock(path: Path):
-    # A separate, persistent lock inode survives atomic replacement of counter data.
-    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
-    with os.fdopen(fd, "r+b") as lock:
-        if os.name == "nt":
-            import msvcrt
-            if not path.stat().st_size:
-                lock.write(b"0")
-                lock.flush()
-            lock.seek(0)
-            msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
-        else:
-            import fcntl
-            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            if os.name == "nt":
-                lock.seek(0)
-                msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+_counter_lock = counter_lock        # journal metadata lock, shared with the private mint identity store
 
 
 _UNSAFE = re.compile(r"[^A-Za-z0-9_-]")
@@ -342,27 +318,7 @@ class FileCheckpointStore:
         self._write(self._path(checkpoint.id), checkpoint.to_json())
 
     def _write(self, target: Path, text: str) -> None:
-        fd, tmp = tempfile.mkstemp(dir=self.directory, prefix=".", suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                fh.write(text)
-                fh.write("\n")
-                fh.flush()
-                os.fsync(fh.fileno())
-            os.chmod(tmp, 0o600)
-            os.replace(tmp, target)
-            if os.name != "nt":
-                directory_fd = os.open(self.directory, os.O_RDONLY)
-                try:
-                    os.fsync(directory_fd)
-                finally:
-                    os.close(directory_fd)
-        except BaseException:
-            try:
-                os.unlink(tmp)
-            except FileNotFoundError:
-                pass
-            raise
+        atomic_write_text(self.directory, target, text)
 
     def load(self, checkpoint_id: str) -> Checkpoint | None:
         path = self._path(checkpoint_id)

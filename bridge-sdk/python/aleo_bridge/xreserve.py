@@ -206,10 +206,16 @@ class XReserveModule:
     def hook_data(self, mode: str, recipient: str, secret_nonce: str = "0scalar") -> bytes:
         return enc.xreserve_hook_data(mode, recipient, self._bridge.environment, secret_nonce)
 
-    def build_private_mint_inputs(self, route: Route, attestation: Attestation, recipient: str, secret_nonce: str) -> list[str]:
-        """The five ``private_mint`` literals (brief §3.5) after re-verifying hash and the (recipient, nonce) commitment."""
+    def build_private_mint_inputs(self, route: Route, attestation: Attestation, recipient: str,
+                                  secret_nonce: str | None) -> list[str]:
+        """The five ``private_mint`` literals (brief §3.5) after re-verifying hash and the (recipient, nonce) commitment.
+
+        ``secret_nonce=None`` resolves the scalar from the bridge's private mint identity store
+        (looked up by the attested commitment, or re-derived from the account's view key).
+        """
         self._validated(route, direction="mint")
-        enc.validate_scalar(secret_nonce)
+        if secret_nonce is not None:
+            enc.validate_scalar(secret_nonce)
         if attestation.status != "complete":
             raise AttestationError("Private mint requires a completed Circle attestation; it is still pending")
         payload, signature, digest = bytes(attestation.payload), bytes(attestation.attestation), bytes(attestation.message_hash)
@@ -217,14 +223,26 @@ class XReserveModule:
             raise AttestationError("Circle attestation has invalid widths (expected 305-byte payload, 65-byte signature, 32-byte hash)")
         if keccak256(payload) != digest:
             raise AttestationError("Circle attestation payload has an invalid message hash")
+        if secret_nonce is None:
+            from . import private_mint
+            commitment = private_mint.commitment_from_hook_data(payload[-enc.HOOK_DATA_BYTES:])
+            secret_nonce = private_mint.resolve_secret_nonce(
+                self._bridge, recipient=recipient, program=route.meta_str("wrapperProgram"),
+                address_commitment=commitment)
         expected_hook = self.hook_data("private", recipient, secret_nonce)
         if payload[-enc.HOOK_DATA_BYTES:] != expected_hook:
             raise AttestationError("Private mint secret nonce and recipient do not match the attested hook data")
         return [enc.u8_array_literal(payload), enc.u8_array_literal(signature), enc.u8_array_literal(digest), secret_nonce, recipient]
 
-    def private_mint(self, attestation: Attestation, recipient: str, *, secret_nonce: str = "0scalar",
+    def private_mint(self, attestation: Attestation, recipient: str, *, secret_nonce: str | None = None,
                      route: Route | None = None) -> AleoCall[MintReceipt]:
-        """Finish a private-mode deposit: the only user-signed Aleo step of the inbound flow (``wrapper.private_mint``)."""
+        """Finish a private-mode deposit: the only user-signed Aleo step of the inbound flow (``wrapper.private_mint``).
+
+        An explicit ``secret_nonce`` is used as given. Without one, the bridge resolves the scalar
+        for its own account from the identity store that reserved the deposit (re-deriving it from
+        the view key when the store lacks it); a deposit made with a caller-supplied nonce needs
+        that nonce back.
+        """
         route = self._validated(route if route is not None else self.inbound_route(), direction="mint")
         inputs = self.build_private_mint_inputs(route, attestation, recipient, secret_nonce)
         program = route.meta_str("wrapperProgram")

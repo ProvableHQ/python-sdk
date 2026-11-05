@@ -19,7 +19,8 @@ Three rules keep a model from doing damage with this surface:
   stays on the quote and inside the checkpoint, because ``lifecycle.resume``
   refuses to resume a deposit whose checkpoint has lost it.)
 * **A private mint never gets a default secret.**  ``mint_mode="private"``
-  without a ``secret_nonce`` is a structured error, never a quiet ``"0scalar"``
+  without a ``secret_nonce`` either derives one (the bridge's own account, an
+  identity store bound) or is a structured error — never a quiet ``"0scalar"``
   that commits to a hook nobody can reproduce.
 * **Failures come back as data.**  Every :class:`~aleo_bridge.errors.BridgeError`
   is rendered ``{"error", "error_type", "how_to_fix"}`` so the model can fix the
@@ -52,8 +53,10 @@ EVM_HOW_TO_FIX = ("set EVM_PRIVATE_KEY + ETHEREUM_RPC_URL in the environment (or
                   "ethereum=Ethereum(...) to Bridge(...)) and retry")
 SOLANA_HOW_TO_FIX = ("set SOLANA_PRIVATE_KEY (and optionally SOLANA_RPC_URL) in the environment (or pass "
                      "solana=Solana(...) to Bridge(...)) and retry")
-NONCE_HOW_TO_FIX = ("re-call with secret_nonce set to the value the user kept from execute — the SDK "
-                    "never stored it, and no other value can open the commitment")
+NONCE_HOW_TO_FIX = ("either re-call with secret_nonce set to the value the user kept (a deposit made with a "
+                    "supplied nonce opens only with that nonce), or let the bridge derive and keep the nonce "
+                    "itself: the recipient must be the bridge's own Aleo address and a checkpoint directory "
+                    "(or private_mint_identities=) must be bound to Bridge(...)")
 RECOVER_HOW_TO_FIX = ("the source step may already be on the wire: call bridge_get_progress with the "
                       "checkpoint (or bridge_pending) before doing anything else — never bridge_execute again")
 
@@ -195,9 +198,16 @@ def _connection_gap(bridge: Any, source_chain: Any) -> dict[str, Any] | None:
 
 def _missing_nonce(what: str) -> dict[str, Any]:
     return _error_payload(ConfigurationError(
-        f"a secret_nonce is required for a private mint: {what} commits to (recipient, secret_nonce) "
-        "and bridge_complete needs the same value again — keep it, the SDK never stores it"),
+        f"a private mint needs a secret_nonce and this bridge cannot derive one: {what} commits to "
+        "(recipient, secret_nonce). Pass the user's own secret_nonce (and keep it for bridge_complete), or "
+        "make the recipient the bridge's own Aleo address with a checkpoint directory or "
+        "private_mint_identities= bound so the nonce is derived and kept"),
         how_to_fix=NONCE_HOW_TO_FIX)
+
+
+def _can_derive(bridge: Any, recipient: Any) -> bool:
+    from .private_mint import can_derive
+    return isinstance(recipient, str) and can_derive(bridge, recipient)
 
 
 # ── shared argument handling ──────────────────────────────────────────────────
@@ -216,9 +226,12 @@ _QUOTE_PROPS = {
         "speed": {**_S, "enum": ["standard", "fast"]}, "forwarding": _B,
         "max_fee": {**_S, "description": "Maximum USDC deduction, preserved through recovery and fee refresh."}}},
     "mint_mode": {**_S, "enum": ["public", "record", "private"],
-                  "description": "xReserve into Aleo only. 'private' requires the user to complete the mint later with the same secret_nonce."},
-    "secret_nonce": {**_S, "description": "Private-mint commitment secret, REQUIRED when mint_mode is 'private' "
-                                          "(there is no default). The user must keep it for bridge_complete; the SDK never stores it."},
+                  "description": "xReserve into Aleo only. 'private' requires the recipient to complete the mint later "
+                                 "with bridge_complete."},
+    "secret_nonce": {**_S, "description": "Optional private-mint commitment secret. Omit it when the recipient is the "
+                                          "bridge's own Aleo account and a journal directory is bound: the nonce is "
+                                          "derived from the view key and kept in the identity store. Pass the user's "
+                                          "own to override — then they must keep it for bridge_complete."},
 }
 _QUOTE_REQUIRED = ["source_chain", "source_asset", "destination_chain", "amount", "recipient"]
 _CONFIRM = {"confirm": {**_B, "description": "Set true to move funds. Without it the quote is returned and nothing is submitted."}}
@@ -232,20 +245,22 @@ _REPLACEMENT = {"approval_replacement": {"type": "object", "additionalProperties
 
 
 def _quote_kwargs(args: dict[str, Any]) -> dict[str, Any]:
-    """Quote inputs. ``secret_nonce`` defaults to ``"0scalar"`` only for a non-private mint —
-    a private one must carry its own (checked by :func:`_private_nonce_gap` first)."""
+    """Quote inputs. ``secret_nonce`` passes through as given (None lets the lifecycle derive or, for a
+    quote, use its placeholder); ``bridge_execute`` checks :func:`_private_nonce_gap` first."""
     mint_mode = args.get("mint_mode") or "public"
     secret_nonce = args.get("secret_nonce")
     return dict(source_chain=args["source_chain"], source_asset=args["source_asset"],
                 destination_chain=args["destination_chain"], destination_asset=args.get("destination_asset"),
                 bridge_protocol=args.get("bridge_protocol"), amount=str(args["amount"]),
                 recipient=args["recipient"], sender=args.get("sender"), mint_mode=mint_mode,
-                secret_nonce=secret_nonce if mint_mode == "private" else (secret_nonce or "0scalar"),
+                secret_nonce=secret_nonce or None,
                 **({"cctp": args["cctp"]} if "cctp" in args else {}))
 
 
-def _private_nonce_gap(args: dict[str, Any]) -> dict[str, Any] | None:
-    if (args.get("mint_mode") or "public") == "private" and not args.get("secret_nonce"):
+def _private_nonce_gap(bridge: Any, args: dict[str, Any]) -> dict[str, Any] | None:
+    """The structured error for a private deposit that neither carries a nonce nor can derive one."""
+    if ((args.get("mint_mode") or "public") == "private" and not args.get("secret_nonce")
+            and not _can_derive(bridge, args.get("recipient"))):
         return _missing_nonce("the deposit")
     return None
 
@@ -302,7 +317,8 @@ def _h_list_routes(b, a):
 
 
 def _h_quote(b, a):
-    gap = _private_nonce_gap(a) or _connection_gap(b, a.get("source_chain"))
+    # A quote never needs a nonce: it prices the transfer and deposits nothing. bridge_execute gates.
+    gap = _connection_gap(b, a.get("source_chain"))
     if gap is not None:
         return gap
     return _serialize(lifecycle.quote(b, **_quote_kwargs(a)), b.registry)
@@ -355,7 +371,7 @@ def _h_pending(b, a):
 # ── writes (confirm-gated) ────────────────────────────────────────────────────
 
 def _h_execute(b, a):
-    gap = _private_nonce_gap(a) or _connection_gap(b, a.get("source_chain"))
+    gap = _private_nonce_gap(b, a) or _connection_gap(b, a.get("source_chain"))
     if gap is not None:
         return gap
     quote = lifecycle.quote(b, **_quote_kwargs(a))
@@ -385,7 +401,8 @@ def _resume_needs_nonce(bridge: Any, progress: Any) -> bool:
 
 def _h_resume(b, a):
     progress = lifecycle.recover(b, a["checkpoint"])                 # reads only
-    if _resume_needs_nonce(b, progress) and not a.get("secret_nonce"):
+    if (_resume_needs_nonce(b, progress) and not a.get("secret_nonce")
+            and not _can_derive(b, progress.plan.recipient)):
         # Pre-checked like _h_complete: lifecycle.resume refuses this before any RPC, but routed
         # through _write that refusal would come back as next: "recover" — "it may already be on
         # the wire" — for a transfer that never left the process. Say what is actually missing.
@@ -405,7 +422,8 @@ def _has_prepared_destination(progress: Any) -> bool:
 def _h_complete(b, a):
     progress = lifecycle.recover(b, a["checkpoint"])                 # reads only
     secret_nonce = a.get("secret_nonce")
-    if progress.plan.protocol != "cctp" and not secret_nonce and not _has_prepared_destination(progress):
+    if (progress.plan.protocol != "cctp" and not secret_nonce and not _has_prepared_destination(progress)
+            and not _can_derive(b, progress.plan.recipient)):
         return _missing_nonce("the deposit this mint finishes")
     if not a.get("confirm"):
         return _confirmation(progress=_serialize(progress, b.registry))
@@ -452,7 +470,7 @@ _READ_TOOLS: list[tuple[str, str, dict[str, Any], Callable[[Any, dict[str, Any]]
     ("bridge_quote",
      "Validate and price a transfer: route, fees (human units), amount_out, approval needs. Reads chain state, "
      "never signs. ALWAYS quote before bridge_execute and show the user fees and amount_out. A private mint "
-     "(mint_mode='private') must carry the user's own secret_nonce — there is no default.",
+     "(mint_mode='private') needs no secret_nonce to quote.",
      _schema(_QUOTE_PROPS, _QUOTE_REQUIRED), _h_quote),
     ("bridge_get_progress",
      "Recover a transfer's state from a checkpoint (reads only). Returns {progress, checkpoint}: progress.next tells "
@@ -471,7 +489,8 @@ _WRITE_TOOLS: list[tuple[str, str, dict[str, Any], Callable[[Any, dict[str, Any]
      "Start a transfer: re-quotes the same inputs, then commits funds on the source chain. Requires confirm=true; "
      "without it returns the quote and moves nothing. The source step is IRREVERSIBLE once broadcast — afterwards "
      "use bridge_get_progress with the returned checkpoint, never bridge_execute again. For mint_mode=private the "
-     "user must supply secret_nonce here (no default) and keep it for bridge_complete.",
+     "bridge derives and keeps the nonce when the recipient is its own Aleo account and a journal is bound; a "
+     "user-supplied secret_nonce overrides that and must then be kept for bridge_complete.",
      _schema({**_QUOTE_PROPS, "mode": {**_S, "description": "Aleo-origin only: caller|signer (Hyperlane) or "
                                                             "private|public|public-as-signer (xReserve burn)."},
               "gas_payment_microcredits": _I, "proving": {**_S, "enum": ["delegate", "local"]}, **_CONFIRM},
@@ -479,17 +498,21 @@ _WRITE_TOOLS: list[tuple[str, str, dict[str, Any], Callable[[Any, dict[str, Any]
     ("bridge_resume",
      "Finish an interrupted source submission (progress.next == 'resume'): rebroadcasts the identical proved Aleo "
      "transaction or authorizes the single missing EVM step after re-scanning history. Requires confirm=true. "
-     "An interrupted EVM xReserve deposit needs the same secret_nonce used at execute.",
-     _schema({**_CHECKPOINT, "secret_nonce": {**_S, "description": "The value used at bridge_execute; required to "
-                                                                    "resume a private-mint xReserve deposit."},
+     "An interrupted private EVM xReserve deposit finds its nonce in the bridge's identity store; only a "
+     "deposit made with a user-supplied secret_nonce needs that same value again.",
+     _schema({**_CHECKPOINT, "secret_nonce": {**_S, "description": "Only for a private-mint deposit made with a "
+                                                                    "user-supplied nonce: the same value. A derived "
+                                                                    "nonce is resolved from the identity store."},
               **_CONFIRM}, ["checkpoint"]), _h_resume),
     ("bridge_complete",
-     "Complete a private USDCx or CCTP mint. Private USDCx requires the original secret_nonce. "
-     "CCTP forwarding fallback requires manual_mint=true. Requires confirm=true.",
+     "Complete a private USDCx or CCTP mint. A private USDCx mint to the bridge's own account resolves its nonce "
+     "from the identity store (re-derived from the view key if the store lost it); a deposit made with a "
+     "user-supplied secret_nonce needs that value again. CCTP forwarding fallback requires manual_mint=true. "
+     "Requires confirm=true.",
      _schema({**_CHECKPOINT, "manual_mint": {**_B, "description": "Explicitly mint a stalled CCTP forwarded transfer."},
-              "secret_nonce": {**_S, "description": "The private-mint secret used at bridge_execute — required "
-                                                    "(there is no default); only an already-proved mint can be "
-                                                    "rebroadcast without it."},
+              "secret_nonce": {**_S, "description": "Only for a private-mint deposit made with a user-supplied "
+                                                    "nonce: the same value. A derived nonce is resolved from the "
+                                                    "identity store; an already-proved mint rebroadcasts without one."},
               **_CONFIRM}, ["checkpoint"]), _h_complete),
     ("bridge_shield",
      "Move a public Aleo balance of a bridged asset (aleo/eth, aleo/wbtc, aleo/usdt, aleo/sol, aleo/usdcx) into a "

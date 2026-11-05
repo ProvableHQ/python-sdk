@@ -263,14 +263,20 @@ def xreserve_hook_data(mode: str, recipient: str, network: str, secret_nonce: st
     out = bytearray(HOOK_DATA_BYTES)
     out[0] = MINT_MODES.index(mode)
     if mode == "private":
-        validate_scalar(secret_nonce)
-        net = network_module(network)
-        bits = net.Plaintext.from_string(recipient).to_bits_le()
-        commitment = field_bytes_le(net.BHP256().commit(bits, net.Scalar.from_string(secret_nonce)))
-        if len(commitment) != 32:
-            raise ConfigurationError("Private mint commitment must contain 32 bytes")
-        out[1:33] = commitment
+        out[1:33] = private_mint_commitment(recipient, secret_nonce, network)
     return bytes(out)
+
+
+def private_mint_commitment(recipient: str, secret_nonce: str, network: str) -> bytes:
+    """The 32 little-endian bytes of ``BHP256.commit(bits(recipient), secret_nonce)`` — the public
+    recipient commitment a private xReserve deposit carries in hook bytes 1..33."""
+    validate_scalar(secret_nonce)
+    net = network_module(network)
+    bits = net.Plaintext.from_string(recipient).to_bits_le()
+    commitment = field_bytes_le(net.BHP256().commit(bits, net.Scalar.from_string(secret_nonce)))
+    if len(commitment) != 32:
+        raise ConfigurationError("Private mint commitment must contain 32 bytes")
+    return commitment
 
 
 def aleo_program_address(program_id: str, network: str) -> str:
@@ -282,7 +288,8 @@ __all__ = [
     "BECH32_ALPHABET", "HOOK_DATA_BYTES", "MINT_MODES", "NETWORKS", "XRESERVE_PAYLOAD_BYTES",
     "aleo_address_to_bytes32", "aleo_program_address", "bytes32_to_aleo_address", "bytes32_to_u128_limbs",
     "evm_address_to_bytes32", "evm_address_to_hyperlane_recipient", "field_bytes_le", "hex_to_bytes",
-    "hyperlane_delivery_key", "is_evm_address", "network_module", "solana_address_to_hyperlane_recipient",
+    "hyperlane_delivery_key", "is_evm_address", "network_module", "private_mint_commitment",
+    "solana_address_to_hyperlane_recipient",
     "to_checksum_address", "to_hex", "u128_pair_literal", "u8_array_literal", "validate_scalar",
     "xreserve_deposit_nonce", "xreserve_deposit_payload", "xreserve_hook_data", "xreserve_message_hash",
     "xreserve_nonce_from_payload",

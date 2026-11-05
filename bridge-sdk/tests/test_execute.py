@@ -181,8 +181,9 @@ def test_a_private_mint_without_a_secret_nonce_is_refused_before_any_rpc():
     """``secret_nonce`` is not a plan field and the SDK never stores it: a private deposit that
     silently fell back to "0scalar" would mint to a commitment the caller cannot ever reproduce."""
     b = FakeBridge()
-    with pytest.raises(ConfigurationError, match="secret_nonce"):
+    with pytest.raises(ConfigurationError, match="secret_nonce") as info:
         execute(b, _usdc_plan(b, mint_mode="private"))
+    assert "private_mint_identities" in str(info.value)          # the other fix: let the bridge derive
     assert b.calls == []
     execute(b, _usdc_plan(b))                                    # public mint: the default is fine
     assert b.calls[0][1]["secret_nonce"] == "0scalar"

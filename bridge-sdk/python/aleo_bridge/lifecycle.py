@@ -22,6 +22,7 @@ from dataclasses import dataclass, replace
 from typing import Any, Callable, cast
 
 from . import _sealevel
+from . import private_mint as _private_mint
 from ._calls import is_duplicate_submission
 from .encoding import HOOK_DATA_BYTES
 from ._plan import build_plan
@@ -210,8 +211,12 @@ def quote(bridge, *, source_chain: str | None = None, source_asset: str | None =
           destination_chain: str | None = None, destination_asset: str | None = None,
           bridge_protocol: str | None = None, route: "Route | str | None" = None,
           amount=None, amount_atomic=None, recipient: str, sender: str | None = None,
-          mint_mode: str = "public", secret_nonce: str = "0scalar", cctp=None) -> Quote:
+          mint_mode: str = "public", secret_nonce: str | None = None, cctp=None) -> Quote:
     """Price a transfer: ``prepare`` + the source-side live read for the route kind.
+
+    A private xReserve quote never needs a nonce: an explicit ``secret_nonce`` is used as given;
+    otherwise the hook previews the nonce the bridge would derive for its own account (nothing is
+    reserved), or a placeholder when nothing can derive — ``execute`` is the gate.
 
     Returns one of ``EvmHyperlaneQuote`` / ``SolanaHyperlaneQuote`` /
     ``AleoHyperlaneQuote`` / ``EvmXReserveQuote`` / ``AleoXReserveQuote``
@@ -255,7 +260,8 @@ def quote(bridge, *, source_chain: str | None = None, source_asset: str | None =
                                   gas_price=gas.gas_price, exchange_rate=gas.exchange_rate,
                                   payment_microcredits=gas.payment_microcredits)
     if plan.protocol == "xreserve" and family == "evm":
-        q = _module(bridge, "eth", resolved.source_chain.id).quote_deposit_usdc(plan=plan, secret_nonce=secret_nonce)
+        nonce = _private_nonce(bridge, plan, resolved, secret_nonce, placeholder=True)
+        q = _module(bridge, "eth", resolved.source_chain.id).quote_deposit_usdc(plan=plan, secret_nonce=nonce)
         return replace(q, plan=plan)
     if plan.protocol == "xreserve" and family == "aleo":
         fee_atomic = _xreserve_withdrawal_fee_atomic(resolved)
@@ -537,21 +543,29 @@ def _xreserve_burn_mode(mode: str | None) -> str:
         f"Aleo xReserve mode must be 'private', 'public' or 'public-as-signer', got {mode!r}")
 
 
-def _mint_secret(plan: Plan, secret_nonce: str | None) -> str:
-    """The secret the EVM deposit commits to. A private mint must supply its own.
+def _derives_here(bridge, plan: Plan, secret_nonce: str | None) -> bool:
+    """True when this verb will look a derived nonce up: a private plan, no explicit nonce, and a
+    bridge that can derive for the plan's recipient."""
+    return plan.mint_mode == "private" and secret_nonce is None and _private_mint.can_derive(bridge, plan.recipient)
 
-    ``secret_nonce`` is not a ``Plan`` field and the SDK never stores it: a private deposit that
-    quietly fell back to the ``"0scalar"`` default would commit to a hook nobody can reproduce,
-    and ``complete`` needs the same value again to mint the record.
+
+def _private_nonce(bridge, plan: Plan, resolved: ResolvedRoute, secret_nonce: str | None, *,
+                   address_commitment: str | None = None, placeholder: bool = False) -> str:
+    """The scalar an EVM xReserve deposit commits to, or its mint opens with.
+
+    Non-private modes use the caller's value or ``"0scalar"`` (the hook ignores it). A private mint
+    resolves through :func:`private_mint.resolve_secret_nonce`: an explicit ``secret_nonce`` as
+    given; otherwise, for the bridge's own account with an identity store bound, a nonce derived
+    from the view key — reserved fresh when ``address_commitment`` is None (execute), else looked
+    up or re-derived for that commitment (resume / complete). ``placeholder`` is the quote-only
+    relaxation: ``"0scalar"`` when nothing can derive, since a quote deposits nothing.
+    ``secret_nonce`` is never a ``Plan`` field and never reaches a checkpoint.
     """
-    if plan.mint_mode == "private":
-        if not secret_nonce:
-            raise ConfigurationError(
-                "a secret_nonce is required for a private xReserve mint: the deposit commits to "
-                "(recipient, secret_nonce) and complete() needs the same value again — keep it, "
-                "the SDK never stores it")
-        return secret_nonce
-    return secret_nonce or "0scalar"
+    if plan.mint_mode != "private":
+        return secret_nonce or "0scalar"
+    return _private_mint.resolve_secret_nonce(
+        bridge, recipient=plan.recipient, program=resolved.route.meta_str("wrapperProgram"),
+        address_commitment=address_commitment, secret_nonce=secret_nonce, placeholder=placeholder)
 
 
 # ── execute ───────────────────────────────────────────────────────────────────
@@ -569,8 +583,9 @@ def execute(bridge, plan: Plan, *, on_checkpoint: Callable | None = None, provin
     "public-as-signer"`` for Aleo xReserve burns (``record`` / ``compliance_proofs`` feed a private
     burn; ``merkle_proof`` is the earlier name for one literal bundle).  The Hyperlane hook payment is re-quoted right before proving unless
     ``gas_payment_microcredits`` pins it.  ``secret_nonce`` is the private-mint commitment secret
-    for an EVM xReserve deposit — required when ``plan.mint_mode == "private"``; keep it,
-    ``complete`` needs it again and the SDK never stores it.
+    for an EVM xReserve deposit: used as given when passed (keep it — ``complete`` needs it again
+    and the SDK never stores it); otherwise, for the bridge's own account with an identity store
+    bound, derived from the view key and reserved in that store before the deposit.
 
     EVM and Solana legs are dispatched through the module's own ``plan=`` surface, so the route,
     registry version, sender and every plan field are re-validated by the module that builds the
@@ -627,7 +642,7 @@ def execute(bridge, plan: Plan, *, on_checkpoint: Callable | None = None, provin
     if plan.protocol == "xreserve" and family == "evm":
         eth = _module(bridge, "eth", resolved.source_chain.id)
         _assert_sender(plan, (getattr(eth, "conn", None) or bridge.ethereum).address, family=family)
-        nonce = _mint_secret(plan, secret_nonce)
+        nonce = _private_nonce(bridge, plan, resolved, secret_nonce)      # reserves a derived identity
         call = eth.deposit_usdc(plan=plan, secret_nonce=nonce)
         receipt = _send_call(call, emit, poll_seconds, timeout_seconds)
         emit.finalize()
@@ -1407,9 +1422,9 @@ def resume(bridge, progress: Progress, *, on_checkpoint: Callable | None = None,
     Solana source: ``SolCall`` has no approval step and no pre-broadcast state to continue, so there
     is nothing to resume — ``recover``/``wait`` observe the signature instead.
 
-    ``secret_nonce`` is mandatory when ``plan.mint_mode == "private"``, and is checked before any
-    RPC: the SDK never stored it, and a silent ``"0scalar"`` fallback would commit the deposit to a
-    hook nobody can open. ``proving`` is accepted for symmetry with ``execute``/``complete`` and is
+    A private deposit's nonce is resolved before any RPC: ``secret_nonce`` as given, else the
+    identity the checkpointed hook commits to, from the bridge's store or re-derived from its view
+    key; a silent ``"0scalar"`` fallback would commit the deposit to a hook nobody can open. ``proving`` is accepted for symmetry with ``execute``/``complete`` and is
     never used — no resume path ever proves anything: an Aleo leg rebroadcasts bytes that were
     already proved, and an EVM leg has no proofs at all.
     """
@@ -1464,9 +1479,9 @@ def resume(bridge, progress: Progress, *, on_checkpoint: Callable | None = None,
     eth = _module(bridge, "eth", resolved.source_chain.id)
     _assert_sender(plan, (getattr(eth, "conn", None) or bridge.ethereum).address, family="evm")
     is_xreserve = resolved.route.protocol == "xreserve"
-    nonce = _mint_secret(plan, secret_nonce) if is_xreserve else None      # before any RPC
     saved_hook = state.get("hookData")
-    if is_xreserve and _hex_bytes(saved_hook, length=HOOK_DATA_BYTES) is None:
+    hook_bytes = _hex_bytes(saved_hook, length=HOOK_DATA_BYTES) if is_xreserve else None
+    if is_xreserve and hook_bytes is None:
         # Without the hook the approval committed to there is nothing to compare the re-quote
         # against, so the guard below would silently pass and the deposit could be re-hooked to a
         # different commitment. Refuse here, before any RPC, rather than resume half-blind.
@@ -1474,6 +1489,13 @@ def resume(bridge, progress: Progress, *, on_checkpoint: Callable | None = None,
             "This transfer's checkpoint carries no xReserve hook data (a 65-byte 0x hex string); "
             "recover() and re-quote instead of resuming — resume() will not re-derive the hook the "
             "approval committed to")
+    nonce = None                                                            # before any RPC
+    if is_xreserve:
+        # Only a derivable bridge reads the commitment out of the hook: an underivable one gets the
+        # "pass secret_nonce= or bind a store" error, not a complaint about the hook's shape.
+        commitment = (_private_mint.commitment_from_hook_data(cast(bytes, hook_bytes))
+                      if _derives_here(bridge, plan, secret_nonce) else None)
+        nonce = _private_nonce(bridge, plan, resolved, secret_nonce, address_commitment=commitment)
 
     existing = create_checkpoint(plan, receipt, bridge.registry)
     emit.supersede(existing.id)          # whatever this resume writes replaces the record it started from
@@ -1488,9 +1510,9 @@ def resume(bridge, progress: Progress, *, on_checkpoint: Callable | None = None,
         if cast(str, saved_hook).lower() != ("0x" + quoted.hook_data.hex()).lower():     # validated above
             raise NotResumableError(
                 "The re-quoted hook data does not match the hook this transfer's approval committed "
-                "to: the secret nonce differs from the one used at execute(). Pass that same "
-                "secret_nonce — depositing under another hook mints to a commitment the recipient "
-                "can never open.")
+                "to: the secret nonce differs from the one the deposit was quoted with. Pass that same "
+                "secret_nonce=, or restore the identity store that reserved it — depositing under "
+                "another hook mints to a commitment the recipient can never open.")
     else:
         quoted = eth.quote_transfer_remote(plan=plan)
     if quoted.approval_required:
@@ -1536,8 +1558,9 @@ def complete(bridge, progress: Progress, *, secret_nonce: str | None = None,
 
     The source deposit is never repeated, and the secret nonce, the attestation and the hook data
     are never written to a receipt, a checkpoint or a ``Progress``. ``secret_nonce`` must be the
-    value used at ``execute``; it is required for a private plan on the proving path
-    (``ConfigurationError``, raised before any RPC).
+    value the deposit was made with when the caller supplied one; otherwise the scalar behind the
+    attested commitment comes from the bridge's identity store, or is re-derived from its view
+    key (``ConfigurationError`` before any RPC when neither applies).
     """
     if progress.plan.protocol == "cctp":
         plan = progress.plan
@@ -1591,7 +1614,9 @@ def complete(bridge, progress: Progress, *, secret_nonce: str | None = None,
         emit.finalize()
         return to_progress(plan, submitted)
 
-    nonce = _mint_secret(plan, secret_nonce)                               # before any RPC
+    commitment = (_private_mint.commitment_from_hook_data(payload[-HOOK_DATA_BYTES:])
+                  if _derives_here(bridge, plan, secret_nonce) else None)
+    nonce = _private_nonce(bridge, plan, resolved, secret_nonce, address_commitment=commitment)   # before any RPC
     att = Attestation(payload=payload, message_hash=message_hash, attestation=attestation, status="complete")
     call = bridge.xreserve.private_mint(att, plan.recipient, secret_nonce=nonce, route=resolved.route)
     prepared = _prepare_aleo(call, proving)

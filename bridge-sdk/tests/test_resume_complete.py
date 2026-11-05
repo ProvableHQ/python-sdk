@@ -228,8 +228,9 @@ def test_resume_of_a_private_mint_without_its_secret_nonce_is_refused_before_any
     b = FakeBridge()
     plan, receipt = _xreserve_progress(b, mint_mode="private")
     b.eth.recover_result = receipt
-    with pytest.raises(ConfigurationError, match="secret_nonce"):
+    with pytest.raises(ConfigurationError, match="secret_nonce") as info:
         resume(b, to_progress(plan, receipt))
+    assert "private_mint_identities" in str(info.value)          # the other fix: let the bridge derive
     assert b.calls == []
     # a public mint has nothing to commit to: the default is fine
     b2 = FakeBridge()
