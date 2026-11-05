@@ -259,6 +259,8 @@ def quote(bridge, *, source_chain: str | None = None, source_asset: str | None =
 
     if plan.protocol == "cctp":
         return bridge.cctp.quote(plan)
+    if plan.protocol == "verulink":
+        return bridge.verulink.quote(plan)
     if plan.protocol == "hyperlane" and family == "evm":
         q = _module(bridge, "eth", resolved.source_chain.id).quote_transfer_remote(plan=plan)
         return replace(q, plan=plan)
@@ -310,12 +312,15 @@ def _keeps_checkpoint(receipt: Receipt) -> bool:
     """A terminal receipt whose record must SURVIVE: an EVM source transaction that was dropped or
     replaced before it mined (``protocol_state["dropped"]``).
 
-    Every other terminal status means the transfer is settled or its funds are gone, and the
+    Verulink holding receipts also keep their source and claim evidence for review/release.
+    Other terminal statuses mean the transfer is settled or its funds are gone, and the
     checkpoint has nothing left to do. A dropped one is the opposite: nothing moved, and this record
     is the only thing ``recover()`` can re-scan source history from once the RPC agrees with itself.
     Deleting it would leave the operator with a hash and no transfer.
     """
-    return receipt.status in TERMINAL and receipt.protocol_state.get("dropped") is True
+    return receipt.status in TERMINAL and (
+        receipt.protocol_state.get("dropped") is True
+        or receipt.protocol == "verulink" and receipt.protocol_state.get("held") is True)
 
 
 def _persist(bridge, checkpoint: Checkpoint, receipt: Receipt, *, previous_id: str | None = None) -> None:
@@ -609,6 +614,13 @@ def execute(bridge, plan: Plan, *, on_checkpoint: Callable | None = None, provin
         plan = replace(plan, journal_id=reserve(plan))
     emit = _Emitter(bridge, plan, on_checkpoint)
 
+    if plan.protocol == "verulink":
+        receipt = bridge.verulink.execute(plan, on_checkpoint=emit, proving=proving, mode=mode,
+                                          poll_seconds=poll_seconds, timeout_seconds=timeout_seconds)
+        emit(receipt)
+        emit.finalize()
+        return to_progress(plan, receipt)
+
     if plan.protocol == "cctp":
         receipt = bridge.cctp.execute(plan, on_checkpoint=emit, poll_seconds=poll_seconds, timeout_seconds=timeout_seconds)
         emit(receipt)
@@ -789,6 +801,8 @@ def get_status(bridge, plan: Plan, receipt: Receipt) -> Receipt:
     route, src, dst = resolved.route, resolved.source_chain, resolved.destination_chain
     if plan.protocol == "cctp":
         return bridge.cctp.get_status(plan, receipt)
+    if plan.protocol == "verulink":
+        return bridge.verulink.get_status(plan, receipt)
     state = receipt.protocol_state
 
     # 1. EVM approval → wallet boundary
@@ -1081,13 +1095,19 @@ def _plan_from_intent(registry: Registry, intent: dict[str, Any]) -> Plan:
     passes ``EthModule``/``SolModule``'s field-by-field ``plan=`` checks.
     """
     try:
-        return prepare(registry,
+        plan = prepare(registry,
                        source_chain=intent["source"]["chain"], source_asset=intent["source"]["asset"],
                        destination_chain=intent["destination"]["chain"],
                        destination_asset=intent["destination"]["asset"],
                        bridge_protocol=intent.get("bridgeProtocol"),
                        amount=intent["amount"], recipient=intent["recipient"], sender=intent.get("sender"),
                        mint_mode=intent.get("mintMode", "public"), cctp=intent.get("cctp"))
+        if plan.protocol == "verulink" and intent.get("amountOut") is not None:
+            amount_out = intent["amountOut"]
+            if not isinstance(amount_out, str) or not 0 < parse_decimal_amount(amount_out, 6) <= plan.amount_atomic:
+                raise CheckpointInvalidError("Invalid Verulink quoted output in checkpoint")
+            plan = replace(plan, amount_out=amount_out)
+        return plan
     except (KeyError, TypeError) as exc:
         raise CheckpointInvalidError(f"Bridge checkpoint intent is incomplete: missing {exc}") from exc
 
@@ -1155,6 +1175,9 @@ def _reconstruct_source_receipt(plan: Plan, resolved: ResolvedRoute, cp: Checkpo
     offline guess here is never unsafe); anything else has nothing to build a receipt from.
     """
     src = resolved.source_chain
+    if plan.protocol == "verulink":
+        from .verulink import VerulinkModule
+        return VerulinkModule.from_checkpoint(plan, cp)
     if plan.protocol == "cctp":
         from .cctp import CctpModule
         return CctpModule.from_checkpoint(plan, cp)
@@ -1232,6 +1255,8 @@ def _apply_destination_overlay(resolved: ResolvedRoute, cp: Checkpoint, receipt:
     never unsafe — only ever a prompt to call the verb that actually checks.
     """
     destination = cp.destination or {}
+    if resolved.route.protocol == "verulink":
+        return receipt
     if not destination:
         return receipt
     if resolved.route.protocol == "cctp" and not destination.get("preparedTransaction"):
@@ -1326,6 +1351,10 @@ def recover(bridge, checkpoint, *, approval_replacement=None) -> Progress:
         return _finish(bridge, plan, receipt, cp.id)
     if approval_replacement is not None:
         raise ConfigurationError("approval_replacement is only supported for CCTP")
+
+    if plan.protocol == "verulink":
+        receipt = bridge.verulink.recover(plan, cp)
+        return _finish(bridge, plan, receipt, cp.id)
 
     if src.family in ("aleo", "solana"):
         receipt = _reconstruct_source_receipt(plan, resolved, cp, verification)
@@ -1448,6 +1477,13 @@ def resume(bridge, progress: Progress, *, on_checkpoint: Callable | None = None,
     emit = _Emitter(bridge, plan, on_checkpoint)
     state = receipt.protocol_state
     family = resolved.source_chain.family
+
+    if plan.protocol == "verulink":
+        emit.supersede(receipt.id)
+        receipt = bridge.verulink.resume(plan, receipt, on_checkpoint=emit)
+        emit(receipt)
+        emit.finalize()
+        return to_progress(plan, receipt)
 
     if plan.protocol == "cctp":
         emit.supersede(receipt.id)
@@ -1573,6 +1609,14 @@ def complete(bridge, progress: Progress, *, secret_nonce: str | None = None,
         return to_progress(plan, receipt)
     if manual_mint:
         raise ConfigurationError("manual_mint is only supported for CCTP")
+    if progress.plan.protocol == "verulink":
+        plan = progress.plan
+        _require_unpaused(bridge, resolve_route(bridge.registry, plan).route, sides=("destination",))
+        emit = _Emitter(bridge, plan, on_checkpoint)
+        receipt = bridge.verulink.complete(plan, progress.receipt, on_checkpoint=emit, proving=proving)
+        emit(receipt)
+        emit.finalize()
+        return to_progress(plan, receipt)
     if progress.next != "complete":
         raise NotResumableError(
             "Bridge progress has no destination action to complete (next must be 'complete'); call "

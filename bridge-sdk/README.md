@@ -3,6 +3,7 @@
 Bring assets from Ethereum or Solana to Aleo for payments and applications,
 or withdraw them back to their source chain. Hyperlane carries ETH, WBTC,
 USDT, SOL, BAT, USDG, and ZEC; Circle xReserve connects Ethereum USDC with Aleo USDCx.
+Verulink connects public native ALEO with wrapped ALEO on BSC.
 
 Review the cost before sending, monitor whether the recipient received the
 funds, and recover an interrupted transfer without making another deposit.
@@ -57,6 +58,8 @@ Choose the source chain and asset first, then find the corresponding destination
 | Aleo | USDG | Ethereum | USDG | Hyperlane |
 | Aleo | BAT, USDG, or ZEC | Solana | BAT, USDG, or ZEC | Hyperlane |
 | Aleo | USDCx | Ethereum | USDC | Circle xReserve |
+| Aleo | ALEO | BSC | Wrapped ALEO | Verulink |
+| BSC | Wrapped ALEO | Aleo | ALEO | Verulink |
 | Ethereum | ETH | Aleo | ETH | Hyperlane |
 | Ethereum | WBTC | Aleo | WBTC | Hyperlane |
 | Ethereum | USDT | Aleo | USDT | Hyperlane |
@@ -72,6 +75,46 @@ tracks Aleo-to-Solana delivery through the recipient's associated token account.
 BAT has 18 decimals on Ethereum and Aleo but 8 on Solana, so amounts on a Solana
 route must fit 8 decimals. On Aleo these three are ARC-22 tokens with their own
 shield programs, so `shield` and `unshield` work for them like USDCx.
+
+## Public ALEO on BSC
+
+Verulink moves public native ALEO to BSC and returns wrapped ALEO to a public
+Aleo balance. Both directions need a destination claim and gas on both chains:
+ALEO on Aleo and BNB on BSC. Add the BSC connection to the client:
+
+```python
+bridge = Bridge(aleo, evm={"bsc": Ethereum(bsc_rpc_url, private_key=evm_private_key)},
+                checkpoints=FileCheckpointStore("./bridge-checkpoints"))
+quote = bridge.quote(source_chain="aleo", source_asset="aleo", destination_chain="bsc",
+                     amount="20", recipient=bsc_recipient)
+print(quote.amount_out, quote.fees)
+```
+
+This uses the `Bridge`, `Ethereum`, and `FileCheckpointStore` imports and the
+Aleo client shown in Setup. To return wrapped ALEO, swap the source and
+destination chains and use an Aleo recipient. Private and record mint modes
+are unavailable for Verulink.
+
+Quotes read current fees, limits, peer contracts and pause state. The protocol
+fee is charged in the source ALEO asset. Network gas is unpriced
+(`Fee.amount=None`); it is an additional cost. Execute `quote.plan` to retain
+the quoted minimum output, then use `wait` and `complete(progress)` when a
+claim is ready. Verulink completion needs no secret nonce.
+
+Save checkpoints before continuing after an interruption. Aleo recovery
+rebroadcasts the saved prepared transaction. An approval-only BSC checkpoint
+requires the wallet's source transaction hash before continuing; repeating
+the burn could send funds twice. After a claim is submitted, recover or wait
+using its transaction ID.
+
+Completion requires the exact recipient delivery. A consumed packet alone
+stays pending, and a screening hold is reported as failed with
+`receipt.protocol_state["held"] == True`. Its checkpoint remains stored
+because the recipient has not received the funds.
+
+The [round-trip example](examples/verulink_roundtrip.py) previews both legs and
+can resume a saved journey. Its return leg spends the verified amount received.
+Checkpoints from the preceding registry remain valid for unchanged routes.
 
 ## Setup
 

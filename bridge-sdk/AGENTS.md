@@ -3,12 +3,12 @@
 > GENERATED from SDK docstrings by `codegen/gen_context.py` — do not
 > edit by hand; edit the docstrings and regenerate.
 
-Typed Python client that moves assets between Aleo, Ethereum, Arc, Base, Arbitrum and Solana
-over reviewed Hyperlane, Circle xReserve and native-USDC CCTP deployments
+Typed Python client that moves assets between Aleo, Ethereum, BSC, Arc, Base, Arbitrum and Solana
+over reviewed Hyperlane, Verulink, Circle xReserve and native-USDC CCTP deployments
 (`pip install aleo-bridge-sdk`, imports as `aleo_bridge`).
 MCP alternative: `python -m aleo_bridge.mcp` exposes the same lifecycle as
 tools; `aleo_bridge.agent.bridge_tools()` gives Claude-shape tool schemas.
-Registry version `2026-09-30.hyperlane-bat-usdg-zec.1`.
+Registry version `2026-11-04.verulink-bsc.1`.
 CCTP supports Arc ↔ Ethereum/Base/Arbitrum. Pass `cctp={"speed": "fast",
 "forwarding": True, "max_fee": "0.1"}` to quote; execute the returned plan to retain its ceiling.
 Use `Bridge(..., evm={"arc": Ethereum(...), "base": Ethereum(...)})` for route-selected connections.
@@ -16,6 +16,11 @@ Arc native gas uses 18 decimals; ERC-20 USDC uses 6. They spend the same balance
 CCTP completion requires the exact message and mint receipt; a consumed nonce alone stays pending.
 For stalled forwarding, `complete(progress, manual_mint=True)` explicitly authorizes a destination mint.
 Recovery keeps the approved fee ceiling; never rerun execute after a broadcast.
+Verulink moves public ALEO between Aleo and BSC; configure `evm={"bsc": Ethereum(...)}`.
+Both directions require `complete(progress)` with destination gas, without a secret nonce.
+Fee rates, pause state and peers are read live; unknown gas costs are None, not zero.
+An approval-only BSC checkpoint requires source-hash reconciliation, never another burn.
+Holding is not delivery; its checkpoint remains available for review and recovery.
 
 Runnable examples ship in the package: start with
 `python -m aleo_bridge.examples.quote_transfer --help`.
@@ -68,7 +73,8 @@ Price a transfer and get the plan that ``execute`` takes. Nothing is signed.
 
 Name the route the way veil's ``quote`` does: ``source_chain`` + ``source_asset``
 + ``destination_chain`` (``"ethereum"``, ``"usdc"``, ``"aleo"``), adding
-``destination_asset`` / ``bridge_protocol`` (``"xreserve"`` | ``"hyperlane"``)
+``destination_asset`` / ``bridge_protocol`` (``"xreserve"``, ``"hyperlane"``,
+``"cctp"``, or ``"verulink"``)
 only when more than one route fits — or ``route=`` with a ``Route`` from
 ``routes()`` or its id.  Give exactly one of ``amount`` (human units, str)
 or ``amount_atomic`` (int).  ``recipient`` is the destination-chain
@@ -76,11 +82,15 @@ address.  ``mint_mode`` (xReserve into Aleo only): ``"public"`` balance,
 ``"record"`` minted by the relayer, or ``"private"`` — you finish it
 yourself with ``complete`` and must keep ``secret_nonce``.  Returns a
 kind-specific ``Quote`` (``quote.kind`` in evm-hyperlane /
-solana-hyperlane / aleo-hyperlane / evm-xreserve / aleo-xreserve) with
+solana-hyperlane / aleo-hyperlane / evm-xreserve / aleo-xreserve /
+evm-cctp / aleo-verulink / evm-verulink) with
 ``fees`` and ``amount_out`` in human units and ``quote.plan``.  Show the
 user fees + amount before ``execute``.  Refuses with ``RoutePausedError`` /
 ``PauseCheckError`` when a pause switch on either end reads paused or
 cannot be read (see ``pause_status``).
+Verulink supports public ALEO
+between Aleo and BSC; both directions require a destination claim.
+Unpriced network gas has ``Fee.amount=None``, never zero.
 
 ### `execute(self, plan, *, on_checkpoint=None, proving: 'str' = 'delegate', mode: 'str | None' = None, record: 'str | None' = None, compliance_proofs: 'ComplianceProofs' = None, merkle_proof: 'str | None' = None, gas_payment_microcredits: 'int | None' = None, secret_nonce: 'str | None' = None, poll_seconds: 'float' = 1.0, timeout_seconds: 'float' = 120.0)`
 
@@ -138,9 +148,9 @@ end reads paused or cannot be read.
 
 ### `complete(self, progress, *, secret_nonce: 'str | None' = None, on_checkpoint=None, proving: 'str' = 'delegate', manual_mint: 'bool' = False)`
 
-Claim a private USDCx or native-USDC CCTP destination mint.
+Claim a private USDCx, native-USDC CCTP, or public Verulink destination.
 
-Requires the same ``secret_nonce`` given to ``execute``; the SDK never
+Private xReserve requires the same ``secret_nonce`` given to ``execute``; the SDK never
 stored it.  Submits exactly one ``private_mint`` and returns
 ``DESTINATION_CONFIRMING`` progress to ``wait`` on. CCTP needs no secret
 nonce, but requires a destination signer and gas. Set ``manual_mint=True``
@@ -148,6 +158,8 @@ to explicitly authorize fallback for stalled forwarding; an already
 submitted destination transaction is observed rather than repeated.
 Refuses with ``RoutePausedError`` / ``PauseCheckError`` when a pause switch
 on the destination side reads paused or cannot be read.
+Verulink requires a destination signer and native gas, with no secret
+nonce. A holding result retains its checkpoint for review and recovery.
 
 ### `pending(self) -> 'list'`
 
@@ -170,7 +182,8 @@ Read every operator pause switch governing ``route`` (a ``Route``, its id, or a 
 Both ends are read unless ``sides`` narrows it: the ``pause`` mapping and enrolled router of the
 Aleo warp program (plus the ARC-20 token's ``pause__``), the USDCx bridge and stablecoin pauses,
 ``paused()`` on xReserve and the CCTP transmitter, any ``PausableHook`` / ``PausableIsm`` in the
-Ethereum Mailbox's trees, and the Solana token PDA's enrolled router. Nothing is cached and the
+Ethereum Mailbox's trees, the Solana token PDA's enrolled router, and Verulink's Aleo bridge/service
+settings and BSC bridge/service pauses. Nothing is cached and the
 result never raises for a pause: ``status.paused`` / ``status.unknown`` say so and
 ``status.reason`` names the switch. ``quote``, ``execute``, ``resume`` and ``complete`` run this same
 check and refuse with ``RoutePausedError`` or ``PauseCheckError``. A far-side EVM chain with no
@@ -460,6 +473,8 @@ tolerated, so re-stating the plan's own amount is harmless). Without a plan, ``r
 | `cctp:arc/usdc->base/usdc` | cctp | mainnet | active |
 | `cctp:arbitrum/usdc->arc/usdc` | cctp | mainnet | active |
 | `cctp:arc/usdc->arbitrum/usdc` | cctp | mainnet | active |
+| `verulink:aleo/aleo->bsc/aleo` | verulink | mainnet | active |
+| `verulink:bsc/aleo->aleo/aleo` | verulink | mainnet | active |
 
 `metadata-required` routes are listed but refused by `quote`/`execute`
 until their deployments are reviewed upstream.

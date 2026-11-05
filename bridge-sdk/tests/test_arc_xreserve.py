@@ -42,7 +42,7 @@ def test_minimum_burn_even_when_fee_is_smaller():
 
 
 def test_quote_uses_live_fee_and_selected_route():
-    b = make_bridge()
+    b = make_bridge(evm={'arc': Ethereum(w3=fake_web3(chain_id=5042))})
     b.xreserve.circle_session = session = FeeSession()
     q = b.quote(route=OUT, amount='2', recipient='0x'+'11'*20)
     assert q.status == 'quoted' and q.withdrawal_fee_atomic == 16400 and q.amount_out == '1.9836'
@@ -51,14 +51,14 @@ def test_quote_uses_live_fee_and_selected_route():
 
 @pytest.mark.parametrize('fee,status', [(True, 200), ('-1', 200), (None, 200), ('1.5', 200), ('2000000', 200), ('16400', 503)])
 def test_bad_or_unaffordable_live_fee_refuses_quote(fee, status):
-    b = make_bridge()
+    b = make_bridge(evm={'arc': Ethereum(w3=fake_web3(chain_id=5042))})
     b.xreserve.circle_session = FeeSession(fee, status)
     with pytest.raises(BridgeError):
         b.quote(route=OUT, amount='2', recipient='0x'+'11'*20)
 
 
 def test_execute_rechecks_fee_before_proving(monkeypatch):
-    b = make_bridge()
+    b = make_bridge(evm={'arc': Ethereum(w3=fake_web3(chain_id=5042))})
     b.xreserve.circle_session = session = FeeSession()
     q = b.quote(route=OUT, amount='2', recipient='0x'+'11'*20)
     session.fee = '2000000'

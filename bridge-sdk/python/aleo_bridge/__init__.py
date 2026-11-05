@@ -45,7 +45,7 @@ from .types import (  # noqa: E402
     CctpOptions, EvmCctpQuote, CALLER_BOUNDARIES, TERMINAL, AleoHyperlaneQuote, AleoXReserveQuote, Attestation, BridgeStatus, BurnReceipt,
     ChainStatus, DepositReceipt, DispatchReceipt, EvmHyperlaneQuote, EvmXReserveQuote, Fee, GasQuote,
     MintReceipt, PauseStatus, PauseSwitch, Plan, PreparedTx, PrivacyReceipt, Progress, Quote, Receipt,
-    SolanaHyperlaneQuote, Status, Step, to_progress,
+    SolanaHyperlaneQuote, Status, Step, to_progress, VerulinkQuote,
 )
 from ._calls import AleoCall, EvmCall, SolCall  # noqa: E402
 from .checkpoint import (Checkpoint, CheckpointLoadResult, CheckpointProblem, CheckpointStore, FileCheckpointStore,  # noqa: E402
@@ -73,7 +73,7 @@ __all__ = [
     "CctpOptions", "EvmCctpQuote", "CALLER_BOUNDARIES", "TERMINAL", "AleoHyperlaneQuote", "AleoXReserveQuote", "Attestation", "BridgeStatus",
     "BurnReceipt", "ChainStatus", "DepositReceipt", "DispatchReceipt", "EvmHyperlaneQuote", "EvmXReserveQuote",
     "Fee", "GasQuote", "MintReceipt", "PauseStatus", "PauseSwitch", "Plan", "PreparedTx", "PrivacyReceipt",
-    "Progress", "Quote", "Receipt", "SolanaHyperlaneQuote", "Status", "Step", "to_progress",
+    "Progress", "Quote", "Receipt", "SolanaHyperlaneQuote", "Status", "Step", "to_progress", "VerulinkQuote",
     "AleoCall", "Bridge", "CircleClient", "DEFAULT_ENDPOINT", "EMPTY_MERKLE_PROOF_PAIR", "FreezeList",
     "ComplianceProof", "ComplianceProofs", "MerkleProofInput", "MerkleProofPair",
     "HyperlaneModule", "PrivacyModule", "Profile", "XReserveModule",

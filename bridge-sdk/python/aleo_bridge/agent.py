@@ -40,7 +40,7 @@ from . import lifecycle
 from .checkpoint import Checkpoint, create_checkpoint
 from .errors import BridgeError, ConfigurationError, PauseCheckError, RoutePausedError
 from .registry import DEFAULT_REGISTRY, Registry
-from .types import EvmXReserveQuote, Receipt
+from .types import EvmXReserveQuote, Plan, Receipt
 from .units import format_decimal_amount
 
 _S = {"type": "string"}
@@ -101,6 +101,8 @@ def _serialize(value: Any, registry: Registry | None = None) -> Any:
     """
     if isinstance(value, Checkpoint):
         return value.to_dict()
+    if isinstance(value, Plan):
+        return _serialize(value.to_dict(), registry)
     if isinstance(value, Receipt):
         return {f.name: (_redacted_state(getattr(value, f.name)) if f.name == "protocol_state"
                          else _serialize(getattr(value, f.name), registry))
@@ -191,6 +193,15 @@ def _connection_gap(bridge: Any, source_chain: Any, *, signing: bool = False) ->
         family = chain.family
     except (BridgeError, TypeError):
         return None                                   # let the real lookup produce the real error
+    if family == "evm" and chain.id not in ("ethereum", "sepolia"):
+        try:
+            connection = bridge.evm(chain.id).conn
+            if signing and not connection.can_sign:
+                return _error_payload(ConfigurationError(f"The {chain.id} connection is read-only; a signer is required."),
+                                      how_to_fix=f"set EVM_PRIVATE_KEY + {chain.id.upper()}_RPC_URL and retry")
+            return None
+        except ConfigurationError as exc:
+            return _error_payload(exc)
     ethereum = getattr(bridge, "ethereum", None)
     if family == "evm" and ethereum is None:
         return _error_payload(ConfigurationError(
@@ -225,7 +236,7 @@ _QUOTE_PROPS = {
     "amount": {**_S, "description": "Positive decimal amount in source-asset display units (e.g. '2', '0.001')."},
     "recipient": {**_S, "description": "Destination-chain address that receives the funds."},
     "sender": {**_S, "description": "Optional source-chain address; must be the configured connection's address."},
-    "bridge_protocol": {**_S, "enum": ["xreserve", "hyperlane", "cctp"], "description": "Only needed when multiple protocols serve the pair."},
+    "bridge_protocol": {**_S, "enum": ["xreserve", "hyperlane", "cctp", "verulink"], "description": "Only needed when multiple protocols serve the pair."},
     "cctp": {"type": "object", "additionalProperties": False, "properties": {
         "speed": {**_S, "enum": ["standard", "fast"]}, "forwarding": _B,
         "max_fee": {**_S, "description": "Maximum USDC deduction, preserved through recovery and fee refresh."}}},
@@ -428,7 +439,7 @@ def _has_prepared_destination(progress: Any) -> bool:
 def _h_complete(b, a):
     progress = lifecycle.recover(b, a["checkpoint"])                 # reads only
     secret_nonce = a.get("secret_nonce")
-    if progress.plan.protocol != "cctp" and not secret_nonce and not _has_prepared_destination(progress):
+    if progress.plan.protocol == "xreserve" and not secret_nonce and not _has_prepared_destination(progress):
         return _missing_nonce("the deposit this mint finishes")
     if not a.get("confirm"):
         return _confirmation(progress=_serialize(progress, b.registry))
@@ -467,19 +478,21 @@ _READ_TOOLS: list[tuple[str, str, dict[str, Any], Callable[[Any, dict[str, Any]]
      "(aleo, ethereum, solana, aleo-testnet, sepolia) or symbol.",
      _schema({"chain": _S, "symbol": _S, "environment": {**_S, "enum": ["mainnet", "testnet"]}}, []), _h_list_assets),
     ("bridge_list_routes",
-     "Supported directions and their protocol (xreserve = USDC<->USDCx via Circle; hyperlane = ETH/WBTC/USDT/SOL/BAT/USDG/ZEC). "
+     "Supported directions and their protocol (xreserve = USDC<->USDCx; hyperlane = ETH/WBTC/USDT/SOL/BAT/USDG/ZEC; "
+     "cctp = native USDC; verulink = public ALEO between Aleo and BSC with a destination claim). "
      "Active routes move funds; metadata-required ones are listed but refused by quote/execute.",
      _schema({"source_chain": _S, "source_asset": _S, "destination_chain": _S, "destination_asset": _S,
-              "bridge_protocol": {**_S, "enum": ["xreserve", "hyperlane"]}, "symbol": _S,
+              "bridge_protocol": {**_S, "enum": ["xreserve", "hyperlane", "cctp", "verulink"]}, "symbol": _S,
               "include_unavailable": _B, "environment": {**_S, "enum": ["mainnet", "testnet"]}}, []), _h_list_routes),
     ("bridge_pause_status",
      "Read the operator pause switches on both ends of a route, live (reads only, never cached): the Aleo warp/USDCx "
      "program pauses and enrolled routers, paused() on xReserve and the CCTP transmitter, any pausable hook/ISM in the "
-     "Ethereum Mailbox, and the Solana warp program's enrolled router. Name the route by route id or by "
+     "Ethereum Mailbox, the Solana warp program's enrolled router, and Verulink's Aleo settings and BSC pauses. "
+     "Name the route by route id or by "
      "source_chain + source_asset + destination_chain. bridge_quote/bridge_execute run this same check and refuse a "
      "paused or unreadable route.",
      _schema({"route": _S, "source_chain": _S, "source_asset": _S, "destination_chain": _S, "destination_asset": _S,
-              "bridge_protocol": {**_S, "enum": ["xreserve", "hyperlane", "cctp"]}}, []), _h_pause_status),
+              "bridge_protocol": {**_S, "enum": ["xreserve", "hyperlane", "cctp", "verulink"]}}, []), _h_pause_status),
     ("bridge_quote",
      "Validate and price a transfer: route, fees (human units), amount_out, approval needs. Reads chain state, "
      "never signs. ALWAYS quote before bridge_execute and show the user fees and amount_out. A private mint "

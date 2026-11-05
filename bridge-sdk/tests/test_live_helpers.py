@@ -115,7 +115,7 @@ def test_gates_only_read_the_environment(monkeypatch):
 
 
 def test_case_names_include_cctp():
-    assert live_config.CASE_NAMES == ("evm-cctp", "evm-hyperlane", "evm-xreserve", "aleo-hyperlane",
+    assert live_config.CASE_NAMES == ("aleo-verulink", "evm-verulink", "evm-cctp", "evm-hyperlane", "evm-xreserve", "aleo-hyperlane",
                                       "aleo-xreserve", "solana-hyperlane")
 
 
@@ -964,7 +964,8 @@ def test_arc_base_and_arbitrum_rpc_urls_default_to_public_providers(monkeypatch)
     assert live_config.evm_chain_rpc_url("arc") == "https://rpc.mainnet.arc.io"
     assert live_config.evm_chain_rpc_url("base") == "https://base-rpc.publicnode.com"
     assert live_config.evm_chain_rpc_url("arbitrum") == "https://arbitrum-one-rpc.publicnode.com"
-    assert set(live_config.EVM_CHAIN_RPC_VARS) == set(live_config.DEFAULT_EVM_CHAIN_RPC_URL) == {"arc", "base", "arbitrum"}
+    assert live_config.evm_chain_rpc_url("bsc") == "https://bsc-dataseed.bnbchain.org"
+    assert set(live_config.EVM_CHAIN_RPC_VARS) == set(live_config.DEFAULT_EVM_CHAIN_RPC_URL) == {"arc", "base", "arbitrum", "bsc"}
 
     monkeypatch.setenv("ARC_RPC_URL", "https://arc.example")
     monkeypatch.setenv("BRIDGE_LIVE_BASE_RPC_URL", "https://base.example")
