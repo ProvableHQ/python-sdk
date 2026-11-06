@@ -42,6 +42,46 @@ real funds. Review a quote before submitting a new transfer.
 | [recover_from_journal.py](recover_from_journal.py) | Find a saved transfer, check progress, or submit its remaining step. |
 | [recover_without_files.py](recover_without_files.py) | Restore monitoring of a confirmed Ethereum-to-Aleo WBTC dispatch from explorer details. |
 | [shield_assets.py](shield_assets.py) | Convert an existing public Aleo balance to an encrypted private record. |
+| [verulink_roundtrip.py](verulink_roundtrip.py) | Preview or recover public ALEO → BSC → Aleo with a checkpoint for each leg. |
+
+## ALEO through BSC
+
+Preview the Verulink round trip using public addresses:
+
+```sh
+python -m aleo_bridge.examples.verulink_roundtrip \
+  --aleo-address "$ALEO_ADDRESS" --bsc-address "$BSC_ADDRESS" --amount 20
+```
+
+The preview loads no keys and writes no journey file. Both directions use
+public balances. Execution requires `ALEO_PRIVATE_KEY`, `EVM_PRIVATE_KEY`,
+`--execute`, and the operator's own
+`BRIDGE_LIVE_MAINNET_EXECUTE=I_ACKNOWLEDGE_THIS_SUBMITS_MAINNET_TRANSACTIONS`
+acknowledgement. The signers must match the two addresses. Keep ALEO for fees
+and at least 0.001 BNB before starting; that BNB reserve is a budget, not a
+gas estimate. Override `ALEO_RPC_URL` and `BSC_RPC_URL` for other mainnet providers.
+
+Execution saves to `~/.aleo-bridge/verulink-roundtrip.json`, or `--state PATH`.
+Run the same arguments to recover that journey. The second leg spends the
+verified packet amount received on BSC. A lock prevents concurrent runners;
+after a process crash, confirm that its owner has stopped before removing
+the adjacent `.lock` file.
+
+A wallet boundary is marked before submission. If its response is lost
+without a transaction ID, the example stops for reconciliation; it never
+starts another source transfer or claim on a retry. Retain the state file,
+find the transaction hash in the wallet, and update that leg's checkpoint.
+An approval-only BSC checkpoint cannot authorize another burn. Screening
+holds keep their checkpoint and are not reported as delivered.
+
+From the checkout, public deployment checks need no accounts:
+
+```sh
+BRIDGE_VERULINK_READ_ONLY=1 python -m pytest -m live tests/live/test_verulink_readonly.py
+```
+
+Funded live coverage uses the existing opt-in gates with the
+`aleo-verulink` and `evm-verulink` case names. No funded test runs by default.
 
 ## Review a transfer
 

@@ -4,7 +4,7 @@ owner rotation at afc5601, registry version 2026-09-30.hyperlane-bat-usdg-zec.1)
 Every key keeps veil's camelCase spelling so the brief and veil tests stay the source of truth."""
 from __future__ import annotations
 
-REGISTRY_VERSION = "2026-09-30.hyperlane-bat-usdg-zec.1"
+REGISTRY_VERSION = "2026-11-04.verulink-bsc.1"
 
 EVM_ADDRESS = "^0x[0-9a-fA-F]{40}$"
 SOLANA_ADDRESS = "^[1-9A-HJ-NP-Za-km-z]{32,44}$"
@@ -12,7 +12,7 @@ ALEO_ADDRESS = "^aleo1[0-9a-z]{58}$"
 
 CHAINS = [
     {"id": "aleo", "displayName": "Aleo", "family": "aleo", "environment": "mainnet", "nativeCurrencySymbol": "ALEO",
-     "protocolDomains": {"xreserve": 10002, "hyperlane": 1634493807}},
+     "protocolDomains": {"xreserve": 10002, "hyperlane": 1634493807, "verulink": 6694886634401}},
     {"id": "ethereum", "displayName": "Ethereum", "family": "evm", "environment": "mainnet", "nativeCurrencySymbol": "ETH",
      "protocolDomains": {"xreserve": 0, "hyperlane": 1, "cctp": 0}},
     {"id": "arc", "displayName": "Arc", "family": "evm", "environment": "mainnet", "nativeCurrencySymbol": "USDC",
@@ -34,6 +34,7 @@ CHAINS = [
 # connection for (never for signing, balances or anything else). Kept off the Chain entries so the
 # legacy route fingerprints in _registry_compatibility stay byte-identical.
 PUBLIC_READ_RPC_URLS = {
+    "bsc": ["https://bsc-dataseed.bnbchain.org"],
     "ethereum": ["https://ethereum-rpc.publicnode.com", "https://1rpc.io/eth"],
     "arc": ["https://rpc.mainnet.arc.io"],
     "base": ["https://base-rpc.publicnode.com", "https://1rpc.io/base"],
@@ -685,3 +686,15 @@ for _chain, _chain_id, _domain in (("ethereum", 1, 0), ("base", 8453, 6), ("arbi
                              f"{_dst}/usdc", "active", f"cctp-v2-{_src}-{_dst}",
                              {**CCTP_MAINNET_METADATA, "sourceChainId": _sid, "destinationChainId": _did,
                               "sourceDomain": _sd, "destinationDomain": _dd}))
+
+from ._verulink_deployment import METADATA as VERULINK_METADATA, SOURCE as VERULINK_SOURCE
+
+CHAINS.append({"id": "bsc", "displayName": "BNB Smart Chain", "family": "evm", "environment": "mainnet",
+               "nativeCurrencySymbol": "BNB", "protocolDomains": {"verulink": 422842677816}})
+ASSETS.append({"id": "bsc/aleo", "key": "aleo", "chainId": "bsc", "symbol": "ALEO", "name": "Verulink ALEO",
+               "decimals": 6, "kind": "token", "locator": {"kind": "evm-contract", "value": VERULINK_METADATA["evmToken"]},
+               "addressValidationRegex": EVM_ADDRESS})
+for _src, _dst in (("aleo", "bsc"), ("bsc", "aleo")):
+    ROUTES.append(_route(f"verulink:{_src}/aleo->{_dst}/aleo", "verulink", "mainnet",
+                         f"{_src}/aleo", f"{_dst}/aleo", "active", "verulink-aleo-bsc",
+                         VERULINK_METADATA, VERULINK_SOURCE))

@@ -10,6 +10,22 @@ from tests.fakes.fake_web3 import fake_web3
 KEY = '0x' + '11' * 32
 
 
+def test_bsc_connection_handles_poa_blocks_and_shared_web3():
+    from web3 import Web3
+    from web3.providers.base import BaseProvider
+
+    class Provider(BaseProvider):
+        def make_request(self, method, params):
+            assert method == "eth_getBlockByNumber"
+            return {"jsonrpc": "2.0", "id": 1, "result": {"extraData": "0x" + "ab" * 97}}
+
+    w3 = Web3(Provider())
+    connection = Ethereum(w3=w3)
+    for _ in range(2):
+        b = make(evm={"bsc": connection})
+        assert len(b.evm("bsc").conn.w3.eth.get_block("latest")["proofOfAuthorityData"]) == 97
+
+
 def make(**kwargs):
     return Bridge(FakeAleo(mappings=default_mappings()), **kwargs)
 

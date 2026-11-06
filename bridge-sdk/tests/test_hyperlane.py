@@ -253,6 +253,16 @@ def test_two_destination_assets_are_selected_by_route_through_tier1_and_tier2(br
     ambiguous. quote()/execute() go by the resolved route; Tier-2 takes the Route or its id."""
     route = REG.route(route_id)
     source = REG.asset(route.source_asset_id)
+    from base64 import b64decode
+    from aleo_bridge import Bridge, Ethereum, Solana
+    from tests.fakes.fake_solana import FakeSolanaClient
+    from tests.fakes.fake_web3 import fake_web3
+    # Pause checks also read the destination. Keep both destination transports local.
+    pda = json.loads((Path(__file__).parent / "fixtures" / "sealevel-token-pda-bat.json").read_text())
+    accounts = {REG.route(f"hyperlane:solana/{symbol}->aleo/{symbol}").meta_str("tokenPda"): b64decode(pda["data_base64"])
+                for symbol in ("bat", "usdg")}
+    bridge = Bridge(bridge.aleo, ethereum=Ethereum(w3=fake_web3()),
+                    solana=Solana(client=FakeSolanaClient(accounts=accounts)))
     amount = "0.0001"
     quote = bridge.quote(route=route_id, amount=amount, recipient=recipient)
     assert quote.kind == "aleo-hyperlane" and quote.plan.route_id == route_id and quote.payment_microcredits > 0

@@ -536,8 +536,16 @@ def test_pause_status_tool_reports_switches_and_write_errors_name_the_fix():
     assert "bridge_pause_status" in {t["name"] for t in bridge_tools(include_writes=False)}
 
 
-def test_existing_tool_schemas_are_byte_identical_to_the_snapshot():
+def test_existing_tool_schemas_preserve_snapshot_with_additive_protocol_choices():
     snap = {t["name"]: t for t in json.loads((Path(__file__).parent / "fixtures" / "agent-tools-2026-10-30.json").read_text())}
+    for name in ("bridge_quote", "bridge_execute"):
+        snap[name]["input_schema"]["properties"]["bridge_protocol"]["enum"].append("verulink")
+    snap["bridge_list_routes"]["input_schema"]["properties"]["bridge_protocol"]["enum"].extend(["cctp", "verulink"])
+    snap["bridge_list_routes"]["description"] = (
+        "Supported directions and their protocol (xreserve = USDC<->USDCx; "
+        "hyperlane = ETH/WBTC/USDT/SOL/BAT/USDG/ZEC; cctp = native USDC; "
+        "verulink = public ALEO between Aleo and BSC with a destination claim). "
+        "Active routes move funds; metadata-required ones are listed but refused by quote/execute.")
     now = {t["name"]: t for t in bridge_tools()}
     assert set(now) - set(snap) == {"bridge_pause_status"}
     for name, tool in snap.items():

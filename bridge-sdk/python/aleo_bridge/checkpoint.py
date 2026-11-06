@@ -205,6 +205,8 @@ def create_checkpoint(plan: Plan, receipt: Receipt, registry: Registry) -> Check
     if plan.cctp is not None:
         from dataclasses import asdict
         intent["cctp"] = asdict(plan.cctp)
+    if plan.protocol == "verulink" and plan.amount_out is not None:
+        intent["amountOut"] = plan.amount_out
     if sender:
         intent["sender"] = sender
     if dst_asset.locator is not None and dst_asset.locator.kind == "aleo-program":

@@ -18,6 +18,7 @@ from . import lifecycle as _lifecycle
 from . import _evm_connections
 from ._calls import AleoCall
 from .cctp import CctpModule
+from .verulink import VerulinkModule
 from .errors import BridgeError, ConfigurationError, UnsupportedRouteError
 from .eth import Ethereum, EthModule
 from .freezelist import ComplianceProofs, FreezeList
@@ -153,6 +154,7 @@ class Bridge:
         self.hyperlane = HyperlaneModule(self)
         self.xreserve = XReserveModule(self)
         self.cctp = CctpModule(self)
+        self.verulink = VerulinkModule(self)
         self.freezelist = FreezeList(self)
         self.privacy = PrivacyModule(self)
 
@@ -356,7 +358,8 @@ class Bridge:
         Both ends are read unless ``sides`` narrows it: the ``pause`` mapping and enrolled router of the
         Aleo warp program (plus the ARC-20 token's ``pause__``), the USDCx bridge and stablecoin pauses,
         ``paused()`` on xReserve and the CCTP transmitter, any ``PausableHook`` / ``PausableIsm`` in the
-        Ethereum Mailbox's trees, and the Solana token PDA's enrolled router. Nothing is cached and the
+        Ethereum Mailbox's trees, the Solana token PDA's enrolled router, and Verulink's Aleo bridge/service
+        settings and BSC bridge/service pauses. Nothing is cached and the
         result never raises for a pause: ``status.paused`` / ``status.unknown`` say so and
         ``status.reason`` names the switch. ``quote``, ``execute``, ``resume`` and ``complete`` run this same
         check and refuse with ``RoutePausedError`` or ``PauseCheckError``. A far-side EVM chain with no
@@ -374,7 +377,8 @@ class Bridge:
 
         Name the route the way veil's ``quote`` does: ``source_chain`` + ``source_asset``
         + ``destination_chain`` (``"ethereum"``, ``"usdc"``, ``"aleo"``), adding
-        ``destination_asset`` / ``bridge_protocol`` (``"xreserve"`` | ``"hyperlane"``)
+        ``destination_asset`` / ``bridge_protocol`` (``"xreserve"``, ``"hyperlane"``,
+        ``"cctp"``, or ``"verulink"``)
         only when more than one route fits — or ``route=`` with a ``Route`` from
         ``routes()`` or its id.  Give exactly one of ``amount`` (human units, str)
         or ``amount_atomic`` (int).  ``recipient`` is the destination-chain
@@ -382,11 +386,15 @@ class Bridge:
         ``"record"`` minted by the relayer, or ``"private"`` — you finish it
         yourself with ``complete`` and must keep ``secret_nonce``.  Returns a
         kind-specific ``Quote`` (``quote.kind`` in evm-hyperlane /
-        solana-hyperlane / aleo-hyperlane / evm-xreserve / aleo-xreserve) with
+        solana-hyperlane / aleo-hyperlane / evm-xreserve / aleo-xreserve /
+        evm-cctp / aleo-verulink / evm-verulink) with
         ``fees`` and ``amount_out`` in human units and ``quote.plan``.  Show the
         user fees + amount before ``execute``.  Refuses with ``RoutePausedError`` /
         ``PauseCheckError`` when a pause switch on either end reads paused or
         cannot be read (see ``pause_status``).
+        Verulink supports public ALEO
+        between Aleo and BSC; both directions require a destination claim.
+        Unpriced network gas has ``Fee.amount=None``, never zero.
         """
         return _lifecycle.quote(self, source_chain=source_chain, source_asset=source_asset,
                                 destination_chain=destination_chain, destination_asset=destination_asset,
@@ -472,9 +480,9 @@ class Bridge:
 
     def complete(self, progress, *, secret_nonce: str | None = None, on_checkpoint=None, proving: str = "delegate",
                  manual_mint: bool = False):
-        """Claim a private USDCx or native-USDC CCTP destination mint.
+        """Claim a private USDCx, native-USDC CCTP, or public Verulink destination.
 
-        Requires the same ``secret_nonce`` given to ``execute``; the SDK never
+        Private xReserve requires the same ``secret_nonce`` given to ``execute``; the SDK never
         stored it.  Submits exactly one ``private_mint`` and returns
         ``DESTINATION_CONFIRMING`` progress to ``wait`` on. CCTP needs no secret
         nonce, but requires a destination signer and gas. Set ``manual_mint=True``
@@ -482,6 +490,8 @@ class Bridge:
         submitted destination transaction is observed rather than repeated.
         Refuses with ``RoutePausedError`` / ``PauseCheckError`` when a pause switch
         on the destination side reads paused or cannot be read.
+        Verulink requires a destination signer and native gas, with no secret
+        nonce. A holding result retains its checkpoint for review and recovery.
         """
         options = {"manual_mint": manual_mint} if manual_mint else {}
         return _lifecycle.complete(self, progress, secret_nonce=secret_nonce, on_checkpoint=on_checkpoint,
@@ -546,7 +556,7 @@ class Bridge:
         """The client for the local profile (spec §3.4), created on first use. *network*/*endpoint* apply only when
         creating. Side-chain connections come from the arguments or the same env variables as ``from_env``;
         a chain neither names falls back to a read-only connection over the profile's ``rpc_urls``."""
-        kwargs = {k: v for k, v in (("network", network), ("endpoint", endpoint)) if v is not None}
+        kwargs: dict[str, Any] = {k: v for k, v in (("network", network), ("endpoint", endpoint)) if v is not None}
         profile = Profile.load_or_create(home, **kwargs)
         aleo = build_aleo(profile.endpoint, profile.network, profile.private_key,
                           api_key=os.environ.get("ALEO_API_KEY"), consumer_id=os.environ.get("ALEO_CONSUMER_ID"))
