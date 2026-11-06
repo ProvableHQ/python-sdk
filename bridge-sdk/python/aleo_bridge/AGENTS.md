@@ -46,7 +46,8 @@ Everything from the environment (spec §3.3); writes nothing to disk. Overrides:
 ### `from_profile(home: 'Any' = None, *, network: 'str | None' = None, endpoint: 'str | None' = None, ethereum: 'Any' = None, solana: 'Any' = None, evm: 'Any' = None) -> "'Bridge'"`
 
 The client for the local profile (spec §3.4), created on first use. *network*/*endpoint* apply only when
-creating. Side-chain connections come from the arguments or the same env variables as ``from_env``.
+creating. Side-chain connections come from the arguments or the same env variables as ``from_env``;
+a chain neither names falls back to a read-only connection over the profile's ``rpc_urls``.
 
 ### `status(self) -> 'BridgeStatus'`
 
@@ -77,7 +78,9 @@ yourself with ``complete`` and must keep ``secret_nonce``.  Returns a
 kind-specific ``Quote`` (``quote.kind`` in evm-hyperlane /
 solana-hyperlane / aleo-hyperlane / evm-xreserve / aleo-xreserve) with
 ``fees`` and ``amount_out`` in human units and ``quote.plan``.  Show the
-user fees + amount before ``execute``.
+user fees + amount before ``execute``.  Refuses with ``RoutePausedError`` /
+``PauseCheckError`` when a pause switch on either end reads paused or
+cannot be read (see ``pause_status``).
 
 ### `execute(self, plan, *, on_checkpoint=None, proving: 'str' = 'delegate', mode: 'str | None' = None, record: 'str | None' = None, compliance_proofs: 'ComplianceProofs' = None, merkle_proof: 'str | None' = None, gas_payment_microcredits: 'int | None' = None, secret_nonce: 'str | None' = None, poll_seconds: 'float' = 1.0, timeout_seconds: 'float' = 120.0)`
 
@@ -97,8 +100,10 @@ record and computes the freeze-list exclusion proof, caching it until
 the list changes; ``merkle_proof`` is the earlier name for one literal
 bundle).  The Hyperlane hook payment is
 re-quoted right before proving unless ``gas_payment_microcredits`` is
-pinned.  Irreversible once the source step is broadcast: afterwards use
-``wait`` / ``recover``, never ``execute`` again.
+pinned.  Refuses with ``RoutePausedError`` / ``PauseCheckError`` when a
+pause switch on either end reads paused or cannot be read.  Irreversible
+once the source step is broadcast: afterwards use ``wait`` / ``recover``,
+never ``execute`` again.
 
 ### `wait(self, progress, *, until=None, poll_seconds: 'float' = 15.0, timeout_seconds: 'float' = 1200.0, on_update=None, on_error=None, max_consecutive_errors: 'int' = 5)`
 
@@ -127,7 +132,9 @@ Finish an interrupted source submission (``progress.next == "resume"``).
 
 Rebroadcasts the identical proved Aleo transaction (a duplicate response is
 success) or, on EVM, re-scans history and only then authorizes the single
-missing deposit/dispatch.  Never repeats a confirmed step.
+missing deposit/dispatch.  Never repeats a confirmed step.  Refuses with
+``RoutePausedError`` / ``PauseCheckError`` when a pause switch on either
+end reads paused or cannot be read.
 
 ### `complete(self, progress, *, secret_nonce: 'str | None' = None, on_checkpoint=None, proving: 'str' = 'delegate', manual_mint: 'bool' = False)`
 
@@ -139,6 +146,8 @@ stored it.  Submits exactly one ``private_mint`` and returns
 nonce, but requires a destination signer and gas. Set ``manual_mint=True``
 to explicitly authorize fallback for stalled forwarding; an already
 submitted destination transaction is observed rather than repeated.
+Refuses with ``RoutePausedError`` / ``PauseCheckError`` when a pause switch
+on the destination side reads paused or cannot be read.
 
 ### `pending(self) -> 'list'`
 
@@ -153,6 +162,19 @@ that no longer exists, a registry version this build did not write — and a fil
 could not even read back come back as ``{"next": "failed", "error", "error_type"}`` entries
 (naming the ``checkpoint_id`` or the ``path``) alongside the healthy ``Progress`` objects,
 so a stale or corrupt file can never make a transfer that is still on the wire invisible.
+
+### `pause_status(self, route, *, sides=('source', 'destination')) -> 'PauseStatus'`
+
+Read every operator pause switch governing ``route`` (a ``Route``, its id, or a ``Plan``), live.
+
+Both ends are read unless ``sides`` narrows it: the ``pause`` mapping and enrolled router of the
+Aleo warp program (plus the ARC-20 token's ``pause__``), the USDCx bridge and stablecoin pauses,
+``paused()`` on xReserve and the CCTP transmitter, any ``PausableHook`` / ``PausableIsm`` in the
+Ethereum Mailbox's trees, and the Solana token PDA's enrolled router. Nothing is cached and the
+result never raises for a pause: ``status.paused`` / ``status.unknown`` say so and
+``status.reason`` names the switch. ``quote``, ``execute``, ``resume`` and ``complete`` run this same
+check and refuse with ``RoutePausedError`` or ``PauseCheckError``. A far-side EVM chain with no
+configured connection is read over the profile's ``rpc_urls`` or the registry's public endpoints.
 
 ## Serving a chatting user (the conversation pattern)
 

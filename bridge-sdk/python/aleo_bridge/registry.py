@@ -119,7 +119,8 @@ def _parse_asset_ref(ref: Any) -> tuple[str, str]:
 class Registry:
     """Immutable snapshot with case-insensitive lookups. Build with :func:`build_registry` or directly."""
 
-    def __init__(self, version: str, chains: Iterable[Chain], assets: Iterable[Asset], routes: Iterable[Route]) -> None:
+    def __init__(self, version: str, chains: Iterable[Chain], assets: Iterable[Asset], routes: Iterable[Route],
+                 public_read_rpc_urls: Mapping[str, Iterable[str]] | None = None) -> None:
         self.version = version
         self._chains = tuple(chains)
         self._assets = tuple(assets)
@@ -127,6 +128,11 @@ class Registry:
         self._chain_by_id = {c.id: c for c in self._chains}
         self._asset_by_id = {a.id: a for a in self._assets}
         self._route_by_id = {r.id: r for r in self._routes}
+        self._public_read_rpc_urls = {k.lower(): tuple(v) for k, v in (public_read_rpc_urls or {}).items()}
+
+    def public_read_rpc_urls(self, chain_id: str) -> tuple[str, ...]:
+        """Public read-only JSON-RPC endpoints pinned for an EVM chain; used only for pause-switch reads."""
+        return self._public_read_rpc_urls.get(str(chain_id).lower(), ())
 
     def __repr__(self) -> str:
         return f"Registry(version={self.version!r}, chains={len(self._chains)}, assets={len(self._assets)}, routes={len(self._routes)})"
@@ -245,6 +251,11 @@ def validate_registry(registry: Registry) -> Registry:
         if chain.family not in FAMILIES:
             raise ConfigurationError(f"Bridge chain {chain.id} has unsupported family {chain.family!r}")
         chain_ids.add(chain.id)
+    for chain_id, urls in registry._public_read_rpc_urls.items():
+        if chain_id not in chain_ids:
+            raise ConfigurationError(f"Public read RPC URLs name unknown chain {chain_id!r}")
+        if not urls or not all(isinstance(u, str) and u.startswith("https://") for u in urls):
+            raise ConfigurationError(f"Public read RPC URLs for {chain_id} must be one or more https:// URLs")
     asset_ids: set[str] = set()
     asset_keys: set[str] = set()
     for asset in registry._assets:
@@ -321,7 +332,8 @@ def build_registry(data: ModuleType = _registry_data) -> Registry:
     routes = [Route(r["id"], r["protocol"], r["environment"], r["sourceAssetId"], r["destinationAssetId"],
                     r["availability"], r.get("deploymentId"), r.get("source"), dict(r.get("metadata", {})))
               for r in data.ROUTES]
-    return validate_registry(Registry(data.REGISTRY_VERSION, chains, assets, routes))
+    return validate_registry(Registry(data.REGISTRY_VERSION, chains, assets, routes,
+                                      getattr(data, "PUBLIC_READ_RPC_URLS", {})))
 
 
 DEFAULT_REGISTRY: Registry = build_registry()

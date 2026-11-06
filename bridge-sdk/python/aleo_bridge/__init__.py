@@ -37,15 +37,15 @@ _require_aleo_sdk()
 from .errors import (  # noqa: E402
     AmbiguousRouteError, AttestationError, BridgeError, ChainMismatchError, CheckpointInvalidError,
     ConfigurationError, DeliveryUnknownError, InsufficientBalanceError, InvalidAmountError,
-    InvalidRecipientError, MissingExtraError, NotResumableError, PollingTimeoutError,
-    RegistryVersionMismatchError, RouteNotFoundError, RouteUnavailableError, UnsupportedRouteError,
+    InvalidRecipientError, MissingExtraError, NotResumableError, PauseCheckError, PollingTimeoutError,
+    RegistryVersionMismatchError, RouteNotFoundError, RoutePausedError, RouteUnavailableError, UnsupportedRouteError,
 )
 from .registry import DEFAULT_REGISTRY, Asset, Chain, Locator, Privacy, Registry, Route, validate_registry  # noqa: E402
 from .types import (  # noqa: E402
     CctpOptions, EvmCctpQuote, CALLER_BOUNDARIES, TERMINAL, AleoHyperlaneQuote, AleoXReserveQuote, Attestation, BridgeStatus, BurnReceipt,
     ChainStatus, DepositReceipt, DispatchReceipt, EvmHyperlaneQuote, EvmXReserveQuote, Fee, GasQuote,
-    MintReceipt, Plan, PreparedTx, PrivacyReceipt, Progress, Quote, Receipt, SolanaHyperlaneQuote, Status, Step,
-    to_progress,
+    MintReceipt, PauseStatus, PauseSwitch, Plan, PreparedTx, PrivacyReceipt, Progress, Quote, Receipt,
+    SolanaHyperlaneQuote, Status, Step, to_progress,
 )
 from ._calls import AleoCall, EvmCall, SolCall  # noqa: E402
 from .checkpoint import (Checkpoint, CheckpointLoadResult, CheckpointProblem, CheckpointStore, FileCheckpointStore,  # noqa: E402
@@ -66,14 +66,14 @@ from .xreserve import XReserveModule  # noqa: E402
 __all__ = [
     "__version__", "AmbiguousRouteError", "AttestationError", "BridgeError", "ChainMismatchError",
     "CheckpointInvalidError", "ConfigurationError", "DeliveryUnknownError", "InsufficientBalanceError",
-    "InvalidAmountError", "InvalidRecipientError", "MissingExtraError", "NotResumableError",
-    "PollingTimeoutError", "RegistryVersionMismatchError", "RouteNotFoundError", "RouteUnavailableError",
-    "UnsupportedRouteError",
+    "InvalidAmountError", "InvalidRecipientError", "MissingExtraError", "NotResumableError", "PauseCheckError",
+    "PollingTimeoutError", "RegistryVersionMismatchError", "RouteNotFoundError", "RoutePausedError",
+    "RouteUnavailableError", "UnsupportedRouteError",
     "Asset", "Chain", "DEFAULT_REGISTRY", "Locator", "Privacy", "Registry", "Route", "validate_registry",
     "CctpOptions", "EvmCctpQuote", "CALLER_BOUNDARIES", "TERMINAL", "AleoHyperlaneQuote", "AleoXReserveQuote", "Attestation", "BridgeStatus",
     "BurnReceipt", "ChainStatus", "DepositReceipt", "DispatchReceipt", "EvmHyperlaneQuote", "EvmXReserveQuote",
-    "Fee", "GasQuote", "MintReceipt", "Plan", "PreparedTx", "PrivacyReceipt", "Progress", "Quote", "Receipt",
-    "SolanaHyperlaneQuote", "Status", "Step", "to_progress",
+    "Fee", "GasQuote", "MintReceipt", "PauseStatus", "PauseSwitch", "Plan", "PreparedTx", "PrivacyReceipt",
+    "Progress", "Quote", "Receipt", "SolanaHyperlaneQuote", "Status", "Step", "to_progress",
     "AleoCall", "Bridge", "CircleClient", "DEFAULT_ENDPOINT", "EMPTY_MERKLE_PROOF_PAIR", "FreezeList",
     "ComplianceProof", "ComplianceProofs", "MerkleProofInput", "MerkleProofPair",
     "HyperlaneModule", "PrivacyModule", "Profile", "XReserveModule",

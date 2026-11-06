@@ -244,15 +244,37 @@ class FakeNetModule:
             return value
 
 
+ETH_DOMAIN, SOL_DOMAIN = "1u32", "1399811149u32"
+ROUTER = "{ domain: 1u32, recipient: [0u8], gas: 1u128 }"
+
+
+def _warp(pause_mapping: str, *domains: str) -> dict:
+    """A warp program as the pause gate reads it: its pause convention declared and every far router enrolled."""
+    return {pause_mapping: {}, "remote_routers": {d: ROUTER for d in domains}, "app_metadata": {}}
+
+
 def default_mappings() -> dict:
     return {
         "hyp_hook_manager.aleo": {"destination_gas_configs": {IGP_KEY_ETH: ETH_GAS_CONFIG, IGP_KEY_SOL: SOL_GAS_CONFIG}},
         "hyp_mailbox.aleo": {"deliveries": {DELIVERED_KEY: "{ block_height: 1u32 }"}},
-        "usdcx_bridge_v2.aleo": {"nullifier": {"[" + ",".join(f"{b}u8" for b in NULLIFIED_NONCE) + "]": "true"}},
+        "usdcx_bridge_v2.aleo": {"nullifier": {"[" + ",".join(f"{b}u8" for b in NULLIFIED_NONCE) + "]": "true"}, "paused": {}},
         "credits.aleo": {"account": {SIGNER: "2392443u64"}},
-        "usdcx_stablecoin.aleo": {"balances": {SIGNER: "1000000u128"}, "freeze_list": {}, "freeze_list_last_index": {}},
-        "arc20_wbtc.aleo": {"balances": {SIGNER: "10000u128"}},
-        "arc20_eth.aleo": {"balances": {}},
+        "usdcx_stablecoin.aleo": {"balances": {SIGNER: "1000000u128"}, "freeze_list": {}, "freeze_list_last_index": {},
+                                  "pause": {}},
+        "arc20_wbtc.aleo": {"balances": {SIGNER: "10000u128"}, "pause__": {}},
+        "arc20_eth.aleo": {"balances": {}, "pause__": {}},
+        "arc20_usdt.aleo": {"pause__": {}}, "arc20_sol.aleo": {"pause__": {}},
+        "shield_arc22_bat.aleo": {"pause__": {}}, "shield_arc22_usdg.aleo": {"pause__": {}}, "shield_arc22_zec.aleo": {"pause__": {}},
+        # every pause switch open, every far router enrolled (mainnet conventions as of 2026-10-30)
+        "hyp_warp_token_eth_v2.aleo": _warp("pause", ETH_DOMAIN),
+        "hyp_warp_token_wbtc_v2.aleo": _warp("pause", ETH_DOMAIN),
+        "hyp_warp_token_usdt_v2.aleo": _warp("pause", ETH_DOMAIN),
+        "hyp_warp_token_sol_v2.aleo": _warp("pause", SOL_DOMAIN),
+        "hyp_warp_token_bat_v2.aleo": _warp("pause__", ETH_DOMAIN, SOL_DOMAIN),
+        "hyp_warp_token_usdg_v2.aleo": _warp("pause__", ETH_DOMAIN, SOL_DOMAIN),
+        "hyp_warp_token_zec_v2.aleo": _warp("pause__", SOL_DOMAIN),
+        # testnet xReserve programs declare the same conventions
+        "test_usdcx_bridge_v2.aleo": {"paused": {}}, "test_usdcx_stablecoin.aleo": {"pause": {}},
     }
 
 

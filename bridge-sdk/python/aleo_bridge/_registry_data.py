@@ -30,6 +30,18 @@ CHAINS = [
      "protocolDomains": {"hyperlane": 11155111, "xreserve": 0}},
 ]
 
+# Public JSON-RPC endpoints used ONLY to read pause switches on a chain the caller configured no
+# connection for (never for signing, balances or anything else). Kept off the Chain entries so the
+# legacy route fingerprints in _registry_compatibility stay byte-identical.
+PUBLIC_READ_RPC_URLS = {
+    "ethereum": ["https://ethereum-rpc.publicnode.com", "https://1rpc.io/eth"],
+    "arc": ["https://rpc.mainnet.arc.io"],
+    "base": ["https://base-rpc.publicnode.com", "https://1rpc.io/base"],
+    "arbitrum": ["https://arbitrum-one-rpc.publicnode.com", "https://1rpc.io/arb"],
+    "hyperevm": ["https://rpc.hyperliquid.xyz/evm"],
+    "sepolia": ["https://ethereum-sepolia-rpc.publicnode.com", "https://1rpc.io/sepolia"],
+}
+
 ASSETS = [
     {"id": "aleo/aleo", "key": "aleo", "chainId": "aleo", "symbol": "ALEO", "name": "Aleo", "decimals": 6, "kind": "native",
      "locator": {"kind": "aleo-program", "value": "credits.aleo"}, "addressValidationRegex": ALEO_ADDRESS},

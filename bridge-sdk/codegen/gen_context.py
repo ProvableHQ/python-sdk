@@ -28,7 +28,7 @@ from aleo_bridge.xreserve import XReserveModule  # noqa: E402
 OUTS = [_ROOT / "AGENTS.md", _ROOT / "python" / "aleo_bridge" / "AGENTS.md"]
 
 TIER1 = ["from_env", "from_profile", "status", "quote", "execute", "wait", "recover", "resume",
-         "complete", "pending"]
+         "complete", "pending", "pause_status"]
 TIER2 = [
     ("hyperlane.transfer_remote", HyperlaneModule.transfer_remote),
     ("hyperlane.quote_gas_payment", HyperlaneModule.quote_gas_payment),

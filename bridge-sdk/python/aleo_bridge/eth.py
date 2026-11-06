@@ -159,12 +159,12 @@ class Ethereum:
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Ethereum | None":
-        """``EVM_PRIVATE_KEY`` + ``ETHEREUM_RPC_URL`` (both or neither) → signing connection; neither → None.
+        """``EVM_PRIVATE_KEY`` + ``ETHEREUM_RPC_URL`` → signing connection; the URL alone → a read-only
+        connection (like Solana and the other EVM chains); neither → None; a key alone is an error.
 
         Aliases (the user's live shell / veil config export these names instead):
         ``BRIDGE_EVM_PRIVATE_KEY`` for the key, ``BRIDGE_LIVE_ETHEREUM_RPC_URL`` for the RPC url.
-        The primary variable wins when both a primary and its alias are set; the both-or-neither
-        rule applies to whichever pair resolves (primary, falling back to alias, per variable).
+        The primary variable wins when both a primary and its alias are set.
 
         ``BRIDGE_MIN_PRIORITY_FEE_WEI`` (digits only) overrides the EIP-1559 tip floor, for a chain
         or a moment where 0.1 gwei is not enough to be mined.
@@ -172,17 +172,17 @@ class Ethereum:
         env = os.environ if env is None else env
         key = env.get("EVM_PRIVATE_KEY") or env.get("BRIDGE_EVM_PRIVATE_KEY")
         url = env.get("ETHEREUM_RPC_URL") or env.get("BRIDGE_LIVE_ETHEREUM_RPC_URL")
-        if bool(key) != bool(url):
+        if key and not url:
             raise ConfigurationError(
-                "Set both EVM_PRIVATE_KEY and ETHEREUM_RPC_URL or neither "
+                "EVM_PRIVATE_KEY is set but ETHEREUM_RPC_URL is not: a key needs an RPC to sign against "
                 "(aliases: BRIDGE_EVM_PRIVATE_KEY, BRIDGE_LIVE_ETHEREUM_RPC_URL)")
-        if not key:
+        if not url:
             return None
         floor = env.get("BRIDGE_MIN_PRIORITY_FEE_WEI") or None      # exported-but-empty reads as unset
         if floor is not None and not str(floor).isdigit():
             raise ConfigurationError(
                 f"BRIDGE_MIN_PRIORITY_FEE_WEI must be a whole number of wei; got {floor!r}")
-        return cls(url, private_key=key,
+        return cls(url, private_key=key or None,
                    min_priority_fee_wei=MIN_PRIORITY_FEE_WEI if floor is None else int(floor))
 
     @property

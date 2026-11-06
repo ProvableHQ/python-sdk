@@ -107,3 +107,23 @@ def test_testnet_ignores_automatically_loaded_mainnet_connections(factory, varia
         b = Bridge.from_env() if factory == 'env' else Bridge.from_profile()
     assert b.environment == 'testnet'
     assert b._evm_connections == {}
+
+
+def test_profile_rpc_urls_fill_missing_connections_but_never_override(monkeypatch):
+    from types import SimpleNamespace
+    for var in ('ETHEREUM_RPC_URL', 'EVM_PRIVATE_KEY', 'BRIDGE_EVM_PRIVATE_KEY', 'BRIDGE_LIVE_ETHEREUM_RPC_URL',
+                'BASE_RPC_URL', 'ARBITRUM_RPC_URL'):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv('ARC_RPC_URL', 'https://env-arc.invalid')
+    explicit_base = Ethereum(w3=fake_web3())
+    profile = SimpleNamespace(endpoint='https://unused.invalid', network='mainnet', private_key='fake',
+                              rpc_urls={'ethereum': 'https://profile-eth.invalid', 'arc': 'https://profile-arc.invalid',
+                                        'base': 'https://profile-base.invalid'})
+    with patch('aleo_bridge.client.build_aleo', return_value=FakeAleo(mappings=default_mappings())), \
+         patch('aleo_bridge.client.Profile.load_or_create', return_value=profile), \
+         patch('aleo_bridge.client._checkpoints_for_profile', return_value=None):
+        b = Bridge.from_profile(evm={'base': explicit_base})
+    assert b.ethereum is not None and b.ethereum.can_sign is False
+    assert b.ethereum.w3.provider.endpoint_uri == 'https://profile-eth.invalid'      # profile fills the gap
+    assert b._evm_connections['arc'].w3.provider.endpoint_uri == 'https://env-arc.invalid'   # env wins
+    assert b._evm_connections['base'] is explicit_base                               # explicit wins

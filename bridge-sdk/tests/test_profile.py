@@ -74,3 +74,35 @@ def test_profile_creation_is_exclusive_loser_adopts_winner_key(tmp_path, monkeyp
     assert profile.address == winner_address
     assert json.loads((home / "profile.json").read_text())["address"] == winner_address
     assert stat.S_IMODE(os.stat(home).st_mode) == 0o700
+
+
+def test_rpc_urls_persist_and_old_profiles_load_without_them(tmp_path, monkeypatch):
+    monkeypatch.delenv("BRIDGE_PRIVATE_KEY", raising=False)
+    monkeypatch.delenv("BRIDGE_PRIVATE_KEY_FILE", raising=False)
+    p = Profile.load_or_create(tmp_path / "h", rpc_urls={"ethereum": "https://eth.example"})
+    assert p.rpc_urls == {"ethereum": "https://eth.example"}
+    p.set_rpc_url("arc", "https://arc.example")
+    assert Profile.load_or_create(tmp_path / "h").rpc_urls == {"ethereum": "https://eth.example", "arc": "https://arc.example"}
+    assert stat.S_IMODE(os.stat(tmp_path / "h" / "profile.json").st_mode) == 0o600
+    (tmp_path / "old").mkdir()
+    (tmp_path / "old" / "profile.json").write_text(json.dumps(
+        {"address": p.address, "private_key": p.private_key, "network": "mainnet"}))
+    assert Profile.load_or_create(tmp_path / "old").rpc_urls == {}
+    with pytest.raises(ConfigurationError, match="https"):
+        p.set_rpc_url("base", "ftp://nope")
+
+
+def test_set_rpc_url_rejects_chains_that_would_break_from_profile(tmp_path, monkeypatch):
+    """Review finding: a typo'd, non-EVM or wrong-environment chain id must be refused, not persisted."""
+    monkeypatch.delenv("BRIDGE_PRIVATE_KEY", raising=False)
+    monkeypatch.delenv("BRIDGE_PRIVATE_KEY_FILE", raising=False)
+    p = Profile.load_or_create(tmp_path / "h")
+    with pytest.raises(ConfigurationError, match="unknown"):
+        p.set_rpc_url("etherum", "https://x.example")
+    with pytest.raises(ConfigurationError, match="not an EVM chain"):
+        p.set_rpc_url("aleo", "https://x.example")
+    with pytest.raises(ConfigurationError, match="mainnet"):
+        p.set_rpc_url("sepolia", "https://x.example")
+    with pytest.raises(ConfigurationError, match="unknown"):
+        Profile.load_or_create(tmp_path / "h2", rpc_urls={"nochain": "https://x.example"})
+    assert p.rpc_urls == {}

@@ -28,6 +28,8 @@ SELECTORS = {
     keccak(text="quoteTransferRemote(uint32,bytes32,uint256)")[:4]: "quoteTransferRemote",
     keccak(text="delivered(bytes32)")[:4]: "delivered",
 }
+# Hyperlane Mailbox hook / ISM tree getters the pause reader walks; unscripted, they answer the zero address.
+_TREE_GETTERS = {keccak(text=sig)[:4] for sig in ("defaultHook()", "requiredHook()", "defaultIsm()", "hooks(uint32)", "module(uint32)")}
 TOPIC_DISPATCH_ID = "0x" + keccak(text="DispatchId(bytes32)").hex()
 TOPIC_SENT_TRANSFER_REMOTE = "0x" + keccak(text="SentTransferRemote(uint32,bytes32,uint256)").hex()
 TOPIC_DEPOSITED_TO_REMOTE = "0x" + keccak(
@@ -113,9 +115,14 @@ class FakeRpcProvider(BaseProvider):
                  token_balances: dict[tuple[str, str], int] | None = None,
                  allowances: dict[tuple[str, str, str], int] | None = None,
                  quotes: dict[str, list[tuple[str, int]]] | None = None,
-                 delivered: set[str] | None = None, legacy: bool = False) -> None:
+                 delivered: set[str] | None = None, legacy: bool = False,
+                 calls: dict[tuple[str, str], Any] | None = None) -> None:
         super().__init__()
         self.chain_id = chain_id
+        # Scripted eth_call answers keyed by (address, 0x-selector): ABI-encoded return bytes, "revert"
+        # (JSON-RPC error 3 "execution reverted"), or an Exception instance raised from make_request.
+        self.calls = {(to_checksum_address(a), s.lower()): v for (a, s), v in (calls or {}).items()}
+        self.call_log: list[tuple[str, str]] = []        # (address, selector) of every scripted lookup
         self.legacy = legacy                              # True: eth_getBlockByNumber omits baseFeePerGas
         self.eth_balances = {to_checksum_address(k): v for k, v in (eth_balances or {}).items()}
         self.token_balances = {(to_checksum_address(t), to_checksum_address(o)): v
@@ -227,6 +234,15 @@ class FakeRpcProvider(BaseProvider):
         if method == "eth_getBalance":
             return self._ok(_hex(self.eth_balances.get(to_checksum_address(params[0]), 0)))
         if method == "eth_call":
+            key = (to_checksum_address(params[0]["to"]), params[0]["data"][:10].lower())
+            if key in self.calls:
+                self.call_log.append(key)
+                scripted = self.calls[key]
+                if isinstance(scripted, Exception):
+                    raise scripted
+                if scripted == "revert":
+                    return {"jsonrpc": "2.0", "id": 1, "error": {"code": 3, "message": "execution reverted"}}
+                return self._ok("0x" + bytes(scripted).hex())
             return self._ok(self._call(params[0]))
         if method == "eth_sendRawTransaction":
             raw = bytes.fromhex(params[0][2:])
@@ -328,6 +344,10 @@ class FakeRpcProvider(BaseProvider):
         if name == "delivered":
             (message_id,) = decode(["bytes32"], args)
             return "0x" + encode(["bool"], [("0x" + message_id.hex()) in self.delivered]).hex()
+        if data[:4] == bytes.fromhex("5c975abb"):            # paused(): every unscripted contract is unpaused
+            return "0x" + encode(["bool"], [False]).hex()
+        if data[:4] in _TREE_GETTERS:                        # Mailbox hook / ISM getters: nothing configured
+            return "0x" + encode(["address"], [ZERO_ADDRESS]).hex()
         raise NotImplementedError(f"eth_call selector {data[:4].hex()} to {to}")
 
 

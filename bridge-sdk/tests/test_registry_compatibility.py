@@ -200,3 +200,11 @@ def test_a_previous_prepared_checkpoint_recovers_without_network_or_signing():
     result = recover(b, cp)
     assert result.next == 'resume' and cp['route']['registryVersion'] == PREVIOUS['version']
     assert b.calls == [] and b.events == []
+
+
+def test_public_read_rpc_urls_do_not_change_legacy_fingerprints():
+    from aleo_bridge._registry_compatibility import route_fingerprint
+    r = DEFAULT_REGISTRY
+    bare = Registry(r.version, r.chains(), r.assets(), r.routes(include_unavailable=True))
+    for route in LEGACY['routes']:
+        assert route_fingerprint(r, route['id']) == route_fingerprint(bare, route['id'])
