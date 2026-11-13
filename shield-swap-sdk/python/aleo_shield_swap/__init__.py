@@ -46,6 +46,10 @@ from .api import ConfirmAirdropResult as ConfirmAirdropResult
 from .rebalance import (
     RebalancePlan as RebalancePlan,
     RebalanceResult as RebalanceResult,
+    plan_rebalance as plan_rebalance,
+    plan_rebalance_exact_amounts as plan_rebalance_exact_amounts,
+    plan_rebalance_to_liquidity as plan_rebalance_to_liquidity,
+    plan_rebalance_from_amounts as plan_rebalance_from_amounts,
 )
 from .compliance import (
     ClaimProofs as ClaimProofs,
@@ -132,7 +136,8 @@ __all__ = [
     "AirdropPendingError", "AirdropRateLimitedError",
     "CredentialsMissingError",
     "OwnedPosition", "OwnedPositionState", "HopFill", "SwapExecution",
-    "RebalancePlan", "RebalanceResult",
+    "RebalancePlan", "RebalanceResult", "plan_rebalance",
+    "plan_rebalance_exact_amounts", "plan_rebalance_to_liquidity", "plan_rebalance_from_amounts",
     "ConfirmAirdropResult", "Profile", "Journal", "REGISTRATION_STAGES",
     "OnboardReport", "StageOutcome", "SessionStatus", "PositionView",
     "SwapBatchReport", "CollectReport", "blinded_identity_at",

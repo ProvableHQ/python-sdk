@@ -212,12 +212,16 @@ them):
   A swap with nothing left over claims through the no-refund entrypoints
   automatically; `get_swap_execution` reads the per-hop fill receipt (fees
   paid, price after) at any later time.
-- **Rebalancing is one transaction, testnet only for now** —
-  `plan_rebalance` quotes the close-and-remint (what comes back, what the
-  new range needs, funding vs refund per token) and `rebalance_position`
-  submits it through `shield_swap_rebalance_router.aleo`.  Every amount is
-  asserted at the execution price: a trade in between reverts the whole
-  transaction (fee paid, no funds moved) — re-plan and resubmit.
+- **Rebalancing replaces the complete position in one transaction** —
+  choose `plan_rebalance_exact_amounts` for exact quotes,
+  `plan_rebalance_to_liquidity` for exact liquidity with actual recovery, or
+  `plan_rebalance_from_amounts` for execution-time sizing from token caps.
+  Review the plan, then pass `plan=` to the matching `rebalance_position_*`
+  method. Flexible funding/refunds are fixed; surplus stays collectible on
+  the successor. `estimated_liquidity` is advisory, and token minimums do not
+  guarantee minimum liquidity. The router is supported on testnet; flexible
+  calls require an upgraded contract. A rejection rolls back funds movements
+  but can still cost a fee — refresh state before retrying.
 - **Concurrency needs partitioned blinded-identity counters AND disjoint
   input records** — `swap_many` implements the recipe; copy it, don't
   improvise.
@@ -499,52 +503,40 @@ them, or pass 2–4 bundles (owner, withdrawal, then a receiver per wrapped side
 
 Burn an empty position NFT.
 
-### `plan_rebalance(self, *, pool_key: 'str', position_token_id: 'str', tick_lower: 'int', tick_upper: 'int', liquidity_target: 'Optional[int]' = None, max_funding0: 'Optional[int]' = None, max_funding1: 'Optional[int]' = None) -> 'RebalancePlan'`
+### `plan_rebalance(self, *, pool_key: 'str', position_token_id: 'str', tick_lower: 'int', tick_upper: 'int', liquidity_target: 'Optional[int]' = None, max_funding0: 'Optional[int]' = None, max_funding1: 'Optional[int]' = None, amount0_desired: 'Optional[int]' = None, amount1_desired: 'Optional[int]' = None, amount0_min: 'Optional[int]' = None, amount1_min: 'Optional[int]' = None, funded0: 'Optional[int]' = None, funded1: 'Optional[int]' = None, refund0: 'Optional[int]' = None, refund1: 'Optional[int]' = None) -> 'RebalancePlan'`
 
-Quote a close-and-remint of one position into a new range.  Reads only.
+Plan a complete position replacement without signing or submitting.
 
-Reads the pool, slot, ``positions`` entry, both current boundary ticks,
-and each side's wrapped-ness, then derives what the close returns, what
-the successor range needs, and per side the funding to add or surplus
-to refund.  Size the successor with exactly one of *liquidity_target*
-(exact) or *max_funding0*/*max_funding1* (a budget the planner solves
-for; ``0, 0`` rebalances on recovered funds alone).
+A positive target with omitted bounds preserves exact quoted recovery
+and deposits. ``max_funding0/1`` also produce an exact quote sized at
+the current price. Explicit ``amount0/1_desired`` cap token consumption;
+``amount0/1_min`` default to the caps. Widen either bound to use actual
+recovery, or set ``liquidity_target=0`` to size liquidity at execution.
+Flexible funding and refunds are fixed amounts, defaulting to zero;
+surplus remains collectible on the successor and earns no LP fees.
 
-The plan is only valid at the pool price it was built against — the
-contract asserts every amount at finalize — so build it right before
-:meth:`rebalance_position` and never cache one.
+Amounts are integer token base units, from 0 through 2**128 - 1.
+``estimated_liquidity`` is advisory; token floors do not guarantee a
+minimum liquidity. Named planners supply mode-specific defaults.
+Requires an existing pool, position, and initialized boundary ticks.
 
-Raises:
-    PoolNotFoundError / PoolNotInitializedError: For an unknown pool.
-    ValueError: If the position or a boundary tick does not exist, the
-        aligned range is empty, the sizing is ambiguous, or the budget
-        supports no liquidity.
+### `rebalance_position(self, *, plan: 'Optional[RebalancePlan]' = None, pool_key: 'Optional[str]' = None, position_token_id: 'Optional[str]' = None, tick_lower: 'Optional[int]' = None, tick_upper: 'Optional[int]' = None, liquidity_target: 'Optional[int]' = None, max_funding0: 'Optional[int]' = None, max_funding1: 'Optional[int]' = None, amount0_desired: 'Optional[int]' = None, amount1_desired: 'Optional[int]' = None, amount0_min: 'Optional[int]' = None, amount1_min: 'Optional[int]' = None, funded0: 'Optional[int]' = None, funded1: 'Optional[int]' = None, refund0: 'Optional[int]' = None, refund1: 'Optional[int]' = None, position_record: 'Optional[str]' = None, token0_program: 'Optional[str]' = None, token1_program: 'Optional[str]' = None, token0_record: 'Optional[str]' = None, token1_record: 'Optional[str]' = None, tick_lower_hint: 'Optional[int]' = None, tick_upper_hint: 'Optional[int]' = None, deadline_offset_blocks: 'int' = 20, nonce: 'Optional[str]' = None, compliance_proofs: 'Optional[RebalanceProofs]' = None, wrapper_proofs: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[RebalanceResult]'`
 
-### `rebalance_position(self, *, plan: 'Optional[RebalancePlan]' = None, pool_key: 'Optional[str]' = None, position_token_id: 'Optional[str]' = None, tick_lower: 'Optional[int]' = None, tick_upper: 'Optional[int]' = None, liquidity_target: 'Optional[int]' = None, max_funding0: 'Optional[int]' = None, max_funding1: 'Optional[int]' = None, position_record: 'Optional[str]' = None, token0_program: 'Optional[str]' = None, token1_program: 'Optional[str]' = None, token0_record: 'Optional[str]' = None, token1_record: 'Optional[str]' = None, tick_lower_hint: 'Optional[int]' = None, tick_upper_hint: 'Optional[int]' = None, deadline_offset_blocks: 'int' = 20, nonce: 'Optional[str]' = None, compliance_proofs: 'Optional[RebalanceProofs]' = None, wrapper_proofs: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[RebalanceResult]'`
+Prepare an atomic replacement in the same pool, keeping owner and withdrawal.
 
-Close a position and mint its successor range in ONE transaction.
+Pass a reviewed ``plan`` verbatim, or pool/range/sizing arguments as in
+``plan_rebalance``. A supplied plan cannot be combined with planning
+overrides. Exact bounds enforce the quote; wider bounds use actual
+recovery and a zero target sizes liquidity at execution. Funding and
+immediate refunds stay fixed; flexible surplus remains collectible on
+the successor. Wrapped funding uses the underlying asset's records.
 
-Burns the old position, settles its principal and every fee it earned,
-adds funding from the signer's records where the new range needs more,
-mints the successor with the same owner and withdrawal address, and
-pays any surplus to the withdrawal address — atomically, through
-``shield_swap_rebalance_router.aleo`` (deployed on testnet).  Either
-pass a *plan* from :meth:`plan_rebalance` (submitted verbatim), or the
-pool, range, and one sizing mode and the plan is built here.
-
-Every amount is asserted against the pool price at execution: a trade
-that moves the price between planning and finalize reverts the whole
-transaction (fee paid, no funds moved).  Rebuild and resubmit when
-that happens; the short default deadline fails stale requests cheaply.
-Funding records for a wrapped side are the UNDERLYING asset's records.
-Freeze-list proofs: leave ``compliance_proofs`` unset and the SDK builds
-them, or pass 2–6 bundles (funded wrapped senders, wrapped receivers,
-then owner and withdrawal).
-
-Raises:
-    ValueError: Without a plan or a complete (pool, range, sizing), or
-        with the wrong number of compliance proof bundles.
-    InsufficientRecordsError: If no record covers a funded side.
+Preparation reads chain state and resolves records and proofs. Submit
+with ``delegate()`` or ``transact()``. A rejection rolls back all funds
+movements but can still cost a fee; refresh state before retrying.
+The default deadline is 20 blocks. Flexible calls require a deployment
+supporting execution-time recovery and amount-driven rebalancing.
+Freeze-list proofs are built automatically unless supplied explicitly.
 
 ### `plan_inventory(self, token: 'str', target: 'InventoryTarget', *, max_transactions: 'Optional[int]' = None, account: 'Any' = None) -> 'InventoryPlan'`
 

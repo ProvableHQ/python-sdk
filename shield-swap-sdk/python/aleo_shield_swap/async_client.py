@@ -49,7 +49,8 @@ from .compliance import (
     SHIELD_SWAP_FREEZELIST, ClaimProofs, Slot, SwapProofs, check_proof_arguments, claim_slots,
     merge_legacy_wrapper_proofs, planned_proof_slots, supplied_literals, swap_slots,
 )
-from .rebalance import RebalancePlan, plan_rebalance as _plan_rebalance
+from .rebalance import (RebalancePlan, plan_rebalance as _plan_rebalance,
+                        _mode_parameters, _validate_planning)
 from .position_math import (
     amounts_for_liquidity,
     fee_growth_inside,
@@ -567,9 +568,16 @@ class AsyncShieldSwap:
                              tick_lower: int, tick_upper: int,
                              liquidity_target: Optional[int] = None,
                              max_funding0: Optional[int] = None,
-                             max_funding1: Optional[int] = None) -> RebalancePlan:
+                             max_funding1: Optional[int] = None,
+                       amount0_desired: Optional[int] = None,
+                       amount1_desired: Optional[int] = None,
+                       amount0_min: Optional[int] = None,
+                       amount1_min: Optional[int] = None,
+                       funded0: Optional[int] = None, funded1: Optional[int] = None,
+                       refund0: Optional[int] = None, refund1: Optional[int] = None) -> RebalancePlan:
         """Quote a close-and-remint — see :meth:`ShieldSwap.plan_rebalance`.
         Reads only; the boundary-tick and wrapped-ness reads run concurrently."""
+        _validate_planning(locals())
         import asyncio
         pool = await self.get_pool(pool_key)
         slot = (await self.get_slot(pool_key)).raw
@@ -590,7 +598,44 @@ class AsyncShieldSwap:
             tick_lower=tick_lower, tick_upper=tick_upper,
             slot=slot, position=position, lower_tick=lower, upper_tick=upper,
             wrapped0=w0, wrapped1=w1, liquidity_target=liquidity_target,
-            max_funding0=max_funding0, max_funding1=max_funding1)
+            max_funding0=max_funding0, max_funding1=max_funding1,
+            amount0_desired=amount0_desired, amount1_desired=amount1_desired,
+            amount0_min=amount0_min, amount1_min=amount1_min,
+            funded0=funded0, funded1=funded1, refund0=refund0, refund1=refund1)
+
+    async def plan_rebalance_exact_amounts(self, **kwargs: Any) -> RebalancePlan:
+        """Plan exact recovery and deposit amounts for a replacement position.
+
+        Accepts the arguments of ``plan_rebalance``; positive targets and equal
+        token bounds are required. Paired ``max_funding0/1`` quote-time budgets
+        remain supported. Price or fee changes can reject execution.
+        Reads chain state without signing or submitting.
+        """
+        return await self.plan_rebalance(**_mode_parameters("exact_amounts", kwargs))
+
+    async def plan_rebalance_to_liquidity(self, **kwargs: Any) -> RebalancePlan:
+        """Plan exact successor liquidity with flexible recovered funds.
+
+        Accepts the arguments of ``plan_rebalance``. Requires a positive
+        ``liquidity_target`` and both token caps; minimums default to zero and
+        at least one bound must be wider than its minimum. Use fixed
+        ``funded0/1`` and ``refund0/1``, not ``max_funding0/1``. Insufficient
+        funds reject execution instead of reducing liquidity.
+        Reads chain state without signing or submitting.
+        """
+        return await self.plan_rebalance(**_mode_parameters("to_liquidity", kwargs))
+
+    async def plan_rebalance_from_amounts(self, **kwargs: Any) -> RebalancePlan:
+        """Plan a replacement sized from available tokens at execution.
+
+        Accepts the arguments of ``plan_rebalance``. Requires both token caps;
+        minimums default to zero and the target must be omitted or zero. Fixed
+        funding/refunds default to zero. ``estimated_liquidity`` is a preview,
+        not a guarantee. Surplus stays collectible on the successor; no swap
+        occurs. Token amounts use integer base units.
+        Reads chain state without signing or submitting.
+        """
+        return await self.plan_rebalance(**_mode_parameters("from_amounts", kwargs))
 
     async def get_owned_position(self, position_token_id: str, *,
                                  account: Any = None) -> Optional[OwnedPosition]:

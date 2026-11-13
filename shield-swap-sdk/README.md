@@ -124,7 +124,72 @@ from the chain or the service.
 | `increase_liquidity(...)` / `decrease_liquidity(...)` | Resizes a position (spends the position NFT record and returns a fresh one). |
 | `collect(...)` | Pays out `tokens_owed` as private records. |
 | `burn(...)` | Closes an emptied position and removes it from the `positions` mapping. |
-| `plan_rebalance(...)` / `rebalance_position(...)` | Close a position and mint its successor range in ONE transaction via `shield_swap_rebalance_router.aleo` (testnet). The plan quotes what comes back, what the new range needs, and funding vs refund per token; every amount is asserted at the execution price, so re-plan and resubmit if the pool moved. |
+| `plan_rebalance(...)` / `rebalance_position(...)` | Plan or prepare a complete position replacement in one transaction. Choose exact quotes, exact liquidity with flexible recovery, or execution-time sizing from token budgets; see below. |
+
+### Move a position to another range
+
+A rebalance closes the complete old position and creates a replacement in the
+same pool, preserving its owner and withdrawal address. Principal and all owed
+and accrued fees become available for the replacement. Optional funding adds
+private tokens; no swap occurs. Choose a mode according to what must remain
+fixed between planning and execution:
+
+| Planner / matching execution method | Guarantee and required inputs |
+|---|---|
+| `plan_rebalance_exact_amounts` / `rebalance_position_exact_amounts` | Exact quoted recovery and deposits. Supply a positive `liquidity_target`, or paired `max_funding0/1` budgets that the planner converts to an exact quote. Price or fee changes can reject execution. |
+| `plan_rebalance_to_liquidity` / `rebalance_position_to_liquidity` | Exact successor liquidity using actual recovery. Supply a positive target and both `amount0/1_desired` caps. Minimums default to zero; at least one token bound must remain flexible. Insufficient funds reject rather than minting less liquidity. |
+| `plan_rebalance_from_amounts` / `rebalance_position_from_amounts` | Liquidity determined from available tokens at execution. Supply both desired caps; minimums default to zero and the target is zero. `estimated_liquidity` is a preview, not a guaranteed amount. |
+
+Token caps, minimums, fixed `funded0/1`, and fixed `refund0/1` use integer base
+units from 0 through `2**128 - 1`. Funding and immediate refunds default to zero
+in flexible modes and cannot both be positive for the same token. Unused funds
+stay collectible as `tokens_owed` on the successor; they earn no liquidity fees
+until reinvested. Token minimums constrain consumption, not minimum liquidity.
+
+The generic `plan_rebalance` and `rebalance_position` preserve existing exact
+calls. With explicit caps, omitted minimums equal those caps. Widening either
+bound enables actual recovery; setting `liquidity_target=0` enables execution-time
+sizing even when both bounds are equal. `max_funding0/1` remain quote-time sizing
+budgets and cannot be combined with explicit caps or fixed transfers.
+
+Continue with the configured `dex` client from the setup above. This example
+uses illustrative token caps; choose caps in each token's own base units and
+review the plan before submitting:
+
+```python
+positions = dex.get_owned_positions()
+if not positions:
+    raise ValueError("An owned position is required before rebalancing")
+position = positions[0]
+plan = dex.plan_rebalance_from_amounts(
+    pool_key=position.pool_key,
+    position_token_id=position.position_token_id,
+    tick_lower=position.tick_lower - 60,
+    tick_upper=position.tick_upper + 60,
+    amount0_desired=100_000,
+    amount1_desired=100_000,
+)
+print(plan)  # Includes fixed transfers, token bounds, and estimated liquidity.
+# After reviewing the plan:
+result = dex.rebalance_position_from_amounts(plan=plan).delegate()
+print(result.transaction_id, result.position_token_id)
+```
+
+Passing `plan=` preserves its constraints and estimates verbatim. Planning
+arguments cannot override a supplied plan; build a new plan to change them.
+Preparation reads the network and resolves records/proofs; only `delegate()` or
+`transact()` submits. A rejected rebalance leaves the old position unchanged but
+can still cost a fee. Refresh state before retrying a confirmed rejection.
+
+`AsyncShieldSwap` exposes all four planners; liquidity execution remains on
+`ShieldSwap`. The same named planner and execution helpers are available through
+`aleo_shield_swap.agent` and the MCP server. Agent/MCP amounts are decimal strings
+to preserve u128 precision; those execution tools rebuild the plan from the
+provided constraints immediately before submission.
+
+The rebalance router is supported on testnet. Flexible calls require a contract
+deployment with execution-time recovery and amount-driven rebalancing support;
+SDK availability alone does not establish deployment compatibility.
 
 A swap whose input was fully consumed (`amount_remaining == 0`) claims
 through the no-refund entrypoints (`claim_swap_output_no_refund` and the

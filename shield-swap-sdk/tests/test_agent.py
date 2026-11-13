@@ -9,6 +9,8 @@ from aleo_shield_swap.types import (CollectReport, MintResult, OnboardReport,
 
 CURATED = {"setup_account", "redeem_referral_code", "request_airdrop", "status",
            "get_swap_execution", "plan_rebalance", "rebalance_position",
+           "plan_rebalance_exact_amounts", "plan_rebalance_to_liquidity", "plan_rebalance_from_amounts",
+           "rebalance_position_exact_amounts", "rebalance_position_to_liquidity", "rebalance_position_from_amounts",
            "get_pools", "get_balances", "get_positions", "swap_many",
            "mint_position", "adjust_liquidity", "collect_all"}
 
