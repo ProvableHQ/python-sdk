@@ -12,6 +12,9 @@ is reachable by writing Python against the client instead.
 from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
+from functools import partial
+
+from .rebalance import _AMOUNT_FIELDS
 from typing import Any, Callable
 
 _S = {"type": "string"}
@@ -112,17 +115,25 @@ def _h_get_swap_execution(dex: Any, args: dict[str, Any]) -> Any:
     return _serialize(dex.get_swap_execution(args["swap_id"]))
 
 
-def _opt_int(args: dict[str, Any], key: str) -> Any:
+def _opt_int(args: dict[str, Any], key: str) -> int | None:
     value = args.get(key)
-    return int(value) if value is not None else None
+    if value is None:
+        return None
+    if type(value) is int:
+        return value
+    if isinstance(value, str) and value.isascii() and value.isdecimal():
+        return int(value)
+    raise ValueError(f"{key} must be an integer or an unsigned decimal integer string")
 
 
 def _rebalance_kwargs(args: dict[str, Any]) -> dict[str, Any]:
-    return dict(pool_key=args["pool_key"], position_token_id=args["position_token_id"],
+    result = dict(pool_key=args["pool_key"], position_token_id=args["position_token_id"],
                 tick_lower=int(args["tick_lower"]), tick_upper=int(args["tick_upper"]),
                 liquidity_target=_opt_int(args, "liquidity_target"),
                 max_funding0=_opt_int(args, "max_funding0"),
                 max_funding1=_opt_int(args, "max_funding1"))
+    result.update({key: _opt_int(args, key) for key in _AMOUNT_FIELDS if args.get(key) is not None})
+    return result
 
 
 #: RebalancePlan fields that are raw u128 amounts — reported as strings so
@@ -130,7 +141,9 @@ def _rebalance_kwargs(args: dict[str, Any]) -> dict[str, Any]:
 #: (the tool descriptions promise "raw base units as strings").
 _PLAN_AMOUNT_FIELDS = ("old_liquidity", "fees_accrued0", "fees_accrued1",
                        "recovered0", "recovered1", "required0", "required1",
-                       "funded0", "funded1", "refund0", "refund1", "liquidity_target")
+                       "funded0", "funded1", "refund0", "refund1", "liquidity_target",
+                       "amount0_desired", "amount1_desired", "amount0_min", "amount1_min",
+                       "estimated_liquidity")
 
 
 def _plan_json(plan: Any) -> dict[str, Any]:
@@ -141,17 +154,32 @@ def _plan_json(plan: Any) -> dict[str, Any]:
     return out
 
 
-def _h_plan_rebalance(dex: Any, args: dict[str, Any]) -> Any:
-    return _plan_json(dex.plan_rebalance(**_rebalance_kwargs(args)))
+def _h_plan_rebalance(dex: Any, args: dict[str, Any], *, mode: str = "") -> Any:
+    method = getattr(dex, "plan_rebalance" + (f"_{mode}" if mode else ""))
+    return _plan_json(method(**_rebalance_kwargs(args)))
 
 
-def _h_rebalance_position(dex: Any, args: dict[str, Any]) -> Any:
-    result = _serialize(dex.rebalance_position(**_rebalance_kwargs(args)).delegate())
+def _h_rebalance_position(dex: Any, args: dict[str, Any], *, mode: str = "") -> Any:
+    method = getattr(dex, "rebalance_position" + (f"_{mode}" if mode else ""))
+    result = _serialize(method(**_rebalance_kwargs(args)).delegate())
     if isinstance(result.get("plan"), dict):
         for key in _PLAN_AMOUNT_FIELDS:
             if result["plan"].get(key) is not None:
                 result["plan"][key] = str(result["plan"][key])
     return result
+
+
+_REBALANCE_REQUIRED = ["pool_key", "position_token_id", "tick_lower", "tick_upper"]
+_REBALANCE_PROPERTIES = {
+    "pool_key": _S, "position_token_id": _S, "tick_lower": _I, "tick_upper": _I,
+    "liquidity_target": {**_S, "description": "Positive exact liquidity; zero sizes from tokens at execution."},
+    "max_funding0": {**_S, "description": "Quote-time extra token0 budget; requires max_funding1 and no explicit caps."},
+    "max_funding1": {**_S, "description": "Quote-time extra token1 budget; requires max_funding0 and no explicit caps."},
+    **{f"amount{i}_desired": {**_S, "description": f"Maximum token{i} consumed, in integer base units; supply both caps."} for i in range(2)},
+    **{f"amount{i}_min": {**_S, "description": f"Minimum token{i} consumed; generic/exact helpers default to the cap, flexible helpers to zero."} for i in range(2)},
+    **{f"funded{i}": {**_S, "description": f"Fixed extra token{i} funding; flexible calls default to zero. Cannot combine with refund{i}."} for i in range(2)},
+    **{f"refund{i}": {**_S, "description": f"Fixed immediate token{i} payout; flexible calls default to zero. Cannot combine with funded{i}."} for i in range(2)},
+}
 
 
 _TOOLS: list[tuple[str, str, dict[str, Any], Callable[[Any, dict[str, Any]], Any]]] = [
@@ -212,31 +240,48 @@ _TOOLS: list[tuple[str, str, dict[str, Any], Callable[[Any, dict[str, Any]], Any
      "null until the swap finalizes.",
      _schema({"swap_id": _S}, ["swap_id"]), _h_get_swap_execution),
     ("plan_rebalance",
-     "Quote moving a position to a new tick range in one transaction (testnet "
-     "only — the rebalance router is not on mainnet). Size with EXACTLY one "
-     "of liquidity_target (exact successor liquidity) or max_funding0 AND "
-     "max_funding1 (extra raw units the user will add; 0 and 0 = reuse only "
-     "what the old position returns). Reports recovered, required, funded, "
-     "and refund amounts per token; show them to the user before executing. "
-     "Amounts are raw base units as strings.",
-     _schema({"pool_key": _S, "position_token_id": _S, "tick_lower": _I,
-              "tick_upper": _I, "liquidity_target": _S, "max_funding0": _S,
-              "max_funding1": _S},
-             ["pool_key", "position_token_id", "tick_lower", "tick_upper"]),
-     _h_plan_rebalance),
+     "Plan moving a complete position to a new range (testnet router). "
+     "Positive liquidity_target with omitted/equal token bounds enforces an exact quote; "
+     "max_funding0/1 also size an exact quote. Wider token bounds use actual recovery; "
+     "a zero target requires both desired caps and sizes liquidity at execution. "
+     "Funding/refunds are fixed, flexible surplus stays collectible on the successor. "
+     "Show the plan before executing; amounts are raw base units as strings. "
+     "estimated_liquidity is advisory, never a guaranteed minimum. Flexible calls require an upgraded contract.",
+     _schema(_REBALANCE_PROPERTIES, _REBALANCE_REQUIRED), _h_plan_rebalance),
     ("rebalance_position",
-     "Execute the rebalance plan_rebalance described: burn the old position, "
-     "settle its principal and fees, add any funding, and mint the successor "
-     "range — atomically. Same sizing arguments as plan_rebalance (the plan is "
-     "rebuilt at submit time). Reverts if the pool price moved since planning; "
-     "on revert, re-plan and resubmit. Returns the new position id, the "
-     "transaction id, and the submitted plan.",
-     _schema({"pool_key": _S, "position_token_id": _S, "tick_lower": _I,
-              "tick_upper": _I, "liquidity_target": _S, "max_funding0": _S,
-              "max_funding1": _S},
-             ["pool_key", "position_token_id", "tick_lower", "tick_upper"]),
-     _h_rebalance_position),
+     "Replace a complete position atomically, keeping its owner and withdrawal address. "
+     "Uses plan_rebalance arguments and rebuilds the plan before submitting. "
+     "Exact calls can reject on price/fee changes; flexible calls use actual recovery "
+     "within token bounds. Funding/refunds stay fixed; surplus stays collectible. "
+     "A rejected transaction moves no funds but can cost a fee. Returns the successor, "
+     "transaction ID, and submitted plan with amounts as base-unit strings.",
+     _schema(_REBALANCE_PROPERTIES, _REBALANCE_REQUIRED), _h_rebalance_position),
 ]
+
+
+_REBALANCE_MODES = {
+    "exact_amounts": "Enforce exact quoted recovery and deposits. A positive target and equal bounds are required; price or fee changes can reject execution.",
+    "to_liquidity": "Require exact successor liquidity using actual recovery. Supply a positive target and both token caps; minimums default to zero and at least one bound must be wider. Insufficient funds reject instead of minting less liquidity.",
+    "from_amounts": "Size successor liquidity from actual recovered tokens plus fixed funding minus fixed refunds, capped per token. Supply both desired caps; target must be omitted or zero and minimums default to zero. Estimated liquidity is advisory; no swap occurs.",
+}
+for _mode, _description in _REBALANCE_MODES.items():
+    _properties = dict(_REBALANCE_PROPERTIES)
+    _required = list(_REBALANCE_REQUIRED)
+    if _mode != "exact_amounts":
+        _properties.pop("max_funding0")
+        _properties.pop("max_funding1")
+        _required.extend(["amount0_desired", "amount1_desired"])
+        if _mode == "to_liquidity":
+            _required.append("liquidity_target")
+    for _prefix, _handler, _effect in (
+        ("plan_rebalance", _h_plan_rebalance, "Read chain state without submitting. Show the plan before execution."),
+        ("rebalance_position", _h_rebalance_position, "Rebuild the plan and submit atomically, keeping owner and withdrawal. Rejection rolls back funds but can cost a fee."),
+    ):
+        _TOOLS.append((f"{_prefix}_{_mode}",
+                       f"{_description} {_effect} Token amounts use integer base-unit strings. "
+                       "Fixed funding/refunds default to zero in flexible modes; surplus stays collectible on the successor. "
+                       "Flexible calls require an upgraded contract; rebalance routing is testnet-only.",
+                       _schema(dict(_properties), list(_required)), partial(_handler, mode=_mode)))
 
 
 def shield_swap_tools() -> list[dict[str, Any]]:

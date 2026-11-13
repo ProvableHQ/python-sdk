@@ -16,7 +16,9 @@ SYNC_ONLY = {
     "swap_many", "collect_all",                     # require a journal
     "create_pool", "mint", "increase_liquidity",    # LP surface
     "decrease_liquidity", "collect", "burn",
-    "rebalance_position",
+    "rebalance_position",                            # shared sync LP executor
+    "rebalance_position_exact_amounts", "rebalance_position_to_liquidity",
+    "rebalance_position_from_amounts",
     "get_positions", "find_tick_predecessor",
 }
 

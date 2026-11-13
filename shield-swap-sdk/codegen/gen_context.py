@@ -171,12 +171,16 @@ them):
   A swap with nothing left over claims through the no-refund entrypoints
   automatically; `get_swap_execution` reads the per-hop fill receipt (fees
   paid, price after) at any later time.
-- **Rebalancing is one transaction, testnet only for now** —
-  `plan_rebalance` quotes the close-and-remint (what comes back, what the
-  new range needs, funding vs refund per token) and `rebalance_position`
-  submits it through `shield_swap_rebalance_router.aleo`.  Every amount is
-  asserted at the execution price: a trade in between reverts the whole
-  transaction (fee paid, no funds moved) — re-plan and resubmit.
+- **Rebalancing replaces the complete position in one transaction** —
+  choose `plan_rebalance_exact_amounts` for exact quotes,
+  `plan_rebalance_to_liquidity` for exact liquidity with actual recovery, or
+  `plan_rebalance_from_amounts` for execution-time sizing from token caps.
+  Review the plan, then pass `plan=` to the matching `rebalance_position_*`
+  method. Flexible funding/refunds are fixed; surplus stays collectible on
+  the successor. `estimated_liquidity` is advisory, and token minimums do not
+  guarantee minimum liquidity. The router is supported on testnet; flexible
+  calls require an upgraded contract. A rejection rolls back funds movements
+  but can still cost a fee — refresh state before retrying.
 - **Concurrency needs partitioned blinded-identity counters AND disjoint
   input records** — `swap_many` implements the recipe; copy it, don't
   improvise.
