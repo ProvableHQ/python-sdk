@@ -71,7 +71,8 @@ A wallet boundary is marked before submission. If its response is lost
 without a transaction ID, the example stops for reconciliation; it never
 starts another source transfer or claim on a retry. Retain the state file,
 find the transaction hash in the wallet, and update that leg's checkpoint.
-An approval-only BSC checkpoint cannot authorize another burn. Screening
+An approval-only BSC checkpoint resumes its burn only while the confirmed
+approval is unspent. Screening
 holds keep their checkpoint and are not reported as delivered.
 
 From the checkout, public deployment checks need no accounts:

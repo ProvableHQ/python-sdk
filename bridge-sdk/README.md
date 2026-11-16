@@ -103,12 +103,17 @@ claim is ready. Verulink completion needs no secret nonce.
 
 Save checkpoints before continuing after an interruption. Aleo recovery
 rebroadcasts the saved prepared transaction. An approval-only BSC checkpoint
-requires the wallet's source transaction hash before continuing; repeating
-the burn could send funds twice. After a claim is submitted, recover or wait
-using its transaction ID.
+resumes with `resume(progress)` once its approval confirms. The burn is sent
+only while that approval is unspent; a spent one means a burn already went
+out, and recovery then needs its transaction hash from the wallet. After a
+claim is submitted, recover or wait using its transaction ID. A claim that
+reverts or is rejected moves nothing: the packet stays claimable and `wait`
+returns `next == "complete"` again.
 
 Completion requires the exact recipient delivery. A consumed packet alone
-stays pending, and a screening hold is reported as failed with
+stays pending. When the claim was made elsewhere, pass its transaction ID to
+`recover(checkpoint, destination_tx_id=...)`; it is verified like any other
+claim. A screening hold is reported as failed with
 `receipt.protocol_state["held"] == True`. Its checkpoint remains stored
 because the recipient has not received the funds.
 

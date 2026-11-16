@@ -452,7 +452,7 @@ class Bridge:
                                timeout_seconds=timeout_seconds, on_update=on_update, on_error=on_error,
                                max_consecutive_errors=max_consecutive_errors)
 
-    def recover(self, checkpoint, *, approval_replacement=None):
+    def recover(self, checkpoint, *, approval_replacement=None, destination_tx_id: str | None = None):
         """Rebuild ``Progress`` from a saved checkpoint (``Checkpoint``, dict or JSON) — reads only.
 
         Re-resolves the route from the live registry and reads chain state once;
@@ -460,10 +460,15 @@ class Bridge:
         ``done`` or ``failed``.
         CCTP can adopt an explicitly selected, confirmed ``approval_replacement``;
         its original transaction must be absent and no burn may be submitted.
+        Verulink can adopt ``destination_tx_id``, a claim the checkpoint never recorded;
+        it is verified against the source packet like any other claim.
         """
+        options: dict = {}
         if approval_replacement is not None:
-            return _lifecycle.recover(self, checkpoint, approval_replacement=approval_replacement)
-        return _lifecycle.recover(self, checkpoint)
+            options["approval_replacement"] = approval_replacement
+        if destination_tx_id is not None:
+            options["destination_tx_id"] = destination_tx_id
+        return _lifecycle.recover(self, checkpoint, **options)
 
     def resume(self, progress, *, on_checkpoint=None, secret_nonce: str | None = None,
                poll_seconds: float = 1.0, timeout_seconds: float = 120.0, proving: str = "delegate"):

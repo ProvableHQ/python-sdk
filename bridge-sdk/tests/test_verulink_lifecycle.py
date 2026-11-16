@@ -180,6 +180,9 @@ def test_holding_keeps_the_durable_checkpoint(tmp_path):
     assert stored is not None
     assert stored.source["transactionId"] == r.source_tx_id
     assert stored.destination["transactionId"] == tx["id"]
+    listed = lifecycle.progress_from_checkpoint(h.bridge.registry, stored)      # offline: no chain read
+    assert listed.next == "failed" and listed.receipt.protocol_state["held"] and "holding" in listed.error
+    assert h.bridge.recover(stored).next == "failed" and h.bridge.checkpoints.load(cp.id) is not None
 
 
 def test_bsc_finality_and_exact_recipient_mint():
@@ -213,6 +216,105 @@ def test_bsc_finality_and_exact_recipient_mint():
     assert result.status == Status.FAILED and result.protocol_state["held"]
 
 
+def consume(h, p):
+    if h.outbound:
+        h.rpc.values["consumedPackets"] = packet_hash(p)
+    else:
+        h.aleo.mappings[M["aleoBridge"]]["in_packet_consumed"] = {
+            f"{{ chain_id: {p['sourceChain']}u128, sequence: {p['sequence']}u64 }}": "true"}
+
+
+@pytest.mark.parametrize("outbound", [True, False])
+def test_failed_claim_leaves_the_packet_claimable(outbound, tmp_path):
+    from aleo_bridge import FileCheckpointStore
+    h = Harness(outbound)
+    h.bridge.checkpoints = FileCheckpointStore(tmp_path)
+    r = ready(h)
+    p = r.protocol_state["packet"]
+    claim_id = "0x" + "ab" * 32 if outbound else "at1rejected"
+    if outbound:
+        h.rpc.receipts[claim_id] = {"status": "0x0", "transactionHash": claim_id, "blockNumber": "0x64", "logs": []}
+        h.rpc.height = 100
+        confirming = lifecycle.get_status(h.bridge, h.plan, r.replace(destination_tx_id=claim_id))
+        assert confirming.status == Status.DESTINATION_CONFIRMING      # a shallow revert can still reorg
+        h.rpc.height = 114
+    else:
+        h.aleo.confirmed_transactions[claim_id] = {"status": "rejected"}
+    claimed = r.replace(destination_tx_id=claim_id, status=Status.DESTINATION_CONFIRMING, next_action=None)
+    h.bridge.checkpoints.save(create_checkpoint(h.plan, claimed, h.bridge.registry))
+    progress = h.bridge.wait(to_progress(h.plan, claimed), timeout_seconds=0)
+    assert progress.next == "complete"
+    assert progress.receipt.destination_tx_id is None and progress.receipt.id == r.source_tx_id
+    assert progress.receipt.protocol_state["failedClaimTxId"] == claim_id
+    stored = h.bridge.checkpoints.load(r.source_tx_id)
+    assert stored is not None and stored.destination is None       # recovery offers the claim again
+    consume(h, p)                                                  # someone else's claim delivered it
+    result = lifecycle.get_status(h.bridge, h.plan, claimed)
+    assert result.status == Status.DELIVERY_PENDING and result.destination_tx_id is None
+
+
+def test_receipt_visible_before_its_transaction_is_pending():
+    h = Harness(False)
+    source = FIXTURE["bscSource"]["tx"]["hash"]
+    tx = h.rpc.transactions.pop(source)
+    assert lifecycle.get_status(h.bridge, h.plan, receipt(h)).status == Status.SOURCE_CONFIRMING
+    h.rpc.transactions[source] = tx
+    h = Harness()
+    r = ready(h)
+    claim_id = "0x" + "ab" * 32
+    h.rpc.receipts[claim_id] = {"status": "0x1", "transactionHash": claim_id, "blockNumber": "0x64", "logs": []}
+    h.rpc.height = 114
+    assert lifecycle.get_status(h.bridge, h.plan, r.replace(destination_tx_id=claim_id)).status == Status.DESTINATION_CONFIRMING
+
+
+def test_polling_reuses_the_verified_packet_and_claims_reread_the_source():
+    h = Harness()
+    r = ready(h)
+    source = h.aleo.confirmed_transactions.pop(r.source_tx_id)
+    assert lifecycle.get_status(h.bridge, h.plan, r).status == Status.DESTINATION_ACTION_REQUIRED
+    forged = r.replace(protocol_state={**r.protocol_state, "packet": {**r.protocol_state["packet"], "recipient": "0x" + "11" * 20}})
+    with pytest.raises(BridgeError, match="does not match the transfer"):
+        lifecycle.get_status(h.bridge, h.plan, forged)
+    with pytest.raises(BridgeError, match="no destination claim ready|consumed or no longer"):
+        h.bridge.complete(to_progress(h.plan, r))                  # source unreadable: no claim is built
+    assert not h.sent
+    h.aleo.confirmed_transactions[r.source_tx_id] = source
+    assert h.bridge.complete(to_progress(h.plan, r)).receipt.status == Status.DESTINATION_CONFIRMING
+
+
+def test_in_flight_transfer_outlives_a_parked_route(monkeypatch):
+    from aleo_bridge import RouteUnavailableError
+    h = Harness()
+    r = ready(h)
+    parked = replace(h.bridge.registry.route(h.plan.route_id), availability="metadata-required")
+    monkeypatch.setattr(h.bridge.registry, "route", lambda route_id: parked)     # the registry is shared
+    assert lifecycle.get_status(h.bridge, h.plan, receipt(h)).status == Status.DESTINATION_ACTION_REQUIRED
+    assert h.bridge.complete(to_progress(h.plan, r)).receipt.status == Status.DESTINATION_CONFIRMING
+    with pytest.raises(RouteUnavailableError):
+        h.bridge.verulink.quote(h.plan)
+
+
+def test_account_without_public_credits_is_an_insufficient_balance():
+    h = Harness()
+    q = h.quote()
+    h.aleo.mappings["credits.aleo"]["account"] = {}
+    with pytest.raises(BridgeError, match="Insufficient public ALEO balance"):
+        h.bridge.execute(q.plan)
+    assert not h.aleo.submitted
+
+
+def test_claim_that_would_revert_is_refused_before_sending():
+    from web3.exceptions import ContractLogicError
+    h = Harness()
+    r = ready(h)
+    call = h.evm.w3.eth.call
+    h.evm.w3.eth.call = lambda tx, *a, **kw: (_ for _ in ()).throw(ContractLogicError("execution reverted")) \
+        if h.rpc.codec.decode_function_input(tx["data"])[0].fn_name == "tokenReceive" else call(tx, *a, **kw)
+    with pytest.raises(BridgeError, match="nothing was submitted") as caught:
+        h.bridge.complete(to_progress(h.plan, r))
+    assert not h.sent and getattr(caught.value, "broadcast_id", None) is None
+
+
 def test_evm_source_approval_timeout_and_ambiguous_resume():
     h = Harness(False)
     q = h.quote()
@@ -225,6 +327,65 @@ def test_evm_source_approval_timeout_and_ambiguous_resume():
     with pytest.raises(BridgeError, match="cannot safely resubmit"):
         h.bridge.resume(to_progress(progress.plan, r))
     assert len(h.sent) == 1
+
+
+def test_confirmed_unspent_approval_resumes_the_burn_once():
+    h = Harness(False)
+    q = h.quote()
+    h.rpc.values["allowance"] = 0
+    progress = h.bridge.execute(q.plan, on_checkpoint=h.saved.append, timeout_seconds=0)
+    approval = progress.receipt.id
+    h.rpc.transactions[approval] = {"hash": approval, "to": M["evmToken"], "from": q.plan.sender, "blockNumber": "0x64",
+        "input": h.rpc.codec.encode_abi("approve", args=[M["evmTokenService"], q.plan.amount_atomic])}
+    h.rpc.receipts[approval] = {"status": "0x1", "transactionHash": approval, "blockNumber": "0x64", "logs": []}
+    progress = h.bridge.recover(h.saved[-1])
+    assert progress.next == "resume"
+    with pytest.raises(BridgeError, match="cannot safely resubmit"):       # a spent approval may be a burn
+        h.bridge.resume(progress)
+    assert len(h.sent) == 1
+    h.rpc.values["allowance"] = q.plan.amount_atomic
+    h.rpc.values["platformFees"] = 200
+    with pytest.raises(BridgeError, match="fee increased"):
+        h.bridge.resume(progress)
+    h.rpc.values["platformFees"] = 100
+    resumed = h.bridge.resume(progress, on_checkpoint=h.saved.append)
+    assert resumed.receipt.status == Status.SOURCE_CONFIRMING and len(h.sent) == 2
+    fn, args = h.rpc.codec.decode_function_input(h.sent[1]["data"])
+    assert fn.fn_name == "publicTokenSend" and args["amount"] == q.plan.amount_atomic
+    assert h.saved[-1].source["transactionId"] == resumed.receipt.source_tx_id
+    assert h.saved[-1].source["approvalTransactionIds"] == [approval]
+
+
+def test_recover_adopts_and_verifies_a_claim_made_elsewhere():
+    from aleo_bridge import ConfigurationError
+    h = Harness(False)
+    r = ready(h)
+    p = r.protocol_state["packet"]
+    tx = prepared_claim(h, p)
+    consume(h, p)
+    cp = create_checkpoint(h.plan, r, h.bridge.registry)
+    assert h.bridge.recover(cp).receipt.status == Status.DELIVERY_PENDING
+    assert h.bridge.recover(cp, destination_tx_id=tx["id"]).next == "wait"           # not yet visible
+    h.aleo.confirmed_transactions[tx["id"]] = {"status": "accepted", "transaction": tx}
+    progress = h.bridge.recover(cp, destination_tx_id=tx["id"])
+    assert progress.next == "done" and progress.receipt.destination_tx_id == tx["id"]
+    other = copy.deepcopy(tx)
+    other["id"] = "at1other"
+    other["execution"]["transitions"][-1]["inputs"][3]["value"] = "999u64"           # a different packet's claim
+    h.aleo.confirmed_transactions["at1other"] = {"status": "accepted", "transaction": other}
+    with pytest.raises(BridgeError, match="does not match the source packet"):
+        h.bridge.recover(cp, destination_tx_id="at1other")
+    claimed = create_checkpoint(h.plan, r.replace(destination_tx_id=tx["id"]), h.bridge.registry)
+    with pytest.raises(BridgeError, match="cannot adopt"):
+        h.bridge.recover(claimed, destination_tx_id="at1other")
+    with pytest.raises(BridgeError, match="Invalid Verulink EVM transaction id"):
+        Harness().bridge.recover(create_checkpoint((o := Harness()).plan, ready(o), o.bridge.registry), destination_tx_id="at1x")
+    hyperlane = {"version": 1, "source": {"transactionId": "at1x"},
+                 "route": {"id": "hyperlane:aleo/eth->ethereum/eth", "registryVersion": h.bridge.registry.version},
+                 "intent": {"source": {"chain": "aleo", "asset": "eth"}, "destination": {"chain": "ethereum", "asset": "eth"},
+                            "bridgeProtocol": "hyperlane", "amount": "0.000000000000000001", "recipient": "0x" + "11" * 20}}
+    with pytest.raises(ConfigurationError, match="only supported for Verulink"):
+        h.bridge.recover(hyperlane, destination_tx_id=tx["id"])
 
 
 def test_evm_source_burn_and_changed_fee_rejected():

@@ -6,7 +6,7 @@ from typing import Any
 from ._verulink_attestation import fetch_signatures, verified_signatures
 from ._verulink_context import Context
 from ._verulink_source import (aleo_transaction, events, get_transaction, hex_value, inputs, prepared_transaction,
-                               source_packet, transition, tx_hash, validate_aleo_claim)
+                               source_packet, transition, tx_hash, validate_aleo_claim, validate_packet)
 from ._verulink_wire import Packet, evm_packet, packet_hash, same, same_packet
 from .errors import BridgeError
 from .types import Plan, Receipt, Status
@@ -32,7 +32,8 @@ def consumed(c: Context, p: Packet) -> bool:
     raise BridgeError("Invalid Verulink consumed-packet flag")
 
 
-def destination_status(c: Context, p: Packet, receipt: Receipt) -> Receipt:
+def destination_status(c: Context, p: Packet, receipt: Receipt) -> Receipt | None:
+    """Read the claim's outcome; ``None`` means it failed onchain and delivered nothing."""
     tx_id = receipt.destination_tx_id
     if not tx_id:
         raise BridgeError("Verulink claim transaction id is missing")
@@ -43,14 +44,16 @@ def destination_status(c: Context, p: Packet, receipt: Receipt) -> Receipt:
             return update(receipt, Status.DESTINATION_CONFIRMING)
         if not same(hex_value(result.get("transactionHash")), tx_id) or result.get("blockNumber") is None:
             raise BridgeError("Verulink claim receipt identity mismatch")
-        if result.get("status") == 0:
-            return update(receipt, Status.FAILED, destinationError=f"Verulink claim reverted: {tx_id}")
-        if result.get("status") != 1:
+        if result.get("status") not in (0, 1):
             raise BridgeError("Invalid Verulink claim receipt status")
         if c.evm.w3.eth.block_number < result["blockNumber"] + c.confirmations - 1:
             return update(receipt, Status.DESTINATION_CONFIRMING)
+        if result["status"] == 0:
+            return None
         tx = get_transaction(c, tx_id)
-        if (tx is None or not same(hex_value(tx.get("hash")), tx_id) or not same(tx.get("to"), c.evm_service)
+        if tx is None:  # A lagging RPC backend can serve the receipt before the transaction.
+            return update(receipt, Status.DESTINATION_CONFIRMING)
+        if (not same(hex_value(tx.get("hash")), tx_id) or not same(tx.get("to"), c.evm_service)
                 or tx.get("blockNumber") != result["blockNumber"]):
             raise BridgeError("Verulink claim transaction identity mismatch")
         fn, args = c.contract(c.evm_service).decode_function_input(tx["input"])
@@ -71,7 +74,7 @@ def destination_status(c: Context, p: Packet, receipt: Receipt) -> Receipt:
     if tx == "pending":
         return update(receipt, Status.DESTINATION_CONFIRMING)
     if tx == "rejected":
-        return update(receipt, Status.FAILED, destinationError=f"Verulink Aleo claim rejected: {tx_id}")
+        return None
     claim = validate_aleo_claim(c, p, tx)
     if not consumed(c, p):
         raise BridgeError("Accepted Verulink claim has no consumed-packet flag")
@@ -118,25 +121,37 @@ def get_status(c: Context, plan: Plan, receipt: Receipt, session: Any) -> Receip
         if not c.outbound and receipt.status in (Status.SOURCE_APPROVAL_PENDING, Status.SOURCE_SUBMISSION_PENDING):
             return approval_status(c, plan, receipt)
         raise BridgeError("Verulink receipt has no source transaction")
-    p = source_packet(c, plan, receipt.source_tx_id)
-    if p == "pending":
-        return update(receipt, Status.SOURCE_CONFIRMING)
-    if p == "rejected":
-        return update(receipt, Status.FAILED, sourceError="Verulink source transaction was rejected")
-    assert isinstance(p, dict)
+    p = receipt.protocol_state.get("packet")
+    if isinstance(p, dict):
+        # Verified from the confirmed source earlier in this process; a checkpoint never stores it.
+        validate_packet(c, plan, p)
+    else:
+        p = source_packet(c, plan, receipt.source_tx_id)
+        if p == "pending":
+            return update(receipt, Status.SOURCE_CONFIRMING)
+        if p == "rejected":
+            return update(receipt, Status.FAILED, sourceError="Verulink source transaction was rejected")
+        assert isinstance(p, dict)
     verified = update(receipt, Status.ATTESTATION_PENDING, packet=p, sourceSender=p["sender"])
-    if receipt.destination_tx_id:
-        return destination_status(c, p, verified)
+    claim_id = receipt.destination_tx_id
     serialized = receipt.protocol_state.get("preparedDestinationTransaction")
-    if serialized is not None:
+    if not claim_id and serialized is not None:
         if c.outbound or not isinstance(serialized, str):
             raise BridgeError("Invalid Verulink prepared destination transaction")
         tx = prepared_transaction(serialized, receipt.id)
         validate_aleo_claim(c, p, tx)
         if aleo_transaction(c, tx["id"]) != "pending":
-            state = dict(verified.protocol_state)
-            state.pop("preparedDestinationTransaction", None)
-            return destination_status(c, p, verified.replace(destination_tx_id=tx["id"], protocol_state=state))
+            claim_id = tx["id"]
+    if claim_id:
+        state = dict(verified.protocol_state)
+        state.pop("preparedDestinationTransaction", None)
+        result = destination_status(c, p, verified.replace(destination_tx_id=claim_id, protocol_state=state))
+        if result is not None:
+            return result
+        # The claim reverted or was rejected, so it moved nothing. The packet's own state decides
+        # what is left: still unconsumed means claim again, consumed means another claim delivered it.
+        verified = verified.replace(id=receipt.source_tx_id, destination_tx_id=None,
+                                    protocol_state={**state, "failedClaimTxId": claim_id})
     if consumed(c, p):
         return update(verified, Status.DELIVERY_PENDING, consumed=True,
                       destinationVerificationRequired="Packet consumed; a destination transaction id is required to distinguish public delivery from holding")

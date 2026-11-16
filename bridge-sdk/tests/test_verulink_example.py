@@ -60,6 +60,49 @@ def test_uncertain_submission_cannot_be_executed_again(monkeypatch, tmp_path):
     assert not path.with_suffix(".json.lock").exists()
 
 
+def test_refusal_before_submission_leaves_the_journey_retryable(monkeypatch, tmp_path):
+    module, bridge = example(), Mock()
+    monkeypatch.setenv("BRIDGE_LIVE_MAINNET_EXECUTE", module.ACK)
+    bridge.aleo_address.return_value = "aleo-address"
+    bridge.evm.return_value.conn.require_address.return_value = "0xaddress"
+    bridge.evm.return_value.conn.w3.eth.get_balance.return_value = 10**18
+    bridge.quote.return_value = SimpleNamespace(amount_out="19.98", plan=object())
+    bridge.execute.side_effect = BridgeError("Verulink fee increased since quoting")
+    path = tmp_path / "journey.json"
+    for attempt in (1, 2):
+        with pytest.raises(BridgeError, match="fee increased"):
+            module.run_roundtrip(bridge, **options(path, execute=True))
+        assert "source_attempted" not in json.loads(path.read_text())["legs"][0]
+        assert bridge.execute.call_count == attempt
+    lost = BridgeError("response lost")
+    lost.broadcast_id = "0x" + "ab" * 32
+    bridge.execute.side_effect = lost
+    with pytest.raises(BridgeError, match="response lost"):
+        module.run_roundtrip(bridge, **options(path, execute=True))
+    with pytest.raises(BridgeError, match="Source submission is uncertain"):
+        module.run_roundtrip(bridge, **options(path, execute=True))
+    assert bridge.execute.call_count == 3
+
+
+def test_refused_claim_can_be_claimed_again(monkeypatch, tmp_path):
+    module, bridge = example(), Mock()
+    monkeypatch.setenv("BRIDGE_LIVE_MAINNET_EXECUTE", module.ACK)
+    bridge.aleo_address.return_value = "aleo-address"
+    bridge.evm.return_value.conn.require_address.return_value = "0xaddress"
+    path = tmp_path / "journey.json"
+    path.write_text(json.dumps({"version": 1, "aleo": "aleo-address", "bsc": "0xaddress", "amount": "20",
+        "legs": [{"amount": "20", "source_attempted": True, "checkpoint": {"source": {"transactionId": "source"}}}]}))
+    bridge.recover.return_value = SimpleNamespace(next="complete", receipt=SimpleNamespace(
+        source_tx_id="source", destination_tx_id=None), plan=SimpleNamespace(
+            route_id=module.ROUTES[0], amount="20", amount_atomic=20_000_000, sender="aleo-address", recipient="0xaddress"))
+    bridge.complete.side_effect = BridgeError("Verulink tokenReceive would revert; nothing was submitted")
+    for attempt in (1, 2):
+        with pytest.raises(BridgeError, match="nothing was submitted"):
+            module.run_roundtrip(bridge, **options(path, execute=True))
+        assert "claim_attempted" not in json.loads(path.read_text())["legs"][0]
+        assert bridge.complete.call_count == attempt
+
+
 def test_existing_lock_prevents_execution_and_remains_owned(monkeypatch, tmp_path):
     module, bridge = example(), Mock()
     monkeypatch.setenv("BRIDGE_LIVE_MAINNET_EXECUTE", module.ACK)

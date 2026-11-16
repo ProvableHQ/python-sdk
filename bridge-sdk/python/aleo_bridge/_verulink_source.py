@@ -147,7 +147,6 @@ def get_transaction(c: Context, tx_id: str) -> Any:
 
 
 def source_packet(c: Context, plan: Plan, tx_id: str) -> Packet | str:
-    c.check_chain()
     if not c.outbound:
         tx_hash(tx_id)
         result = c.evm.get_receipt(tx_id)
@@ -162,7 +161,9 @@ def source_packet(c: Context, plan: Plan, tx_id: str) -> Packet | str:
         if c.evm.w3.eth.block_number < result["blockNumber"] + c.confirmations - 1:
             return "pending"
         tx = get_transaction(c, tx_id)
-        if (tx is None or not same(hex_value(tx.get("hash")), tx_id) or not same(tx.get("to"), c.evm_service)
+        if tx is None:  # A lagging RPC backend can serve the receipt before the transaction.
+            return "pending"
+        if (not same(hex_value(tx.get("hash")), tx_id) or not same(tx.get("to"), c.evm_service)
                 or tx.get("blockNumber") != result["blockNumber"]):
             raise BridgeError("Verulink source transaction does not match its receipt")
         fn, args = c.contract(c.evm_service).decode_function_input(tx["input"])

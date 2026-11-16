@@ -1317,7 +1317,7 @@ def progress_from_checkpoint(registry: Registry, checkpoint) -> Progress:
     return to_progress(plan, receipt)
 
 
-def recover(bridge, checkpoint, *, approval_replacement=None) -> Progress:
+def recover(bridge, checkpoint, *, approval_replacement=None, destination_tx_id: str | None = None) -> Progress:
     """Rebuild a transfer's ``Progress`` from a saved checkpoint — reads only, never signs.
 
     Accepts a ``Checkpoint``, its dict, or its JSON.  Re-runs ``prepare`` on the
@@ -1328,7 +1328,9 @@ def recover(bridge, checkpoint, *, approval_replacement=None) -> Progress:
     ``SOURCE_CONFIRMING``.  Solana: validates the blockhash pair and reads the
     signature status.  EVM: delegates to ``bridge.eth.recover_source`` (log
     scan); inbound xReserve additionally restores a submitted or prepared
-    private mint.  The result's ``next`` tells the caller what to do.
+    private mint.  Verulink: ``destination_tx_id`` names a claim the checkpoint never recorded
+    (submitted elsewhere, or lost before it was saved) and is verified against the source packet.
+    The result's ``next`` tells the caller what to do.
     """
     cp = _coerce_checkpoint(checkpoint)
     if cp.version != 1 or not cp.intent or not cp.route:
@@ -1345,6 +1347,8 @@ def recover(bridge, checkpoint, *, approval_replacement=None) -> Progress:
     src, dst = resolved.source_chain, resolved.destination_chain
     verification = _verification_from_delivery(cp.delivery_verification or {})
 
+    if destination_tx_id is not None and plan.protocol != "verulink":
+        raise ConfigurationError("destination_tx_id is only supported for Verulink")
     if plan.protocol == "cctp":
         receipt = bridge.cctp.recover(plan, cp, approval_replacement=approval_replacement)
         _persist(bridge, create_checkpoint(plan, receipt, bridge.registry), receipt, previous_id=cp.id)
@@ -1353,7 +1357,7 @@ def recover(bridge, checkpoint, *, approval_replacement=None) -> Progress:
         raise ConfigurationError("approval_replacement is only supported for CCTP")
 
     if plan.protocol == "verulink":
-        receipt = bridge.verulink.recover(plan, cp)
+        receipt = bridge.verulink.recover(plan, cp, destination_tx_id=destination_tx_id)
         return _finish(bridge, plan, receipt, cp.id)
 
     if src.family in ("aleo", "solana"):

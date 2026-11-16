@@ -189,6 +189,11 @@ def create_checkpoint(plan: Plan, receipt: Receipt, registry: Registry) -> Check
         destination = {}
         if receipt.destination_tx_id:
             destination["transactionId"] = receipt.destination_tx_id
+            if state.get("held") is True and isinstance(state.get("destinationError"), str):
+                # Verulink screening sent the delivery to holding. Kept as a pair, like a dropped
+                # source, so an offline listing reports the transfer as held and not as confirming.
+                destination["held"] = True
+                destination["destinationError"] = state["destinationError"]
         if prepared_destination is not None:
             destination["preparedTransaction"] = {"transactionId": receipt.id,
                                                   "serializedTransaction": prepared_destination}

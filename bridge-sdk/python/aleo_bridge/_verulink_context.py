@@ -19,11 +19,11 @@ class Context:
         self.route, self.source, self.destination = r.route, r.source_asset, r.destination_asset
         self.outbound = r.source_chain.family == "aleo"
         aleo_chain, evm_chain = (r.source_chain, r.destination_chain) if self.outbound else (r.destination_chain, r.source_chain)
-        if (plan.protocol != "verulink" or not r.route.active or plan.environment != bridge.environment
+        if (plan.protocol != "verulink" or plan.environment != bridge.environment
                 or aleo_chain.family != "aleo" or evm_chain.family != "evm"
                 or plan.mint_mode != "public" or plan.cctp is not None
                 or self.source.decimals != 6 or self.destination.decimals != 6):
-            raise BridgeError("Verulink requires an active public ALEO route between Aleo and EVM")
+            raise BridgeError("Verulink requires a public ALEO route between Aleo and EVM")
         self.aleo_chain, self.evm_chain = aleo_chain.id, evm_chain.id
         self.evm = bridge.evm(evm_chain.id).conn
         self.evm_chain_id = r.route.meta_int("evmChainId")
@@ -90,18 +90,13 @@ class Context:
         return None if value is None else parse(value)
 
     def assert_active(self, *, destination_only: bool = False) -> None:
+        """Refuse a parked route (new funds only) and any set or unreadable pause switch."""
+        from .lifecycle import _require_active, _require_unpaused
         self.check_chain()
-        if (not destination_only or self.outbound) and (
-                self.read(self.evm_service, "paused") is not False
-                or self.read(self.evm_bridge, "paused") is not False):
-            raise BridgeError("Verulink route is paused, unsupported, or unreadable")
-        if not destination_only or not self.outbound:
-            active = self.mapping(self.aleo_bridge, "bridge_settings", "3u8")
-            if (self.mapping(self.aleo_service, "status", self.chain_token) is not False
-                    or type(active) is not int or active != 1
-                    or self.mapping(self.aleo_bridge, "supported_chains", self.evm_domain + "u128") is not True
-                    or self.mapping(self.aleo_bridge, "supported_services", self.aleo_service_address) is not True):
-                raise BridgeError("Verulink route is paused, unsupported, or unreadable")
+        if not destination_only:
+            # A transfer already in flight must stay observable and claimable after its route is parked.
+            _require_active(self.route)
+        _require_unpaused(self.bridge, self.route, sides=("destination",) if destination_only else ("source", "destination"))
 
     def configuration(self) -> tuple[int, int, int]:
         self.check_chain()

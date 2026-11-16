@@ -19,7 +19,8 @@ Recovery keeps the approved fee ceiling; never rerun execute after a broadcast.
 Verulink moves public ALEO between Aleo and BSC; configure `evm={"bsc": Ethereum(...)}`.
 Both directions require `complete(progress)` with destination gas, without a secret nonce.
 Fee rates, pause state and peers are read live; unknown gas costs are None, not zero.
-An approval-only BSC checkpoint requires source-hash reconciliation, never another burn.
+An approval-only BSC checkpoint resumes its burn only while the confirmed approval is unspent.
+A claim made elsewhere completes with `recover(checkpoint, destination_tx_id=...)`.
 Holding is not delivery; its checkpoint remains available for review and recovery.
 
 Runnable examples ship in the package: start with
@@ -126,7 +127,7 @@ each changed ``Progress``.  A transient error (flaky RPC/HTTP transport)
 is retried up to ``max_consecutive_errors`` times, calling ``on_error``
 on each tolerated retry; a non-transient error propagates immediately.
 
-### `recover(self, checkpoint, *, approval_replacement=None)`
+### `recover(self, checkpoint, *, approval_replacement=None, destination_tx_id: 'str | None' = None)`
 
 Rebuild ``Progress`` from a saved checkpoint (``Checkpoint``, dict or JSON) — reads only.
 
@@ -135,6 +136,8 @@ Re-resolves the route from the live registry and reads chain state once;
 ``done`` or ``failed``.
 CCTP can adopt an explicitly selected, confirmed ``approval_replacement``;
 its original transaction must be absent and no burn may be submitted.
+Verulink can adopt ``destination_tx_id``, a claim the checkpoint never recorded;
+it is verified against the source packet like any other claim.
 
 ### `resume(self, progress, *, on_checkpoint=None, secret_nonce: 'str | None' = None, poll_seconds: 'float' = 1.0, timeout_seconds: 'float' = 120.0, proving: 'str' = 'delegate')`
 

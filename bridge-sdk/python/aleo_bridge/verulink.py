@@ -79,7 +79,11 @@ class VerulinkModule:
         sender = c.evm.require_address()
         data = c.contract(to).encode_abi(name, args=args)
         tx = {"from": sender, "to": to, "chainId": c.evm_chain_id, "data": data, "value": 0}
-        c.evm.w3.eth.call({k: v for k, v in tx.items() if k != "chainId"})
+        from web3.exceptions import ContractLogicError
+        try:
+            c.evm.w3.eth.call({k: v for k, v in tx.items() if k != "chainId"})
+        except ContractLogicError as exc:
+            raise BridgeError(f"Verulink {name} would revert; nothing was submitted: {exc}") from exc
 
         def submitted(tx_id: str) -> Receipt:
             tx_hash(tx_id)
@@ -105,6 +109,17 @@ class VerulinkModule:
         call = self.bridge._call(c.aleo_service, function, args, lambda tx_id, outputs: tx_id)
         return _prepare_aleo(call, proving)
 
+    def _price(self, plan: Plan) -> VerulinkQuote:
+        q = self.quote(plan)
+        assert q.amount_out is not None
+        if plan.amount_out is not None and parse_decimal_amount(q.amount_out, 6) < parse_decimal_amount(plan.amount_out, 6):
+            raise BridgeError("Verulink fee increased since quoting; quote again before submission")
+        return q
+
+    def _burn(self, c: Context, plan: Plan, pending: Receipt, emit: Callable[[Receipt], Any]) -> Receipt:
+        self._price(plan)  # Approval confirmation may take minutes; re-read before the burn.
+        return self._send(c, plan, pending, c.evm_service, "publicTokenSend", [c.evm_token, plan.amount_atomic, plan.recipient], emit)
+
     def execute(self, plan: Plan, *, on_checkpoint: Callable[[Receipt], Any], proving: str = "delegate",
                 mode: str | None = None, poll_seconds: float = 1.0, timeout_seconds: float = 120.0) -> Receipt:
         """Submit public source funds after checking fresh fees and peer configuration."""
@@ -112,21 +127,14 @@ class VerulinkModule:
         if mode not in (None, "public", "public-as-signer", "signer"):
             raise BridgeError("Verulink only supports public source balances")
         c = self.context(plan)
-
-        def price() -> VerulinkQuote:
-            q = self.quote(plan)
-            assert q.amount_out is not None
-            if plan.amount_out is not None and parse_decimal_amount(q.amount_out, 6) < parse_decimal_amount(plan.amount_out, 6):
-                raise BridgeError("Verulink fee increased since quoting; quote again before submission")
-            return q
-
-        priced = price()
+        priced = self._price(plan)
         sender = _connected_aleo_address(self.bridge) if c.outbound else c.evm.require_address()
         if not sender or (plan.sender is not None and not same(sender, plan.sender)):
             raise BridgeError("Verulink source sender does not match the wallet account")
         state = {"routeId": plan.route_id, "sourceSender": sender}
         if c.outbound:
-            if integer(c.mapping("credits.aleo", "account", sender), "public balance") < plan.amount_atomic:
+            balance = c.mapping("credits.aleo", "account", sender)  # absent until the account holds public credits
+            if balance is None or integer(balance, "public balance") < plan.amount_atomic:
                 raise BridgeError("Insufficient public ALEO balance for Verulink")
             args = [address_literal(plan.recipient), f"{plan.amount_atomic}u64", c.evm_domain + "u128",
                     address_literal(c.evm_service), address_literal(c.evm_token), f"{priced.fee_atomic}u64"]
@@ -161,8 +169,7 @@ class VerulinkModule:
                 time.sleep(min(max(0.01, poll_seconds), remaining))
             if integer(c.read(c.evm_token, "allowance", [sender, c.evm_service]), "allowance", 2**256 - 1) < plan.amount_atomic:
                 raise BridgeError("Confirmed Verulink approval did not grant the required allowance")
-        price()  # Approval confirmation may take minutes; re-read before the burn.
-        return self._send(c, plan, pending, c.evm_service, "publicTokenSend", [c.evm_token, plan.amount_atomic, plan.recipient], on_checkpoint)
+        return self._burn(c, plan, pending, on_checkpoint)
 
     def get_status(self, plan: Plan, receipt: Receipt) -> Receipt:
         """Verify source, attestors and destination delivery without submitting."""
@@ -200,6 +207,10 @@ class VerulinkModule:
             raise BridgeError("Invalid Verulink claim transaction id")
         if dest_id and outbound:
             tx_hash(dest_id)
+        if tx_id and dest.get("held") is True and isinstance(dest.get("destinationError"), str):
+            # Screening sent the funds to holding; the record is kept for review and must read as such offline.
+            return Receipt(tx_id, "verulink", Status.FAILED, source_tx_id=tx_id, destination_tx_id=dest_id,
+                           protocol_state={**state, "held": True, "destinationError": dest["destinationError"]})
         receipt_id = tx_id or approvals[-1]
         if claim is not None:
             if not isinstance(claim, dict):
@@ -211,21 +222,41 @@ class VerulinkModule:
                        Status.SOURCE_CONFIRMING if tx_id else Status.SOURCE_APPROVAL_PENDING,
                        source_tx_id=tx_id, destination_tx_id=dest_id, protocol_state=state)
 
-    def recover(self, plan: Plan, checkpoint: Checkpoint) -> Receipt:
-        """Reconstruct a saved transfer and read its current chain evidence."""
+    def recover(self, plan: Plan, checkpoint: Checkpoint, *, destination_tx_id: str | None = None) -> Receipt:
+        """Reconstruct a saved transfer and read its current chain evidence.
+
+        ``destination_tx_id`` names a claim this checkpoint never recorded; it is verified like any other.
+        """
         c = self.context(plan)
         r = self.from_checkpoint(plan, checkpoint)
+        if destination_tx_id is not None:
+            if not r.source_tx_id or r.destination_tx_id not in (None, destination_tx_id):
+                raise BridgeError("Verulink checkpoint cannot adopt this claim transaction id")
+            if not isinstance(destination_tx_id, str) or not destination_tx_id:
+                raise BridgeError("Invalid Verulink claim transaction id")
+            if c.outbound:
+                tx_hash(destination_tx_id)
+            state = {k: v for k, v in r.protocol_state.items() if k != "preparedDestinationTransaction"}
+            r = r.replace(id=r.source_tx_id, destination_tx_id=destination_tx_id, status=Status.DESTINATION_CONFIRMING, protocol_state=state)
         if "preparedTransaction" in r.protocol_state:
             validate_aleo_source(c, plan, prepared_transaction(r.protocol_state["preparedTransaction"], r.id))
             return r
         return self.get_status(plan, r)
 
     def resume(self, plan: Plan, receipt: Receipt, *, on_checkpoint: Callable[[Receipt], Any]) -> Receipt:
-        """Rebroadcast the saved Aleo bytes; an ambiguous EVM source needs its wallet hash."""
+        """Rebroadcast the saved Aleo bytes, or burn on BSC while the confirmed approval is still unspent."""
         from .lifecycle import submit_serialized
         c = self.context(plan)
         if not c.outbound:
-            raise BridgeError("Verulink approval-only recovery cannot safely resubmit; recover with the source transaction hash from the wallet")
+            sender = c.evm.require_address()
+            if not same(sender, plan.sender or receipt.protocol_state.get("sourceSender")):
+                raise BridgeError("Verulink source sender does not match the wallet account")
+            # The approval set the allowance to exactly this amount and a burn spends it, so an intact
+            # allowance proves no burn has mined; anything less may be an unrecorded burn.
+            if (integer(c.read(c.evm_token, "allowance", [sender, c.evm_service]), "allowance", 2**256 - 1) < plan.amount_atomic
+                    or status.approval_status(c, replace(plan, sender=sender), receipt).status != Status.SOURCE_SUBMISSION_PENDING):
+                raise BridgeError("Verulink approval-only recovery cannot safely resubmit; recover with the source transaction hash from the wallet")
+            return self._burn(c, plan, receipt, on_checkpoint)
         c.assert_active()
         c.configuration()
         serialized = receipt.protocol_state.get("preparedTransaction")
@@ -251,7 +282,8 @@ class VerulinkModule:
             raise BridgeError("Verulink receipt has no destination claim ready")
         c.assert_active(destination_only=True)
         c.configuration()
-        ready = self.get_status(plan, receipt)
+        # Drop the packet verified while polling so the claim is built from a fresh source read.
+        ready = self.get_status(plan, receipt.replace(protocol_state={k: v for k, v in receipt.protocol_state.items() if k != "packet"}))
         if ready.status != Status.DESTINATION_ACTION_REQUIRED:
             raise BridgeError("Verulink packet is consumed or no longer has a positive attestor quorum")
         p, signatures = ready.protocol_state["packet"], ready.protocol_state["signatures"]

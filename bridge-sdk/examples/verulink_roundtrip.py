@@ -114,7 +114,13 @@ def run_roundtrip(bridge: Bridge, *, aleo_address: str, bsc_address: str, amount
                     quote(1, quoted.amount_out)  # The estimated return must clear its fees and minimum.
                 leg["source_attempted"] = True
                 _save(path, state)
-                bridge.execute(quoted.plan, on_checkpoint=checkpoint, timeout_seconds=timeout)
+                try:
+                    bridge.execute(quoted.plan, on_checkpoint=checkpoint, timeout_seconds=timeout)
+                except BridgeError as exc:
+                    if not leg.get("checkpoint") and not getattr(exc, "broadcast_id", None):
+                        leg.pop("source_attempted")  # refused before the wallet sent anything
+                        _save(path, state)
+                    raise
             if not leg.get("checkpoint"):
                 raise BridgeError("Wallet returned without a checkpoint; reconcile before retrying")
             progress = bridge.recover(leg["checkpoint"])
@@ -140,15 +146,19 @@ def run_roundtrip(bridge: Bridge, *, aleo_address: str, bsc_address: str, amount
                 if time.monotonic() >= deadline:
                     raise BridgeError("Polling timed out; recover the same journey")
                 if progress.next == "resume":
-                    if not leg["checkpoint"].get("source", {}).get("preparedTransaction"):
-                        raise BridgeError("Approval-only BSC recovery requires wallet reconciliation")
                     progress = bridge.resume(progress, on_checkpoint=checkpoint)
                 elif progress.next == "complete":
                     if leg.get("claim_attempted") and not leg["checkpoint"].get("destination", {}).get("preparedTransaction"):
                         raise BridgeError("Claim submission is uncertain; add its destination transaction hash before continuing")
                     leg["claim_attempted"] = True
                     _save(path, state)
-                    progress = bridge.complete(progress, on_checkpoint=checkpoint)
+                    try:
+                        progress = bridge.complete(progress, on_checkpoint=checkpoint)
+                    except BridgeError as exc:
+                        if not getattr(exc, "broadcast_id", None):
+                            leg.pop("claim_attempted")  # refused before the wallet sent anything
+                            _save(path, state)
+                        raise
                 else:
                     progress = bridge.wait(progress, timeout_seconds=max(0, deadline - time.monotonic()),
                         on_update=lambda update: checkpoint(create_checkpoint(update.plan, update.receipt, bridge.registry)))
