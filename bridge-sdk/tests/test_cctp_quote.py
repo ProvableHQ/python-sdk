@@ -4,9 +4,10 @@ from dataclasses import replace
 import pytest
 
 from aleo_bridge.errors import BridgeError
+from aleo_bridge import Ethereum
 from aleo_bridge.lifecycle import prepare
 from aleo_bridge.registry import DEFAULT_REGISTRY
-from tests.fakes.fake_web3 import make_bridge
+from tests.fakes.fake_web3 import fake_web3, make_bridge
 
 ROUTES = [f'cctp:{a}/usdc->{b}/usdc' for other in ('ethereum', 'base', 'arbitrum')
           for a, b in ((other, 'arc'), ('arc', other))]
@@ -32,7 +33,8 @@ class CircleSession:
 
 
 def bridge():
-    b = make_bridge()
+    b = make_bridge(evm={chain: Ethereum(w3=fake_web3(chain_id=chain_id))
+                         for chain, chain_id in {"ethereum": 1, "arc": 5042, "base": 8453, "arbitrum": 42161}.items()})
     b.cctp.circle_session = CircleSession()
     return b
 

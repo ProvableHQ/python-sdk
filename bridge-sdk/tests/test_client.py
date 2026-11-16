@@ -239,9 +239,9 @@ def test_from_profile_uses_profile_and_wires_no_side_chains(tmp_path, monkeypatc
 def test_cli_lists_routes_and_assets(capsys):
     assert cli.main(["routes"]) == 0
     routes = json.loads(capsys.readouterr().out)
-    assert len(routes) == 40 and routes[0] == "xreserve:ethereum/usdc->aleo/usdcx"
+    assert len(routes) == 42 and routes[0] == "xreserve:ethereum/usdc->aleo/usdcx"
     assert cli.main(["assets"]) == 0
-    assert len(json.loads(capsys.readouterr().out)) == 30
+    assert len(json.loads(capsys.readouterr().out)) == 31
     assert cli.main(["bogus"]) == 2
 
 

@@ -55,6 +55,14 @@ def build_plan(registry: Registry, route: Route, *, amount_atomic: int, recipien
                      Step("destination-confirmation", "confirm-delivery", "protocol", False))
         else:
             raise UnsupportedRouteError(f"Unsupported xReserve route direction: {route.id}")
+    elif route.protocol == "verulink":
+        if {source_family, destination_family} != {"aleo", "evm"}:
+            raise UnsupportedRouteError("Verulink requires Aleo and EVM chains")
+        steps = tuple([Step("source-approval", "approve", wallet, False)] if source_family == "evm" else []) + (
+            Step("source-transfer", "dispatch", wallet, True),
+            Step("packet-attestation", "wait-attestation", "protocol", False),
+            Step("destination-claim", "claim", WALLET_EXECUTOR_BY_FAMILY[destination_family], False),
+            Step("destination-confirmation", "confirm-delivery", "protocol", False))
     elif route.protocol == "cctp":
         if (source_family, destination_family) != ("evm", "evm"):
             raise BridgeError("CCTP requires two EVM chains")

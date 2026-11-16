@@ -22,7 +22,8 @@ if TYPE_CHECKING:
 
 LEGACY_VERSION = "2026-08-31.solana-deposits.1"
 PREVIOUS_VERSION = "2026-09-28.cctp-arc.1"
-CURRENT_VERSION = "2026-09-30.hyperlane-bat-usdg-zec.1"
+PRE_VERULINK_VERSION = "2026-09-30.hyperlane-bat-usdg-zec.1"
+CURRENT_VERSION = "2026-11-04.verulink-bsc.1"
 
 
 def route_fingerprint(registry: Registry, route_id: str) -> str:
@@ -127,8 +128,53 @@ PREVIOUS_ROUTE_HASHES: dict[str, str] = {
     "cctp:arc/usdc->arbitrum/usdc": "4df2493eeeae9ced9b5089c8f0cbe4d25555ec5c2b19b7f645acf1bc655d228c"
 }
 
+# Captured from Python SDK d41f4c6 before adding Verulink; old plans cannot name new routes.
+PRE_VERULINK_ROUTE_HASHES: dict[str, str] = {
+    "xreserve:ethereum/usdc->aleo/usdcx": "4ed8a326a8fe3cb284648e17b9e319a1b484abc2013a85dd77d257120fd2276f",
+    "xreserve:aleo/usdcx->ethereum/usdc": "09da7909d1bf2cf378dc2554669b0245a400eb658b601ee2b3509389a91d2069",
+    "xreserve:sepolia/usdc->aleo-testnet/usdcx": "b0c21c2818c11fd0f44eb4b756f35f67eb269a0ae3561cceda9b13ef000701b0",
+    "xreserve:aleo-testnet/usdcx->sepolia/usdc": "f98f69e1c00b1b235aba49d1bfaf0dba293749141463683dedcf3ede3ab2c0fb",
+    "hyperlane:ethereum/eth->aleo/eth": "20373a6cd79a46cfa81f15c96afff141391b8d63c5590a1c66a39e952526e701",
+    "hyperlane:aleo/eth->ethereum/eth": "f8a90521d79b34e3a5e34608f0857c365d0a2dd7f0a4fd38bab87c0f201fd2fa",
+    "hyperlane:ethereum/wbtc->aleo/wbtc": "9ebcfd2052464d50952a7a0df297dac6c949839473f51afe733c3a32e6b55188",
+    "hyperlane:aleo/wbtc->ethereum/wbtc": "a815111fe419154f1dba77b34f49a491b59593811c38eb4b1e6439880bc050f9",
+    "hyperlane:ethereum/usdt->aleo/usdt": "17126cfffa855c9e56173290a196596b178753e61b3c00ec9ffe401bf4395770",
+    "hyperlane:aleo/usdt->ethereum/usdt": "40aeb94f3c007034cb2235f6f65fcd16a0a34d33e129d891b69d0c606b1e0b83",
+    "hyperlane:ethereum/bat->aleo/bat": "0008853ddd0c14288d7903a1f90c6d7935894f0b7ef532b5570adc6748510014",
+    "hyperlane:aleo/bat->ethereum/bat": "f81a5f53866a6ccd66a88bddf2343fff52b5171e97e0e0405cf4d4dc50e65c97",
+    "hyperlane:ethereum/usdg->aleo/usdg": "367179b4dd63b906ef728332222f1b588e9b73537048a19bf4cb3f26d530ea47",
+    "hyperlane:aleo/usdg->ethereum/usdg": "9727df123e419862b0105d99c76bef729852cf2a8cfb9b8c0b4ed94952dbd258",
+    "hyperlane:solana/sol->aleo/sol": "f8dccf00884bf41dc4ae702ec40366dacc47c65c2aa5985e7638ad11139098fc",
+    "hyperlane:aleo/sol->solana/sol": "ae205673cb91518ec0e6aeea2a465bd15450e880809ee642226640690e461f80",
+    "hyperlane:solana/bat->aleo/bat": "080f29e2c08fe9e42a4b01ff6e99f06f88819c94292ab9378e2a659b1f953ab9",
+    "hyperlane:aleo/bat->solana/bat": "3668b5f90f66ebabe92c14fc6bef9e552d51a96fb1258460f5a99e8329d8f4e9",
+    "hyperlane:solana/usdg->aleo/usdg": "c44d166d1ce707d38ec0475d72702a520f0b750a599c7ac3972ec0bb752e7701",
+    "hyperlane:aleo/usdg->solana/usdg": "fbf10573519c571bcb7974e1b97a23b566c6af00ee377cf7a19a65f72a6b37d5",
+    "hyperlane:solana/zec->aleo/zec": "896ee1945da91116623d0055351ecaec35070e3831d43a88428474e5628f62ab",
+    "hyperlane:aleo/zec->solana/zec": "9c3aa35f88f7b6decd01f3e9b1bef2915221a2155b3b2caf9c6c70e1d0bec61c",
+    "hyperlane:aleo/aleo->ethereum/aleo": "c940558ced6095dae81a41ab135ae0dece301d753321bf5530052c3927a91e24",
+    "hyperlane:ethereum/aleo->aleo/aleo": "748b567a881f9de2d5802cb02d23e699dbd47fb17966522260cfce17f83fe4e4",
+    "hyperlane:aleo/aleo->solana/aleo": "71a29407848f09605d8d611f678a0531803a40e982f9976c85bae4fa775e7075",
+    "hyperlane:solana/aleo->aleo/aleo": "32a57bb81118f958ead32837eaed1c3252042a614ef147537c165c1bcf7847fc",
+    "hyperlane:aleo/aleo->base/aleo": "622ad27af392b5992ca2083d1c9b73cff768b3b3c5630391bd1be582ccf3ff8d",
+    "hyperlane:base/aleo->aleo/aleo": "01f12d5cc78e7d734a370be742f131eeb7955e4bfce5fc3f0ceb4ed5c144ec6a",
+    "hyperlane:aleo/aleo->hyperevm/aleo": "f4035f8b63001f7dacb78ef7e0cf4f5b3ecbc4c426ff1455f91aca01dd277118",
+    "hyperlane:hyperevm/aleo->aleo/aleo": "317af78d3ae408f373da6dba0aa561183ce2b854e4b0a1f9424247ef905578a7",
+    "hyperlane:ethereum/usad->aleo/usad": "98f6bfba28a1011526f5ec58b8e30ce6526363502ff333fd218c3d8e8375e7eb",
+    "hyperlane:aleo/usad->ethereum/usad": "a23c9db907e33e2d5da5bfbf9061c616a9ac4d9e5bc05495e02c05d4a013efe8",
+    "xreserve:arc/usdc->aleo/usdcx": "a362fbc8f8e431e8103a7c4ff8bf8ea98ebcd774ee78e8e8f893e4e3a6cc5778",
+    "xreserve:aleo/usdcx->arc/usdc": "b1d97486bc55030b41f350fcee9693a6412a0ccd7d85e963ff6ffcfe8d29e291",
+    "cctp:ethereum/usdc->arc/usdc": "57da199c23adec3a7a43391107e6260deb253cc03037dccb75919bd34f5098c7",
+    "cctp:arc/usdc->ethereum/usdc": "3862c7c92f0794a0c7a676107e08901ebb3ae77ce8da10c63abd08bfd9d12633",
+    "cctp:base/usdc->arc/usdc": "bf845c10ccc83dd2c4387e89de311e9c42d40d0ba6a8b7f457fa75531778f80e",
+    "cctp:arc/usdc->base/usdc": "0b8c47359d34c4575652b650f047d1a6da3ccb1fc802f7fec843c8e5e7d7d439",
+    "cctp:arbitrum/usdc->arc/usdc": "adffa5d93d5aad95f1055c3a8e10417e3e0f6cf361cc77dc5b56c32e1d6413fe",
+    "cctp:arc/usdc->arbitrum/usdc": "4df2493eeeae9ced9b5089c8f0cbe4d25555ec5c2b19b7f645acf1bc655d228c"
+}
+
 #: Every reviewed prior snapshot a newer registry still accepts unchanged routes from.
 KNOWN_ROUTE_HASHES: dict[str, dict[str, str]] = {
+    PRE_VERULINK_VERSION: PRE_VERULINK_ROUTE_HASHES,
     LEGACY_VERSION: LEGACY_ROUTE_HASHES,
     PREVIOUS_VERSION: PREVIOUS_ROUTE_HASHES,
 }

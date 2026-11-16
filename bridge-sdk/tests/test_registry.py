@@ -20,20 +20,20 @@ MAILBOX = {
 
 
 def test_shape_and_version():
-    assert REG.version == "2026-09-30.hyperlane-bat-usdg-zec.1"
-    assert len(REG.chains()) == 9 and len(REG.assets()) == 30
-    assert len(REG.routes(include_unavailable=True)) == 40
-    assert len(REG.routes()) == 40  # nothing is 'disabled' in this snapshot; metadata-required stays visible
+    assert REG.version == "2026-11-04.verulink-bsc.1"
+    assert len(REG.chains()) == 10 and len(REG.assets()) == 31
+    assert len(REG.routes(include_unavailable=True)) == 42
+    assert len(REG.routes()) == 42  # nothing is 'disabled' in this snapshot; metadata-required stays visible
     assert validate_registry(REG) is REG
     assert REG.routes(include_unavailable=True)[0].metadata["xReserveContract"] == "0x8888888199b2Df864bf678259607d6D5EBb4e3Ce"
 
 
 def test_chains():
-    assert [c.id for c in REG.chains()] == ["aleo", "ethereum", "arc", "solana", "base", "arbitrum", "hyperevm", "aleo-testnet", "sepolia"]
+    assert [c.id for c in REG.chains()] == ["aleo", "ethereum", "arc", "solana", "base", "arbitrum", "hyperevm", "aleo-testnet", "sepolia", "bsc"]
     assert [c.id for c in REG.chains(environment="testnet")] == ["aleo-testnet", "sepolia"]
     aleo = REG.chain("aleo")
     assert (aleo.display_name, aleo.family, aleo.environment, aleo.native_symbol) == ("Aleo", "aleo", "mainnet", "ALEO")
-    assert aleo.protocol_domains == {"xreserve": 10002, "hyperlane": 1634493807}
+    assert aleo.protocol_domains == {"xreserve": 10002, "hyperlane": 1634493807, "verulink": 6694886634401}
     assert REG.chain("ethereum").protocol_domains == {"xreserve": 0, "hyperlane": 1, "cctp": 0}
     assert REG.chain("solana").protocol_domains == {"hyperlane": 1399811149}
     assert REG.chain("base").protocol_domains == {"cctp": 6} and REG.chain("hyperevm").native_symbol == "HYPE"
@@ -69,7 +69,7 @@ def test_assets_and_lookups():
     # re.fullmatch, not re.search: a trailing newline must not sneak past the "$" anchor
     assert not REG.asset("ethereum/usdc").matches_address("0x0000000000000000000000000000000000000001\n")
     assert [a.id for a in REG.assets(chain="aleo")] == ["aleo/aleo", "aleo/usdcx", "aleo/eth", "aleo/wbtc", "aleo/usdt", "aleo/sol", "aleo/bat", "aleo/usdg", "aleo/zec", "aleo/usad"]
-    assert [a.id for a in REG.assets(symbol="aleo")] == ["aleo/aleo", "ethereum/aleo", "solana/aleo", "base/aleo", "hyperevm/aleo"]
+    assert [a.id for a in REG.assets(symbol="aleo")] == ["aleo/aleo", "ethereum/aleo", "solana/aleo", "base/aleo", "hyperevm/aleo", "bsc/aleo"]
     assert [a.id for a in REG.assets(environment="testnet")] == ["aleo-testnet/usdcx", "sepolia/usdc"]
     for bad in ("aleo/doge", "doge", ("aleo", "doge"), "a/b/c"):
         with pytest.raises(RouteNotFoundError):
@@ -81,7 +81,7 @@ def test_usdcx_only_via_xreserve_and_others_via_hyperlane():
     assert usdcx and all(r.protocol == "xreserve" for r in usdcx)
     for symbol in ("ETH", "WBTC", "USDT", "SOL", "BAT", "USDG", "ZEC", "ALEO", "USAD"):
         routes = REG.routes(symbol=symbol, include_unavailable=True)
-        assert routes and all(r.protocol == "hyperlane" for r in routes), symbol
+        assert routes and all(r.protocol == ("verulink" if "bsc/" in r.id else "hyperlane") for r in routes), symbol
 
 
 def test_xreserve_routes():
@@ -248,7 +248,7 @@ def test_route_filters_follow_veil_get_routes():
     # veil getRoutes: protocol / sourceChainId / destinationChainId / symbol — chain ids, never asset refs.
     assert [r.id for r in REG.routes(source_chain="aleo", bridge_protocol="xreserve")] == ["xreserve:aleo/usdcx->ethereum/usdc", "xreserve:aleo/usdcx->arc/usdc"]
     assert [r.id for r in REG.routes(destination_chain="aleo", symbol="wbtc")] == ["hyperlane:ethereum/wbtc->aleo/wbtc"]
-    assert len(REG.routes(environment="testnet")) == 2 and len(REG.routes(environment="mainnet")) == 38
+    assert len(REG.routes(environment="testnet")) == 2 and len(REG.routes(environment="mainnet")) == 40
     assert len(REG.routes(source_chain="solana")) == 5  # SOL + BAT/USDG/ZEC deposits + metadata-required ALEO
     assert len(REG.routes(source_chain="SOLANA", destination_chain="Aleo")) == 5   # case-insensitive
     # the asset filters narrow a chain pair to one asset on either side
@@ -345,7 +345,7 @@ def test_validation_failures():
 
 def test_data_module_is_plain_literals():
     assert data.REGISTRY_VERSION == REG.version
-    assert len(data.CHAINS) == 9 and len(data.ASSETS) == 30 and len(data.ROUTES) == 40
+    assert len(data.CHAINS) == 10 and len(data.ASSETS) == 31 and len(data.ROUTES) == 42
     assert all(isinstance(c, dict) for c in data.CHAINS) and all(isinstance(r["metadata"], dict) for r in data.ROUTES)
     assert re.compile(data.ALEO_ADDRESS).match("aleo1kypwp5m7qtk9mwazgcpg0tq8aal23mnrvwfvug65qgcg9xvsrqgspyjm6n")
 

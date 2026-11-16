@@ -65,6 +65,10 @@ class CaseSpec:
 
 
 CASES: dict[str, CaseSpec] = {
+    "aleo-verulink": CaseSpec(name="aleo-verulink", protocol="verulink", source_family="aleo", amount="20", mode="public",
+                             veil_source="mainnet/verulink-readonly.live.test.ts"),
+    "evm-verulink": CaseSpec(name="evm-verulink", protocol="verulink", source_family="evm", amount="20",
+                            veil_source="mainnet/verulink-readonly.live.test.ts"),
     "evm-cctp": CaseSpec(name="evm-cctp", protocol="cctp", source_family="evm", amount="2",
                          veil_source="mainnet/cctp-roundtrip.live.test.ts"),
     "evm-hyperlane": CaseSpec(
@@ -182,6 +186,9 @@ def print_quote(bridge: Any, quote: Any, *, case: str, route_id: str, log: Calla
     log(f"  mint mode  {plan.mint_mode}")
     for fee in quote.fees:
         estimated = " (estimated)" if fee.estimated else ""
+        if fee.amount is None:
+            log(f"  fee        unpriced {bridge.registry.chain(fee.chain_id).native_symbol} [{fee.kind}]")
+            continue
         log(f"  fee        {fee.amount} {bridge.registry.asset(fee.asset_id).symbol} [{fee.kind}]{estimated}")
     # An EvmXReserveQuote carries no `fees`: its protocol cost is the max fee the deposit authorizes.
     max_fee = getattr(quote, "max_fee_atomic", None)
@@ -256,7 +263,7 @@ def precheck(bridge: Any, quote: Any, *, case: str, log: Callable[[str], None] =
         if quote.balance_atomic < plan.amount_atomic:
             raise Underfunded(asset_id=source.id, needed=plan.amount_atomic, have=quote.balance_atomic)
         log(f"  balance    {source.id}: {quote.balance_atomic} atomic (need {plan.amount_atomic})")
-    elif quote.kind == "evm-cctp":
+    elif quote.kind in ("evm-cctp", "aleo-verulink", "evm-verulink"):
         _require(balances, source.id, plan.amount_atomic, log=log)
     elif quote.kind == "aleo-xreserve":
         pass            # the private record is selected (and checked) right before the burn
@@ -326,7 +333,7 @@ def _drive(bridge: Any, progress: Any, state: LiveState, state_path: Path, *, sp
             benchmark.mark("resume-returned")
             continue
         if progress.next == "complete":
-            if not secret_nonce:
+            if spec.private_mint and not secret_nonce:
                 raise LiveCaseError(
                     "The private mint needs the secret nonce kept beside this case's state file; "
                     "it is missing, so the mint cannot be completed here")
@@ -369,7 +376,7 @@ def completion_has_no_destination_id(route: Route, registry: Registry) -> bool:
     id nor a destination transaction id — veil's ``aleo-hyperlane.live.test.ts:163`` likewise
     asserts only ``completed`` and ``sourceTxId`` there (the 2026-09-22 mainnet
     ``aleo/eth->ethereum/eth`` leg completed exactly this way, +1 wei on Ethereum)."""
-    return registry.chain(registry.asset(route.source_asset_id).chain_id).family == "aleo"
+    return route.protocol != "verulink" and registry.chain(registry.asset(route.source_asset_id).chain_id).family == "aleo"
 
 
 def delivery_is_a_balance_rise(route: Route, registry: Registry) -> bool:
@@ -579,6 +586,8 @@ run_aleo_xreserve = _runner("aleo-xreserve")
 run_solana_hyperlane = _runner("solana-hyperlane")
 
 RUNNERS: dict[str, Callable[..., LiveState]] = {
+    "aleo-verulink": _runner("aleo-verulink"),
+    "evm-verulink": _runner("evm-verulink"),
     "evm-hyperlane": run_evm_hyperlane,
     "evm-xreserve": run_evm_xreserve,
     "aleo-hyperlane": run_aleo_hyperlane,

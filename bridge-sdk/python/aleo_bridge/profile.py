@@ -69,7 +69,7 @@ class Profile:
                 home_path.mkdir(parents=True, exist_ok=True, mode=0o700)
                 home_path.chmod(0o700)              # mkdir's mode is subject to umask; make it exact
             private_key, address = _initial_key(network)
-            data = {"address": address, "private_key": private_key, "network": network, "endpoint": endpoint}
+            data: dict[str, Any] = {"address": address, "private_key": private_key, "network": network, "endpoint": endpoint}
             if rpc_urls:
                 data["rpc_urls"] = dict(rpc_urls)
             try:

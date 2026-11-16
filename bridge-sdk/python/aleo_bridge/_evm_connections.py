@@ -9,7 +9,7 @@ from .errors import ConfigurationError
 from .eth import Ethereum
 from .registry import Registry
 
-RPC_VARIABLES = {"arc": "ARC_RPC_URL", "base": "BASE_RPC_URL", "arbitrum": "ARBITRUM_RPC_URL"}
+RPC_VARIABLES = {"arc": "ARC_RPC_URL", "base": "BASE_RPC_URL", "arbitrum": "ARBITRUM_RPC_URL", "bsc": "BSC_RPC_URL"}
 
 
 def coerce(value: Any) -> Ethereum:
@@ -30,6 +30,11 @@ def normalize(registry: Registry, environment: str, connections: Mapping[str, An
         if chain.family != "evm" or chain.environment != environment:
             raise ConfigurationError(f"EVM connection {key!r} must belong to {environment} and the EVM family")
         conn = coerce(value)
+        if chain.id == "bsc":
+            from web3.middleware import ExtraDataToPOAMiddleware
+            onion = conn.w3.middleware_onion
+            if ExtraDataToPOAMiddleware not in onion:
+                onion.inject(ExtraDataToPOAMiddleware, layer=0)
         if chain.id in out and out[chain.id] is not conn:
             raise ConfigurationError(f"Conflicting EVM connections for {chain.id}")
         out[chain.id] = conn

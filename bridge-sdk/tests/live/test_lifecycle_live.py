@@ -281,6 +281,15 @@ def _testnet(case: str, route_id: str, make_bridge: Callable[[], Any],
 
 # ── the five mainnet cases, one test each, over every route they cover ───────
 
+@_params("aleo-verulink")
+def test_aleo_verulink(route, mainnet_client, record_property):
+    _mainnet("aleo-verulink", route, mainnet_client, record_property)
+
+
+@_params("evm-verulink")
+def test_evm_verulink(route, mainnet_client, record_property):
+    _mainnet("evm-verulink", route, mainnet_client, record_property)
+
 @_params("evm-hyperlane")
 def test_evm_hyperlane(route, mainnet_client, record_property):
     """veil mainnet/evm-hyperlane.live.test.ts: ethereum → aleo over the Hyperlane warp routes."""

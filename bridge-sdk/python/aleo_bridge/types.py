@@ -53,8 +53,8 @@ class Step:
 class Fee:
     kind: str
     chain_id: str
-    asset_id: str
-    amount: str
+    asset_id: str | None
+    amount: str | None
     estimated: bool
 
 
@@ -115,10 +115,14 @@ class Plan:
     #: Local recovery identity, allocated by execute; does not change the quoted transfer.
     journal_id: str | None = field(default=None, compare=False)
     cctp: CctpOptions | None = None
+    #: Minimum net output approved by a Verulink quote; omitted for other protocols.
+    amount_out: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d = dataclasses.asdict(self)
         d["steps"] = [dataclasses.asdict(s) for s in self.steps]
+        if self.amount_out is None:
+            d.pop("amount_out")
         return d
 
     @classmethod
@@ -136,6 +140,14 @@ class Quote:
     plan: Plan
     fees: tuple[Fee, ...]
     amount_out: str | None
+
+
+@dataclass(frozen=True)
+class VerulinkQuote(Quote):
+    """Current Verulink fee and public ALEO output; network gas is unpriced."""
+    amount_atomic: int
+    fee_atomic: int
+    rate: int
 
 
 @dataclass(frozen=True)

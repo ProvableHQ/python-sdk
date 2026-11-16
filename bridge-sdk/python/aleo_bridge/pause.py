@@ -145,15 +145,16 @@ def _evm_call(w3: Any, address: str, fn: str, *args: Any, sleep: Callable[[float
     does not answer this getter), never retried."""
     from .eth import _web3
     from ._evm_abi import PAUSE_ABI
+    from web3.exceptions import ContractLogicError
     web3 = _web3()
     checksummed = web3.Web3.to_checksum_address(address)
 
     def call(attempt: int) -> Any:
-        client = w3(attempt) if callable(w3) else w3
+        client: Any = w3(attempt) if callable(w3) else w3
         return getattr(client.eth.contract(address=checksummed, abi=PAUSE_ABI).functions, fn)(*args).call()
     try:
         return read_with_retry(call, sleep=sleep)
-    except web3.exceptions.ContractLogicError as exc:
+    except ContractLogicError as exc:
         raise ConfigurationError(f"{fn}() on {address} reverted: {exc}") from exc
 
 
@@ -289,6 +290,26 @@ class PauseReader:
     # -- switches per chain family --
     def _aleo(self, side: str, route: Route, asset: Asset, far_chain: Chain) -> list[PauseSwitch]:
         bridge, out = self._bridge, []
+        if route.protocol == "verulink":
+            service, token_bridge = route.meta_str("aleoTokenService"), route.meta_str("aleoBridge")
+            domain = route.meta_str("evmDomain")
+            token = f"{{ chain_id: {domain}u128, token_id: {route.meta_str('aleoTokenId')} }}"
+            settings = (
+                (service, "status", token, "false", "true"),
+                (token_bridge, "bridge_settings", "3u8", "1u8", "0u8"),
+                (token_bridge, "supported_chains", domain + "u128", "true", "false"),
+                (token_bridge, "supported_services", route.meta_str("aleoServiceAddress"), "true", "false"),
+            )
+            for program, mapping, key, open_value, paused_value in settings:
+                switch = f"{mapping}[{key}]"
+                try:
+                    value = _aleo_mapping_value(bridge, program, mapping, key, self._sleep)
+                except ReadFailed as exc:
+                    out.append(PauseSwitch(asset.chain_id, side, program, switch, "unknown", str(exc)))
+                    continue
+                state = "open" if value == open_value else "paused" if value == paused_value else "unknown"
+                out.append(PauseSwitch(asset.chain_id, side, program, switch, state, value))
+            return out
         if route.protocol == "hyperlane":
             program = asset.locator.value if asset.locator is not None else route.meta_str("aleoRouterProgram")
             convention = declared_pause_mapping(bridge, program, sleep=self._sleep)
@@ -313,6 +334,9 @@ class PauseReader:
 
     def _evm(self, side: str, route: Route, chain: Chain, far_chain: Chain) -> list[PauseSwitch]:
         w3 = self.evm_w3(chain.id)
+        if route.protocol == "verulink":
+            return [read_evm_paused(w3, chain_id=chain.id, side=side, address=route.meta_str(key), sleep=self._sleep)
+                    for key in ("evmTokenService", "evmBridge")]
         if route.protocol == "hyperlane":
             reader = read_mailbox_hook_pauses if side == "source" else read_mailbox_ism_pauses
             return reader(w3, chain_id=chain.id, side=side, mailbox=route.meta_str("mailboxAddress"),

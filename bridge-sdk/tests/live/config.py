@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Mapping
 
 #: The five mainnet cases veil ships, in the order the funding table lists them.
-CASE_NAMES = ("evm-cctp", "evm-hyperlane", "evm-xreserve", "aleo-hyperlane", "aleo-xreserve", "solana-hyperlane")
+CASE_NAMES = ("aleo-verulink", "evm-verulink", "evm-cctp", "evm-hyperlane", "evm-xreserve", "aleo-hyperlane", "aleo-xreserve", "solana-hyperlane")
 
 FUNDS_VAR = "BRIDGE_LIVE_FUNDS"
 STATE_DIR_VAR = "BRIDGE_LIVE_STATE_DIR"
@@ -68,9 +68,10 @@ EVM_CHAIN_RPC_VARS = {
     "arc": ("ARC_RPC_URL", "BRIDGE_LIVE_ARC_RPC_URL"),
     "base": ("BASE_RPC_URL", "BRIDGE_LIVE_BASE_RPC_URL"),
     "arbitrum": ("ARBITRUM_RPC_URL", "BRIDGE_LIVE_ARBITRUM_RPC_URL"),
+    "bsc": ("BSC_RPC_URL", "BRIDGE_LIVE_BSC_RPC_URL"),
 }
 DEFAULT_EVM_CHAIN_RPC_URL = {"arc": DEFAULT_ARC_RPC_URL, "base": DEFAULT_BASE_RPC_URL,
-                             "arbitrum": DEFAULT_ARBITRUM_RPC_URL}
+                             "arbitrum": DEFAULT_ARBITRUM_RPC_URL, "bsc": "https://bsc-dataseed.bnbchain.org"}
 
 #: The Aleo network name each bridge environment runs on.
 ALEO_NETWORKS = {"mainnet": "mainnet", "testnet": "testnet"}

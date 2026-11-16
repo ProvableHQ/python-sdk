@@ -1,7 +1,7 @@
 [project]
 name = "aleo-bridge-sdk"
 version = "0.8.0"
-description = "Bridge Aleo, Ethereum, Arc, Base, Arbitrum and Solana assets with Hyperlane, Circle xReserve and CCTP"
+description = "Bridge Aleo, Ethereum, BSC, Arc, Base, Arbitrum and Solana assets with Hyperlane, Verulink, Circle xReserve and CCTP"
 readme = "README.md"
 requires-python = ">=3.10"
 # PyNaCl is NOT optional: every Aleo-side execution goes through delegated proving
@@ -50,6 +50,7 @@ packages = ["python/aleo_bridge"]
 "examples/bridge_wbtc.py" = "aleo_bridge/examples/bridge_wbtc.py"
 "examples/bridge_wbtc_to_ethereum.py" = "aleo_bridge/examples/bridge_wbtc_to_ethereum.py"
 "examples/quote_transfer.py" = "aleo_bridge/examples/quote_transfer.py"
+"examples/verulink_roundtrip.py" = "aleo_bridge/examples/verulink_roundtrip.py"
 "examples/recover_from_journal.py" = "aleo_bridge/examples/recover_from_journal.py"
 "examples/recover_without_files.py" = "aleo_bridge/examples/recover_without_files.py"
 "examples/shield_assets.py" = "aleo_bridge/examples/shield_assets.py"
