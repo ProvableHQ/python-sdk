@@ -13,6 +13,7 @@ import getpass
 import json
 import os
 import re
+import time
 import sys
 import unicodedata
 from dataclasses import FrozenInstanceError
@@ -1884,6 +1885,93 @@ def test_removes_the_new_saved_password_when_a_move_to_encrypted_storage_is_undo
     assert stored.path.read_bytes() == data
     # Only the original key entry is left.
     assert list(sandbox.security.entries) == [key_entry(stored.path)]
+
+
+# ---------------------------------------------------------------------------
+# One process changes an account file at a time
+# ---------------------------------------------------------------------------
+
+
+def test_does_not_restore_a_stale_file_over_a_change_another_process_made(sandbox: Sandbox) -> None:
+    account = new_account()
+    stored = keystore.save(account.private_key, dir=sandbox.dir, storage="keychain")
+    entry = key_entry(stored.path)
+    interleaved: List[Any] = []
+
+    def other_process_changes_the_file(args: Any) -> Any:
+        # The first caller reads the key from the Keychain. Before it goes on,
+        # another process moves the same account to plaintext, which removes
+        # the Keychain entry the first caller has just read.
+        if args[0] == "find-generic-password" and not interleaved:
+            value = sandbox.security.entries[entry]
+            # Marked first, so the other process's own Keychain reads pass through.
+            interleaved.append(None)
+            interleaved[0] = keystore.protect(dir=sandbox.dir, storage="plaintext")
+            return 0, f"{value}\n"
+        return None
+
+    sandbox.security.force(other_process_changes_the_file)
+    error = failure(lambda: keystore.protect(dir=sandbox.dir, storage="encrypted", password=PASSWORD, prompt=False))
+    sandbox.security.force(None)
+    assert error.code == "ACCOUNT_BUSY"
+    assert str(stored.path) in str(error)
+    # The other process's result stands: the stale Keychain pointer was not put back.
+    assert interleaved[0].storage == "plaintext"
+    info = keystore.info(dir=sandbox.dir)
+    assert info is not None and info.storage == "plaintext"
+    check_secret(keystore.export(dir=sandbox.dir), account.private_key)
+    assert sandbox.security.entries == {}
+    assert os.listdir(sandbox.dir) == ["default.json"]
+
+
+def test_waits_for_the_lock_and_gives_up_with_account_busy(sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch) -> None:
+    account = new_account()
+    stored = keystore.save(account.private_key, dir=sandbox.dir)
+    data = stored.path.read_bytes()
+    lock = sandbox.dir / "default.json.lock"
+    lock.write_bytes(b"")
+    monkeypatch.setattr(runtime, "lock_wait_seconds", 0.2)
+    error = failure(lambda: keystore.protect(dir=sandbox.dir, storage="encrypted", password=PASSWORD, prompt=False))
+    assert error.code == "ACCOUNT_BUSY"
+    assert str(lock) in str(error)
+    # Nothing was changed, and the other process's lock was left alone.
+    assert stored.path.read_bytes() == data
+    assert lock.exists()
+
+    # Once the lock is released, the same call goes through and leaves no lock behind.
+    lock.unlink()
+    assert keystore.protect(dir=sandbox.dir, storage="encrypted", password=PASSWORD, prompt=False).storage == "encrypted"
+    assert os.listdir(sandbox.dir) == ["default.json"]
+
+
+def test_never_removes_a_lock_on_its_own_however_old_it_is(sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch) -> None:
+    account = new_account()
+    stored = keystore.save(account.private_key, dir=sandbox.dir)
+    data = stored.path.read_bytes()
+    lock = sandbox.dir / "default.json.lock"
+    lock.write_bytes(b"")
+    long_ago = time.time() - 7 * 24 * 3600
+    os.utime(lock, (long_ago, long_ago))
+    monkeypatch.setattr(runtime, "lock_wait_seconds", 0.2)
+    # Two waiting callers that both removed an old lock would both go ahead.
+    error = failure(lambda: keystore.protect(dir=sandbox.dir, storage="encrypted", password=PASSWORD, prompt=False))
+    assert error.code == "ACCOUNT_BUSY"
+    assert str(lock) in str(error)
+    assert lock.exists()
+    assert stored.path.read_bytes() == data
+
+
+def test_releases_the_lock_when_the_change_fails(sandbox: Sandbox) -> None:
+    account = new_account()
+    stored = keystore.save(account.private_key, dir=sandbox.dir)
+    data = stored.path.read_bytes()
+    sandbox.security.force(lambda args: (1, "") if args[0] == "-i" else None)
+    assert code_of(lambda: keystore.protect(dir=sandbox.dir, storage="keychain")) == "KEYCHAIN_FAILED"
+    sandbox.security.force(None)
+    assert stored.path.read_bytes() == data
+    assert os.listdir(sandbox.dir) == ["default.json"]
+    # The next change is not blocked.
+    assert keystore.protect(dir=sandbox.dir, storage="keychain").storage == "keychain"
 
 
 # ---------------------------------------------------------------------------

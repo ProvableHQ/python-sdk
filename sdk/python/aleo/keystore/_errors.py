@@ -24,6 +24,9 @@ class KeystoreError(AleoError):
         The account file records only an address, and no key was supplied.
     ``ACCOUNT_EXISTS``
         Saving would replace an account file that is already there.
+    ``ACCOUNT_BUSY``
+        Another process is changing the account file, or changed it while
+        this operation was in progress. Nothing was changed; try again.
     ``ADDRESS_MISMATCH``
         A key belongs to a different address than the one expected.
     ``KEY_CONFLICT``

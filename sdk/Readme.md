@@ -152,7 +152,7 @@ except KeystoreError as error:
         raise
 ```
 
-The codes are `ACCOUNT_NOT_FOUND`, `KEY_NOT_STORED`, `ACCOUNT_EXISTS`, `ADDRESS_MISMATCH`, `KEY_CONFLICT`, `EMPTY_KEY_SOURCE`, `INVALID_KEY`, `INVALID_MNEMONIC`, `INVALID_NAME`, `INVALID_ACCOUNT_FILE`, `UNSUPPORTED_VERSION`, `UNSUPPORTED_STORAGE`, `KEYCHAIN_UNAVAILABLE`, `KEYCHAIN_ITEM_NOT_FOUND`, `KEYCHAIN_FAILED`, `PASSWORD_REQUIRED`, `WRONG_PASSWORD`, `TERMINAL_REQUIRED` and `LEGACY_KEY_NOT_FOUND`; the `KeystoreError` docstring says when each is raised. A file system failure on the account file other than a missing file (permission denied, a directory in its place) is raised as `OSError`.
+The codes are `ACCOUNT_NOT_FOUND`, `KEY_NOT_STORED`, `ACCOUNT_EXISTS`, `ACCOUNT_BUSY`, `ADDRESS_MISMATCH`, `KEY_CONFLICT`, `EMPTY_KEY_SOURCE`, `INVALID_KEY`, `INVALID_MNEMONIC`, `INVALID_NAME`, `INVALID_ACCOUNT_FILE`, `UNSUPPORTED_VERSION`, `UNSUPPORTED_STORAGE`, `KEYCHAIN_UNAVAILABLE`, `KEYCHAIN_ITEM_NOT_FOUND`, `KEYCHAIN_FAILED`, `PASSWORD_REQUIRED`, `WRONG_PASSWORD`, `TERMINAL_REQUIRED` and `LEGACY_KEY_NOT_FOUND`; the `KeystoreError` docstring says when each is raised. A file system failure on the account file other than a missing file (permission denied, a directory in its place) is raised as `OSError`.
 
 #### Set up an account from a terminal
 

@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import base64
 import binascii
+import contextlib
 import json
 import os
 import re
 import stat
-from typing import Any, Dict, List, NamedTuple, NoReturn, Optional, Sequence, Tuple, Union, cast
+import time
+from typing import Any, Dict, Generator, List, NamedTuple, NoReturn, Optional, Sequence, Tuple, Union, cast
 
 from ._encrypted import SALT_BYTES, SCRYPT_MAX_N, SCRYPT_MIN_N, SCRYPT_P, SCRYPT_R
 from ._errors import KeystoreError
@@ -400,6 +402,73 @@ def write_file_exclusive(path: str, data: Union[str, bytes]) -> None:
             pass
 
 
+# How often a waiting caller looks at a held lock again, in seconds.
+_LOCK_POLL_SECONDS = 0.05
+
+
+@contextlib.contextmanager
+def account_lock(location: Location) -> Generator[None, None, None]:
+    """Hold the interprocess lock of one account file while changing it.
+
+    Changing how an account file holds its key reads the file, writes a new
+    one, removes the old secret, and puts the old file back if a step fails.
+    Two processes doing that to one file at once could each undo the other's
+    work, and leave a file that points at a secret the other has removed. The
+    lock lets one of them through at a time.
+
+    The lock is a file next to the account file, ``<name>.json.lock``,
+    created exclusively and removed on exit. A caller that finds it held
+    waits, looking again at short intervals, and gives up after the runtime's
+    ``lock_wait_seconds``.
+
+    A lock is never removed on another caller's behalf, however old it is:
+    deciding that a lock is abandoned and removing it cannot be done in one
+    step, so two waiting callers could both remove it and both go ahead. A
+    lock left by a process that was killed stays until a person removes it,
+    and the error says which file that is.
+
+    Args:
+        location: The account file to lock. Its directory must exist.
+
+    Raises:
+        KeystoreError: ``ACCOUNT_BUSY`` when the lock is still held after the
+            wait.
+    """
+    path = f"{location.path}.lock"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    deadline = time.monotonic() + runtime.lock_wait_seconds
+    while True:
+        try:
+            os.close(os.open(path, flags, 0o600))
+            break
+        except FileExistsError:
+            pending_delete = False
+        except PermissionError:
+            # Windows reports a file that is being deleted as a permission
+            # error. Anywhere else it is a real one.
+            if os.name != "nt":
+                raise
+            pending_delete = True
+        if time.monotonic() >= deadline:
+            # A permission error with no lock file behind it is a real one.
+            if pending_delete and not os.path.exists(path):
+                os.close(os.open(path, flags, 0o600))
+                break
+            raise KeystoreError(
+                "ACCOUNT_BUSY",
+                f"Another process is changing account file {location.path}. Try again when it has "
+                f"finished. If no other process is using the account, remove {path}.",
+            ) from None
+        time.sleep(_LOCK_POLL_SECONDS)
+    try:
+        yield
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
 def write_account_file(location: Location, file: AccountFile, exclusive: bool = False) -> None:
     """Write an account file, creating the accounts directory when needed.
 
@@ -441,6 +510,7 @@ __all__: List[str] = [
     "FILE_VERSION",
     "Location",
     "STORAGE_TYPES",
+    "account_lock",
     "loads_strict",
     "parse_account_file",
     "read_account_file",

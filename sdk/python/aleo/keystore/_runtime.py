@@ -132,6 +132,8 @@ class KeystoreRuntime:
         prompt_visible: Asks for one line on the terminal with echo, for a
             confirmation that is not secret.
         notify: Writes one line to the terminal, never to standard output.
+        lock_wait_seconds: How long a caller waits for another process to
+            finish changing an account file before giving up.
     """
 
     def __init__(self) -> None:
@@ -143,6 +145,7 @@ class KeystoreRuntime:
         self.prompt_hidden: Callable[[str], str] = _prompt_hidden
         self.prompt_visible: Callable[[str], str] = _prompt_visible
         self.notify: Callable[[str], None] = _notify
+        self.lock_wait_seconds: float = 10.0
 
 
 # The live facilities: the real platform, Keychain tool and terminal.

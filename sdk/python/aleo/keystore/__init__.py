@@ -63,6 +63,7 @@ from ._file import (
     STORAGE_TYPES,
     AccountFile,
     Location,
+    account_lock,
     loads_strict,
     read_account_file,
     resolve_location,
@@ -836,49 +837,63 @@ def protect(
             )
     saving = storage == "encrypted" and bool(save_password) and keychain_available()
 
-    # Every step below is undone together if any of them fails: the original
-    # file goes back, and the Keychain entries this call created are removed.
-    # The old secret is the last thing touched, and it is touched only once
-    # everything else has succeeded, so the original file works again as soon
-    # as it is back in place.
-    created: List[_KeychainEntry] = []
-    try:
-        # The new file's saved password has its own entry, named after the new
-        # salt, so the entry of the file being replaced is not disturbed.
-        _write_storage(location, account, storage, chosen, saving, False, created)
-        # Read the new storage back the way a later load would, then compare.
-        _confirm_stored(location, account, storage, chosen, False)
+    # One process changes an account file at a time. Passwords were asked for
+    # above, so the lock is held only while files and the Keychain change.
+    with account_lock(location):
+        # The file was read before the lock was taken. If another process has
+        # changed it since, the key and the old secret worked out above belong
+        # to a file that no longer exists, and nothing here is safe to do.
+        latest = read_account_file(location.path)
+        if latest is None or latest.data != existing.data:
+            raise KeystoreError(
+                "ACCOUNT_BUSY",
+                f"Account file {location.path} was changed by another process while its storage was "
+                "being changed. Nothing was changed here; run the operation again.",
+            )
 
-        # Only now is the old secret redundant. Each file has entries of its
-        # own, so only a copy of this very file can still point at them; an
-        # entry a copy in the same directory still uses is left in place.
-        if current == "keychain" and storage != "keychain":
-            old_entry: str = existing.file["key"]["account"]
-            if not _neighbour_uses(
-                location,
-                lambda file: _key_of(file).get("type") == "keychain" and _key_of(file).get("account") == old_entry,
-            ):
-                delete_keychain(KEY_SERVICE, old_entry)
-        previous = saved_password_entry(existing.file)
-        if previous is not None and keychain_available():
-            salt = existing.file["key"]["kdfParams"]["salt"]
+        # Every step below is undone together if any of them fails: the original
+        # file goes back, and the Keychain entries this call created are removed.
+        # The old secret is the last thing touched, and it is touched only once
+        # everything else has succeeded, so the original file works again as soon
+        # as it is back in place.
+        created: List[_KeychainEntry] = []
+        try:
+            # The new file's saved password has its own entry, named after the new
+            # salt, so the entry of the file being replaced is not disturbed.
+            _write_storage(location, account, storage, chosen, saving, False, created)
+            # Read the new storage back the way a later load would, then compare.
+            _confirm_stored(location, account, storage, chosen, False)
 
-            def same_ciphertext(file: Dict[str, Any]) -> bool:
-                key = _key_of(file)
-                params = key.get("kdfParams")
-                return (
-                    file.get("address") == address
-                    and key.get("type") == "encrypted"
-                    and isinstance(params, dict)
-                    and cast(Dict[str, Any], params).get("salt") == salt
-                )
+            # Only now is the old secret redundant. Each file has entries of its
+            # own, so only a copy of this very file can still point at them; an
+            # entry a copy in the same directory still uses is left in place.
+            if current == "keychain" and storage != "keychain":
+                old_entry: str = existing.file["key"]["account"]
+                if not _neighbour_uses(
+                    location,
+                    lambda file: _key_of(file).get("type") == "keychain" and _key_of(file).get("account") == old_entry,
+                ):
+                    delete_keychain(KEY_SERVICE, old_entry)
+            previous = saved_password_entry(existing.file)
+            if previous is not None and keychain_available():
+                salt = existing.file["key"]["kdfParams"]["salt"]
 
-            if not _neighbour_uses(location, same_ciphertext):
-                delete_keychain(PASSWORD_SERVICE, previous)
-    except BaseException:
-        write_file_atomic(location.path, existing.data)
-        _remove_entries(created)
-        raise
+                def same_ciphertext(file: Dict[str, Any]) -> bool:
+                    key = _key_of(file)
+                    params = key.get("kdfParams")
+                    return (
+                        file.get("address") == address
+                        and key.get("type") == "encrypted"
+                        and isinstance(params, dict)
+                        and cast(Dict[str, Any], params).get("salt") == salt
+                    )
+
+                if not _neighbour_uses(location, same_ciphertext):
+                    delete_keychain(PASSWORD_SERVICE, previous)
+        except BaseException:
+            write_file_atomic(location.path, existing.data)
+            _remove_entries(created)
+            raise
 
     return StoredAccount(name=location.name, path=Path(location.path), address=address, storage=storage)
 
