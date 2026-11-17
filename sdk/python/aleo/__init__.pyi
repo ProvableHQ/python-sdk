@@ -49,6 +49,7 @@ from .inventory import (
     SqliteRecordInventoryStore as SqliteRecordInventoryStore,
     TokenJoinRouter as TokenJoinRouter,
 )
+from . import keystore as keystore
 
 
 def consensus_version(block_height: Optional[int] = None) -> int: ...

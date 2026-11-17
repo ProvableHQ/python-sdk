@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "address": "aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px",
+  "key": {
+    "type": "encrypted",
+    "kdf": "scrypt",
+    "kdfParams": {
+      "N": 131072,
+      "r": 8,
+      "p": 1,
+      "salt": "EBESExQVFhcYGRobHB0eHw=="
+    },
+    "ciphertext": "ciphertext1qvqwxkte5nq42f38st3js82tu2q6qes4te7cxzldtx0yc9wt8t0fqrt4jyztwytkscvp0lqnheu5cp29mdmr3p0m8z6lq9fr63wgxk03ql488cdttp9lvdtg9cqeayeywehnhnkxs3l2x6cpveuze8k5sxes25luj9u"
+  }
+}

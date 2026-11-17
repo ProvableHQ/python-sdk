@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from ..keystore._mnemonic import derive_seed, generate_phrase
+
 if TYPE_CHECKING:
     # Import only for type annotations; resolved at runtime via _net().
     pass
@@ -130,6 +132,151 @@ class AccountModule:
             field = seed
         pk: Any = net.PrivateKey.from_seed(field)
         return net.Account.from_private_key(pk)
+
+    def from_mnemonic(
+        self,
+        mnemonic: str,
+        *,
+        index: int = 0,
+        derivation: str = "standard",
+    ) -> Any:
+        """Derive an :class:`Account` from a recovery phrase.
+
+        Recovers an account created by a wallet from its BIP-39 phrase, using
+        the derivation the Shield wallet and the other Aleo SDKs use, so the
+        same phrase gives the same account everywhere. One phrase holds many
+        accounts; *index* selects among them.
+
+        The phrase is checked first, so a mistyped word is reported instead of
+        silently producing a different account. Works offline and stores
+        nothing: the caller keeps the phrase, which is the only way to derive
+        the account again. Does not change ``aleo.default_account``.
+
+        Parameters
+        ----------
+        mnemonic:
+            A BIP-39 English phrase of 12, 15, 18, 21 or 24 lower-case words
+            separated by single spaces.
+        index:
+            Which account of the phrase to derive, from 0 through
+            ``2**31 - 1``. Defaults to 0, the first account a wallet shows.
+        derivation:
+            ``"standard"`` (the default) follows the registered Aleo path
+            ``m/44'/683'/<index>'/0'``. ``"legacy"`` follows
+            ``m/44'/0'/<index>'/0'``; choose it only to recover an account
+            from a wallet that predates the registration.
+
+        Returns
+        -------
+        Account
+            The account at *index* of the phrase.
+
+        Raises
+        ------
+        aleo.keystore.KeystoreError
+            With ``code == "INVALID_MNEMONIC"`` when a word is not in the
+            BIP-39 English word list, the word count is wrong, or the checksum
+            does not match. The message never repeats a word of the phrase.
+        ValueError
+            If *index* or *derivation* is outside the accepted values.
+
+        Example
+        -------
+        ::
+
+            first = aleo.account.from_mnemonic(phrase)
+            second = aleo.account.from_mnemonic(phrase, index=1)
+        """
+        net = self._net()
+        seed = derive_seed(mnemonic, index=index, derivation=derivation)
+        pk: Any = net.PrivateKey.from_seed_unchecked(list(seed))
+        return net.Account.from_private_key(pk)
+
+    def generate_mnemonic(self, strength: int = 128) -> str:
+        """Create a new recovery phrase.
+
+        Draws the randomness from the operating system and encodes it as a
+        BIP-39 English phrase. Works offline and stores nothing.
+
+        The phrase is the root secret of every account derived from it: whoever
+        holds it controls them all. Show it to the person who will keep it and
+        nowhere else: do not log it, write it to a file left on disk, or send
+        it to a service.
+
+        Parameters
+        ----------
+        strength:
+            Bits of randomness: 128 (the default) gives 12 words, 256 gives 24.
+
+        Returns
+        -------
+        str
+            The phrase, as lower-case words separated by single spaces. Pass it
+            to :meth:`from_mnemonic` to derive its accounts.
+
+        Raises
+        ------
+        ValueError
+            If *strength* is neither 128 nor 256.
+
+        Example
+        -------
+        ::
+
+            phrase = aleo.account.generate_mnemonic()
+            account = aleo.account.from_mnemonic(phrase)
+        """
+        return generate_phrase(strength)
+
+    def create_with_mnemonic(
+        self,
+        *,
+        strength: int = 128,
+        index: int = 0,
+        derivation: str = "standard",
+    ) -> "tuple[str, Any]":
+        """Create a new recovery phrase and derive its account in one call.
+
+        Use this for a new account that a wallet must be able to import later:
+        the wallet derives the same account from the phrase. :meth:`create`
+        makes an account from a random key instead, which has no phrase.
+
+        Works offline and stores nothing. The caller must give the phrase to
+        the person who will keep it; it is the only way to derive the account
+        again, and it controls every account of the phrase. Does not change
+        ``aleo.default_account``.
+
+        Parameters
+        ----------
+        strength:
+            Bits of randomness: 128 (the default) gives 12 words, 256 gives 24.
+        index:
+            Which account of the phrase to derive, from 0 through
+            ``2**31 - 1``. Defaults to 0, the first account a wallet shows.
+        derivation:
+            ``"standard"`` (the default) or ``"legacy"``, as in
+            :meth:`from_mnemonic`.
+
+        Returns
+        -------
+        tuple[str, Account]
+            The new phrase and the account derived from it.
+
+        Raises
+        ------
+        ValueError
+            If *strength*, *index* or *derivation* is outside the accepted
+            values.
+
+        Example
+        -------
+        ::
+
+            phrase, account = aleo.account.create_with_mnemonic()
+            # show `phrase` to the user once; `account.address` is ready to use
+        """
+        phrase = generate_phrase(strength)
+        return phrase, self.from_mnemonic(phrase, index=index, derivation=derivation)
 
     # ── Encryption ─────────────────────────────────────────────────────────
 

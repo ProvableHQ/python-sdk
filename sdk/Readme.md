@@ -58,6 +58,13 @@ account = aleo.account.from_private_key("APrivateKey1zkp…")
 # Derive deterministically from a field seed
 account = aleo.account.from_seed("123field")
 
+# Recover a wallet account from its recovery phrase (offline; nothing is stored)
+account = aleo.account.from_mnemonic(phrase)            # first account of the phrase
+second = aleo.account.from_mnemonic(phrase, index=1)    # the next one
+
+# Create a new account a wallet can import later (offline; nothing is stored)
+phrase, account = aleo.account.create_with_mnemonic()   # show `phrase` to the user once
+
 # Sign / verify (bytes)
 sig = aleo.account.sign(b"hello aleo", account)
 assert aleo.account.verify(str(account.address), b"hello aleo", sig)
@@ -67,9 +74,113 @@ sv = aleo.account.sign_value("100u64", account)
 assert aleo.account.verify_value(str(account.address), "100u64", sv)
 ```
 
+`create_with_mnemonic` makes a new 12-word phrase (24 with `strength=256`) and returns it with its first account; `generate_mnemonic` returns only the phrase. The phrase controls every account derived from it and is not stored anywhere, so give it to the person who will keep it and do not log it. `create` makes an account from a random key instead, which no phrase can recover. `from_mnemonic` takes a BIP-39 English phrase of 12 to 24 lower-case words separated by single spaces and uses the derivation of the Shield wallet and the other Aleo SDKs, so one phrase gives the same accounts everywhere. A mistyped word raises `aleo.keystore.KeystoreError` with `code == "INVALID_MNEMONIC"` instead of deriving a different account. Pass `derivation="legacy"` only to recover an account from a wallet that used the path `m/44'/0'` before Aleo's own path `m/44'/683'` was registered.
+
 Set `aleo.default_account = account` and the verbs below will use it whenever you omit the signer.
 
 > **Note:** the facade deliberately has no "recover signer from signature" verb. Aleo is a privacy chain — surfacing "which address signed this?" is a de-anonymisation vector. The low-level `Signature.to_address()` primitive remains available directly if you truly need it.
+
+### Store an account — `aleo.keystore`
+
+The functions above keep a key in memory. `aleo.keystore` stores an account on disk and finds it again on later runs, in an account file whose format is shared with the other Aleo SDKs, so an account set up once can serve every tool that reads it. The file is network-neutral: one account works on testnet and mainnet, and named accounts keep separate keys apart. Nothing here contacts a network, and nothing is written until `save`, `protect` or `migrate` is called.
+
+```python
+from aleo import Aleo, HTTPProvider, keystore
+
+aleo = Aleo(HTTPProvider("https://edge.provable.com/api", network="testnet"))
+
+# First run: create an account and store it under a name.
+stored = keystore.save(aleo.account.create(), name="testnet")
+print(stored.address, stored.storage, stored.path)   # never the key
+
+# Later runs: resolve the key and hand it to the client.
+loaded = keystore.load(name="testnet")
+account = aleo.account.from_private_key(loaded.private_key)
+```
+
+The account file is `~/.aleo/accounts/<name>.json`, readable by its owner only. The name defaults to `default`; `ALEO_ACCOUNT` or the `name` argument selects another. `ALEO_ACCOUNTS_DIR` or the `dir` argument moves the directory, for example into a project or a test directory.
+
+#### Choose how the key is stored
+
+`save` takes a `storage` argument. Encryption and the Keychain protect a key at rest: a copied file, a backup, a synced folder. They do not stop a process running as the same user from reading it.
+
+| `storage` | Where the key is | Choose it when |
+| --- | --- | --- |
+| `"plaintext"` (default) | In the account file, mode 0600 | The machine and its backups are trusted; no password is ever needed |
+| `"keychain"` | In the macOS login keychain, as the item `aleo-account-key` for the address, labelled `aleo-account-key:<name>`; the file holds no secret | Working on a Mac, and the file may be copied or backed up. The key has no other copy, so export it once as a backup |
+| `"encrypted"` | In the account file, encrypted under a password | Any system where the file may leak. Each run needs the password |
+| `"none"` | Nowhere; the file records the address | The key arrives through the environment on every run and the file only confirms it is the expected account |
+
+An encrypted account takes its password from the `password` argument, then `ALEO_ACCOUNT_PASSWORD`, then the macOS Keychain when `save_password=True` put it there, then a hidden terminal prompt. An unattended job cannot answer a prompt, so it relies on the variable or the saved password; pass `prompt=False` to fail at once instead of waiting. A wrong password from any source but the prompt is an error and the later sources are not tried.
+
+```python
+keystore.save(account, name="mainnet", storage="encrypted", save_password=True)   # asks for a password twice
+keystore.protect(name="testnet", storage="keychain")    # move an existing account; the old copy is removed after a check
+print(keystore.info(name="testnet"))                    # name, path, address, storage; None when there is no file
+key = keystore.export(name="testnet")                   # the private key itself: do not log it
+```
+
+#### How `load` finds the key
+
+Every tool that uses the keystore resolves the key in the same order, and the first source that supplies one wins:
+
+1. The `private_key` argument.
+2. `ALEO_PRIVATE_KEY`, then its alias `SHIELD_SWAP_PRIVATE_KEY`.
+3. The text file named by `ALEO_PRIVATE_KEY_FILE`, then its alias `SHIELD_SWAP_PRIVATE_KEY_FILE`.
+4. The selected account file.
+5. The `legacy_key` argument, which a tool passes when its own older state file still holds a key.
+
+A key from the environment is used for that process and never written to disk. A variable that is set but empty is an error, as are two variables that hold different keys, and when the account file exists a key from sources 1 to 3 must belong to the address it records. `load` never generates a key: with no source it raises `ACCOUNT_NOT_FOUND`. `loaded.source` names the source used (`"argument"`, `"env"`, `"env-file"`, `"account-file"` or `"legacy"`).
+
+`keystore.migrate(path)` copies the key out of a `profile.json` or `state.json` that keeps it in a top-level `private_key` or `privateKey` field. The old file keeps its plaintext copy unless `remove_legacy_key=True` is passed, which strips the field after the new account has been read back.
+
+#### Handle failures
+
+Every failure the keystore detects is an `aleo.keystore.KeystoreError` (a subclass of `aleo.AleoError`) with a stable `code`. Messages name addresses and paths, never a key or a password.
+
+```python
+from aleo.keystore import KeystoreError
+
+try:
+    loaded = keystore.load()
+except KeystoreError as error:
+    if error.code == "ACCOUNT_NOT_FOUND":
+        ...   # no key in the environment and no account file: create or import one
+    elif error.code == "PASSWORD_REQUIRED":
+        ...   # encrypted account and no password source
+    else:
+        raise
+```
+
+The codes are `ACCOUNT_NOT_FOUND`, `KEY_NOT_STORED`, `ACCOUNT_EXISTS`, `ADDRESS_MISMATCH`, `KEY_CONFLICT`, `EMPTY_KEY_SOURCE`, `INVALID_KEY`, `INVALID_MNEMONIC`, `INVALID_NAME`, `INVALID_ACCOUNT_FILE`, `UNSUPPORTED_VERSION`, `UNSUPPORTED_STORAGE`, `KEYCHAIN_UNAVAILABLE`, `KEYCHAIN_ITEM_NOT_FOUND`, `KEYCHAIN_FAILED`, `PASSWORD_REQUIRED`, `WRONG_PASSWORD`, `TERMINAL_REQUIRED` and `LEGACY_KEY_NOT_FOUND`; the `KeystoreError` docstring says when each is raised. A file system failure on the account file other than a missing file (permission denied, a directory in its place) is raised as `OSError`.
+
+#### Set up an account from a terminal
+
+`python -m aleo.keystore <command>` runs the same operations without writing code. Passwords are never taken from the command line: they come from `ALEO_ACCOUNT_PASSWORD`, the Keychain or a hidden prompt.
+
+| Command | Does |
+| --- | --- |
+| `create` | Generates a key and stores it (`--storage plaintext` unless stated). With `--mnemonic` the key comes from a new recovery phrase, printed once and stored nowhere, so a wallet can import the account later; this needs a terminal |
+| `import` | Stores an existing key from `--key-file`, the key variables or a hidden prompt, or the account of a recovery phrase from `--mnemonic-file` or the prompt (`--index`, `--derivation`). The derived key is stored, not the phrase |
+| `show` | Prints the address, account name and storage type. Never the key |
+| `protect` | Changes the storage with `--storage`; `--save-password` saves the password in the Keychain and `--forget-password` removes a saved one |
+| `export` | Prints the key after a confirmation. Requires a terminal |
+| `migrate` | Copies a key from `--from <profile.json or state.json>`; `--remove-legacy-key` strips it from the old file |
+
+```sh
+python -m aleo.keystore create --name testnet
+python -m aleo.keystore import --key-file ./account.key --storage encrypted --save-password
+python -m aleo.keystore show --json
+```
+
+Every command accepts `--name`, `--dir` and `--json`. With `--json` a result is one object with `name`, `address`, `storage` and `path`, and an error is `{"error": {"code": "…", "message": "…"}}` on standard output; without it, errors go to standard error as `<CODE>: <message>`. `export` and `create --storage none` show a key, so they run only with a terminal attached and never with `--json`: an agent or a script must not run them.
+
+| Exit status | Meaning |
+| --- | --- |
+| 0 | Done |
+| 1 | Failed |
+| 2 | Needs a person: `ACCOUNT_NOT_FOUND`, `KEY_NOT_STORED`, `PASSWORD_REQUIRED` or `TERMINAL_REQUIRED` |
+| 64 | Usage error |
 
 ### 3. Read — balance and mappings
 
