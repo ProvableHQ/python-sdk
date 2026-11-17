@@ -107,7 +107,7 @@ The account file is `~/.aleo/accounts/<name>.json`, readable by its owner only. 
 | `storage` | Where the key is | Choose it when |
 | --- | --- | --- |
 | `"plaintext"` (default) | In the account file, mode 0600 | The machine and its backups are trusted; no password is ever needed |
-| `"keychain"` | In the macOS login keychain, as the item `aleo-account-key` for the address, labelled `aleo-account-key:<name>`; the file holds no secret | Working on a Mac, and the file may be copied or backed up. The key has no other copy, so export it once as a backup |
+| `"keychain"` | In the macOS login keychain, under `aleo-account-key`. Each account file has an entry of its own, named after the address and an identifier the file records, and labelled `aleo-account-key:<name>`; the file holds no secret | Working on a Mac, and the file may be copied or backed up. The key has no other copy, so export it once as a backup |
 | `"encrypted"` | In the account file, encrypted under a password | Any system where the file may leak. Each run needs the password |
 | `"none"` | Nowhere; the file records the address | The key arrives through the environment on every run and the file only confirms it is the expected account |
 

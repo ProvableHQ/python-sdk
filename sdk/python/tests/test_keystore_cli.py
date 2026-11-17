@@ -19,7 +19,6 @@ import pytest
 import aleo
 from aleo import keystore
 from aleo.keystore._cli import main
-from aleo.keystore._keychain import KEY_SERVICE
 from aleo.keystore._runtime import runtime
 from aleo.mainnet import PrivateKey
 
@@ -33,6 +32,7 @@ from keystore_helpers import (  # noqa: F401  (sandbox is a fixture)
     VECTORS,
     absent,
     check_secret,
+    key_entry,
     mode,
     new_account,
     sandbox,
@@ -392,7 +392,7 @@ def test_create_from_a_new_phrase_in_the_keychain_names_the_phrase_as_the_backup
     phrase = _phrase_shown(outcome.out)
     stored = keystore.info(dir=sandbox.dir, name="wallet")
     assert stored is not None and stored.storage == "keychain"
-    key = sandbox.security.entries[f"{KEY_SERVICE} {stored.address}"]
+    key = sandbox.security.entries[key_entry(stored.path)]
     client = aleo.Aleo(aleo.HTTPProvider("http://127.0.0.1:1"))
     if str(client.account.from_mnemonic(phrase).private_key) != key:
         raise AssertionError("the phrase shown does not derive the key in the Keychain")
@@ -419,8 +419,7 @@ def test_create_in_the_keychain_says_the_key_has_no_other_copy(sandbox: Sandbox,
     outcome = run("create", "--storage", "keychain", "--json")
     assert outcome.status == 0
     assert outcome.json["storage"] == "keychain"
-    address = outcome.json["address"]
-    key = sandbox.security.entries[f"{KEY_SERVICE} {address}"]
+    key = sandbox.security.entries[key_entry(outcome.json["path"])]
     absent(outcome.out + outcome.err, key)
     assert "APrivateKey1" not in (sandbox.dir / "default.json").read_text(encoding="utf-8")
     assert "export" in outcome.err
@@ -546,7 +545,7 @@ def test_import_stores_a_key_supplied_through_the_variables(sandbox: Sandbox, ru
     outcome = run("import", "--storage", "keychain", "--json")
     assert outcome.status == 0
     assert outcome.json["address"] == account.address
-    check_secret(sandbox.security.entries[f"{KEY_SERVICE} {account.address}"], account.private_key)
+    check_secret(sandbox.security.entries[key_entry(outcome.json["path"])], account.private_key)
     absent(outcome.out + outcome.err, account.private_key)
 
     key_file = sandbox.root / "key.txt"
@@ -736,7 +735,7 @@ def test_protect_forget_password_with_a_storage_change_removes_the_saved_passwor
     monkeypatch.setenv("ALEO_ACCOUNT_PASSWORD", PASSWORD)
     outcome = run("protect", "--storage", "keychain", "--forget-password", "--json")
     assert outcome.status == 0
-    assert list(sandbox.security.entries) == [f"{KEY_SERVICE} {account.address}"]
+    assert list(sandbox.security.entries) == [key_entry(outcome.json["path"])]
 
 
 def test_protect_forget_password_fails_outside_macos(sandbox: Sandbox, run: Any, monkeypatch: pytest.MonkeyPatch) -> None:

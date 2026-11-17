@@ -16,7 +16,7 @@ from typing import Any, Dict, List, NamedTuple, NoReturn, Optional, Sequence, Tu
 
 from ._encrypted import SALT_BYTES, SCRYPT_MAX_N, SCRYPT_MIN_N, SCRYPT_P, SCRYPT_R
 from ._errors import KeystoreError
-from ._keychain import KEY_SERVICE
+from ._keychain import KEY_SERVICE, is_key_entry_account
 from ._runtime import runtime
 
 # Format version written to, and accepted from, an account file.
@@ -197,11 +197,12 @@ def parse_account_file(text: str, path: str) -> AccountFile:
         exact(key, ["type", "service", "account"], '"key"')
         service = text_of(key["service"], "key.service")
         account = text_of(key["account"], "key.account")
-        # Pinned so a crafted file cannot direct the reader to another entry.
+        # Pinned so a crafted file cannot direct the reader to an entry of
+        # another service or another address.
         if service != KEY_SERVICE:
             raise invalid(f'"key.service" must be "{KEY_SERVICE}"')
-        if account != address:
-            raise invalid('"key.account" must equal "address"')
+        if not is_key_entry_account(account, address):
+            raise invalid('"key.account" must be "address" followed by "-" and 32 hex characters')
         return {
             "version": FILE_VERSION,
             "address": address,

@@ -44,6 +44,8 @@ from keystore_helpers import (  # noqa: F401  (sandbox is a fixture)
     check_secret,
     code_of,
     failure,
+    key_entry,
+    key_entry_account,
     mode,
     new_account,
     sandbox,
@@ -93,7 +95,7 @@ def test_renders_every_sample_account_file_byte_for_byte() -> None:
         assert serialize_account_file(parsed).encode("utf-8") == data, path.name
 
 
-@pytest.mark.parametrize("storage", ["none", "plaintext", "keychain"])
+@pytest.mark.parametrize("storage", ["none", "plaintext"])
 def test_writes_the_sample_byte_for_byte(sandbox: Sandbox, storage: str) -> None:
     stored = keystore.save(SAMPLE.private_key, dir=sandbox.dir, name=storage, storage=storage)
     assert stored == StoredAccount(
@@ -102,9 +104,22 @@ def test_writes_the_sample_byte_for_byte(sandbox: Sandbox, storage: str) -> None
     assert stored.path.read_bytes() == (VECTORS_DIR / f"{storage}.json").read_bytes()
 
 
+def test_writes_the_keychain_sample_byte_for_byte_apart_from_the_entry_name_it_chooses(sandbox: Sandbox) -> None:
+    stored = keystore.save(SAMPLE.private_key, dir=sandbox.dir, name="keychain", storage="keychain")
+    sample = (VECTORS_DIR / "keychain.json").read_text(encoding="utf-8")
+    # Each file names an entry of its own: the address, "-", and 16 random bytes in hex.
+    chosen = key_entry_account(stored.path)
+    assert re.fullmatch(f"{SAMPLE.address}-[0-9a-f]{{32}}", chosen)
+    written = stored.path.read_text(encoding="utf-8")
+    assert written.replace(chosen, key_entry_account(VECTORS_DIR / "keychain.json")) == sample
+    # Two files for one account never choose the same entry.
+    again = keystore.save(SAMPLE.private_key, dir=sandbox.dir, name="again", storage="keychain")
+    assert key_entry_account(again.path) != chosen
+
+
 def test_returns_the_sample_key_from_the_plaintext_and_keychain_samples(sandbox: Sandbox) -> None:
     sandbox.copy_vectors()
-    sandbox.security.entries[f"{KEY_SERVICE} {SAMPLE.address}"] = SAMPLE.private_key
+    sandbox.security.entries[key_entry(sandbox.dir / "keychain.json")] = SAMPLE.private_key
     for name in ("plaintext", "keychain"):
         loaded = keystore.load(dir=sandbox.dir, name=name)
         assert loaded.source == "account-file"
@@ -368,6 +383,18 @@ def test_returns_nothing_for_a_missing_file(sandbox: Sandbox) -> None:
         pytest.param(
             {"version": 1, "address": ADDRESS, "key": {"type": "keychain", "service": KEY_SERVICE, "account": "aleo1other"}},
             id="a keychain key with another account",
+        ),
+        pytest.param(
+            {"version": 1, "address": ADDRESS, "key": {"type": "keychain", "service": KEY_SERVICE, "account": ADDRESS}},
+            id="a keychain key named after the bare address",
+        ),
+        pytest.param(
+            {"version": 1, "address": ADDRESS, "key": {"type": "keychain", "service": KEY_SERVICE, "account": "aleo1other-" + "0" * 32}},
+            id="a keychain key named after another address's entry",
+        ),
+        pytest.param(
+            {"version": 1, "address": ADDRESS, "key": {"type": "keychain", "service": KEY_SERVICE, "account": ADDRESS + "-XYZ"}},
+            id="a keychain key with a malformed entry name",
         ),
         pytest.param('{"version": NaN, "address": "a", "key": {"type": "none"}}', id="a NaN version"),
         pytest.param('{"version": 1, "address": "a", "key": {"type": "none"}} trailing', id="trailing text"),
@@ -1216,12 +1243,14 @@ def test_writes_the_key_through_security_i_and_never_as_a_process_argument(sandb
     stored = keystore.save(account.private_key, dir=sandbox.dir, storage="keychain")
     assert stored.storage == "keychain"
     calls = sandbox.security.calls
-    find = {"args": ["find-generic-password", "-s", "aleo-account-key", "-a", account.address, "-w"], "stdin": None}
+    entry = key_entry_account(stored.path)
+    assert re.fullmatch(f"{account.address}-[0-9a-f]{{32}}", entry)
+    find = {"args": ["find-generic-password", "-s", "aleo-account-key", "-a", entry, "-w"], "stdin": None}
     assert len(calls) == 3
-    # An entry another account file may already rely on is looked for first.
+    # The entry is looked for before it is written.
     assert calls[0] == find
     assert calls[1]["args"] == ["-i"]
-    check_secret(calls[1]["stdin"], f"add-generic-password -U -s aleo-account-key -a {account.address} -l aleo-account-key:default -w {account.private_key}\n")
+    check_secret(calls[1]["stdin"], f"add-generic-password -U -s aleo-account-key -a {entry} -l aleo-account-key:default -w {account.private_key}\n")
     # The write is confirmed by reading the entry back.
     assert calls[2] == find
     for call in calls:
@@ -1232,42 +1261,42 @@ def test_writes_the_key_through_security_i_and_never_as_a_process_argument(sandb
     assert json.loads(text) == {
         "version": 1,
         "address": account.address,
-        "key": {"type": "keychain", "service": "aleo-account-key", "account": account.address},
+        "key": {"type": "keychain", "service": "aleo-account-key", "account": entry},
     }
 
 
-def test_labels_each_entry_with_the_account_name_and_still_finds_it_by_address(sandbox: Sandbox) -> None:
+def test_labels_each_entry_with_the_account_name_and_finds_it_by_the_name_the_file_records(sandbox: Sandbox) -> None:
     first = new_account()
-    keystore.save(first.private_key, dir=sandbox.dir, name="trading", storage="keychain")
-    assert sandbox.security.labels[f"{KEY_SERVICE} {first.address}"] == "aleo-account-key:trading"
+    trading_key = keystore.save(first.private_key, dir=sandbox.dir, name="trading", storage="keychain")
+    assert sandbox.security.labels[key_entry(trading_key.path)] == "aleo-account-key:trading"
 
     second = new_account()
     bot = keystore.save(second.private_key, dir=sandbox.dir, name="bot_1-a", storage="encrypted", password=PASSWORD, save_password=True)
     assert sandbox.security.labels[saved_password_entry(bot.path)] == "aleo-account-password:bot_1-a"
 
     # Changing the storage writes the new entry under the same account name.
-    keystore.protect(dir=sandbox.dir, name="bot_1-a", storage="keychain", password=PASSWORD)
-    assert sandbox.security.labels[f"{KEY_SERVICE} {second.address}"] == "aleo-account-key:bot_1-a"
+    bot_key = keystore.protect(dir=sandbox.dir, name="bot_1-a", storage="keychain", password=PASSWORD)
+    assert sandbox.security.labels[key_entry(bot_key.path)] == "aleo-account-key:bot_1-a"
     trading = keystore.protect(dir=sandbox.dir, name="trading", storage="encrypted", password=PASSWORD, save_password=True)
     assert sandbox.security.labels[saved_password_entry(trading.path)] == "aleo-account-password:trading"
 
-    # The label plays no part in the lookup: reads name only the service and the address.
+    # The label plays no part in the lookup: reads name only the service and the entry.
     sandbox.security.calls.clear()
     keystore.load(dir=sandbox.dir, name="bot_1-a")
     assert sandbox.security.calls == [
-        {"args": ["find-generic-password", "-s", "aleo-account-key", "-a", second.address, "-w"], "stdin": None}
+        {"args": ["find-generic-password", "-s", "aleo-account-key", "-a", key_entry_account(bot_key.path), "-w"], "stdin": None}
     ]
 
 
 def test_reads_the_key_back_from_the_keychain(sandbox: Sandbox) -> None:
     account = new_account()
-    keystore.save(account.private_key, dir=sandbox.dir, storage="keychain")
+    stored = keystore.save(account.private_key, dir=sandbox.dir, storage="keychain")
     sandbox.security.calls.clear()
     loaded = keystore.load(dir=sandbox.dir)
     assert loaded.source == "account-file"
     check_secret(loaded.private_key, account.private_key)
     assert sandbox.security.calls == [
-        {"args": ["find-generic-password", "-s", "aleo-account-key", "-a", account.address, "-w"], "stdin": None}
+        {"args": ["find-generic-password", "-s", "aleo-account-key", "-a", key_entry_account(stored.path), "-w"], "stdin": None}
     ]
 
 
@@ -1289,8 +1318,8 @@ def test_maps_exit_status_44_to_item_not_found_and_other_failures_to_keychain_fa
 def test_fails_with_address_mismatch_when_the_keychain_entry_holds_another_key(sandbox: Sandbox) -> None:
     account = new_account()
     other = new_account()
-    keystore.save(account.private_key, dir=sandbox.dir, storage="keychain")
-    sandbox.security.entries[f"{KEY_SERVICE} {account.address}"] = other.private_key
+    stored = keystore.save(account.private_key, dir=sandbox.dir, storage="keychain")
+    sandbox.security.entries[key_entry(stored.path)] = other.private_key
     error = failure(lambda: keystore.load(dir=sandbox.dir))
     assert error.code == "ADDRESS_MISMATCH"
     assert account.address in str(error)
@@ -1364,7 +1393,6 @@ def test_fails_to_load_a_keychain_file_outside_macos_and_never_falls_back(
 
 def test_moves_an_account_through_every_storage_and_removes_each_old_secret(sandbox: Sandbox) -> None:
     account = new_account()
-    key_entry = f"{KEY_SERVICE} {account.address}"
     keystore.save(account.private_key, dir=sandbox.dir)
 
     # plaintext -> keychain
@@ -1373,13 +1401,14 @@ def test_moves_an_account_through_every_storage_and_removes_each_old_secret(sand
         name="default", path=sandbox.dir / "default.json", address=account.address, storage="keychain"
     )
     assert "APrivateKey1" not in stored.path.read_text(encoding="utf-8")
-    check_secret(sandbox.security.entries[key_entry], account.private_key)
+    key_entry_name = key_entry(stored.path)
+    check_secret(sandbox.security.entries[key_entry_name], account.private_key)
     check_secret(keystore.export(dir=sandbox.dir), account.private_key)
 
     # keychain -> encrypted, password saved: the key entry goes, the password entry appears.
     stored = keystore.protect(dir=sandbox.dir, storage="encrypted", password=PASSWORD, save_password=True, prompt=False)
     assert stored.storage == "encrypted"
-    assert key_entry not in sandbox.security.entries
+    assert key_entry_name not in sandbox.security.entries
     assert sandbox.security.entries.get(saved_password_entry(stored.path)) == PASSWORD.encode("utf-8").hex()
     check_secret(keystore.export(dir=sandbox.dir, prompt=False), account.private_key)
 
@@ -1651,24 +1680,27 @@ def test_removes_the_keychain_entry_it_wrote_when_another_account_takes_the_name
     error = failure(lambda: keystore.save(mine.private_key, dir=sandbox.dir, storage="keychain"))
     assert error.code == "ACCOUNT_EXISTS"
     assert mine.address in str(error)
-    assert f"{KEY_SERVICE} {mine.address}" not in sandbox.security.entries
+    assert sandbox.security.entries == {}
     check_secret(keystore.export(dir=sandbox.dir), theirs.private_key)
     assert os.listdir(sandbox.dir) == ["default.json"]
 
 
 def test_accepts_the_same_account_in_the_same_storage_stored_by_another_process_meanwhile(sandbox: Sandbox) -> None:
     account = new_account()
+    their_entry = f"{account.address}-{'ab' * 16}"
 
     def same_account_appears(args: Any) -> Any:
+        # The other process stores the same account, with a Keychain entry of its own.
         if args[0] == "-i" and not (sandbox.dir / "default.json").exists():
-            sandbox.put("default", {"version": 1, "address": account.address, "key": {"type": "keychain", "service": KEY_SERVICE, "account": account.address}})
+            sandbox.security.entries[f"{KEY_SERVICE} {their_entry}"] = account.private_key
+            sandbox.put("default", {"version": 1, "address": account.address, "key": {"type": "keychain", "service": KEY_SERVICE, "account": their_entry}})
         return None
 
     sandbox.security.force(same_account_appears)
     stored = keystore.save(account.private_key, dir=sandbox.dir, storage="keychain")
     assert (stored.name, stored.address, stored.storage) == ("default", account.address, "keychain")
-    # The entry both writers share is kept.
-    check_secret(sandbox.security.entries[f"{KEY_SERVICE} {account.address}"], account.private_key)
+    # The entry made for the file that was never created is gone; the winner's is untouched.
+    assert list(sandbox.security.entries) == [f"{KEY_SERVICE} {their_entry}"]
     sandbox.security.force(None)
     check_secret(keystore.export(dir=sandbox.dir), account.private_key)
 
@@ -1687,38 +1719,82 @@ def test_removes_the_keychain_entry_when_the_account_file_cannot_be_created(sand
 # ---------------------------------------------------------------------------
 
 
-def test_keeps_a_key_another_account_file_relies_on_when_a_later_save_fails(sandbox: Sandbox) -> None:
+def test_leaves_another_account_files_key_alone_when_a_later_save_of_the_same_account_fails(sandbox: Sandbox) -> None:
     account = new_account()
-    keystore.save(account.private_key, dir=sandbox.dir, name="original", storage="keychain")
+    original = keystore.save(account.private_key, dir=sandbox.dir, name="original", storage="keychain")
     # The same account is saved again where the file cannot be created.
     blocked = sandbox.root / "blocked"
     blocked.write_text("not a directory", encoding="utf-8")
     with pytest.raises(OSError):
         keystore.save(account.private_key, dir=blocked, name="copy", storage="keychain")
-    # The entry was there before the failed call, so it is not that call's to remove.
-    check_secret(sandbox.security.entries[f"{KEY_SERVICE} {account.address}"], account.private_key)
+    # The failed save made and removed an entry of its own; the original's is untouched.
+    assert list(sandbox.security.entries) == [key_entry(original.path)]
     check_secret(keystore.export(dir=sandbox.dir, name="original"), account.private_key)
 
 
-def test_does_not_rewrite_a_key_entry_that_already_holds_the_key(sandbox: Sandbox) -> None:
+def test_does_not_let_a_failed_save_remove_the_key_of_a_save_that_succeeds_alongside_it(sandbox: Sandbox) -> None:
     account = new_account()
-    keystore.save(account.private_key, dir=sandbox.dir, name="first", storage="keychain")
-    sandbox.security.calls.clear()
-    keystore.save(account.private_key, dir=sandbox.dir, name="second", storage="keychain")
-    # One look at the existing entry and no write.
-    assert [call["args"][0] for call in sandbox.security.calls] == ["find-generic-password"]
-    assert sandbox.security.labels[f"{KEY_SERVICE} {account.address}"] == "aleo-account-key:first"
+    saved: List[Any] = []
+
+    def second_save_runs_in_between(args: Any) -> Any:
+        # Once the first save is writing its Keychain entry, a second save of
+        # the same account runs to completion, and the first one's file can
+        # then no longer be created.
+        if args[0] == "-i" and not saved:
+            saved.append(None)
+            saved[0] = keystore.save(account.private_key, dir=sandbox.dir, name="b", storage="keychain")
+            (sandbox.dir / "a.json").mkdir()
+        return None
+
+    sandbox.security.force(second_save_runs_in_between)
+    with pytest.raises(OSError):
+        keystore.save(account.private_key, dir=sandbox.dir, name="a", storage="keychain")
+    sandbox.security.force(None)
+    # Neither save can adopt the other's entry, so the failed one removes only its own.
+    assert list(sandbox.security.entries) == [key_entry(saved[0].path)]
+    check_secret(keystore.export(dir=sandbox.dir, name="b"), account.private_key)
 
 
-def test_keeps_the_keychain_key_while_a_neighbouring_account_file_still_points_at_it(sandbox: Sandbox) -> None:
+def test_gives_two_account_files_for_one_account_separate_key_entries(sandbox: Sandbox) -> None:
+    account = new_account()
+    first = keystore.save(account.private_key, dir=sandbox.dir, name="first", storage="keychain")
+    second = keystore.save(account.private_key, dir=sandbox.dir, name="second", storage="keychain")
+    assert key_entry(first.path) != key_entry(second.path)
+    assert len(sandbox.security.entries) == 2
+    assert sandbox.security.labels[key_entry(first.path)] == "aleo-account-key:first"
+    assert sandbox.security.labels[key_entry(second.path)] == "aleo-account-key:second"
+
+
+def test_removes_only_its_own_key_entry_when_one_of_two_files_for_an_account_leaves_the_keychain(sandbox: Sandbox) -> None:
     account = new_account()
     keystore.save(account.private_key, dir=sandbox.dir, name="first", storage="keychain")
-    keystore.save(account.private_key, dir=sandbox.dir, name="second", storage="keychain")
+    second = keystore.save(account.private_key, dir=sandbox.dir, name="second", storage="keychain")
     keystore.protect(dir=sandbox.dir, name="first", storage="plaintext")
-    assert f"{KEY_SERVICE} {account.address}" in sandbox.security.entries
+    assert list(sandbox.security.entries) == [key_entry(second.path)]
     check_secret(keystore.export(dir=sandbox.dir, name="second"), account.private_key)
-    # Once the last file has left the Keychain, the entry goes.
     keystore.protect(dir=sandbox.dir, name="second", storage="plaintext")
+    assert sandbox.security.entries == {}
+
+
+def test_leaves_the_same_account_in_another_directory_working_when_one_leaves_the_keychain(sandbox: Sandbox) -> None:
+    account = new_account()
+    elsewhere = sandbox.root / "other-project"
+    keystore.save(account.private_key, dir=sandbox.dir, storage="keychain")
+    other = keystore.save(account.private_key, dir=elsewhere, storage="keychain")
+    keystore.protect(dir=sandbox.dir, storage="plaintext")
+    # The other directory's file has its own entry, which nothing here touched.
+    assert list(sandbox.security.entries) == [key_entry(other.path)]
+    check_secret(keystore.export(dir=elsewhere), account.private_key)
+
+
+def test_keeps_the_key_entry_while_a_copy_of_the_keychain_account_file_remains_beside_it(sandbox: Sandbox) -> None:
+    account = new_account()
+    original = keystore.save(account.private_key, dir=sandbox.dir, name="original", storage="keychain")
+    (sandbox.dir / "copy.json").write_bytes(original.path.read_bytes())
+    keystore.protect(dir=sandbox.dir, name="original", storage="plaintext")
+    # The copy points at the same entry, so it still finds the key.
+    check_secret(keystore.export(dir=sandbox.dir, name="copy"), account.private_key)
+    keystore.protect(dir=sandbox.dir, name="copy", storage="plaintext")
     assert sandbox.security.entries == {}
 
 
@@ -1807,7 +1883,7 @@ def test_removes_the_new_saved_password_when_a_move_to_encrypted_storage_is_undo
     sandbox.security.force(None)
     assert stored.path.read_bytes() == data
     # Only the original key entry is left.
-    assert list(sandbox.security.entries) == [f"{KEY_SERVICE} {account.address}"]
+    assert list(sandbox.security.entries) == [key_entry(stored.path)]
 
 
 # ---------------------------------------------------------------------------
@@ -2185,22 +2261,17 @@ def test_stores_reads_and_removes_the_sample_account_through_the_real_keychain(
     if sandbox.real_home is not None:
         monkeypatch.setenv("HOME", sandbox.real_home)
 
-    # Saved-password entries are named after a file's salt; every one this
-    # test makes is recorded so it can be checked and removed.
-    password_accounts: List[str] = []
+    # Every entry is named after its own file, so each one this test makes is
+    # recorded, checked and removed. Nothing here can touch another run's entries.
+    made: List[Any] = []
 
     def leftovers() -> List[bool]:
-        return [read_keychain(KEY_SERVICE, SAMPLE.address) is None] + [
-            read_keychain(PASSWORD_SERVICE, account) is None for account in password_accounts
-        ]
+        return [read_keychain(service, account) is None for service, account in made]
 
-    # Checked before the cleanup below is armed: entries that are already
-    # there belong to someone else's run and are left alone.
-    assert all(leftovers()), "the sample account already has Keychain entries; retry later"
     password = VECTORS["encrypted"]["password"]
     try:
         stored = keystore.save(SAMPLE.private_key, dir=sandbox.dir, name="keychain", storage="keychain")
-        assert stored.path.read_bytes() == (VECTORS_DIR / "keychain.json").read_bytes()
+        made.append((KEY_SERVICE, key_entry_account(stored.path)))
         loaded = keystore.load(dir=sandbox.dir, name="keychain", prompt=False)
         assert loaded.source == "account-file"
         assert loaded.address == SAMPLE.address
@@ -2210,16 +2281,15 @@ def test_stores_reads_and_removes_the_sample_account_through_the_real_keychain(
         encrypted = keystore.protect(
             dir=sandbox.dir, name="keychain", storage="encrypted", password=password, save_password=True, prompt=False
         )
-        password_accounts.append(saved_password_account(encrypted.path))
-        assert read_keychain(KEY_SERVICE, SAMPLE.address) is None
-        assert read_keychain(PASSWORD_SERVICE, password_accounts[0]) == VECTORS["keychain"]["passwordValue"]
+        made.append((PASSWORD_SERVICE, saved_password_account(encrypted.path)))
+        assert read_keychain(*made[0]) is None
+        assert read_keychain(*made[1]) == VECTORS["keychain"]["passwordValue"]
         check_secret(keystore.export(dir=sandbox.dir, name="keychain", prompt=False), SAMPLE.private_key)
 
         # Back to plaintext: the saved password goes too.
         keystore.protect(dir=sandbox.dir, name="keychain", storage="plaintext", prompt=False)
         assert all(leftovers())
     finally:
-        delete_keychain(KEY_SERVICE, SAMPLE.address)
-        for account in password_accounts:
-            delete_keychain(PASSWORD_SERVICE, account)
+        for service, account in made:
+            delete_keychain(service, account)
     assert all(leftovers())

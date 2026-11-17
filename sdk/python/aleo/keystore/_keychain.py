@@ -6,14 +6,20 @@ process arguments.
 """
 from __future__ import annotations
 
+import os
 import re
 from typing import Optional
 
 from ._errors import KeystoreError
 from ._runtime import runtime
 
-# Keychain service holding private keys; the entry's account is the address.
+# Keychain service holding private keys. The entry's account names one account
+# file: the address followed by an identifier chosen when the file is written.
 KEY_SERVICE = "aleo-account-key"
+
+# Length of the identifier in a key entry's account, in bytes.
+_KEY_ENTRY_ID_BYTES = 16
+_KEY_ENTRY_ID = re.compile(r"[0-9a-f]{32}")
 
 # Keychain service holding saved passwords. The entry's account names one
 # encrypted file: the address followed by the file's salt.
@@ -30,8 +36,40 @@ _UNQUOTED = re.compile(r"[A-Za-z0-9]+")
 _LABEL_NAME = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
 
 # Entry accounts that can be placed on a ``security -i`` command line without
-# quoting: an address, optionally followed by ``-`` and a salt in hex.
+# quoting: an address, optionally followed by ``-`` and an identifier in hex.
 _ENTRY_ACCOUNT = re.compile(r"[A-Za-z0-9]+(?:-[0-9a-f]+)?")
+
+
+def new_key_entry_account(address: str) -> str:
+    """Name a new Keychain entry for the key of one account file.
+
+    Every account file gets an entry of its own. Entries are never shared
+    between files that were stored separately, so writing, undoing or removing
+    one file's entry cannot affect another file that holds the same key. The
+    account file records the name, so the entry is found again after the file
+    is renamed or moved.
+
+    Args:
+        address: Aleo address of the account.
+
+    Returns:
+        The entry's account: the address, ``-``, and 16 random bytes in hex.
+    """
+    return f"{address}-{os.urandom(_KEY_ENTRY_ID_BYTES).hex()}"
+
+
+def is_key_entry_account(account: str, address: str) -> bool:
+    """Check that a key entry's account belongs to an address.
+
+    Args:
+        account: The ``account`` recorded in an account file.
+        address: The address recorded in the same file.
+
+    Returns:
+        True when the account is the address, ``-``, and 32 hex characters.
+    """
+    prefix = f"{address}-"
+    return account.startswith(prefix) and _KEY_ENTRY_ID.fullmatch(account[len(prefix):]) is not None
 
 
 def keychain_available() -> bool:
@@ -107,14 +145,13 @@ def write_keychain(service: str, address: str, value: str, name: str) -> bool:
     Access shows, is ``<service>:<name>``, so entries of several accounts can
     be told apart; the label takes no part in finding the entry.
 
-    An entry may be shared: every account file that holds the same key in the
-    Keychain points at one entry. The existing entry is therefore read first,
-    and one that already holds the value is left as it is.
+    The existing entry is read first, and one that already holds the value is
+    left as it is.
 
     Args:
         service: Keychain service name.
-        address: The entry's account: an Aleo address, or an address followed
-            by ``-`` and a salt in hex.
+        address: The entry's account: an Aleo address followed by ``-`` and
+            an identifier in hex.
         value: Secret to store. Must be ASCII letters and digits only.
         name: Account name, shown in the entry's label.
 

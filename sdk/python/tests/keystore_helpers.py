@@ -165,6 +165,16 @@ def sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sandbox:
     return box
 
 
+def key_entry_account(path: Any) -> str:
+    """The Keychain account of the key entry that one Keychain account file points at."""
+    return json.loads(Path(path).read_text(encoding="utf-8"))["key"]["account"]
+
+
+def key_entry(path: Any) -> str:
+    """The stand-in Keychain's key for the key entry of one Keychain account file."""
+    return f"aleo-account-key {key_entry_account(path)}"
+
+
 def saved_password_account(path: Any) -> str:
     """The Keychain account of the saved password that belongs to one encrypted account file."""
     from aleo.keystore._password import password_entry_account
