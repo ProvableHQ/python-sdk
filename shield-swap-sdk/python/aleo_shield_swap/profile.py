@@ -47,6 +47,42 @@ def _selected_account_name(account: Optional[str]) -> str:
     return account if account is not None else (os.environ.get("ALEO_ACCOUNT") or "default")
 
 
+def _same_directory(first: Path, second: Path) -> bool:
+    """Report whether two paths name one directory, following symbolic links."""
+    try:
+        return os.path.samefile(first, second)
+    except OSError:
+        # A directory that does not exist yet is compared by its resolved path.
+        return os.path.normcase(os.path.realpath(first)) == os.path.normcase(os.path.realpath(second))
+
+
+def _reject_account_in_profile_files(home: Path, account: Optional[str],
+                                     accounts_dir: "Path | str | None") -> None:
+    """Refuse an account file that is also one of the profile's own files.
+
+    The keystore stores an account as ``<name>.json``. When the accounts
+    directory is the profile home, the names ``profile`` and ``credentials``
+    select ``profile.json`` and ``credentials.json``, and writing either
+    file would replace the stored key. Reads the environment and resolves
+    paths; writes nothing.
+
+    Raises:
+        ValueError: The selected account file is ``profile.json`` or
+            ``credentials.json`` in ``home``.
+    """
+    name = _selected_account_name(account)
+    if f"{name}.json" not in (_PROFILE, _CREDENTIALS):
+        return
+    # Resolve the directory as the keystore does: argument, variable, then default.
+    directory = Path(accounts_dir or os.environ.get("ALEO_ACCOUNTS_DIR")
+                     or Path.home() / ".aleo" / "accounts").expanduser()
+    if _same_directory(directory, home):
+        raise ValueError(
+            f'The account "{name}" in {directory} would be stored as {home / (name + ".json")}, '
+            "a file this profile writes its own data to. Choose another account name, or an "
+            "accounts directory other than the profile home.")
+
+
 def _report_legacy_key(path: Path, address: str) -> None:
     """Point callers to the migration command for a key still in profile.json.
 
@@ -203,9 +239,15 @@ class Profile:
                 to another account. Other codes identify invalid key sources,
                 names, or unavailable storage. An existing profile reports key
                 errors when :attr:`private_key` is read.
+            ValueError: The account file would be ``profile.json`` or
+                ``credentials.json`` in ``home``: the account is named
+                ``profile`` or ``credentials`` and the accounts directory is
+                the profile home. Nothing is written. Choose another name or
+                another accounts directory.
         """
         # Treat ~ as the user's home, including paths passed directly from Python.
         home = Path(home).expanduser() if home is not None else cls.default_home()
+        _reject_account_in_profile_files(home, account, accounts_dir)
         path = home / _PROFILE
         if path.exists():
             path.chmod(0o600)             # heal a pre-existing loose mode

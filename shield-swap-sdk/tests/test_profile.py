@@ -353,6 +353,53 @@ def test_accounts_dir_variable_is_honoured(tmp_path, monkeypatch, account_sandbo
     same_secret(Profile.load_or_create(tmp_path / "home").private_key, profile.private_key)
 
 
+@pytest.mark.parametrize("name", ["profile", "credentials"])
+def test_account_file_that_is_a_profile_file_is_rejected_before_anything_is_written(tmp_path, name):
+    home = tmp_path / "home"
+    with pytest.raises(ValueError, match=f"{name}.json"):
+        Profile.load_or_create(home, accounts_dir=home, account=name)
+    assert not home.exists()
+
+
+def test_account_file_that_is_a_profile_file_is_rejected_when_the_variables_select_it(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    monkeypatch.setenv("ALEO_ACCOUNTS_DIR", str(home))
+    monkeypatch.setenv("ALEO_ACCOUNT", "profile")
+    with pytest.raises(ValueError, match="profile.json"):
+        Profile.load_or_create(home)
+    assert not home.exists()
+
+
+def test_account_file_that_is_a_profile_file_is_rejected_through_another_spelling_of_the_home(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    (tmp_path / "link").symlink_to(home, target_is_directory=True)
+    with pytest.raises(ValueError, match="profile.json"):
+        Profile.load_or_create(home, accounts_dir=tmp_path / "link", account="profile")
+    assert files_under(home) == []
+
+
+def test_stored_account_named_like_the_credentials_file_is_left_untouched(tmp_path):
+    # Saving credentials would replace this account file, so the profile refuses it.
+    home = tmp_path / "home"
+    account = new_account()
+    stored = keystore.save(account.private_key, name="credentials", dir=home)
+    before = Path(stored.path).read_bytes()
+    with pytest.raises(ValueError, match="credentials.json"):
+        Profile.load_or_create(home, accounts_dir=home, account="credentials")
+    assert files_under(home) == [Path(stored.path)]
+    assert Path(stored.path).read_bytes() == before
+
+
+def test_other_account_names_may_live_in_the_profile_home(tmp_path):
+    home = tmp_path / "home"
+    profile = Profile.load_or_create(home, accounts_dir=home, account="trading")
+    profile.save_credentials(jwt="token")
+    reopened = Profile.load_or_create(home, accounts_dir=home)
+    same_secret(reopened.private_key, profile.private_key)
+    assert {path.name for path in files_under(home)} == {"profile.json", "credentials.json", "trading.json"}
+
+
 # Protecting keys with encryption or Keychain
 
 def test_encrypted_account_needs_its_password_on_later_runs(tmp_path, monkeypatch, account_sandbox):
