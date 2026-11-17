@@ -20,6 +20,7 @@ from aleo.keystore import KeystoreError
 
 from aleo_shield_swap import ShieldSwap
 from aleo_shield_swap import profile as profile_module
+from aleo_shield_swap.journal import Journal
 from aleo_shield_swap.profile import DEFAULT_ENDPOINT, Profile
 
 # Fixed passwords for unfunded test accounts.
@@ -389,6 +390,35 @@ def test_stored_account_named_like_the_credentials_file_is_left_untouched(tmp_pa
         Profile.load_or_create(home, accounts_dir=home, account="credentials")
     assert files_under(home) == [Path(stored.path)]
     assert Path(stored.path).read_bytes() == before
+
+
+def test_saved_account_name_that_selects_a_profile_file_is_rejected_on_reopening(tmp_path, account_sandbox):
+    home = tmp_path / "home"
+    Profile.load_or_create(home, account="credentials")
+    moved = home / "credentials.json"
+    (account_sandbox.accounts / "credentials.json").rename(moved)
+    before = moved.read_bytes()
+    # The saved name selects the account here, without the argument or the variable.
+    with pytest.raises(ValueError, match="credentials.json"):
+        Profile.load_or_create(home, accounts_dir=home)
+    assert moved.read_bytes() == before
+
+
+def test_saved_account_name_gives_way_to_the_variable_when_checking_profile_files(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    Profile.load_or_create(home, account="credentials")
+    other = Profile.load_or_create(tmp_path / "other-home", accounts_dir=home, account="trading")
+    monkeypatch.setenv("ALEO_ACCOUNT", "trading")
+    reopened = Profile.load_or_create(tmp_path / "other-home", accounts_dir=home)
+    same_secret(reopened.private_key, other.private_key)
+
+
+def test_account_named_like_a_profile_file_works_outside_the_profile_home(tmp_path):
+    profile = Profile.load_or_create(tmp_path / "home", account="credentials")
+    profile.save_credentials(jwt="token")
+    reopened = Profile.load_or_create(tmp_path / "home")
+    same_secret(reopened.private_key, profile.private_key)
+    assert reopened.credentials == {"jwt": "token"}
 
 
 def test_other_account_names_may_live_in_the_profile_home(tmp_path):
@@ -764,6 +794,25 @@ def test_clients_of_two_homes_on_one_account_reserve_different_swap_identities(t
     counters = [identity.counter for dex in (first, second, first) for identity in dex._reserve_identities(object(), 1)]
     assert counters == [0, 1, 2]
     assert first.journal.path != second.journal.path
+
+
+def test_client_of_a_second_home_skips_counters_an_earlier_journal_still_has_pending(tmp_path, monkeypatch):
+    aleo = Mock()
+    aleo.network_name = "testnet"
+    monkeypatch.setattr("aleo.Aleo", Mock(return_value=aleo))
+    monkeypatch.setattr("aleo.HTTPProvider", Mock())
+    # The earlier swaps have not finalized, so the chain cannot report their counters.
+    monkeypatch.setattr(ShieldSwap, "_blinded_address_used", lambda self, blinded_address: False)
+    monkeypatch.setattr(
+        "aleo_shield_swap.client.blinded_identity_at",
+        lambda aleo, account, program, counter: SimpleNamespace(counter=counter, blinded_address=f"ba{counter}"))
+    # A journal that reserved counters before the ledger existed.
+    profile = Profile.load_or_create(tmp_path / "one")
+    assert Journal(profile.journal_path).reserve_counters(2) == [0, 1]
+
+    ShieldSwap.from_profile(tmp_path / "one")
+    second = ShieldSwap.from_profile(tmp_path / "two")
+    assert [identity.counter for identity in second._reserve_identities(object(), 1)] == [2]
 
 
 def test_from_profile_reports_a_locked_account(tmp_path, monkeypatch):

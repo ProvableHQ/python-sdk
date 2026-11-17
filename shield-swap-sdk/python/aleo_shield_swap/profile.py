@@ -61,7 +61,7 @@ def _same_directory(first: Path, second: Path) -> bool:
         return os.path.normcase(os.path.realpath(first)) == os.path.normcase(os.path.realpath(second))
 
 
-def _reject_account_in_profile_files(home: Path, account: Optional[str],
+def _reject_account_in_profile_files(home: Path, name: str,
                                      accounts_dir: "Path | str | None") -> None:
     """Refuse an account file that is also one of the profile's own files.
 
@@ -75,7 +75,6 @@ def _reject_account_in_profile_files(home: Path, account: Optional[str],
         ValueError: The selected account file is ``profile.json`` or
             ``credentials.json`` in ``home``.
     """
-    name = _selected_account_name(account)
     if f"{name}.json" not in (_PROFILE, _CREDENTIALS):
         return
     # Resolve the directory as the keystore does: argument, variable, then default.
@@ -252,12 +251,14 @@ class Profile:
             ValueError: The account file would be ``profile.json`` or
                 ``credentials.json`` in ``home``: the account is named
                 ``profile`` or ``credentials`` and the accounts directory is
-                the profile home. Nothing is written. Choose another name or
-                another accounts directory.
+                the profile home. The name is the one that selects the
+                account, including the name saved in an existing profile.
+                Nothing is written. Choose another name or another accounts
+                directory.
         """
         # Treat ~ as the user's home, including paths passed directly from Python.
         home = Path(home).expanduser() if home is not None else cls.default_home()
-        _reject_account_in_profile_files(home, account, accounts_dir)
+        _reject_account_in_profile_files(home, _selected_account_name(account), accounts_dir)
         path = home / _PROFILE
         if path.exists():
             path.chmod(0o600)             # heal a pre-existing loose mode
@@ -266,6 +267,10 @@ class Profile:
             profile._account = account
             profile._accounts_dir = accounts_dir
             profile._password = password
+            # The name saved in the profile selects the account when nothing else does.
+            saved = profile._data.get("account")
+            if account is None and not os.environ.get("ALEO_ACCOUNT") and isinstance(saved, str):
+                _reject_account_in_profile_files(home, saved, accounts_dir)
         else:
             import aleo
             from aleo import keystore
