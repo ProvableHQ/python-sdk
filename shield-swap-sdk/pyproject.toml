@@ -1,10 +1,10 @@
 [project]
 name = "shield-swap-sdk"
-version = "0.8.0"
+version = "0.9.0"
 description = "Python SDK for the shield swap AMM Dex on Aleo"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["aleo-sdk>=0.8.0", "requests>=2"]   # 0.8.0: aleo.inventory (record management)
+dependencies = ["aleo-sdk>=0.9.0", "requests>=2"]   # 0.9.0: aleo.keystore (account keystore)
 
 [project.optional-dependencies]
 async = ["httpx>=0.27"]

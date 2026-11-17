@@ -21,8 +21,11 @@ python -m aleo_shield_swap.examples.first_swap.swap
 
 ## 1. Create an account
 
-Start with an existing testnet private key or let the SDK create and retain one
-in `~/.shield-swap/profile.json`.
+Start with an existing testnet private key or let the SDK create and retain
+one. `Profile.load_or_create` stores a new account in the Aleo account
+keystore (`~/.aleo/accounts/default.json`), where the other Aleo tools find it
+too, and records its address in `~/.shield-swap/profile.json`. Later runs
+reuse that account.
 
 ```python
 import os

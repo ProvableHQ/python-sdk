@@ -43,7 +43,7 @@ pip install -e "shield-swap-sdk[async]"        # + AsyncShieldSwap (httpx)
 pip install -e "shield-swap-sdk[mcp]"          # + the MCP server
 ```
 
-Requires `aleo-sdk>=0.8.0` (this repo's SDK; imports as `aleo`) and Python 3.10+.
+Requires `aleo-sdk>=0.9.0` (this repo's SDK; imports as `aleo`) and Python 3.10+.
 
 ## First swap example
 
@@ -71,6 +71,77 @@ python -m aleo_shield_swap          # prints the agent guide
 Claude Code users get it via the `shield-swap` skill (packaged under
 `aleo_shield_swap/skills/`, copy into `.claude/skills/`); any MCP client
 can run the same lifecycle through `python -m aleo_shield_swap.mcp`.
+
+## Profiles and the account key
+
+`ShieldSwap.from_profile()` and `Profile.load_or_create()` keep a trader's
+state between runs in a profile home (`~/.shield-swap`, `SHIELD_SWAP_HOME`,
+or the `home` argument): API credentials, the swap journal, and
+`profile.json`, which records the account's address, its account name, the
+network and the endpoint.
+
+The private key is not in the profile. It is found through the Aleo SDK's
+account keystore ([`aleo.keystore`](../sdk/Readme.md#store-an-account--aleokeystore)),
+which the other Aleo tools read as well, so an account set up once serves all
+of them:
+
+1. `ALEO_PRIVATE_KEY`, or the text file named by `ALEO_PRIVATE_KEY_FILE`
+   (`SHIELD_SWAP_PRIVATE_KEY` and `SHIELD_SWAP_PRIVATE_KEY_FILE` are aliases).
+   A key supplied this way is used for the process and never written to disk,
+   so it has to be supplied on every run.
+2. The account file `~/.aleo/accounts/<name>.json`. The name comes from the
+   `account` argument, then `ALEO_ACCOUNT`, then the name recorded in the
+   profile, then `default`.
+
+A new profile adopts the account those sources supply. When there is none it
+creates an account and stores it in the keystore; `create=False` raises
+instead. Two profile homes that select the same account name therefore share
+one account: give a second address its own home and its own `account` name.
+Whichever source supplies the key later, it must belong to the
+address the profile records, so a stale variable or the wrong account name is
+an error naming both addresses instead of a trade from another account.
+
+```python
+from aleo_shield_swap import Profile, ShieldSwap
+
+# First run: adopt the stored account, or create one and store it.
+profile = Profile.load_or_create()
+
+# Or choose how a newly created key is held, then build the client. An
+# encrypted account takes its password from ALEO_ACCOUNT_PASSWORD or asks for
+# it twice on the terminal.
+Profile.load_or_create("~/.shield-swap-main", network="mainnet", account="mainnet",
+                       storage="encrypted", save_password=True)
+dex = ShieldSwap.from_profile("~/.shield-swap-main")
+```
+
+`storage` applies when an account is created: `"plaintext"` (the default) is
+a file only its owner can read; `"keychain"` keeps the key in the macOS login
+keychain; `"encrypted"` encrypts it under a password, which later runs take
+from the `password` argument, `ALEO_ACCOUNT_PASSWORD`, the macOS Keychain
+(`save_password=True`, macOS only) or a hidden prompt on a terminal. Keychain and
+encrypted storage protect a copied or backed-up file; they do not stop
+another process running as the same user. An unattended job with an encrypted
+account needs the variable or the saved password, because it cannot answer a
+prompt.
+
+`profile.private_key` looks the key up on first use and raises
+`aleo.keystore.KeystoreError` when it cannot: read `error.code`
+(`PASSWORD_REQUIRED`, `ADDRESS_MISMATCH`, `ACCOUNT_NOT_FOUND`, …).
+`accounts_dir` (or `ALEO_ACCOUNTS_DIR`) points at another accounts directory;
+the profile does not record it, so pass it on every run.
+
+A profile written by an earlier release keeps its key in `profile.json` and
+works unchanged. The first read of its key logs one warning on the
+`aleo_shield_swap.profile` logger with the command that moves the key:
+
+```sh
+python -m aleo.keystore migrate --from ~/.shield-swap/profile.json --remove-legacy-key
+```
+
+Without `--remove-legacy-key` the command copies the key and leaves the
+plaintext copy in `profile.json`. Earlier releases cannot read a profile that
+no longer holds the key.
 
 ## How calls work
 

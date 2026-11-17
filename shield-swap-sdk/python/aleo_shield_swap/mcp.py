@@ -14,8 +14,10 @@ Environment:
                       the provider derives ``/v2`` reads, ``/prove``, and
                       ``/scanner`` from it)
     ALEO_PRIVATE_KEY  Explicit signer (overrides the profile); without it
-                      the server binds ShieldSwap.from_profile() —
-                      ~/.shield-swap key material, journal, credentials
+                      the server binds ShieldSwap.from_profile() — the
+                      ~/.shield-swap journal and credentials, signing with
+                      the profile's account from the Aleo account keystore
+                      (~/.aleo/accounts)
     ALEO_NETWORK      ``testnet`` (default) or ``mainnet``
     ALEO_E2E_API_KEY / ALEO_E2E_CONSUMER_ID
                       Delegated-proving + hosted-scanner credentials
@@ -86,6 +88,7 @@ def _build_dex() -> Any:
         return ShieldSwap(aleo)
     # No explicit key: bind the local participant profile (created on first
     # use), so MCP agents get persistence — journal, counters, credentials.
+    # Its account comes from the Aleo account keystore.
     return ShieldSwap.from_profile()
 
 
@@ -93,7 +96,10 @@ def main() -> None:
     """Serve the shield_swap MCP tools over stdio until the client disconnects.
 
     Builds a DEX client first, which binds a key from ``ALEO_PRIVATE_KEY`` or
-    else creates/loads the local participant profile on disk. Blocks for the
+    else creates/loads the local participant profile on disk and signs with
+    its account from the Aleo account keystore. An encrypted account needs
+    ``ALEO_ACCOUNT_PASSWORD`` or a password saved in the macOS Keychain here,
+    because a server on stdio has no terminal to ask on. Blocks for the
     lifetime of the server; requires the ``[mcp]`` extra.
     """
     import anyio

@@ -8,9 +8,107 @@ of on testnet.
 """
 from __future__ import annotations
 
+import re
+from pathlib import Path
+from typing import Dict, List, Optional, Sequence, Tuple
+
 import pytest
 
-SLOT_TEXT = ("{ tick: 4055i32, tick_spacing: 60u32, "
+# Variables a developer's shell could leak into a test: each one selects an
+# account, a key, a password or a profile home.
+ACCOUNT_VARIABLES = (
+    "ALEO_PRIVATE_KEY",
+    "ALEO_PRIVATE_KEY_FILE",
+    "ALEO_ACCOUNT",
+    "ALEO_ACCOUNTS_DIR",
+    "ALEO_ACCOUNT_PASSWORD",
+    "SHIELD_SWAP_PRIVATE_KEY",
+    "SHIELD_SWAP_PRIVATE_KEY_FILE",
+    "SHIELD_SWAP_HOME",
+)
+
+
+class FakeKeychain:
+    """An in-memory stand-in for the macOS ``security`` tool.
+
+    Understands the three invocations the account keystore makes (add, find
+    and delete a generic password), so Keychain storage can be exercised
+    without touching the login keychain of the machine running the tests.
+    """
+
+    def __init__(self) -> None:
+        self.entries: Dict[str, str] = {}
+
+    def run(self, args: Sequence[str], stdin: Optional[str] = None) -> Tuple[Optional[int], str]:
+        args = list(args)
+        if args == ["-i"]:
+            match = re.fullmatch(r"add-generic-password -U -s (\S+) -a (\S+) -l (\S+) -w (\S+)\n", stdin or "")
+            if match is None:
+                return 1, ""
+            self.entries[f"{match.group(1)} {match.group(2)}"] = match.group(4)
+            return 0, ""
+        if len(args) == 6 and args[0] == "find-generic-password" and args[1] == "-s" and args[3] == "-a" and args[5] == "-w":
+            value = self.entries.get(f"{args[2]} {args[4]}")
+            return (44, "") if value is None else (0, f"{value}\n")
+        if len(args) == 5 and args[0] == "delete-generic-password" and args[1] == "-s" and args[3] == "-a":
+            return (44, "") if self.entries.pop(f"{args[2]} {args[4]}", None) is None else (0, "")
+        return 1, ""
+
+
+class AccountSandbox:
+    """The replaced surroundings of one test.
+
+    Attributes:
+        home: Stand-in home directory. The default accounts directory and the
+            default profile home resolve inside it.
+        accounts: The default accounts directory, ``<home>/.aleo/accounts``.
+            Created by the keystore on first save.
+        keychain: The in-memory Keychain tool.
+        notes: Lines the keystore wrote to the terminal.
+    """
+
+    def __init__(self, home: Path) -> None:
+        self.home = home
+        self.accounts = home / ".aleo" / "accounts"
+        self.keychain = FakeKeychain()
+        self.notes: List[str] = []
+
+
+def _no_prompt(message: str) -> str:
+    raise AssertionError("unexpected prompt")
+
+
+@pytest.fixture(autouse=True)
+def account_sandbox(request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory,
+                    monkeypatch: pytest.MonkeyPatch) -> AccountSandbox:
+    """Keep every test away from the developer's own accounts, profile and Keychain.
+
+    A profile finds its account through the account keystore, so a test that
+    only creates a profile would otherwise read or write ``~/.aleo/accounts``.
+    Each test gets an empty home directory, the account and profile variables
+    cleared, an in-memory Keychain and no terminal to prompt on.
+    """
+    from aleo.keystore._runtime import runtime
+
+    for name in ACCOUNT_VARIABLES:
+        monkeypatch.delenv(name, raising=False)
+    box = AccountSandbox(tmp_path_factory.mktemp("account-home"))
+    monkeypatch.setattr(runtime, "home", lambda: str(box.home))
+    monkeypatch.setattr(runtime, "security", box.keychain.run)
+    monkeypatch.setattr(runtime, "terminal_attached", lambda: False)
+    monkeypatch.setattr(runtime, "prompt_hidden", _no_prompt)
+    monkeypatch.setattr(runtime, "prompt_visible", _no_prompt)
+    monkeypatch.setattr(runtime, "notify", box.notes.append)
+    # The live and devnode tiers keep the real home directory in the
+    # environment: local proving caches its parameters there. The keystore's
+    # own home lookup is replaced for them all the same.
+    if request.node.get_closest_marker("live") is None and request.node.get_closest_marker("devnode") is None:
+        monkeypatch.setenv("HOME", str(box.home))
+        monkeypatch.setenv("USERPROFILE", str(box.home))
+    return box
+
+
+SLOT_TEXT =("{ tick: 4055i32, tick_spacing: 60u32, "
              "sqrt_price: { hi: 1u128, lo: 0u128 }, "
              "fee_protocol: 0u8, liquidity: 1000u128, "
              "fee_growth_global0_x_128: { hi: 0u128, lo: 0u128 }, "

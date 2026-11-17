@@ -66,4 +66,7 @@ def test_page_stays_compact():
     # ``compliance_proofs`` parameter and a one-line note on what it takes.
     # 34k → 36k (2026-10-23) for record inventory: ``plan_inventory`` and
     # ``rebalance_inventory`` plus the reservation note on ``swap``.
-    assert len(_render()) < 36_000
+    # 36k → 38k (2026-11-17) for the account keystore: ``from_profile`` says
+    # where the signer's key comes from and what it raises, and the
+    # existing-account question names the keystore import command.
+    assert len(_render()) < 38_000

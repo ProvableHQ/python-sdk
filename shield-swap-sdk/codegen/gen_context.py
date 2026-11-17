@@ -45,7 +45,7 @@ QUICKSTART = """\
 ```python
 from aleo_shield_swap import ShieldSwap
 
-dex = ShieldSwap.from_profile()          # key material auto-managed on disk
+dex = ShieldSwap.from_profile()          # account from the Aleo keystore, created on first use
 dex.onboard()                            # first run registers; no-op afterwards
 pools = dex.api.get_pools()
 report = dex.swap_many(pool_key=pools[0].key, token_in_id=pools[0].token0,
@@ -62,9 +62,13 @@ CONVERSATION_PATTERN = """\
    profile, ask whether the user already has a shield-swap account before
    creating anything — their funds and access live on the old key.
    **NEVER ask the user to paste a private key into the conversation.**
-   They supply it out-of-band: `export SHIELD_SWAP_PRIVATE_KEY=...` (or
-   `SHIELD_SWAP_PRIVATE_KEY_FILE=path`) in their own shell before the
-   profile is first created.
+   They supply it out-of-band, in their own terminal, before the profile is
+   first created: `python -m aleo.keystore import` stores it once (hidden
+   prompt, or `--key-file <path>`), or `export ALEO_PRIVATE_KEY=...` (or
+   `ALEO_PRIVATE_KEY_FILE=path`) supplies it for each session — a key from
+   the environment is never written to disk.  The key lives in the Aleo
+   account keystore (`~/.aleo/accounts/`), not in the profile; never run
+   `python -m aleo.keystore export` or read an account file, both reveal it.
 2. **Referral code — optional.**  Access is granted by authentication
    alone; `onboard()` needs nothing from the user.  Mention that a
    referral code from a friend can be passed (`onboard(referral_code=)`)
@@ -143,7 +147,7 @@ where the signing keys live:
 
 | Building | Stack | Keys live |
 | --- | --- | --- |
-| Bot / server / CLI / notebook | `aleo-sdk` facade + `shield-swap-sdk` (this package) | A local private key (`ShieldSwap.from_profile()` manages it); delegated proving through the Provable prover — fees covered by default. |
+| Bot / server / CLI / notebook | `aleo-sdk` facade + `shield-swap-sdk` (this package) | A local private key in the Aleo account keystore (`ShieldSwap.from_profile()` finds it, or creates and stores one on first use); delegated proving through the Provable prover — fees covered by default. |
 | Agent integration | `aleo_shield_swap.agent` (Claude-shape tool schemas + `dispatch_tool`) or `python -m aleo_shield_swap.mcp` (MCP server), over the same client | Same as the underlying client; the tools bind to it. |
 | Browser dApp (wallet-signed) | The TypeScript stack: `@provablehq/shield-swap-sdk` + Veil react hooks — not this package | The user's wallet signs and proves. |
 
