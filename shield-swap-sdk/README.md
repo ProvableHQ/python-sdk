@@ -79,6 +79,11 @@ together so a script can resume trading or collect unfinished swaps after a
 restart. Use the same profile directory on each run: `~/.shield-swap` by
 default, or a directory selected with `SHIELD_SWAP_HOME` or the `home` argument.
 
+Profile directories that use one account on one network share its swap
+counters through `~/.aleo/shield-swap/counters/<network>/<address>.jsonl`, so
+their swaps never reuse a blinded identity. Each directory keeps its own
+journal: collect a swap from the profile that made it.
+
 ### Use an existing account
 
 Import the account to keep its address and funds. Run this in a terminal;

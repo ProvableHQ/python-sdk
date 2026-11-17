@@ -47,6 +47,11 @@ def _selected_account_name(account: Optional[str]) -> str:
     return account if account is not None else (os.environ.get("ALEO_ACCOUNT") or "default")
 
 
+def _counters_root() -> Path:
+    """Return the directory of the counter ledgers shared by this user's profile homes."""
+    return Path.home() / ".aleo" / "shield-swap" / "counters"
+
+
 def _same_directory(first: Path, second: Path) -> bool:
     """Report whether two paths name one directory, following symbolic links."""
     try:
@@ -126,6 +131,11 @@ class Profile:
     profiles selecting the same account name share its key. To trade from
     another address, use a separate home and ``account`` name, and clear
     any key variables that still select the first account.
+
+    Homes that share an account on one network issue swap counters through
+    one file, :attr:`counters_path`, so their swaps never reuse a blinded
+    identity. Each home keeps its own journal: collect a swap from the home
+    that made it.
     """
 
     def __init__(self, home: Path, data: dict[str, Any]) -> None:
@@ -399,3 +409,20 @@ class Profile:
         on first append.
         """
         return self.home / "journal.jsonl"
+
+    @property
+    def counters_path(self) -> Path:
+        """Where the swap counters issued for this account are recorded.
+
+        The file is ``~/.aleo/shield-swap/counters/<network>/<address>.jsonl``,
+        outside the profile home.  Every profile on this machine that trades
+        from the same address on the same network shares it, so their swaps
+        never use the same counter.  It holds counter numbers and timestamps;
+        swaps and their claim secrets stay in :attr:`journal_path`.  Its
+        directory is created for the owner only, because the file names in
+        it are addresses.
+
+        Returns the path whether or not the file exists — the journal creates
+        it when it first issues a counter.
+        """
+        return _counters_root() / self.network / f"{self.address}.jsonl"

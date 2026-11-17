@@ -1,4 +1,5 @@
 import json
+import stat
 import threading
 
 from aleo_shield_swap.journal import Journal
@@ -84,3 +85,77 @@ def test_skip_counters_through_advances_the_cursor(tmp_path):
     assert Journal(tmp_path / "journal.jsonl").counter_cursor() == 12
     j.skip_counters_through(5)                       # never moves backwards
     assert j.counter_cursor() == 12
+
+
+# Journals of one account sharing a counter ledger
+
+def _on_ledger(tmp_path, home):
+    """Open the journal of one profile home on the ledger every home shares."""
+    return Journal(tmp_path / home / "journal.jsonl", counters=tmp_path / "counters" / "account.jsonl")
+
+
+def test_journals_on_one_ledger_never_issue_the_same_counter(tmp_path):
+    one, two = _on_ledger(tmp_path, "one"), _on_ledger(tmp_path, "two")
+    assert one.reserve_counters(2) == [0, 1]
+    assert two.reserve_counters(2) == [2, 3]
+    assert one.reserve_counters(1) == [4]
+    assert one.counter_cursor() == two.counter_cursor() == 5
+    assert _on_ledger(tmp_path, "three").reserve_counters(1) == [5]     # a home opened later
+
+
+def test_ledger_directory_is_readable_by_its_owner_only(tmp_path):
+    _on_ledger(tmp_path, "one").reserve_counters(1)
+    assert stat.S_IMODE((tmp_path / "counters").stat().st_mode) == 0o700
+
+
+def test_journals_on_one_ledger_are_safe_across_threads(tmp_path):
+    got: list[int] = []
+    lock = threading.Lock()
+
+    def grab(home):
+        counters = _on_ledger(tmp_path, home).reserve_counters(5)
+        with lock:
+            got.extend(counters)
+
+    ts = [threading.Thread(target=grab, args=(f"home-{n}",)) for n in range(4)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    assert sorted(got) == list(range(20))              # no counter issued twice
+
+
+def test_skipped_counters_reach_every_journal_on_the_ledger(tmp_path):
+    one, two = _on_ledger(tmp_path, "one"), _on_ledger(tmp_path, "two")
+    one.skip_counters_through(9)
+    assert two.counter_cursor() == 10
+    assert two.reserve_counters(1) == [10]
+    two.skip_counters_through(5)                       # never moves backwards
+    assert one.counter_cursor() == 11
+
+
+def test_journal_ahead_of_the_ledger_starts_past_its_own_history(tmp_path):
+    # A journal that issued counters before it joined a ledger keeps them spent.
+    Journal(tmp_path / "one" / "journal.jsonl").reserve_counters(8)
+    one, two = _on_ledger(tmp_path, "one"), _on_ledger(tmp_path, "two")
+    assert one.reserve_counters(1) == [8]
+    assert two.reserve_counters(1) == [9]
+
+
+def test_each_journal_records_the_counters_it_was_issued(tmp_path):
+    # Without the ledger file, a journal still never reissues its own counters.
+    one, two = _on_ledger(tmp_path, "one"), _on_ledger(tmp_path, "two")
+    one.reserve_counters(2)
+    two.reserve_counters(2)
+    assert Journal(tmp_path / "two" / "journal.jsonl").counter_cursor() == 4
+    assert Journal(tmp_path / "one" / "journal.jsonl").counter_cursor() == 2
+
+
+def test_ledger_holds_counters_and_nothing_about_the_swaps(tmp_path):
+    one = _on_ledger(tmp_path, "one")
+    (counter,) = one.reserve_counters(1)
+    one.record_swap(_handle("s1"), counter=counter)
+    one.record_swap_failed(one.reserve_counters(1)[0], "boom")
+    one.skip_counters_through(6)
+    events = [json.loads(line) for line in (tmp_path / "counters" / "account.jsonl").read_text().splitlines()]
+    assert [sorted(event) for event in events] == [
+        ["counters", "ts", "type"], ["counters", "ts", "type"], ["through", "ts", "type"]]
+    assert [h.swap_id for h in one.pending_claims()] == ["s1"]

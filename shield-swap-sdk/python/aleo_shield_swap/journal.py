@@ -9,6 +9,10 @@ that never landed just reports not-finalized).
 Counter reservation is the concurrency-critical piece: blinded identities
 must never collide, so counters are issued once, under an advisory file
 lock, and burned (never reused) when their swap fails.
+
+Profiles that trade from one account on one network share a counter ledger,
+a second JSONL file outside every profile home.  A journal opened with that
+ledger issues counters through it, so two homes never issue the same one.
 """
 from __future__ import annotations
 
@@ -55,11 +59,19 @@ class Journal:
         path: Where the log lives, usually ``Profile.journal_path``.  Its
             parent is created on first append, alongside a ``.lock`` sibling
             used to serialize writers.
+        counters: Ledger of the counters issued for this journal's account,
+            usually ``Profile.counters_path``.  Every journal opened with the
+            same ledger issues counters through it, so profile homes that
+            share an account never issue the same counter.  The ledger holds
+            counter numbers and timestamps only; swaps and blinding factors
+            stay in *path*.  Defaults to None: counters are then coordinated
+            only among users of *path*.
     """
 
-    def __init__(self, path: "Path | str") -> None:
+    def __init__(self, path: "Path | str", *, counters: "Path | str | None" = None) -> None:
         self.path = Path(path)
         self._lock_path = self.path.with_suffix(".lock")
+        self._ledger = Journal(counters) if counters is not None else None
 
     def __repr__(self) -> str:
         return f"Journal({str(self.path)!r})"
@@ -113,17 +125,49 @@ class Journal:
 
     # ── Counters ─────────────────────────────────────────────────────────────
 
+    @contextmanager
+    def _counters_locked(self) -> Iterator[None]:
+        """Hold every lock a counter change needs.
+
+        Takes the ledger's lock before this journal's, in that order on every
+        path, so journals sharing a ledger cannot deadlock.  Creates the
+        ledger's directory for its owner only: the file names in it are the
+        addresses this user trades from.
+        """
+        if self._ledger is None:
+            with self._locked():
+                yield
+        else:
+            self._ledger.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            with self._ledger._locked(), self._locked():
+                yield
+
+    def _write_counter_event(self, event: dict[str, Any]) -> None:
+        """Append a counter event to the ledger, then to this journal.
+
+        The caller holds :meth:`_counters_locked`.  The ledger is written
+        first: a crash between the two writes leaves a counter that no
+        journal uses, never one that two journals use.
+        """
+        line = json.dumps(event) + "\n"
+        for journal in (self._ledger, self):
+            if journal is not None:
+                with journal.path.open("a") as f:
+                    f.write(line)
+
     def reserve_counters(self, n: int) -> list[int]:
-        """Issue the next *n* counters, exactly once, under a file lock."""
+        """Issue the next *n* counters, exactly once, under a file lock.
+
+        With a counter ledger, the counters are also unique among every
+        journal that shares the ledger.
+        """
         if n <= 0:
             return []
-        with self._locked():
+        with self._counters_locked():
             start = self.counter_cursor()
             counters = list(range(start, start + n))
-            event = {"type": "counters_reserved", "ts": time.time(),
-                     "counters": counters}
-            with self.path.open("a") as f:      # already under the lock
-                f.write(json.dumps(event) + "\n")
+            self._write_counter_event({"type": "counters_reserved", "ts": time.time(),
+                                       "counters": counters})
             return counters
 
     def skip_counters_through(self, counter: int) -> None:
@@ -132,17 +176,21 @@ class Journal:
         A fresh journal for an account that already swapped starts at 0, but
         those counters are consumed on chain — a swap built on one is rejected
         at finalize.  The client seeds the cursor past the used run with this;
-        it never moves the cursor backwards.
+        it never moves the cursor backwards.  With a counter ledger, the run
+        is retired for every journal that shares the ledger.
         """
-        with self._locked():
+        with self._counters_locked():
             if counter < self.counter_cursor():
                 return
-            event = {"type": "counters_skipped", "ts": time.time(), "through": counter}
-            with self.path.open("a") as f:      # already under the lock
-                f.write(json.dumps(event) + "\n")
+            self._write_counter_event({"type": "counters_skipped", "ts": time.time(),
+                                       "through": counter})
 
     def counter_cursor(self) -> int:
-        """Next unissued counter (max seen in any event + 1)."""
+        """Next unissued counter (max seen in any event + 1).
+
+        With a counter ledger, counts the counters issued to every journal
+        that shares it as well as this journal's own.
+        """
         top = -1
         for e in self.events():
             if e["type"] == "counters_reserved":
@@ -151,7 +199,8 @@ class Journal:
                 top = max(top, e.get("through", -1))
             elif e["type"] in ("swap", "swap_failed"):
                 top = max(top, e.get("counter", -1))
-        return top + 1
+        cursor = top + 1
+        return cursor if self._ledger is None else max(cursor, self._ledger.counter_cursor())
 
     # ── Typed events ─────────────────────────────────────────────────────────
 

@@ -746,6 +746,26 @@ def test_from_profile_signs_with_the_resolved_key(tmp_path, monkeypatch):
     assert saved_profile(tmp_path / "home")["account"] == "default"
 
 
+def test_clients_of_two_homes_on_one_account_reserve_different_swap_identities(tmp_path, monkeypatch):
+    aleo = Mock()
+    aleo.network_name = "testnet"
+    monkeypatch.setattr("aleo.Aleo", Mock(return_value=aleo))
+    monkeypatch.setattr("aleo.HTTPProvider", Mock())
+    # No swap has finalized, so the chain reports every blinded address unused.
+    monkeypatch.setattr(ShieldSwap, "_blinded_address_used", lambda self, blinded_address: False)
+    monkeypatch.setattr(
+        "aleo_shield_swap.client.blinded_identity_at",
+        lambda aleo, account, program, counter: SimpleNamespace(counter=counter, blinded_address=f"ba{counter}"))
+
+    first = ShieldSwap.from_profile(tmp_path / "one")
+    second = ShieldSwap.from_profile(tmp_path / "two")
+    assert first.profile.address == second.profile.address
+
+    counters = [identity.counter for dex in (first, second, first) for identity in dex._reserve_identities(object(), 1)]
+    assert counters == [0, 1, 2]
+    assert first.journal.path != second.journal.path
+
+
 def test_from_profile_reports_a_locked_account(tmp_path, monkeypatch):
     keystore.save(new_account().private_key, storage="encrypted", password=PASSWORD)
     monkeypatch.setattr("aleo.Aleo", Mock())
@@ -766,6 +786,23 @@ def test_default_home_is_under_the_home_directory(account_sandbox):
     p = Profile.load_or_create()
     assert p.home == account_sandbox.home / ".shield-swap"
     assert (account_sandbox.home / ".shield-swap" / "profile.json").exists()
+
+
+def test_counter_ledger_is_named_by_network_and_address_outside_the_home(tmp_path, account_sandbox):
+    first = Profile.load_or_create(tmp_path / "one")
+    second = Profile.load_or_create(tmp_path / "two")
+    mainnet = Profile.load_or_create(tmp_path / "three", network="mainnet")
+    counters = account_sandbox.home / ".aleo" / "shield-swap" / "counters"
+    assert first.counters_path == second.counters_path == counters / "testnet" / f"{first.address}.jsonl"
+    assert mainnet.counters_path == counters / "mainnet" / f"{mainnet.address}.jsonl"
+    assert not counters.exists()                       # reading the path creates nothing
+
+
+def test_counter_ledger_differs_between_accounts(tmp_path):
+    first = Profile.load_or_create(tmp_path / "one")
+    other = Profile.load_or_create(tmp_path / "two", account="other")
+    assert first.address != other.address
+    assert first.counters_path != other.counters_path
 
 
 def test_credentials_roundtrip(tmp_path):

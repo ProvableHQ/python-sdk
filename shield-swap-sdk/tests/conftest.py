@@ -100,6 +100,10 @@ def account_sandbox(request: pytest.FixtureRequest, tmp_path_factory: pytest.Tem
     if request.node.get_closest_marker("live") is None and request.node.get_closest_marker("devnode") is None:
         monkeypatch.setenv("HOME", str(box.home))
         monkeypatch.setenv("USERPROFILE", str(box.home))
+    else:
+        # Keep counter ledgers out of the real home, which these tests retain.
+        from aleo_shield_swap import profile
+        monkeypatch.setattr(profile, "_counters_root", lambda: box.home / ".aleo" / "shield-swap" / "counters")
     return box
 
 

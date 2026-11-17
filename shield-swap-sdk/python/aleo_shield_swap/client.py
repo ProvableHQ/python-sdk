@@ -235,7 +235,8 @@ class ShieldSwap:
             pass  # offline or scanner down — record methods will surface it
         dex = cls(aleo)
         dex.profile = profile
-        dex.journal = Journal(profile.journal_path)
+        # The ledger keeps homes that share this account off each other's counters.
+        dex.journal = Journal(profile.journal_path, counters=profile.counters_path)
         # Durable ss_ token first — session JWTs are short-lived and stale
         # ones would shadow a perfectly good API token.
         if creds.get("dex_api_token"):
