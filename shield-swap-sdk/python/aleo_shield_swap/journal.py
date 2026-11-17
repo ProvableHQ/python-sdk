@@ -64,14 +64,18 @@ class Journal:
             same ledger issues counters through it, so profile homes that
             share an account never issue the same counter.  The ledger holds
             counter numbers and timestamps only; swaps and blinding factors
-            stay in *path*.  Defaults to None: counters are then coordinated
-            only among users of *path*.
+            stay in *path*.  Opening the journal reads both files and, when
+            *path* records counters the ledger lacks, retires them in the
+            ledger.  Defaults to None: counters are then coordinated only
+            among users of *path*.
     """
 
     def __init__(self, path: "Path | str", *, counters: "Path | str | None" = None) -> None:
         self.path = Path(path)
         self._lock_path = self.path.with_suffix(".lock")
         self._ledger = Journal(counters) if counters is not None else None
+        # Counters issued before this journal used the ledger may still be pending.
+        self._publish_counters()
 
     def __repr__(self) -> str:
         return f"Journal({str(self.path)!r})"
@@ -155,6 +159,27 @@ class Journal:
                 with journal.path.open("a") as f:
                     f.write(line)
 
+    def _publish_counters(self) -> None:
+        """Retire this journal's counters in the ledger when the ledger is behind.
+
+        A journal holds counters the ledger did not issue when it reserved
+        them before it was opened with a ledger, or recorded a swap on an
+        identity the caller chose.  Their swaps may not have finalized, so
+        the chain cannot report them to the other journals; this does.
+
+        Reads both files.  Takes the locks and appends one
+        ``counters_skipped`` event to the ledger only when the ledger is
+        behind; otherwise writes nothing.
+        """
+        if self._ledger is None or self._own_cursor() <= self._ledger.counter_cursor():
+            return
+        with self._counters_locked():
+            through = self._own_cursor() - 1
+            if through >= self._ledger.counter_cursor():
+                event = {"type": "counters_skipped", "ts": time.time(), "through": through}
+                with self._ledger.path.open("a") as f:
+                    f.write(json.dumps(event) + "\n")
+
     def reserve_counters(self, n: int) -> list[int]:
         """Issue the next *n* counters, exactly once, under a file lock.
 
@@ -191,6 +216,11 @@ class Journal:
         With a counter ledger, counts the counters issued to every journal
         that shares it as well as this journal's own.
         """
+        cursor = self._own_cursor()
+        return cursor if self._ledger is None else max(cursor, self._ledger.counter_cursor())
+
+    def _own_cursor(self) -> int:
+        """Next counter past every one this journal's own file records."""
         top = -1
         for e in self.events():
             if e["type"] == "counters_reserved":
@@ -199,8 +229,7 @@ class Journal:
                 top = max(top, e.get("through", -1))
             elif e["type"] in ("swap", "swap_failed"):
                 top = max(top, e.get("counter", -1))
-        cursor = top + 1
-        return cursor if self._ledger is None else max(cursor, self._ledger.counter_cursor())
+        return top + 1
 
     # ── Typed events ─────────────────────────────────────────────────────────
 
@@ -218,6 +247,7 @@ class Journal:
         """
         self.append("swap", counter=counter, pool_keys=list(handle.pool_keys),
                     **{k: getattr(handle, k) for k in _HANDLE_FIELDS})
+        self._publish_counters()          # the caller may have chosen the identity
 
     def record_swap_failed(self, counter: int, error: str) -> None:
         """Burn a counter whose swap never landed.
@@ -231,6 +261,7 @@ class Journal:
             error: Why the swap failed, kept for diagnosis.
         """
         self.append("swap_failed", counter=counter, error=error)
+        self._publish_counters()
 
     def record_claim(self, swap_id: str, transaction_id: str,
                      amount_out: int) -> None:

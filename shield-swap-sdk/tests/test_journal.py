@@ -140,6 +140,33 @@ def test_journal_ahead_of_the_ledger_starts_past_its_own_history(tmp_path):
     assert two.reserve_counters(1) == [9]
 
 
+def test_opening_a_journal_on_a_ledger_publishes_the_counters_it_already_issued(tmp_path):
+    # Counters reserved before the ledger existed may belong to swaps that have not finalized.
+    assert Journal(tmp_path / "one" / "journal.jsonl").reserve_counters(2) == [0, 1]
+    _on_ledger(tmp_path, "one")                         # opened, never asked for a counter
+    assert _on_ledger(tmp_path, "two").reserve_counters(1) == [2]
+
+
+def test_opening_a_new_journal_on_a_ledger_writes_nothing(tmp_path):
+    _on_ledger(tmp_path, "one")
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_reopening_a_journal_on_a_ledger_publishes_its_counters_once(tmp_path):
+    Journal(tmp_path / "one" / "journal.jsonl").reserve_counters(2)
+    for _ in range(3):
+        _on_ledger(tmp_path, "one")
+    assert len((tmp_path / "counters" / "account.jsonl").read_text().splitlines()) == 1
+
+
+def test_swap_recorded_on_a_caller_chosen_counter_reaches_the_ledger(tmp_path):
+    one, two = _on_ledger(tmp_path, "one"), _on_ledger(tmp_path, "two")
+    one.record_swap(_handle("s1"), counter=7)           # an identity the ledger did not issue
+    assert two.reserve_counters(1) == [8]
+    two.record_swap_failed(11, "boom")
+    assert one.reserve_counters(1) == [12]
+
+
 def test_each_journal_records_the_counters_it_was_issued(tmp_path):
     # Without the ledger file, a journal still never reissues its own counters.
     one, two = _on_ledger(tmp_path, "one"), _on_ledger(tmp_path, "two")
