@@ -1550,6 +1550,139 @@ def test_puts_the_original_file_back_when_the_new_storage_does_not_read_back(san
     check_secret(keystore.export(dir=sandbox.dir), account.private_key)
 
 
+def test_removes_the_new_keychain_entry_when_the_new_storage_does_not_read_back(sandbox: Sandbox) -> None:
+    account = new_account()
+    stored = keystore.save(account.private_key, dir=sandbox.dir)
+    data = stored.path.read_bytes()
+    finds = {"count": 0}
+
+    def another_key_on_read_back(args: Any) -> Any:
+        if args[0] != "find-generic-password":
+            return None
+        finds["count"] += 1
+        # The write is confirmed, then the read-back sees another key.
+        return (0, f"{new_account().private_key}\n") if finds["count"] >= 2 else None
+
+    sandbox.security.force(another_key_on_read_back)
+    assert code_of(lambda: keystore.protect(dir=sandbox.dir, storage="keychain")) == "ADDRESS_MISMATCH"
+    assert stored.path.read_bytes() == data
+    assert f"{KEY_SERVICE} {account.address}" not in sandbox.security.entries
+
+
+def test_goes_back_to_the_original_file_when_the_new_password_cannot_be_saved(sandbox: Sandbox) -> None:
+    account = new_account()
+    stored = keystore.save(account.private_key, dir=sandbox.dir, storage="encrypted", password=PASSWORD, save_password=True)
+    data = stored.path.read_bytes()
+    # Reading the saved password works; writing the new one does not.
+    sandbox.security.force(lambda args: (1, "") if args[0] == "-i" else None)
+    assert (
+        code_of(lambda: keystore.protect(dir=sandbox.dir, storage="encrypted", new_password=OTHER_PASSWORD, save_password=True, prompt=False))
+        == "KEYCHAIN_FAILED"
+    )
+    sandbox.security.force(None)
+    assert stored.path.read_bytes() == data
+    # The old password still opens the account; no stale saved password blocks it.
+    check_secret(keystore.export(dir=sandbox.dir, password=PASSWORD, prompt=False), account.private_key)
+    assert f"{PASSWORD_SERVICE} {account.address}" not in sandbox.security.entries
+    assert code_of(lambda: keystore.export(dir=sandbox.dir, password=OTHER_PASSWORD, prompt=False)) == "WRONG_PASSWORD"
+
+
+def test_keeps_the_encrypted_file_when_the_saved_password_cannot_be_removed(sandbox: Sandbox) -> None:
+    account = new_account()
+    stored = keystore.save(account.private_key, dir=sandbox.dir, storage="encrypted", password=PASSWORD, save_password=True)
+    data = stored.path.read_bytes()
+    sandbox.security.force(lambda args: (1, "") if args[0] == "delete-generic-password" else None)
+    assert code_of(lambda: keystore.protect(dir=sandbox.dir, storage="plaintext", prompt=False)) == "KEYCHAIN_FAILED"
+    sandbox.security.force(None)
+    # Still encrypted, and the saved password still unlocks it.
+    assert stored.path.read_bytes() == data
+    check_secret(keystore.export(dir=sandbox.dir, prompt=False), account.private_key)
+
+
+def test_keeps_the_keychain_key_until_a_move_out_of_the_keychain_has_fully_succeeded(sandbox: Sandbox) -> None:
+    account = new_account()
+    stored = keystore.save(account.private_key, dir=sandbox.dir, storage="keychain")
+    data = stored.path.read_bytes()
+    # Saving the password of the new encrypted file fails.
+    sandbox.security.force(lambda args: (1, "") if args[0] == "-i" else None)
+    assert (
+        code_of(lambda: keystore.protect(dir=sandbox.dir, storage="encrypted", password=PASSWORD, save_password=True, prompt=False))
+        == "KEYCHAIN_FAILED"
+    )
+    sandbox.security.force(None)
+    assert stored.path.read_bytes() == data
+    check_secret(keystore.export(dir=sandbox.dir), account.private_key)
+
+
+# ---------------------------------------------------------------------------
+# Storing a new account never replaces a file
+# ---------------------------------------------------------------------------
+
+
+def test_creates_a_file_exclusively_and_leaves_an_existing_one_untouched(sandbox: Sandbox) -> None:
+    from aleo.keystore._file import write_file_exclusive
+
+    sandbox.dir.mkdir(parents=True)
+    path = sandbox.dir / "exclusive.json"
+    write_file_exclusive(str(path), "first")
+    with pytest.raises(FileExistsError):
+        write_file_exclusive(str(path), "second")
+    assert path.read_text(encoding="utf-8") == "first"
+    if POSIX:
+        assert mode(path) == 0o600
+    # No temporary file is left behind by either call.
+    assert os.listdir(sandbox.dir) == ["exclusive.json"]
+
+
+def _plaintext_file(account: Any) -> Dict[str, Any]:
+    return {"version": 1, "address": account.address, "key": {"type": "plaintext", "privateKey": account.private_key}}
+
+
+def test_removes_the_keychain_entry_it_wrote_when_another_account_takes_the_name_first(sandbox: Sandbox) -> None:
+    mine = new_account()
+    theirs = new_account()
+
+    def other_account_appears(args: Any) -> Any:
+        # The other account appears between the existence check and the write.
+        if args[0] == "-i" and not (sandbox.dir / "default.json").exists():
+            sandbox.put("default", _plaintext_file(theirs))
+        return None
+
+    sandbox.security.force(other_account_appears)
+    error = failure(lambda: keystore.save(mine.private_key, dir=sandbox.dir, storage="keychain"))
+    assert error.code == "ACCOUNT_EXISTS"
+    assert mine.address in str(error)
+    assert f"{KEY_SERVICE} {mine.address}" not in sandbox.security.entries
+    check_secret(keystore.export(dir=sandbox.dir), theirs.private_key)
+    assert os.listdir(sandbox.dir) == ["default.json"]
+
+
+def test_accepts_the_same_account_in_the_same_storage_stored_by_another_process_meanwhile(sandbox: Sandbox) -> None:
+    account = new_account()
+
+    def same_account_appears(args: Any) -> Any:
+        if args[0] == "-i" and not (sandbox.dir / "default.json").exists():
+            sandbox.put("default", {"version": 1, "address": account.address, "key": {"type": "keychain", "service": KEY_SERVICE, "account": account.address}})
+        return None
+
+    sandbox.security.force(same_account_appears)
+    stored = keystore.save(account.private_key, dir=sandbox.dir, storage="keychain")
+    assert (stored.name, stored.address, stored.storage) == ("default", account.address, "keychain")
+    # The entry both writers share is kept.
+    check_secret(sandbox.security.entries[f"{KEY_SERVICE} {account.address}"], account.private_key)
+    sandbox.security.force(None)
+    check_secret(keystore.export(dir=sandbox.dir), account.private_key)
+
+
+def test_removes_the_keychain_entry_when_the_account_file_cannot_be_created(sandbox: Sandbox) -> None:
+    account = new_account()
+    # A file where the accounts directory should be makes the write fail.
+    sandbox.dir.write_text("not a directory", encoding="utf-8")
+    with pytest.raises(OSError):
+        keystore.save(account.private_key, dir=sandbox.dir, storage="keychain")
+    assert sandbox.security.entries == {}
+
+
 # ---------------------------------------------------------------------------
 # export
 # ---------------------------------------------------------------------------
@@ -1604,14 +1737,41 @@ def test_copies_the_field_into_an_account_file_and_keeps_the_legacy_file(sandbox
     check_secret(keystore.export(dir=sandbox.dir), account.private_key)
 
 
-def test_prefers_the_private_key_field_when_a_legacy_file_has_both(sandbox: Sandbox) -> None:
+def _both_fields(first: str, second: str) -> str:
+    content = {"address": "placeholder", "privateKey": first, "network": "testnet", "private_key": second, "endpoint": "https://example.test"}
+    return json.dumps(content, indent=2) + "\n"
+
+
+def test_removes_both_fields_when_a_legacy_file_holds_the_same_key_in_each(sandbox: Sandbox) -> None:
+    account = new_account()
+    source = sandbox.root / "state.json"
+    source.write_text(_both_fields(account.private_key, account.private_key), encoding="utf-8")
+    assert keystore.migrate(str(source), dir=sandbox.dir, remove_legacy_key=True).address == account.address
+    expected = {"address": "placeholder", "network": "testnet", "endpoint": "https://example.test"}
+    assert source.read_text(encoding="utf-8") == json.dumps(expected, indent=2) + "\n"
+    check_secret(keystore.export(dir=sandbox.dir), account.private_key)
+
+
+def test_refuses_a_legacy_file_whose_two_fields_hold_different_keys(sandbox: Sandbox) -> None:
     first = new_account()
     second = new_account()
     source = sandbox.root / "state.json"
-    source.write_text(json.dumps({"private_key": second.private_key, "privateKey": first.private_key}), encoding="utf-8")
-    assert keystore.migrate(str(source), dir=sandbox.dir, remove_legacy_key=True).address == first.address
-    # Only the field that was used is stripped.
-    assert read_json(source) == {"private_key": second.private_key}
+    text = _both_fields(first.private_key, second.private_key)
+    source.write_text(text, encoding="utf-8")
+    for removing in (False, True):
+        error = failure(lambda: keystore.migrate(str(source), dir=sandbox.dir, remove_legacy_key=removing))
+        assert error.code == "KEY_CONFLICT"
+        assert first.address in str(error) and second.address in str(error)
+        assert "APrivateKey1" not in str(error)
+    assert source.read_text(encoding="utf-8") == text
+    assert not sandbox.dir.exists()
+
+
+def test_fails_with_invalid_key_when_the_second_legacy_field_is_not_a_key(sandbox: Sandbox) -> None:
+    source = sandbox.root / "state.json"
+    source.write_text(_both_fields(new_account().private_key, "APrivateKey1nope"), encoding="utf-8")
+    assert code_of(lambda: keystore.migrate(str(source), dir=sandbox.dir)) == "INVALID_KEY"
+    assert not sandbox.dir.exists()
 
 
 def test_strips_the_key_field_and_keeps_the_other_fields_their_order_and_the_indentation(sandbox: Sandbox) -> None:

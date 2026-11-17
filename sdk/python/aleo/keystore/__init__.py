@@ -55,7 +55,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Literal, NamedTuple, Optional, Sequence, Tuple, Union, cast
+from typing import Any, Dict, List, Literal, NamedTuple, Optional, Sequence, Tuple, Union, cast
 
 from ._encrypted import EncryptedKey, encrypt_key, parse_key
 from ._errors import KeystoreError
@@ -156,12 +156,12 @@ class _Key(NamedTuple):
 
 
 class _Legacy(NamedTuple):
-    """A legacy state file and the key field found in it."""
+    """A legacy state file, the fields that hold its key, and the parsed key."""
 
     text: str
     content: Dict[str, Any]
-    field: str
-    private_key: str
+    fields: Tuple[str, ...]
+    account: "_Key"
 
 
 def _describe(location: Location, file: AccountFile) -> StoredAccount:
@@ -283,8 +283,10 @@ def _write_storage(
     storage: str,
     password: Optional[bytes],
     save_password: bool,
+    exclusive: bool = False,
+    written: Optional[List[str]] = None,
 ) -> AccountFile:
-    """Write an account under the given storage, replacing any file at the path.
+    """Write an account under the given storage.
 
     Secrets held outside the file (the Keychain key entry, a saved password)
     are written first, so a failure there leaves no file pointing at a missing
@@ -297,9 +299,17 @@ def _write_storage(
         password: Normalised password bytes; required for ``"encrypted"``.
         save_password: Whether to save the password in the macOS Keychain.
             Applies to ``"encrypted"`` on macOS and is ignored otherwise.
+        exclusive: Whether the account file must not exist yet. By default
+            any file at the path is replaced.
+        written: Receives the Keychain service of each entry this call
+            writes, so a caller can remove them when a later step fails.
 
     Returns:
         The content written to the account file.
+
+    Raises:
+        FileExistsError: *exclusive* is set and the account file already
+            exists.
     """
     private_key, address = account
     key: Dict[str, Any]
@@ -309,6 +319,8 @@ def _write_storage(
         key = {"type": "plaintext", "privateKey": private_key}
     elif storage == "keychain":
         write_keychain(KEY_SERVICE, address, private_key, location.name)
+        if written is not None:
+            written.append(KEY_SERVICE)
         key = {"type": "keychain", "service": KEY_SERVICE, "account": address}
     else:
         if not password:
@@ -318,8 +330,10 @@ def _write_storage(
         key = dict(encrypt_key(private_key, password))
         if save_password and keychain_available():
             write_keychain(PASSWORD_SERVICE, address, password_to_keychain_value(password), location.name)
+            if written is not None:
+                written.append(PASSWORD_SERVICE)
     file: AccountFile = {"version": 1, "address": address, "key": key}
-    write_account_file(location, file)
+    write_account_file(location, file, exclusive)
     return file
 
 
@@ -406,7 +420,36 @@ def _store_account(
             environment=True,
             prompt=True,
         )
-    file = _write_storage(location, account, storage, chosen, save_password)
+    # The file is created exclusively: another process may have stored an
+    # account under this name since the check above, and it must not be
+    # replaced.
+    written: List[str] = []
+
+    def remove_written() -> None:
+        for service in written:
+            try:
+                delete_keychain(service, account.address)
+            except KeystoreError:
+                pass
+
+    try:
+        file = _write_storage(location, account, storage, chosen, save_password, True, written)
+    except FileExistsError:
+        now = read_account_file(location.path)
+        # The same account in the same storage is what was asked for; its
+        # Keychain entries are the ones just written, so they stay.
+        if now is not None and now.file["address"] == account.address and now.file["key"]["type"] == storage:
+            return _describe(location, now.file), None
+        remove_written()
+        raise KeystoreError(
+            "ACCOUNT_EXISTS",
+            f"Account file {location.path} was created by another process while {account.address} was "
+            "being stored; it was not replaced. Choose another account name.",
+        ) from None
+    except BaseException:
+        # No account file was created, so nothing may point at these entries.
+        remove_written()
+        raise
     return _describe(location, file), chosen
 
 
@@ -728,26 +771,54 @@ def protect(
             )
     saving = storage == "encrypted" and bool(save_password) and keychain_available()
 
-    # A saved password is left alone until the new file is confirmed: until
-    # then the saved one still unlocks the file on disk.
-    _write_storage(location, account, storage, chosen, False)
+    def restore() -> None:
+        """Put the account back as it was.
 
-    # Read the new storage back the way a later load would, then compare.
+        The old secret is removed last of all, so the original file works
+        again once it is back in place.
+        """
+        write_file_atomic(location.path, existing.data)
+        # A Keychain key entry written for the new storage has no file left
+        # that points at it.
+        if storage == "keychain" and current != "keychain":
+            try:
+                delete_keychain(KEY_SERVICE, address)
+            except KeystoreError:
+                pass
+
     try:
+        # A saved password is left alone until the new file is confirmed:
+        # until then the saved one still unlocks the file on disk.
+        _write_storage(location, account, storage, chosen, False)
+        # Read the new storage back the way a later load would, then compare.
         _confirm_stored(location, account, storage, chosen, False)
     except BaseException:
-        # The old secret has not been removed yet, so the original file still
-        # works once it is back in place.
-        write_file_atomic(location.path, existing.data)
+        restore()
         raise
 
-    # Only now is the old secret redundant.
-    if current == "keychain":
+    # The saved password follows the file. If the Keychain cannot be brought
+    # in line, the account goes back to its original file, which the password
+    # saved before this call still unlocks.
+    try:
+        if saving and chosen:
+            write_keychain(PASSWORD_SERVICE, address, password_to_keychain_value(chosen), location.name)
+        elif keychain_available() and (current == "encrypted" or storage == "encrypted"):
+            delete_keychain(PASSWORD_SERVICE, address)
+    except BaseException:
+        restore()
+        # A failed write may have left the new password in the entry, which
+        # the restored file does not accept. No saved password is better than
+        # a wrong one: the variable or the prompt then unlocks the account.
+        if saving:
+            try:
+                delete_keychain(PASSWORD_SERVICE, address)
+            except KeystoreError:
+                pass
+        raise
+
+    # Only now is the old key entry redundant.
+    if current == "keychain" and storage != "keychain":
         delete_keychain(KEY_SERVICE, address)
-    if saving and chosen:
-        write_keychain(PASSWORD_SERVICE, address, password_to_keychain_value(chosen), location.name)
-    elif keychain_available() and (current == "encrypted" or storage == "encrypted"):
-        delete_keychain(PASSWORD_SERVICE, address)
 
     return StoredAccount(name=location.name, path=Path(location.path), address=address, storage=storage)
 
@@ -805,7 +876,10 @@ def _read_legacy_key(path: str) -> _Legacy:
 
     Raises:
         KeystoreError: ``LEGACY_KEY_NOT_FOUND`` when the file cannot be read,
-            is not a JSON object or has neither field.
+            is not a JSON object or has neither field; ``INVALID_KEY`` when a
+            field holds text that is not a key; ``KEY_CONFLICT`` when the two
+            fields hold different keys, since it is then unclear which account
+            the file belongs to.
     """
 
     def not_found(problem: str) -> KeystoreError:
@@ -837,20 +911,32 @@ def _read_legacy_key(path: str) -> _Legacy:
     if not isinstance(content, dict):
         raise not_found("the file does not hold a JSON object")
     record = cast(Dict[str, Any], content)
-    for name in _LEGACY_KEY_FIELDS:
-        value = record.get(name)
-        if isinstance(value, str) and value != "":
-            return _Legacy(text, record, name, value)
-    raise not_found('it has no "privateKey" or "private_key" field')
+    fields = tuple(
+        name for name in _LEGACY_KEY_FIELDS if isinstance(record.get(name), str) and record.get(name) != ""
+    )
+    if not fields:
+        raise not_found('it has no "privateKey" or "private_key" field')
+    first = fields[0]
+    account = _Key(*parse_key(record[first], f'The "{first}" field of {path}'))
+    if len(fields) > 1:
+        second = fields[1]
+        other = _Key(*parse_key(record[second], f'The "{second}" field of {path}'))
+        if other.address != account.address:
+            raise KeystoreError(
+                "KEY_CONFLICT",
+                f'{path} holds two different keys: "{first}" belongs to {account.address} and "{second}" to '
+                f"{other.address}. Remove the one that is not wanted, then migrate again.",
+            )
+    return _Legacy(text, record, fields, account)
 
 
-def _without_key_field(legacy: _Legacy) -> str:
-    """Render a legacy state file without its key field.
+def _without_key_fields(legacy: _Legacy) -> str:
+    """Render a legacy state file without its key fields.
 
     Keeps the other fields in their order, the indentation of the original and
     whether it ended with a newline.
     """
-    rest = {name: value for name, value in legacy.content.items() if name != legacy.field}
+    rest = {name: value for name, value in legacy.content.items() if name not in legacy.fields}
     # The indentation is whatever precedes the first field on its own line; a
     # file written on one line stays on one line.
     layout = re.match(r"\s*\{\r?\n([ \t]+)\S", legacy.text)
@@ -925,7 +1011,7 @@ def migrate(
 
     origin_path = os.fspath(source)
     legacy = _read_legacy_key(origin_path)
-    account = _Key(*parse_key(legacy.private_key, f'The "{legacy.field}" field of {origin_path}'))
+    account = legacy.account
     stored, chosen = _store_account(account, location, storage, password, bool(save_password))
 
     if not removing:
@@ -933,7 +1019,7 @@ def migrate(
 
     # The legacy copy goes only after the new one has been read back in full.
     _confirm_stored(location, account, storage, chosen if chosen is not None else password, True)
-    write_file_atomic(origin_path, _without_key_field(legacy))
+    write_file_atomic(origin_path, _without_key_fields(legacy))
     return stored
 
 

@@ -27,7 +27,8 @@ class KeystoreError(AleoError):
     ``ADDRESS_MISMATCH``
         A key belongs to a different address than the one expected.
     ``KEY_CONFLICT``
-        Two environment variables supply different keys.
+        Two environment variables supply different keys, or a legacy state
+        file holds two different keys.
     ``EMPTY_KEY_SOURCE``
         A key variable or key file is set but holds no key.
     ``INVALID_KEY``

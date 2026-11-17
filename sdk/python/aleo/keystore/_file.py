@@ -351,12 +351,70 @@ def write_file_atomic(path: str, data: Union[str, bytes]) -> None:
         raise
 
 
-def write_account_file(location: Location, file: AccountFile) -> None:
+def write_file_exclusive(path: str, data: Union[str, bytes]) -> None:
+    """Create a file that must not exist yet, through a temporary file and a hard link.
+
+    A rename replaces whatever is at the destination; a hard link fails when a
+    file is already there. Two callers creating the same path at the same
+    moment therefore cannot both succeed, and neither can replace the other's
+    file. The temporary file is created in the same directory with mode 0600
+    before any content is written, so a reader never sees a partial file. On a
+    file system without hard links the destination is created directly, still
+    refusing an existing file.
+
+    Args:
+        path: Destination path. Its directory must exist.
+        data: Complete content; text is written as UTF-8.
+
+    Raises:
+        FileExistsError: A file already exists at the path. Other file system
+            errors propagate unchanged.
+    """
+    payload = data.encode("utf-8") if isinstance(data, str) else data
+    temporary = os.path.join(os.path.dirname(path), f".{os.urandom(8).hex()}.tmp")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+    descriptor = os.open(temporary, flags, 0o600)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        try:
+            os.link(temporary, path)
+        except FileExistsError:
+            raise
+        except (OSError, NotImplementedError):
+            # No hard links here: create the destination itself, exclusively.
+            target = os.open(path, flags, 0o600)
+            with os.fdopen(target, "wb") as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+    finally:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+
+
+def write_account_file(location: Location, file: AccountFile, exclusive: bool = False) -> None:
     """Write an account file, creating the accounts directory when needed.
 
     A directory created here gets mode 0700; missing parents get the default
     mode, and an existing directory keeps its mode. The file is written with
-    mode 0600 and replaces any file already at the path.
+    mode 0600. It replaces any file already at the path, unless *exclusive* is
+    set.
+
+    Args:
+        location: Resolved account location.
+        file: Account content.
+        exclusive: Whether the file must not exist yet. Used when storing a
+            new account, so that two callers storing different accounts under
+            one name cannot replace each other's file.
+
+    Raises:
+        FileExistsError: *exclusive* is set and a file already exists at the
+            path.
     """
     os.makedirs(os.path.dirname(location.dir), exist_ok=True)
     try:
@@ -367,7 +425,11 @@ def write_account_file(location: Location, file: AccountFile) -> None:
         # mkdir applies the umask; the directory is owner-only regardless of it.
         if runtime.platform != "win32":
             os.chmod(location.dir, 0o700)
-    write_file_atomic(location.path, serialize_account_file(file))
+    text = serialize_account_file(file)
+    if exclusive:
+        write_file_exclusive(location.path, text)
+    else:
+        write_file_atomic(location.path, text)
 
 
 __all__: List[str] = [
@@ -383,4 +445,5 @@ __all__: List[str] = [
     "serialize_account_file",
     "write_account_file",
     "write_file_atomic",
+    "write_file_exclusive",
 ]
