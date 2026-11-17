@@ -165,6 +165,19 @@ def sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sandbox:
     return box
 
 
+def saved_password_account(path: Any) -> str:
+    """The Keychain account of the saved password that belongs to one encrypted account file."""
+    from aleo.keystore._password import password_entry_account
+
+    file = json.loads(Path(path).read_text(encoding="utf-8"))
+    return password_entry_account(file["address"], file["key"]["kdfParams"]["salt"])
+
+
+def saved_password_entry(path: Any) -> str:
+    """The stand-in Keychain's key for the saved password of one encrypted account file."""
+    return f"aleo-account-password {saved_password_account(path)}"
+
+
 def new_account() -> SimpleNamespace:
     """Generate a random account as an address and private-key pair of strings."""
     account = Account.random()

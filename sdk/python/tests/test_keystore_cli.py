@@ -19,7 +19,7 @@ import pytest
 import aleo
 from aleo import keystore
 from aleo.keystore._cli import main
-from aleo.keystore._keychain import KEY_SERVICE, PASSWORD_SERVICE
+from aleo.keystore._keychain import KEY_SERVICE
 from aleo.keystore._runtime import runtime
 from aleo.mainnet import PrivateKey
 
@@ -28,14 +28,15 @@ from keystore_helpers import (  # noqa: F401  (sandbox is a fixture)
     PASSWORD,
     POSIX,
     SAMPLE,
+    Sandbox,
     VARIABLES,
     VECTORS,
-    Sandbox,
     absent,
     check_secret,
     mode,
     new_account,
     sandbox,
+    saved_password_entry,
 )
 
 pytestmark = pytest.mark.usefixtures("sandbox")
@@ -466,8 +467,7 @@ def test_create_can_save_the_password_in_the_keychain(sandbox: Sandbox, run: Any
     monkeypatch.setenv("ALEO_ACCOUNT_PASSWORD", PASSWORD)
     outcome = run("create", "--storage", "encrypted", "--save-password", "--json")
     assert outcome.status == 0
-    address = outcome.json["address"]
-    assert sandbox.security.entries == {f"{PASSWORD_SERVICE} {address}": PASSWORD.encode("utf-8").hex()}
+    assert sandbox.security.entries == {saved_password_entry(outcome.json["path"]): PASSWORD.encode("utf-8").hex()}
     assert "--save-password" not in outcome.err
 
     # Where it cannot apply, the flag is reported as having had no effect.
@@ -678,7 +678,7 @@ def test_protect_changes_the_storage(sandbox: Sandbox, run: Any, monkeypatch: py
     outcome = run("protect", "--storage", "encrypted", "--save-password", "--json")
     assert outcome.status == 0
     assert outcome.json["storage"] == "encrypted"
-    assert sandbox.security.entries == {f"{PASSWORD_SERVICE} {account.address}": PASSWORD.encode("utf-8").hex()}
+    assert sandbox.security.entries == {saved_password_entry(outcome.json["path"]): PASSWORD.encode("utf-8").hex()}
 
     outcome = run("protect", "--storage", "plaintext")
     assert outcome.status == 0

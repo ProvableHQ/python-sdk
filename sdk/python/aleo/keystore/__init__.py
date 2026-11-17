@@ -55,7 +55,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Literal, NamedTuple, Optional, Sequence, Tuple, Union, cast
+from typing import Any, Callable, Dict, List, Literal, NamedTuple, Optional, Sequence, Tuple, Union, cast
 
 from ._encrypted import EncryptedKey, encrypt_key, parse_key
 from ._errors import KeystoreError
@@ -78,7 +78,14 @@ from ._keychain import (
     require_keychain,
     write_keychain,
 )
-from ._password import PasswordSubject, choose_new_password, password_to_keychain_value, unlock
+from ._password import (
+    PasswordSubject,
+    choose_new_password,
+    password_entry_account,
+    password_to_keychain_value,
+    saved_password_entry,
+    unlock,
+)
 from ._sources import (
     KEY_FILE_VARIABLES,
     KEY_VARIABLES,
@@ -277,6 +284,59 @@ def _read_stored_key(
     return private_key, used
 
 
+class _KeychainEntry(NamedTuple):
+    """One Keychain entry: its service and its account within the service."""
+
+    service: str
+    account: str
+
+
+def _remove_entries(entries: Sequence[_KeychainEntry]) -> None:
+    """Remove Keychain entries, ignoring failures; used when undoing a failed step."""
+    for entry in entries:
+        try:
+            delete_keychain(entry.service, entry.account)
+        except KeystoreError:
+            pass
+
+
+def _neighbour_uses(location: Location, matches: Callable[[Dict[str, Any]], bool]) -> bool:
+    """Report whether another account file in the same directory matches.
+
+    Keychain entries can be shared: every account file that holds one key in
+    the Keychain points at the same entry, and a copied encrypted file shares
+    its saved password. Before an entry is removed, the neighbouring files are
+    checked so that one still in use stays. Files that cannot be read or
+    parsed are skipped. Account files in other directories are not seen.
+
+    Args:
+        location: The account file being changed; it is not counted itself.
+        matches: Decides whether a parsed neighbouring file uses the entry.
+    """
+    try:
+        names = os.listdir(location.dir)
+    except OSError:
+        return False
+    for name in names:
+        if not name.endswith(".json") or name == f"{location.name}.json":
+            continue
+        try:
+            with open(os.path.join(location.dir, name), "rb") as handle:
+                parsed = json.loads(handle.read().decode("utf-8"))
+        except (OSError, ValueError, RecursionError):
+            # Not an account file, or not readable: it holds no claim on the entry.
+            continue
+        if isinstance(parsed, dict) and matches(cast(Dict[str, Any], parsed)):
+            return True
+    return False
+
+
+def _key_of(file: Dict[str, Any]) -> Dict[str, Any]:
+    """Read the ``key`` object of a loosely parsed account file."""
+    key = file.get("key")
+    return cast(Dict[str, Any], key) if isinstance(key, dict) else {}
+
+
 def _write_storage(
     location: Location,
     account: _Key,
@@ -284,7 +344,7 @@ def _write_storage(
     password: Optional[bytes],
     save_password: bool,
     exclusive: bool = False,
-    written: Optional[List[str]] = None,
+    created: Optional[List[_KeychainEntry]] = None,
 ) -> AccountFile:
     """Write an account under the given storage.
 
@@ -301,8 +361,10 @@ def _write_storage(
             Applies to ``"encrypted"`` on macOS and is ignored otherwise.
         exclusive: Whether the account file must not exist yet. By default
             any file at the path is replaced.
-        written: Receives the Keychain service of each entry this call
-            writes, so a caller can remove them when a later step fails.
+        created: Receives each Keychain entry this call creates, so a
+            caller can remove them when a later step fails. An entry that
+            existed before the call is not listed: another account file may
+            rely on it.
 
     Returns:
         The content written to the account file.
@@ -318,9 +380,8 @@ def _write_storage(
     elif storage == "plaintext":
         key = {"type": "plaintext", "privateKey": private_key}
     elif storage == "keychain":
-        write_keychain(KEY_SERVICE, address, private_key, location.name)
-        if written is not None:
-            written.append(KEY_SERVICE)
+        if write_keychain(KEY_SERVICE, address, private_key, location.name) and created is not None:
+            created.append(_KeychainEntry(KEY_SERVICE, address))
         key = {"type": "keychain", "service": KEY_SERVICE, "account": address}
     else:
         if not password:
@@ -329,9 +390,14 @@ def _write_storage(
             )
         key = dict(encrypt_key(private_key, password))
         if save_password and keychain_available():
-            write_keychain(PASSWORD_SERVICE, address, password_to_keychain_value(password), location.name)
-            if written is not None:
-                written.append(PASSWORD_SERVICE)
+            # The entry is named after this file's salt, so it cannot collide
+            # with the saved password of another file for the same address.
+            entry = password_entry_account(address, key["kdfParams"]["salt"])
+            if (
+                write_keychain(PASSWORD_SERVICE, entry, password_to_keychain_value(password), location.name)
+                and created is not None
+            ):
+                created.append(_KeychainEntry(PASSWORD_SERVICE, entry))
     file: AccountFile = {"version": 1, "address": address, "key": key}
     write_account_file(location, file, exclusive)
     return file
@@ -423,32 +489,30 @@ def _store_account(
     # The file is created exclusively: another process may have stored an
     # account under this name since the check above, and it must not be
     # replaced.
-    written: List[str] = []
-
-    def remove_written() -> None:
-        for service in written:
-            try:
-                delete_keychain(service, account.address)
-            except KeystoreError:
-                pass
-
+    # Only Keychain entries this call creates are undone on failure: an entry
+    # that was already there may be the only stored key of another account
+    # file.
+    created: List[_KeychainEntry] = []
     try:
-        file = _write_storage(location, account, storage, chosen, save_password, True, written)
+        file = _write_storage(location, account, storage, chosen, save_password, True, created)
     except FileExistsError:
         now = read_account_file(location.path)
-        # The same account in the same storage is what was asked for; its
-        # Keychain entries are the ones just written, so they stay.
-        if now is not None and now.file["address"] == account.address and now.file["key"]["type"] == storage:
+        same = now is not None and now.file["address"] == account.address and now.file["key"]["type"] == storage
+        # The same account in the same Keychain storage is what was asked for,
+        # and the key entry just written is the one that file points at.
+        if now is not None and same and storage != "encrypted":
             return _describe(location, now.file), None
-        remove_written()
+        _remove_entries(created)
+        if now is not None and same:
+            return _describe(location, now.file), None
         raise KeystoreError(
             "ACCOUNT_EXISTS",
             f"Account file {location.path} was created by another process while {account.address} was "
             "being stored; it was not replaced. Choose another account name.",
         ) from None
     except BaseException:
-        # No account file was created, so nothing may point at these entries.
-        remove_written()
+        # No account file was created, so nothing points at the entries made here.
+        _remove_entries(created)
         raise
     return _describe(location, file), chosen
 
@@ -771,54 +835,46 @@ def protect(
             )
     saving = storage == "encrypted" and bool(save_password) and keychain_available()
 
-    def restore() -> None:
-        """Put the account back as it was.
-
-        The old secret is removed last of all, so the original file works
-        again once it is back in place.
-        """
-        write_file_atomic(location.path, existing.data)
-        # A Keychain key entry written for the new storage has no file left
-        # that points at it.
-        if storage == "keychain" and current != "keychain":
-            try:
-                delete_keychain(KEY_SERVICE, address)
-            except KeystoreError:
-                pass
-
+    # Every step below is undone together if any of them fails: the original
+    # file goes back, and the Keychain entries this call created are removed.
+    # The old secret is the last thing touched, and it is touched only once
+    # everything else has succeeded, so the original file works again as soon
+    # as it is back in place.
+    created: List[_KeychainEntry] = []
     try:
-        # A saved password is left alone until the new file is confirmed:
-        # until then the saved one still unlocks the file on disk.
-        _write_storage(location, account, storage, chosen, False)
+        # The new file's saved password has its own entry, named after the new
+        # salt, so the entry of the file being replaced is not disturbed.
+        _write_storage(location, account, storage, chosen, saving, False, created)
         # Read the new storage back the way a later load would, then compare.
         _confirm_stored(location, account, storage, chosen, False)
-    except BaseException:
-        restore()
-        raise
 
-    # The saved password follows the file. If the Keychain cannot be brought
-    # in line, the account goes back to its original file, which the password
-    # saved before this call still unlocks.
-    try:
-        if saving and chosen:
-            write_keychain(PASSWORD_SERVICE, address, password_to_keychain_value(chosen), location.name)
-        elif keychain_available() and (current == "encrypted" or storage == "encrypted"):
-            delete_keychain(PASSWORD_SERVICE, address)
-    except BaseException:
-        restore()
-        # A failed write may have left the new password in the entry, which
-        # the restored file does not accept. No saved password is better than
-        # a wrong one: the variable or the prompt then unlocks the account.
-        if saving:
-            try:
-                delete_keychain(PASSWORD_SERVICE, address)
-            except KeystoreError:
-                pass
-        raise
+        # Only now is the old secret redundant. An entry a neighbouring
+        # account file still uses is left in place.
+        if current == "keychain" and storage != "keychain":
+            if not _neighbour_uses(
+                location, lambda file: file.get("address") == address and _key_of(file).get("type") == "keychain"
+            ):
+                delete_keychain(KEY_SERVICE, address)
+        previous = saved_password_entry(existing.file)
+        if previous is not None and keychain_available():
+            salt = existing.file["key"]["kdfParams"]["salt"]
 
-    # Only now is the old key entry redundant.
-    if current == "keychain" and storage != "keychain":
-        delete_keychain(KEY_SERVICE, address)
+            def same_ciphertext(file: Dict[str, Any]) -> bool:
+                key = _key_of(file)
+                params = key.get("kdfParams")
+                return (
+                    file.get("address") == address
+                    and key.get("type") == "encrypted"
+                    and isinstance(params, dict)
+                    and cast(Dict[str, Any], params).get("salt") == salt
+                )
+
+            if not _neighbour_uses(location, same_ciphertext):
+                delete_keychain(PASSWORD_SERVICE, previous)
+    except BaseException:
+        write_file_atomic(location.path, existing.data)
+        _remove_entries(created)
+        raise
 
     return StoredAccount(name=location.name, path=Path(location.path), address=address, storage=storage)
 

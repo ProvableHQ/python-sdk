@@ -6,13 +6,14 @@ Setting a password never reads the Keychain and asks twice at the prompt.
 """
 from __future__ import annotations
 
+import base64
 import os
 import re
-from typing import NamedTuple, Optional, Sequence, Tuple, Union
+from typing import Any, Mapping, NamedTuple, Optional, Sequence, Tuple, Union
 
 from ._encrypted import EncryptedKey, decrypt_key, encode_password, normalize_password
 from ._errors import KeystoreError
-from ._keychain import PASSWORD_SERVICE, keychain_available, read_keychain
+from ._keychain import PASSWORD_SERVICE, delete_keychain, keychain_available, read_keychain
 from ._runtime import runtime
 
 # Variable that supplies the password of an encrypted account.
@@ -40,6 +41,48 @@ class PasswordSubject(NamedTuple):
 def _password_from_environment() -> Optional[str]:
     """Read the password variable, treating an empty value as unset."""
     return os.environ.get(PASSWORD_VARIABLE) or None
+
+
+def password_entry_account(address: str, salt: str) -> str:
+    """Name the Keychain entry that holds the saved password of one encrypted file.
+
+    The entry belongs to a file, not to an address: two encrypted files can
+    hold the same account under different passwords, and each needs its own
+    saved password. The salt is unique to each encryption, so it identifies
+    the file, and it changes whenever the file is encrypted again.
+
+    Args:
+        address: Aleo address of the account.
+        salt: The file's scrypt salt, as standard base64.
+
+    Returns:
+        The entry's account: the address, ``-``, and the salt in hex.
+    """
+    return f"{address}-{base64.b64decode(salt).hex()}"
+
+
+def saved_password_entry(file: Mapping[str, Any]) -> Optional[str]:
+    """Name the saved-password entry of a parsed account file.
+
+    Returns:
+        The entry's account in the Keychain, or None when the file is not
+        encrypted, since only an encrypted file has a saved password.
+    """
+    key = file["key"]
+    if key["type"] != "encrypted":
+        return None
+    return password_entry_account(file["address"], key["kdfParams"]["salt"])
+
+
+def forget_saved_password(file: Mapping[str, Any]) -> None:
+    """Remove the saved password of a parsed account file from the Keychain.
+
+    Does nothing for a file that is not encrypted. An entry that is already
+    absent counts as removed.
+    """
+    entry = saved_password_entry(file)
+    if entry is not None:
+        delete_keychain(PASSWORD_SERVICE, entry)
 
 
 def password_to_keychain_value(password: bytes) -> str:
@@ -91,7 +134,7 @@ def unlock(
         return attempt(normalize_password(from_environment))
 
     if keychain_available():
-        saved = read_keychain(PASSWORD_SERVICE, subject.address)
+        saved = read_keychain(PASSWORD_SERVICE, password_entry_account(subject.address, key["kdfParams"]["salt"]))
         if saved is not None:
             # A saved password is the hex of its bytes; anything else was not
             # written by the keystore.

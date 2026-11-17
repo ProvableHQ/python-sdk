@@ -37,9 +37,9 @@ from keystore_helpers import (  # noqa: F401  (sandbox is a fixture)
     PASSWORD,
     POSIX,
     SAMPLE,
+    Sandbox,
     VECTORS,
     VECTORS_DIR,
-    Sandbox,
     absent,
     check_secret,
     code_of,
@@ -47,6 +47,8 @@ from keystore_helpers import (  # noqa: F401  (sandbox is a fixture)
     mode,
     new_account,
     sandbox,
+    saved_password_account,
+    saved_password_entry,
 )
 
 pytestmark = pytest.mark.usefixtures("sandbox")
@@ -1095,21 +1097,24 @@ def test_fails_with_password_required_when_no_source_supplies_a_password(
 
 def test_reads_a_saved_password_from_the_keychain(sandbox: Sandbox) -> None:
     account = new_account()
-    keystore.save(account.private_key, dir=sandbox.dir, storage="encrypted", password=PASSWORD, save_password=True)
-    assert sandbox.security.entries.get(f"{PASSWORD_SERVICE} {account.address}") == PASSWORD.encode("utf-8").hex()
+    stored = keystore.save(account.private_key, dir=sandbox.dir, storage="encrypted", password=PASSWORD, save_password=True)
+    # The entry is named after the address and this file's salt.
+    entry_account = saved_password_account(stored.path)
+    assert re.fullmatch(f"{account.address}-[0-9a-f]{{32}}", entry_account)
+    assert sandbox.security.entries.get(f"{PASSWORD_SERVICE} {entry_account}") == PASSWORD.encode("utf-8").hex()
     sandbox.security.calls.clear()
 
     loaded = keystore.load(dir=sandbox.dir, prompt=False)
     assert loaded.address == account.address
     assert sandbox.security.calls == [
-        {"args": ["find-generic-password", "-s", "aleo-account-password", "-a", account.address, "-w"], "stdin": None}
+        {"args": ["find-generic-password", "-s", "aleo-account-password", "-a", entry_account, "-w"], "stdin": None}
     ]
 
 
 def test_fails_on_a_wrong_saved_password_without_prompting(sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch) -> None:
     account = new_account()
-    keystore.save(account.private_key, dir=sandbox.dir, storage="encrypted", password=PASSWORD)
-    sandbox.security.entries[f"{PASSWORD_SERVICE} {account.address}"] = OTHER_PASSWORD.encode("utf-8").hex()
+    stored = keystore.save(account.private_key, dir=sandbox.dir, storage="encrypted", password=PASSWORD)
+    sandbox.security.entries[saved_password_entry(stored.path)] = OTHER_PASSWORD.encode("utf-8").hex()
     sandbox.terminal = True
     sandbox.answers.append(PASSWORD)
     assert code_of(lambda: keystore.load(dir=sandbox.dir)) == "WRONG_PASSWORD"
@@ -1121,13 +1126,13 @@ def test_fails_on_a_wrong_saved_password_without_prompting(sandbox: Sandbox, mon
 
 def test_reports_a_failing_keychain_lookup_instead_of_prompting(sandbox: Sandbox) -> None:
     account = new_account()
-    keystore.save(account.private_key, dir=sandbox.dir, storage="encrypted", password=PASSWORD)
+    stored = keystore.save(account.private_key, dir=sandbox.dir, storage="encrypted", password=PASSWORD)
     sandbox.security.force(lambda args: (36, "") if args[0] == "find-generic-password" else None)
     sandbox.terminal = True
     assert code_of(lambda: keystore.load(dir=sandbox.dir)) == "KEYCHAIN_FAILED"
     sandbox.security.force(None)
     for not_a_saved_password in ("not-hex", "", "abc", "ABCD"):
-        sandbox.security.entries[f"{PASSWORD_SERVICE} {account.address}"] = not_a_saved_password
+        sandbox.security.entries[saved_password_entry(stored.path)] = not_a_saved_password
         assert code_of(lambda: keystore.load(dir=sandbox.dir)) == "KEYCHAIN_FAILED"
     assert sandbox.prompts == []
 
@@ -1211,14 +1216,14 @@ def test_writes_the_key_through_security_i_and_never_as_a_process_argument(sandb
     stored = keystore.save(account.private_key, dir=sandbox.dir, storage="keychain")
     assert stored.storage == "keychain"
     calls = sandbox.security.calls
-    assert len(calls) == 2
-    assert calls[0]["args"] == ["-i"]
-    check_secret(calls[0]["stdin"], f"add-generic-password -U -s aleo-account-key -a {account.address} -l aleo-account-key:default -w {account.private_key}\n")
+    find = {"args": ["find-generic-password", "-s", "aleo-account-key", "-a", account.address, "-w"], "stdin": None}
+    assert len(calls) == 3
+    # An entry another account file may already rely on is looked for first.
+    assert calls[0] == find
+    assert calls[1]["args"] == ["-i"]
+    check_secret(calls[1]["stdin"], f"add-generic-password -U -s aleo-account-key -a {account.address} -l aleo-account-key:default -w {account.private_key}\n")
     # The write is confirmed by reading the entry back.
-    assert calls[1] == {
-        "args": ["find-generic-password", "-s", "aleo-account-key", "-a", account.address, "-w"],
-        "stdin": None,
-    }
+    assert calls[2] == find
     for call in calls:
         assert not any("APrivateKey1" in argument for argument in call["args"])
 
@@ -1237,14 +1242,14 @@ def test_labels_each_entry_with_the_account_name_and_still_finds_it_by_address(s
     assert sandbox.security.labels[f"{KEY_SERVICE} {first.address}"] == "aleo-account-key:trading"
 
     second = new_account()
-    keystore.save(second.private_key, dir=sandbox.dir, name="bot_1-a", storage="encrypted", password=PASSWORD, save_password=True)
-    assert sandbox.security.labels[f"{PASSWORD_SERVICE} {second.address}"] == "aleo-account-password:bot_1-a"
+    bot = keystore.save(second.private_key, dir=sandbox.dir, name="bot_1-a", storage="encrypted", password=PASSWORD, save_password=True)
+    assert sandbox.security.labels[saved_password_entry(bot.path)] == "aleo-account-password:bot_1-a"
 
     # Changing the storage writes the new entry under the same account name.
     keystore.protect(dir=sandbox.dir, name="bot_1-a", storage="keychain", password=PASSWORD)
     assert sandbox.security.labels[f"{KEY_SERVICE} {second.address}"] == "aleo-account-key:bot_1-a"
-    keystore.protect(dir=sandbox.dir, name="trading", storage="encrypted", password=PASSWORD, save_password=True)
-    assert sandbox.security.labels[f"{PASSWORD_SERVICE} {first.address}"] == "aleo-account-password:trading"
+    trading = keystore.protect(dir=sandbox.dir, name="trading", storage="encrypted", password=PASSWORD, save_password=True)
+    assert sandbox.security.labels[saved_password_entry(trading.path)] == "aleo-account-password:trading"
 
     # The label plays no part in the lookup: reads name only the service and the address.
     sandbox.security.calls.clear()
@@ -1360,7 +1365,6 @@ def test_fails_to_load_a_keychain_file_outside_macos_and_never_falls_back(
 def test_moves_an_account_through_every_storage_and_removes_each_old_secret(sandbox: Sandbox) -> None:
     account = new_account()
     key_entry = f"{KEY_SERVICE} {account.address}"
-    password_entry = f"{PASSWORD_SERVICE} {account.address}"
     keystore.save(account.private_key, dir=sandbox.dir)
 
     # plaintext -> keychain
@@ -1376,7 +1380,7 @@ def test_moves_an_account_through_every_storage_and_removes_each_old_secret(sand
     stored = keystore.protect(dir=sandbox.dir, storage="encrypted", password=PASSWORD, save_password=True, prompt=False)
     assert stored.storage == "encrypted"
     assert key_entry not in sandbox.security.entries
-    assert sandbox.security.entries.get(password_entry) == PASSWORD.encode("utf-8").hex()
+    assert sandbox.security.entries.get(saved_password_entry(stored.path)) == PASSWORD.encode("utf-8").hex()
     check_secret(keystore.export(dir=sandbox.dir, prompt=False), account.private_key)
 
     # encrypted -> plaintext: the saved password goes.
@@ -1418,9 +1422,9 @@ def test_takes_a_replacement_password_from_new_password_or_the_prompt_only(
     sandbox.terminal = True
     assert code_of(lambda: keystore.protect(dir=sandbox.dir, storage="encrypted", prompt=False)) == "PASSWORD_REQUIRED"
     sandbox.answers.extend([OTHER_PASSWORD, OTHER_PASSWORD])
-    keystore.protect(dir=sandbox.dir, storage="encrypted", save_password=True)
+    rekeyed = keystore.protect(dir=sandbox.dir, storage="encrypted", save_password=True)
     assert len(sandbox.prompts) == 2
-    assert sandbox.security.entries.get(f"{PASSWORD_SERVICE} {account.address}") == OTHER_PASSWORD.encode("utf-8").hex()
+    assert sandbox.security.entries.get(saved_password_entry(rekeyed.path)) == OTHER_PASSWORD.encode("utf-8").hex()
     monkeypatch.setenv("ALEO_ACCOUNT_PASSWORD", OTHER_PASSWORD)
     check_secret(keystore.export(dir=sandbox.dir), account.private_key)
 
@@ -1519,14 +1523,14 @@ def test_keeps_the_old_secret_when_the_new_storage_cannot_be_written(sandbox: Sa
 
 
 def _vanishing_entry() -> Callable[[Sequence[str]], Optional[Any]]:
-    """The entry is written and confirmed, then disappears before the check."""
+    """The entry is looked for, written and confirmed, then disappears before the check."""
     finds: List[int] = []
 
     def override(args: Sequence[str]) -> Optional[Any]:
         if args[0] != "find-generic-password":
             return None
         finds.append(1)
-        return (44, "") if len(finds) >= 2 else None
+        return (44, "") if len(finds) >= 3 else None
 
     return override
 
@@ -1556,7 +1560,7 @@ def test_removes_the_new_keychain_entry_when_the_new_storage_does_not_read_back(
             return None
         finds["count"] += 1
         # The write is confirmed, then the read-back sees another key.
-        return (0, f"{new_account().private_key}\n") if finds["count"] >= 2 else None
+        return (0, f"{new_account().private_key}\n") if finds["count"] >= 3 else None
 
     sandbox.security.force(another_key_on_read_back)
     assert code_of(lambda: keystore.protect(dir=sandbox.dir, storage="keychain")) == "ADDRESS_MISMATCH"
@@ -1576,9 +1580,9 @@ def test_goes_back_to_the_original_file_when_the_new_password_cannot_be_saved(sa
     )
     sandbox.security.force(None)
     assert stored.path.read_bytes() == data
-    # The old password still opens the account; no stale saved password blocks it.
-    check_secret(keystore.export(dir=sandbox.dir, password=PASSWORD, prompt=False), account.private_key)
-    assert f"{PASSWORD_SERVICE} {account.address}" not in sandbox.security.entries
+    # The original saved password is untouched, so an unattended load still works.
+    assert sandbox.security.entries == {saved_password_entry(stored.path): PASSWORD.encode("utf-8").hex()}
+    check_secret(keystore.export(dir=sandbox.dir, prompt=False), account.private_key)
     assert code_of(lambda: keystore.export(dir=sandbox.dir, password=OTHER_PASSWORD, prompt=False)) == "WRONG_PASSWORD"
 
 
@@ -1676,6 +1680,134 @@ def test_removes_the_keychain_entry_when_the_account_file_cannot_be_created(sand
     with pytest.raises(OSError):
         keystore.save(account.private_key, dir=sandbox.dir, storage="keychain")
     assert sandbox.security.entries == {}
+
+
+# ---------------------------------------------------------------------------
+# Keychain entries shared between account files
+# ---------------------------------------------------------------------------
+
+
+def test_keeps_a_key_another_account_file_relies_on_when_a_later_save_fails(sandbox: Sandbox) -> None:
+    account = new_account()
+    keystore.save(account.private_key, dir=sandbox.dir, name="original", storage="keychain")
+    # The same account is saved again where the file cannot be created.
+    blocked = sandbox.root / "blocked"
+    blocked.write_text("not a directory", encoding="utf-8")
+    with pytest.raises(OSError):
+        keystore.save(account.private_key, dir=blocked, name="copy", storage="keychain")
+    # The entry was there before the failed call, so it is not that call's to remove.
+    check_secret(sandbox.security.entries[f"{KEY_SERVICE} {account.address}"], account.private_key)
+    check_secret(keystore.export(dir=sandbox.dir, name="original"), account.private_key)
+
+
+def test_does_not_rewrite_a_key_entry_that_already_holds_the_key(sandbox: Sandbox) -> None:
+    account = new_account()
+    keystore.save(account.private_key, dir=sandbox.dir, name="first", storage="keychain")
+    sandbox.security.calls.clear()
+    keystore.save(account.private_key, dir=sandbox.dir, name="second", storage="keychain")
+    # One look at the existing entry and no write.
+    assert [call["args"][0] for call in sandbox.security.calls] == ["find-generic-password"]
+    assert sandbox.security.labels[f"{KEY_SERVICE} {account.address}"] == "aleo-account-key:first"
+
+
+def test_keeps_the_keychain_key_while_a_neighbouring_account_file_still_points_at_it(sandbox: Sandbox) -> None:
+    account = new_account()
+    keystore.save(account.private_key, dir=sandbox.dir, name="first", storage="keychain")
+    keystore.save(account.private_key, dir=sandbox.dir, name="second", storage="keychain")
+    keystore.protect(dir=sandbox.dir, name="first", storage="plaintext")
+    assert f"{KEY_SERVICE} {account.address}" in sandbox.security.entries
+    check_secret(keystore.export(dir=sandbox.dir, name="second"), account.private_key)
+    # Once the last file has left the Keychain, the entry goes.
+    keystore.protect(dir=sandbox.dir, name="second", storage="plaintext")
+    assert sandbox.security.entries == {}
+
+
+def test_keeps_the_key_of_a_neighbouring_file_when_a_failed_move_into_the_keychain_is_undone(sandbox: Sandbox) -> None:
+    account = new_account()
+    keystore.save(account.private_key, dir=sandbox.dir, name="first", storage="keychain")
+    second = keystore.save(account.private_key, dir=sandbox.dir, name="second")
+    data = second.path.read_bytes()
+    finds = {"count": 0}
+
+    def read_back_fails(args: Any) -> Any:
+        if args[0] != "find-generic-password":
+            return None
+        finds["count"] += 1
+        # The existing entry is seen, then the read-back fails.
+        return (51, "") if finds["count"] >= 2 else None
+
+    sandbox.security.force(read_back_fails)
+    assert code_of(lambda: keystore.protect(dir=sandbox.dir, name="second", storage="keychain")) == "KEYCHAIN_FAILED"
+    sandbox.security.force(None)
+    assert second.path.read_bytes() == data
+    check_secret(keystore.export(dir=sandbox.dir, name="first"), account.private_key)
+
+
+def test_gives_each_encrypted_file_its_own_saved_password(sandbox: Sandbox) -> None:
+    account = new_account()
+    first = keystore.save(account.private_key, dir=sandbox.dir, name="first", storage="encrypted", password=PASSWORD, save_password=True)
+    second = keystore.save(account.private_key, dir=sandbox.dir, name="second", storage="encrypted", password=OTHER_PASSWORD, save_password=True)
+    assert saved_password_entry(first.path) != saved_password_entry(second.path)
+    assert len(sandbox.security.entries) == 2
+    # Both open unattended, each with its own password.
+    for name in ("first", "second"):
+        check_secret(keystore.export(dir=sandbox.dir, name=name, prompt=False), account.private_key)
+    # Changing one file's password leaves the other's saved password alone.
+    keystore.protect(dir=sandbox.dir, name="first", storage="encrypted", new_password="a third test password", prompt=False)
+    assert len(sandbox.security.entries) == 1
+    check_secret(keystore.export(dir=sandbox.dir, name="second", prompt=False), account.private_key)
+
+
+def test_does_not_consult_the_saved_password_of_another_file_for_the_same_address(sandbox: Sandbox) -> None:
+    account = new_account()
+    keystore.save(account.private_key, dir=sandbox.dir, name="saved", storage="encrypted", password=PASSWORD, save_password=True)
+    keystore.save(account.private_key, dir=sandbox.dir, name="unsaved", storage="encrypted", password=OTHER_PASSWORD)
+    # No saved password of its own: the load asks for one instead of failing on the neighbour's.
+    assert code_of(lambda: keystore.load(dir=sandbox.dir, name="unsaved", prompt=False)) == "PASSWORD_REQUIRED"
+    sandbox.terminal = True
+    sandbox.answers.append(OTHER_PASSWORD)
+    assert keystore.load(dir=sandbox.dir, name="unsaved").address == account.address
+
+
+def test_keeps_the_saved_password_while_a_copy_of_the_encrypted_file_remains(sandbox: Sandbox) -> None:
+    account = new_account()
+    original = keystore.save(account.private_key, dir=sandbox.dir, name="original", storage="encrypted", password=PASSWORD, save_password=True)
+    (sandbox.dir / "copy.json").write_bytes(original.path.read_bytes())
+    keystore.protect(dir=sandbox.dir, name="original", storage="plaintext", prompt=False)
+    # The copy has the same salt, so it still finds the saved password.
+    check_secret(keystore.export(dir=sandbox.dir, name="copy", prompt=False), account.private_key)
+    keystore.protect(dir=sandbox.dir, name="copy", storage="plaintext", prompt=False)
+    assert sandbox.security.entries == {}
+
+
+def test_goes_back_to_keychain_storage_when_the_old_key_cannot_be_removed(sandbox: Sandbox) -> None:
+    account = new_account()
+    stored = keystore.save(account.private_key, dir=sandbox.dir, storage="keychain")
+    data = stored.path.read_bytes()
+    sandbox.security.force(lambda args: (1, "") if args[0] == "delete-generic-password" else None)
+    assert code_of(lambda: keystore.protect(dir=sandbox.dir, storage="plaintext")) == "KEYCHAIN_FAILED"
+    sandbox.security.force(None)
+    # The rejected operation left the account exactly as it was.
+    assert stored.path.read_bytes() == data
+    info = keystore.info(dir=sandbox.dir)
+    assert info is not None and info.storage == "keychain"
+    check_secret(keystore.export(dir=sandbox.dir), account.private_key)
+
+
+def test_removes_the_new_saved_password_when_a_move_to_encrypted_storage_is_undone(sandbox: Sandbox) -> None:
+    account = new_account()
+    stored = keystore.save(account.private_key, dir=sandbox.dir, storage="keychain")
+    data = stored.path.read_bytes()
+    # The new file and its saved password are written, then the old key cannot be removed.
+    sandbox.security.force(lambda args: (1, "") if args[0] == "delete-generic-password" and args[2] == KEY_SERVICE else None)
+    assert (
+        code_of(lambda: keystore.protect(dir=sandbox.dir, storage="encrypted", password=PASSWORD, save_password=True, prompt=False))
+        == "KEYCHAIN_FAILED"
+    )
+    sandbox.security.force(None)
+    assert stored.path.read_bytes() == data
+    # Only the original key entry is left.
+    assert list(sandbox.security.entries) == [f"{KEY_SERVICE} {account.address}"]
 
 
 # ---------------------------------------------------------------------------
@@ -2053,15 +2185,18 @@ def test_stores_reads_and_removes_the_sample_account_through_the_real_keychain(
     if sandbox.real_home is not None:
         monkeypatch.setenv("HOME", sandbox.real_home)
 
+    # Saved-password entries are named after a file's salt; every one this
+    # test makes is recorded so it can be checked and removed.
+    password_accounts: List[str] = []
+
     def leftovers() -> List[bool]:
-        return [
-            read_keychain(KEY_SERVICE, SAMPLE.address) is None,
-            read_keychain(PASSWORD_SERVICE, SAMPLE.address) is None,
+        return [read_keychain(KEY_SERVICE, SAMPLE.address) is None] + [
+            read_keychain(PASSWORD_SERVICE, account) is None for account in password_accounts
         ]
 
     # Checked before the cleanup below is armed: entries that are already
     # there belong to someone else's run and are left alone.
-    assert leftovers() == [True, True], "the sample account already has Keychain entries; retry later"
+    assert all(leftovers()), "the sample account already has Keychain entries; retry later"
     password = VECTORS["encrypted"]["password"]
     try:
         stored = keystore.save(SAMPLE.private_key, dir=sandbox.dir, name="keychain", storage="keychain")
@@ -2072,17 +2207,19 @@ def test_stores_reads_and_removes_the_sample_account_through_the_real_keychain(
         check_secret(loaded.private_key, SAMPLE.private_key)
 
         # Move to an encrypted file with the password saved: the key entry goes.
-        keystore.protect(
+        encrypted = keystore.protect(
             dir=sandbox.dir, name="keychain", storage="encrypted", password=password, save_password=True, prompt=False
         )
+        password_accounts.append(saved_password_account(encrypted.path))
         assert read_keychain(KEY_SERVICE, SAMPLE.address) is None
-        assert read_keychain(PASSWORD_SERVICE, SAMPLE.address) == VECTORS["keychain"]["passwordValue"]
+        assert read_keychain(PASSWORD_SERVICE, password_accounts[0]) == VECTORS["keychain"]["passwordValue"]
         check_secret(keystore.export(dir=sandbox.dir, name="keychain", prompt=False), SAMPLE.private_key)
 
         # Back to plaintext: the saved password goes too.
         keystore.protect(dir=sandbox.dir, name="keychain", storage="plaintext", prompt=False)
-        assert leftovers() == [True, True]
+        assert all(leftovers())
     finally:
         delete_keychain(KEY_SERVICE, SAMPLE.address)
-        delete_keychain(PASSWORD_SERVICE, SAMPLE.address)
-    assert leftovers() == [True, True]
+        for account in password_accounts:
+            delete_keychain(PASSWORD_SERVICE, account)
+    assert all(leftovers())

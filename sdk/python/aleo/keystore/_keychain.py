@@ -15,7 +15,8 @@ from ._runtime import runtime
 # Keychain service holding private keys; the entry's account is the address.
 KEY_SERVICE = "aleo-account-key"
 
-# Keychain service holding saved passwords; the entry's account is the address.
+# Keychain service holding saved passwords. The entry's account names one
+# encrypted file: the address followed by the file's salt.
 PASSWORD_SERVICE = "aleo-account-password"
 
 # Exit status ``security`` returns when the requested entry does not exist.
@@ -27,6 +28,10 @@ _UNQUOTED = re.compile(r"[A-Za-z0-9]+")
 
 # Account names as they may appear, unquoted, in an entry's label.
 _LABEL_NAME = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
+
+# Entry accounts that can be placed on a ``security -i`` command line without
+# quoting: an address, optionally followed by ``-`` and a salt in hex.
+_ENTRY_ACCOUNT = re.compile(r"[A-Za-z0-9]+(?:-[0-9a-f]+)?")
 
 
 def keychain_available() -> bool:
@@ -91,22 +96,32 @@ def read_keychain(service: str, address: str) -> Optional[str]:
     return stdout
 
 
-def write_keychain(service: str, address: str, value: str, name: str) -> None:
+def write_keychain(service: str, address: str, value: str, name: str) -> bool:
     """Create or replace one generic password in the macOS login keychain.
 
     The command travels on the tool's standard input, so the value never
     appears in the process arguments. The entry is read back afterwards to
     confirm it holds the value.
 
-    The entry is found by service and address. Its label, the name Keychain
+    The entry is found by service and account. Its label, the name Keychain
     Access shows, is ``<service>:<name>``, so entries of several accounts can
     be told apart; the label takes no part in finding the entry.
 
+    An entry may be shared: every account file that holds the same key in the
+    Keychain points at one entry. The existing entry is therefore read first,
+    and one that already holds the value is left as it is.
+
     Args:
         service: Keychain service name.
-        address: Aleo address, used as the entry's account.
+        address: The entry's account: an Aleo address, or an address followed
+            by ``-`` and a salt in hex.
         value: Secret to store. Must be ASCII letters and digits only.
         name: Account name, shown in the entry's label.
+
+    Returns:
+        True when this call created the entry; False when an entry already
+        existed. Only an entry a caller created is the caller's to remove if
+        a later step fails.
 
     Raises:
         KeystoreError: ``KEYCHAIN_FAILED`` when the tool fails or the entry
@@ -115,19 +130,23 @@ def write_keychain(service: str, address: str, value: str, name: str) -> None:
     # Nothing here is quoted, so anything able to split or extend the command
     # line is refused before the tool runs.
     if (
-        not _UNQUOTED.fullmatch(address)
+        not _ENTRY_ACCOUNT.fullmatch(address)
         or not _UNQUOTED.fullmatch(value)
         or not _LABEL_NAME.fullmatch(name)
     ):
         raise _failed(
             "writing", service, address, "was not run, because the value cannot be passed unquoted,"
         )
+    existing = read_keychain(service, address)
+    if existing == value:
+        return False
     command = f"add-generic-password -U -s {service} -a {address} -l {service}:{name} -w {value}\n"
     status, _ = runtime.security(["-i"], command)
     if status != 0:
         raise _failed("writing", service, address, _exit_reason(status))
     if read_keychain(service, address) != value:
         raise _failed("verifying", service, address, "did not store the value")
+    return existing is None
 
 
 def delete_keychain(service: str, address: str) -> None:

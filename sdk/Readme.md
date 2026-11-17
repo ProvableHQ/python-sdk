@@ -111,7 +111,7 @@ The account file is `~/.aleo/accounts/<name>.json`, readable by its owner only. 
 | `"encrypted"` | In the account file, encrypted under a password | Any system where the file may leak. Each run needs the password |
 | `"none"` | Nowhere; the file records the address | The key arrives through the environment on every run and the file only confirms it is the expected account |
 
-An encrypted account takes its password from the `password` argument, then `ALEO_ACCOUNT_PASSWORD`, then the macOS Keychain when `save_password=True` put it there, then a hidden terminal prompt. An unattended job cannot answer a prompt, so it relies on the variable or the saved password; pass `prompt=False` to fail at once instead of waiting. A wrong password from any source but the prompt is an error and the later sources are not tried.
+An encrypted account takes its password from the `password` argument, then `ALEO_ACCOUNT_PASSWORD`, then the macOS Keychain when `save_password=True` put it there, then a hidden terminal prompt. A saved password belongs to one encrypted file: its Keychain entry is named after the address and the file's salt, so two files that hold one account under different passwords do not share it. An unattended job cannot answer a prompt, so it relies on the variable or the saved password; pass `prompt=False` to fail at once instead of waiting. A wrong password from any source but the prompt is an error and the later sources are not tried.
 
 ```python
 keystore.save(account, name="mainnet", storage="encrypted", save_password=True)   # asks for a password twice

@@ -29,9 +29,10 @@ from . import StoredAccount
 from . import export as export_key
 from . import info, migrate, protect, save
 from ._errors import KeystoreError
-from ._file import resolve_location
-from ._keychain import PASSWORD_SERVICE, delete_keychain, keychain_available, require_keychain
+from ._file import read_account_file, resolve_location
+from ._keychain import keychain_available, require_keychain
 from ._mnemonic import clean_phrase, derive_seed, generate_phrase
+from ._password import forget_saved_password
 from ._runtime import runtime
 from ._sources import TRIMMED, key_from_environment, read_key_text
 
@@ -310,6 +311,13 @@ def _existing(args: argparse.Namespace) -> StoredAccount:
     return stored
 
 
+def _forget_saved(args: argparse.Namespace) -> None:
+    """Remove the saved password of the selected account file, if it has one."""
+    existing = read_account_file(resolve_location(args.name, args.dir).path)
+    if existing is not None:
+        forget_saved_password(existing.file)
+
+
 def _show(args: argparse.Namespace) -> int:
     stored = _existing(args)
     _report(
@@ -325,7 +333,7 @@ def _protect(args: argparse.Namespace) -> int:
         # Only the saved password goes; the account file stays as it is.
         stored = _existing(args)
         require_keychain("A saved password exists only in the macOS Keychain.")
-        delete_keychain(PASSWORD_SERVICE, stored.address)
+        _forget_saved(args)
         _report(
             stored,
             args.json,
@@ -334,7 +342,7 @@ def _protect(args: argparse.Namespace) -> int:
         return EXIT_DONE
     stored = protect(storage=args.storage, name=args.name, dir=args.dir, save_password=args.save_password)
     if args.forget_password and keychain_available():
-        delete_keychain(PASSWORD_SERVICE, stored.address)
+        _forget_saved(args)
     _report(stored, args.json, _summary(stored, "Stored"))
     _storage_notes(stored, args.save_password)
     return EXIT_DONE
