@@ -193,7 +193,8 @@ class Profile:
 
         The profile records its address, account name, network, and endpoint
         in ``profile.json``. Creating it does not contact the network or move
-        funds. An existing profile keeps its recorded settings and can be
+        funds. When several processes create the same missing account at
+        once, one key is saved and every profile uses it. An existing profile keeps its recorded settings and can be
         opened without a password; its key is unlocked on the first read of
         :attr:`private_key`.
 
@@ -275,11 +276,15 @@ class Profile:
             import aleo
             from aleo import keystore
             net = getattr(aleo, network)
-            try:
+
+            def existing() -> "tuple[str, str, str]":
                 loaded = keystore.load(name=account, dir=accounts_dir, password=password)
-                private_key, address = loaded.private_key, loaded.address
                 # Remember the account name even when the key is supplied per run.
                 name = loaded.stored.name if loaded.stored is not None else _selected_account_name(account)
+                return loaded.private_key, loaded.address, name
+
+            try:
+                private_key, address, name = existing()
             except keystore.KeystoreError as error:
                 if error.code != "ACCOUNT_NOT_FOUND" or not create:
                     raise
@@ -290,10 +295,17 @@ class Profile:
                         'after this process exits. Choose "plaintext", "keychain" or "encrypted".',
                     ) from None
                 private_key = str(net.PrivateKey.random())
-                stored = keystore.save(private_key, name=account, dir=accounts_dir,
-                                       storage=cast(Any, storage),   # save() validates storage.
-                                       password=password, save_password=save_password)
-                address, name = stored.address, stored.name
+                try:
+                    stored = keystore.save(private_key, name=account, dir=accounts_dir,
+                                           storage=cast(Any, storage),   # save() validates storage.
+                                           password=password, save_password=save_password)
+                    address, name = stored.address, stored.name
+                except keystore.KeystoreError as lost:
+                    if lost.code != "ACCOUNT_EXISTS":
+                        raise
+                    # Another process stored this account after the lookup found
+                    # none. Use its key; the key generated here was never saved.
+                    private_key, address, name = existing()
             home.mkdir(parents=True, exist_ok=True)
             data = {"address": address, "account": name,
                     "network": network, "endpoint": endpoint}

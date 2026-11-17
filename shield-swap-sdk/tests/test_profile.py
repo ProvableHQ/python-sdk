@@ -168,6 +168,43 @@ def test_new_profile_adopts_the_stored_account(tmp_path, account_sandbox):
     assert saved_profile(profile.home)["account"] == "default"
 
 
+def test_account_stored_by_a_concurrent_startup_is_adopted(tmp_path, monkeypatch, account_sandbox):
+    winner = new_account()
+    real = keystore.load
+
+    def racing(**kwargs: Any):
+        try:
+            return real(**kwargs)
+        except KeystoreError:
+            # Another process stores the account after this lookup found none.
+            if not (account_sandbox.accounts / "default.json").exists():
+                keystore.save(winner.private_key)
+            raise
+
+    monkeypatch.setattr(keystore, "load", racing)
+    profile = Profile.load_or_create(tmp_path / "home")
+    assert profile.address == winner.address
+    same_secret(profile.private_key, winner.private_key)
+    assert saved_profile(profile.home)["address"] == winner.address
+    assert [path.name for path in account_sandbox.accounts.iterdir() if path.suffix == ".json"] == ["default.json"]
+
+
+def test_locked_account_stored_by_a_concurrent_startup_is_reported(tmp_path, monkeypatch, account_sandbox):
+    real = keystore.load
+
+    def racing(**kwargs: Any):
+        try:
+            return real(**kwargs)
+        except KeystoreError:
+            if not (account_sandbox.accounts / "default.json").exists():
+                keystore.save(new_account().private_key, storage="encrypted", password=PASSWORD)
+            raise
+
+    monkeypatch.setattr(keystore, "load", racing)
+    assert failure(lambda: Profile.load_or_create(tmp_path / "home")).code == "PASSWORD_REQUIRED"
+    assert not (tmp_path / "home").exists()
+
+
 def test_two_homes_share_the_stored_account(tmp_path):
     first = Profile.load_or_create(tmp_path / "one")
     second = Profile.load_or_create(tmp_path / "two")
