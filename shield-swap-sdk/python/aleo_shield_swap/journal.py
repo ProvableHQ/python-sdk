@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import fcntl
 import json
+import os
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -134,17 +135,32 @@ class Journal:
         """Hold every lock a counter change needs.
 
         Takes the ledger's lock before this journal's, in that order on every
-        path, so journals sharing a ledger cannot deadlock.  Creates the
+        path, so journals sharing a ledger cannot deadlock.  Takes one lock
+        when both are the same file.  Creates the
         ledger's directory for its owner only: the file names in it are the
         addresses this user trades from.
         """
         if self._ledger is None:
             with self._locked():
                 yield
-        else:
-            self._ledger.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-            with self._ledger._locked(), self._locked():
-                yield
+            return
+        self._ledger.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self._ledger._lock_path.open("a") as outer, self._lock_path.open("a") as inner:
+            # Two file names can derive one lock file, such as journal.jsonl and
+            # journal.counters. A second lock on it would wait on the first forever.
+            shared = os.path.sameopenfile(outer.fileno(), inner.fileno())
+            fcntl.flock(outer, fcntl.LOCK_EX)
+            try:
+                if not shared:
+                    fcntl.flock(inner, fcntl.LOCK_EX)
+                try:
+                    yield
+                finally:
+                    if not shared:
+                        fcntl.flock(inner, fcntl.LOCK_UN)
+            finally:
+                fcntl.flock(outer, fcntl.LOCK_UN)
 
     def _write_counter_event(self, event: dict[str, Any]) -> None:
         """Append a counter event to the ledger, then to this journal.

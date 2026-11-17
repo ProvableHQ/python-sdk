@@ -167,6 +167,23 @@ def test_swap_recorded_on_a_caller_chosen_counter_reaches_the_ledger(tmp_path):
     assert one.reserve_counters(1) == [12]
 
 
+def test_journal_and_ledger_that_derive_one_lock_file_do_not_deadlock(tmp_path):
+    # Both names lose their suffix to ".lock", so the two locks are one file.
+    got: list[int] = []
+
+    def reserve():
+        for home in ("one", "one"):
+            journal = Journal(tmp_path / home / "journal.jsonl", counters=tmp_path / home / "journal.counters")
+            got.extend(journal.reserve_counters(2))
+            journal.skip_counters_through(got[-1] + 1)
+
+    worker = threading.Thread(target=reserve, daemon=True)
+    worker.start()
+    worker.join(timeout=10)
+    assert not worker.is_alive()                       # a second lock on the same file would wait forever
+    assert got == [0, 1, 3, 4]
+
+
 def test_each_journal_records_the_counters_it_was_issued(tmp_path):
     # Without the ledger file, a journal still never reissues its own counters.
     one, two = _on_ledger(tmp_path, "one"), _on_ledger(tmp_path, "two")
