@@ -52,21 +52,5 @@ def test_committed_page_is_current():
 
 
 def test_page_stays_compact():
-    # ~6.5k tokens — cheap context, enforced.  Raised 20k → 22k with the
-    # router-dispatch surface (wrapper_proofs / withdrawal params); 22k → 24k
-    # when get_pools/get_tokens/derive_pool_key/derive_tick_key picked up full
-    # docstrings (they rendered blank before); 24k → 26k for the swap/swap_many
-    # footgun warnings (build-time counter reservation, refusing an unusable
-    # quote). 24k had been squeezed to 134 chars of headroom, which any further
-    # edit broke — this is deliberate room, not another squeeze.  26k → 32k
-    # (2026-09) for the upstream sync: rebalancing (plan + execute, with the
-    # price-fragility warning agents must relay), fill receipts, the routing
-    # graph, and the indexer's unclaimed/protocol-state views.  32k → 34k
-    # (2026-10) for compliance proofs: six write methods gained a
-    # ``compliance_proofs`` parameter and a one-line note on what it takes.
-    # 34k → 36k (2026-10-23) for record inventory: ``plan_inventory`` and
-    # ``rebalance_inventory`` plus the reservation note on ``swap``.
-    # 36k → 38k (2026-11-17) for the account keystore: ``from_profile`` says
-    # where the signer's key comes from and what it raises, and the
-    # existing-account question names the keystore import command.
+    # Keep the full guide small enough to include in an agent's working context.
     assert len(_render()) < 38_000

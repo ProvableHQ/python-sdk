@@ -222,7 +222,7 @@ def test_concurrent_swaps_reserve_distinct_identities(tmp_path, monkeypatch):
     monkeypatch.setenv("ALEO_E2E_CONSUMER_ID", cid)
     monkeypatch.setenv("SHIELD_SWAP_PRIVATE_KEY", os.environ["ALEO_E2E_PRIVATE_KEY"])
     dex = ShieldSwap.from_profile(tmp_path / "home")
-    report = dex.onboard()                     # uses the funded account; no-op stages skip
+    report = dex.onboard()                     # Reuse completed onboarding stages for the funded account.
     assert report.funded
 
     held = {tid: v for tid, v in dex.status().balances.items() if v.get("private", 0) > 0}

@@ -32,7 +32,7 @@ def test_import_guard_names_the_aleo_sdk_upgrade(monkeypatch):
     import pytest
 
     import aleo_shield_swap
-    aleo_shield_swap._require_aleo_sdk()                               # the installed sdk has aleo.keystore
-    monkeypatch.setitem(sys.modules, "aleo.keystore", None)            # simulate an aleo-sdk without it
+    aleo_shield_swap._require_aleo_sdk()                               # Confirm the installed SDK supports account storage.
+    monkeypatch.setitem(sys.modules, "aleo.keystore", None)            # Exercise the upgrade message for an older SDK.
     with pytest.raises(ImportError, match=r'needs aleo-sdk>=0\.9\.0 \(found .*\); run: pip install -U "aleo-sdk>=0\.9\.0"'):
         aleo_shield_swap._require_aleo_sdk()

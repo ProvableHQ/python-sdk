@@ -8,12 +8,13 @@ Typed Python client for the shield_swap AMM on Aleo
 MCP alternative: `python -m aleo_shield_swap.mcp` exposes the same
 lifecycle as tools.
 
-## Tier 1 — the lifecycle (six lines end to end)
+## Tier 1 — start and resume a trading session
 
 ```python
-from aleo_shield_swap import ShieldSwap
+from aleo_shield_swap import Profile, ShieldSwap
 
-dex = ShieldSwap.from_profile()          # account from the Aleo keystore, created on first use
+Profile.load_or_create(storage="encrypted")  # Protect a new key; existing storage stays unchanged.
+dex = ShieldSwap.from_profile()              # Resume with the same account and journal.
 dex.onboard()                            # first run registers; no-op afterwards
 pools = dex.api.get_pools()
 report = dex.swap_many(pool_key=pools[0].key, token_in_id=pools[0].token0,
@@ -23,42 +24,54 @@ dex.collect_all()                        # any session, any time
 
 ### `from_profile(home: 'Any' = None, *, network: 'Optional[str]' = None, endpoint: 'Optional[str]' = None) -> "'ShieldSwap'"`
 
-The client for the local participant profile (created on first use).
+Continue trading with the same account, credentials, and swap journal.
 
-Wires endpoint, network, signer, and (when present) delegated-proving
-credentials from ``$SHIELD_SWAP_HOME``/``~/.shield-swap``.  Run
-``onboard()`` next on a fresh profile.
+Use the same *home* on each run to retain pending swaps and saved API
+credentials. On first use, the client uses an existing Aleo account
+or creates one. To keep an existing address and its funds, import
+that account before starting; see :meth:`Profile.load_or_create`.
 
-The signer is the profile's Aleo account, found through the account
-keystore (``aleo.keystore``): a key in ``ALEO_PRIVATE_KEY`` or
-``ALEO_PRIVATE_KEY_FILE`` when set, otherwise the account file in
-``~/.aleo/accounts`` that the profile names.  A fresh profile uses
-that account, or creates one and stores it there; the profile itself
-holds no private key, and a key from the environment is never written
-to disk.  To create the account encrypted, in the macOS Keychain or
-under another name, call :meth:`Profile.load_or_create` on the same
-*home* first.
+For a new account, use macOS Keychain or password encryption to
+protect the private key. Set this up before building the client::
 
-*network* and *endpoint* apply only when the profile is being created —
-an existing one keeps what it was created with, because its derived pool
-keys and blinded identities are network-scoped and would not transfer.
-Give each network its own home directory.
+    from aleo_shield_swap import Profile, ShieldSwap
+
+    Profile.load_or_create(storage="encrypted")
+    dex = ShieldSwap.from_profile()
+
+This prompts for a password if none is supplied by the environment
+or Keychain. It does not change an account's existing storage.
+Without this setup, a generated key is saved as plaintext: anyone
+who can read the account file can spend its funds. Use
+``storage="keychain"`` on macOS to keep the key outside the file.
+
+An encrypted account needs its password each time the client starts.
+For unattended runs, set ``ALEO_ACCOUNT_PASSWORD`` or save the password
+in the macOS Keychain. A key supplied through ``ALEO_PRIVATE_KEY`` or
+``ALEO_PRIVATE_KEY_FILE`` must also be supplied each run; it is never
+saved by the profile.
+
+The client attempts to register with the hosted record scanner,
+sharing the account's view key so the scanner can read its records.
+For a custom record provider, construct ``ShieldSwap(aleo)`` instead.
+Call ``onboard()`` to register a new account with Shield Swap before
+trading. Client construction does not submit a trade.
 
 Args:
-    home: Profile directory; defaults to ``$SHIELD_SWAP_HOME`` or
-        ``~/.shield-swap``.
-    network: ``"mainnet"`` or ``"testnet"`` for a NEW profile; defaults
-        to testnet.
-    endpoint: Node API origin for a NEW profile.
+    home: Directory holding the profile and its saved work. Defaults to
+        ``SHIELD_SWAP_HOME``, then ``~/.shield-swap``. Use a separate
+        directory for each network.
+    network: ``"mainnet"`` or ``"testnet"``; defaults to testnet for a
+        new profile. An existing profile keeps its recorded network.
+    endpoint: API service root for a new profile; defaults to
+        ``https://edge.provable.com/api``. Ignored for an existing profile.
 
 Raises:
-    aleo.keystore.KeystoreError: The signing key cannot be resolved.
-        Read ``code``: ``ADDRESS_MISMATCH`` when the key found belongs
-        to another address than the profile's; ``PASSWORD_REQUIRED``
-        when the account is encrypted and nothing supplies its
-        password; ``ACCOUNT_NOT_FOUND`` when no source has the key of
-        an existing profile, such as a key variable that is not set
-        on this run.
+    aleo.keystore.KeystoreError: The account cannot be opened. Check
+        ``code``: ``PASSWORD_REQUIRED`` means a password must be supplied;
+        ``ACCOUNT_NOT_FOUND`` means an existing profile's key is missing;
+        ``ADDRESS_MISMATCH`` means the selected key belongs to another
+        address. Restore the intended key before trying again.
 
 ### `onboard(self, referral_code: 'Optional[str]' = None) -> 'OnboardReport'`
 
@@ -118,17 +131,19 @@ reports.  Requires ``from_profile()``.
 
 ### Before doing anything: two questions
 
-1. **Existing account?**  When `status()` shows a brand-new, unregistered
-   profile, ask whether the user already has a shield-swap account before
-   creating anything — their funds and access live on the old key.
-   **NEVER ask the user to paste a private key into the conversation.**
-   They supply it out-of-band, in their own terminal, before the profile is
-   first created: `python -m aleo.keystore import` stores it once (hidden
-   prompt, or `--key-file <path>`), or `export ALEO_PRIVATE_KEY=...` (or
-   `ALEO_PRIVATE_KEY_FILE=path`) supplies it for each session — a key from
-   the environment is never written to disk.  The key lives in the Aleo
-   account keystore (`~/.aleo/accounts/`), not in the profile; never run
-   `python -m aleo.keystore export` or read an account file, both reveal it.
+1. **Existing account?** Ask before creating a profile: an existing
+   account's funds stay with its original key. Have the user import that key
+   in their own terminal with
+   `python -m aleo.keystore import --storage encrypted`, or use
+   `--storage keychain` on macOS. These protect the saved key; plaintext
+   storage leaves it readable to anyone with access to the account file.
+   After import, `Profile.load_or_create(create=False)` requires that account
+   rather than generating another key if setup is missing.
+   **Never ask for a private key in the conversation.** Do not run
+   `python -m aleo.keystore export` or read account files to inspect an
+   address; use `python -m aleo.keystore show` instead. An account supplied
+   through `ALEO_PRIVATE_KEY` or `ALEO_PRIVATE_KEY_FILE` must be supplied
+   each run; the profile does not save that key.
 2. **Referral code — optional.**  Access is granted by authentication
    alone; `onboard()` needs nothing from the user.  Mention that a
    referral code from a friend can be passed (`onboard(referral_code=)`)
@@ -207,7 +222,7 @@ where the signing keys live:
 
 | Building | Stack | Keys live |
 | --- | --- | --- |
-| Bot / server / CLI / notebook | `aleo-sdk` facade + `shield-swap-sdk` (this package) | A local private key in the Aleo account keystore (`ShieldSwap.from_profile()` finds it, or creates and stores one on first use); delegated proving through the Provable prover — fees covered by default. |
+| Bot / server / CLI / notebook | `aleo-sdk` facade + `shield-swap-sdk` (this package) | A saved Aleo account. Import an existing key to retain its funds, or create an account with Keychain or encrypted storage before calling `ShieldSwap.from_profile()`. Delegated proving uses the Provable prover; fees are covered by default. |
 | Agent integration | `aleo_shield_swap.agent` (Claude-shape tool schemas + `dispatch_tool`) or `python -m aleo_shield_swap.mcp` (MCP server), over the same client | Same as the underlying client; the tools bind to it. |
 | Browser dApp (wallet-signed) | The TypeScript stack: `@provablehq/shield-swap-sdk` + Veil react hooks — not this package | The user's wallet signs and proves. |
 

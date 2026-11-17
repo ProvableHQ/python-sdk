@@ -18,12 +18,9 @@ _ALEO_SDK_MINIMUM = "0.9.0"
 
 
 def _require_aleo_sdk() -> None:
-    """Fail at import, naming the fix, when the installed aleo-sdk predates ``aleo.keystore``.
+    """Report the required SDK upgrade before a caller tries to load an account.
 
-    The account keystore comes from ``aleo.keystore``, which first shipped in aleo-sdk 0.9.0
-    (record management, from ``aleo.inventory``, arrived in 0.8.0, and freeze-list proofs,
-    from ``aleo.compliance``, in 0.7.0). An older install would otherwise fail the first time
-    a profile looks for its account, with a bare ``ModuleNotFoundError``.
+    Profiles need ``aleo.keystore``, available in aleo-sdk 0.9.0 and later.
     """
     try:
         import aleo.keystore  # noqa: F401

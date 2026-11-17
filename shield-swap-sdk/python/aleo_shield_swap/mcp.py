@@ -1,26 +1,34 @@
-"""MCP server exposing shield_swap as tools (the ``[mcp]`` extra).
+"""Use Shield Swap from an MCP client.
 
-Run: ``python -m aleo_shield_swap.mcp``
+Install ``shield-swap-sdk[mcp]`` and run
+``python -m aleo_shield_swap.mcp``. By default, the server uses the local
+profile to retain the account, API credentials, and unfinished swaps
+between sessions.
 
-Uses the low-level ``mcp.server.Server`` (not FastMCP) so each tool
-advertises the exact JSON schema from :func:`~aleo_shield_swap.agent
-.shield_swap_tools` — FastMCP infers schemas from handler signatures, which
-would collapse every tool to one opaque ``args`` object.  Tools run against
-the synchronous :class:`~aleo_shield_swap.client.ShieldSwap` (its full method
-surface) in a worker thread, keeping the event loop free.
+Set up the account before starting the server. Import an existing account
+to keep its address and funds, or create one for a separate address.
+Use macOS Keychain or encrypted storage to protect the private key; see
+:meth:`~aleo_shield_swap.profile.Profile.load_or_create`. Without setup,
+the first run can create an account with its key stored as plaintext.
+
+An encrypted account needs ``ALEO_ACCOUNT_PASSWORD`` or a password saved
+in the macOS Keychain: a server connected over stdio cannot answer a
+password prompt.
 
 Environment:
-    ALEO_ENDPOINT     API service root (default ``https://edge.provable.com/api``, no credentials —
-                      the provider derives ``/v2`` reads, ``/prove``, and
-                      ``/scanner`` from it)
-    ALEO_PRIVATE_KEY  Explicit signer (overrides the profile); without it
-                      the server binds ShieldSwap.from_profile() — the
-                      ~/.shield-swap journal and credentials, signing with
-                      the profile's account from the Aleo account keystore
-                      (~/.aleo/accounts)
-    ALEO_NETWORK      ``testnet`` (default) or ``mainnet``
+    SHIELD_SWAP_HOME  Profile directory; defaults to ``~/.shield-swap``.
+    ALEO_ACCOUNT     Account name; defaults to the profile's saved name,
+                     then ``default``.
+    ALEO_ACCOUNTS_DIR Account directory; defaults to ``~/.aleo/accounts``.
+    ALEO_PRIVATE_KEY Use this key directly, without the profile's journal
+                     or credentials. Supply it again on each server start.
+    ALEO_ENDPOINT    API service root for a direct-key client; defaults to
+                     ``https://edge.provable.com/api``.
+    ALEO_NETWORK     ``testnet`` (default) or ``mainnet`` for a direct-key
+                     client. A profile keeps its recorded network.
     ALEO_E2E_API_KEY / ALEO_E2E_CONSUMER_ID
-                      Delegated-proving + hosted-scanner credentials
+                     Optional service credentials for a direct-key client.
+                     A profile uses its saved credentials instead.
 """
 from __future__ import annotations
 
@@ -86,21 +94,17 @@ def _build_dex() -> Any:
     if pk:
         aleo.default_account = aleo.account.from_private_key(pk)
         return ShieldSwap(aleo)
-    # No explicit key: bind the local participant profile (created on first
-    # use), so MCP agents get persistence — journal, counters, credentials.
-    # Its account comes from the Aleo account keystore.
+    # Keep pending swaps and credentials available when the MCP client restarts.
     return ShieldSwap.from_profile()
 
 
 def main() -> None:
-    """Serve the shield_swap MCP tools over stdio until the client disconnects.
+    """Serve Shield Swap tools until the MCP client disconnects.
 
-    Builds a DEX client first, which binds a key from ``ALEO_PRIVATE_KEY`` or
-    else creates/loads the local participant profile on disk and signs with
-    its account from the Aleo account keystore. An encrypted account needs
-    ``ALEO_ACCOUNT_PASSWORD`` or a password saved in the macOS Keychain here,
-    because a server on stdio has no terminal to ask on. Blocks for the
-    lifetime of the server; requires the ``[mcp]`` extra.
+    Requires ``shield-swap-sdk[mcp]``. Prepare the account and any password
+    before starting; see the module's setup instructions. Without
+    ``ALEO_PRIVATE_KEY``, the server uses the saved profile and journal.
+    Setting that variable starts a client without profile persistence.
     """
     import anyio
     from mcp.server.stdio import stdio_server

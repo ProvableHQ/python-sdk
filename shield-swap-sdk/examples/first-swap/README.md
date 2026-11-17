@@ -19,13 +19,26 @@ An installed release that contains the example also supports:
 python -m aleo_shield_swap.examples.first_swap.swap
 ```
 
-## 1. Create an account
+## 1. Choose the account to trade with
 
-Start with an existing testnet private key or let the SDK create and retain
-one. `Profile.load_or_create` stores a new account in the Aleo account
-keystore (`~/.aleo/accounts/default.json`), where the other Aleo tools find it
-too, and records its address in `~/.shield-swap/profile.json`. Later runs
-reuse that account.
+Use an existing testnet account to keep its address and funds. Before running
+the example, import its key from a terminal:
+
+```sh
+python -m aleo.keystore import --storage encrypted
+```
+
+For a new account, run `python -m aleo.keystore create --storage encrypted`
+instead. Both commands ask for a password without displaying it. On macOS,
+`--storage keychain` keeps the key in Keychain instead of encrypting it in a
+file. These are the recommended choices: the default, plaintext, leaves the
+private key readable to anyone with access to the account file.
+
+The example reuses this account on later runs. With no account set up, it
+creates one using plaintext storage in `~/.aleo/accounts/default.json` and
+records its address in `~/.shield-swap/profile.json`. An encrypted account
+needs its password at startup; unattended runs need `ALEO_ACCOUNT_PASSWORD`
+or a password saved in macOS Keychain.
 
 ```python
 import os

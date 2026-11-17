@@ -1,4 +1,4 @@
-"""The runnable example binds its account before scanner or faucet I/O."""
+"""Check that the example reuses its account before contacting a service."""
 import json
 import runpy
 from pathlib import Path
@@ -23,7 +23,7 @@ def test_example_reuses_stored_account_before_network(tmp_path, monkeypatch, acc
         stored = json.loads(account_file.read_text())
         if run == 0:
             first_address, first_account = saved["address"], account_file.read_bytes()
-        # The profile names the account; the key stays in the account file.
+        # A restart must keep both the saved address and its original key.
         assert saved == {"address": first_address, "account": "default", "network": "testnet",
                          "endpoint": "https://edge.provable.com/api"}
         assert stored["address"] == first_address and stored["key"]["type"] == "plaintext"

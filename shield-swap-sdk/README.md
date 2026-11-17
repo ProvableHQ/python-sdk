@@ -72,76 +72,118 @@ Claude Code users get it via the `shield-swap` skill (packaged under
 `aleo_shield_swap/skills/`, copy into `.claude/skills/`); any MCP client
 can run the same lifecycle through `python -m aleo_shield_swap.mcp`.
 
-## Profiles and the account key
+## Keep using the same account
 
-`ShieldSwap.from_profile()` and `Profile.load_or_create()` keep a trader's
-state between runs in a profile home (`~/.shield-swap`, `SHIELD_SWAP_HOME`,
-or the `home` argument): API credentials, the swap journal, and
-`profile.json`, which records the account's address, its account name, the
-network and the endpoint.
+A profile keeps an account's address, API credentials, and swap journal
+together so a script can resume trading or collect unfinished swaps after a
+restart. Use the same profile directory on each run: `~/.shield-swap` by
+default, or a directory selected with `SHIELD_SWAP_HOME` or the `home` argument.
 
-The private key is not in the profile. It is found through the Aleo SDK's
-account keystore ([`aleo.keystore`](../sdk/Readme.md#store-an-account--aleokeystore)),
-which the other Aleo tools read as well, so an account set up once serves all
-of them:
+### Use an existing account
 
-1. `ALEO_PRIVATE_KEY`, or the text file named by `ALEO_PRIVATE_KEY_FILE`
-   (`SHIELD_SWAP_PRIVATE_KEY` and `SHIELD_SWAP_PRIVATE_KEY_FILE` are aliases).
-   A key supplied this way is used for the process and never written to disk,
-   so it has to be supplied on every run.
-2. The account file `~/.aleo/accounts/<name>.json`. The name comes from the
-   `account` argument, then `ALEO_ACCOUNT`, then the name recorded in the
-   profile, then `default`.
+Import the account to keep its address and funds. Run this in a terminal;
+the command asks for the private key without displaying it:
 
-A new profile adopts the account those sources supply. When there is none it
-creates an account and stores it in the keystore; `create=False` raises
-instead. Two profile homes that select the same account name therefore share
-one account: give a second address its own home and its own `account` name.
-Whichever source supplies the key later, it must belong to the
-address the profile records, so a stale variable or the wrong account name is
-an error naming both addresses instead of a trade from another account.
+```sh
+python -m aleo.keystore import --name trading --storage encrypted
+```
+
+Then create a profile for that account. `create=False` requires an existing
+key, so a missing account produces an error instead of a new address.
 
 ```python
 from aleo_shield_swap import Profile, ShieldSwap
 
-# First run: adopt the stored account, or create one and store it.
-profile = Profile.load_or_create()
-
-# Or choose how a newly created key is held, then build the client. An
-# encrypted account takes its password from ALEO_ACCOUNT_PASSWORD or asks for
-# it twice on the terminal.
-Profile.load_or_create("~/.shield-swap-main", network="mainnet", account="mainnet",
-                       storage="encrypted", save_password=True)
-dex = ShieldSwap.from_profile("~/.shield-swap-main")
+profile = Profile.load_or_create(account="trading", create=False)
+dex = ShieldSwap.from_profile(profile.home)
 ```
 
-`storage` applies when an account is created: `"plaintext"` (the default) is
-a file only its owner can read; `"keychain"` keeps the key in the macOS login
-keychain; `"encrypted"` encrypts it under a password, which later runs take
-from the `password` argument, `ALEO_ACCOUNT_PASSWORD`, the macOS Keychain
-(`save_password=True`, macOS only) or a hidden prompt on a terminal. Keychain and
-encrypted storage protect a copied or backed-up file; they do not stop
-another process running as the same user. An unattended job with an encrypted
-account needs the variable or the saved password, because it cannot answer a
-prompt.
+On later runs, `ShieldSwap.from_profile()` reuses the saved account, credentials,
+and journal. An encrypted account needs its password when the client starts.
 
-`profile.private_key` looks the key up on first use and raises
-`aleo.keystore.KeystoreError` when it cannot: read `error.code`
-(`PASSWORD_REQUIRED`, `ADDRESS_MISMATCH`, `ACCOUNT_NOT_FOUND`, …).
-`accounts_dir` (or `ALEO_ACCOUNTS_DIR`) points at another accounts directory;
-the profile does not record it, so pass it on every run.
+### Protect a new account's key
 
-A profile written by an earlier release keeps its key in `profile.json` and
-works unchanged. The first read of its key logs one warning on the
-`aleo_shield_swap.profile` logger with the command that moves the key:
+Use macOS Keychain or encrypted storage for saved keys. The default is
+plaintext, so choose storage before generating an account:
+
+```python
+from aleo_shield_swap import Profile, ShieldSwap
+
+Profile.load_or_create(storage="encrypted")
+dex = ShieldSwap.from_profile()
+```
+
+The first call asks for an encryption password if none was supplied. On macOS,
+use `storage="keychain"` to keep the private key outside the account file.
+The choices differ in what access to that file reveals:
+
+| Storage | Where the key is kept | What unlocks it |
+| --- | --- | --- |
+| `"keychain"` (macOS) | In macOS Keychain; the account file contains a reference to it. | Access to the Keychain entry. Copying the account file does not copy the key. |
+| `"encrypted"` | Encrypted inside the account file. | The account password. A copy or backup remains encrypted. |
+| `"plaintext"` (default) | Readable inside the account file. | Nothing beyond access to the file. Owner-only permissions do not encrypt the key or protect a copied file. |
+
+Anyone who obtains the private key can spend the account's funds. The address
+remains readable in the account file in every mode.
+
+`storage` only applies when generating a key. To protect an account that
+already exists, change its storage without changing its address or funds:
 
 ```sh
-python -m aleo.keystore migrate --from ~/.shield-swap/profile.json --remove-legacy-key
+python -m aleo.keystore protect --name trading --storage encrypted
 ```
 
-Without `--remove-legacy-key` the command copies the key and leaves the
-plaintext copy in `profile.json`. Earlier releases cannot read a profile that
-no longer holds the key.
+To create a separate account, choose both an unused `account` name and a
+separate profile directory. A second directory alone reuses the same account.
+Clear any private-key variables first, since those take precedence over the
+named account.
+
+### Run without a password prompt
+
+For `ShieldSwap.from_profile()` and MCP, set `ALEO_ACCOUNT_PASSWORD` or save
+the encryption password in macOS Keychain. When creating an encrypted account,
+`save_password=True` saves the password there so later runs can unlock it
+without a prompt. The password is still needed; Keychain supplies it.
+
+Code that uses `Profile` directly can also pass `password` to
+`Profile.load_or_create`. That password is kept only by the returned object;
+it is not passed on to a later `ShieldSwap.from_profile()` call. Without a
+password source, unlocking asks at a hidden terminal prompt, which unattended
+scripts and MCP servers cannot answer.
+
+A key supplied through `ALEO_PRIVATE_KEY` or `ALEO_PRIVATE_KEY_FILE` is used
+before a saved key and is never copied to disk. Supply it on every run, or
+import it once to save it. `SHIELD_SWAP_PRIVATE_KEY` and
+`SHIELD_SWAP_PRIVATE_KEY_FILE` are also accepted. Any supplied key must match
+the profile's address and the selected account file, if one exists.
+
+Account files default to `~/.aleo/accounts/<name>.json`. The name comes from
+`account`, then `ALEO_ACCOUNT`, then the profile's saved name, then `default`.
+Use `accounts_dir` or `ALEO_ACCOUNTS_DIR` for another directory. The profile
+does not save that location, so supply it on each run; clients opened with
+`ShieldSwap.from_profile()` need `ALEO_ACCOUNTS_DIR` for a custom location.
+
+Opening an existing `Profile` does not require its key. Reading
+`profile.private_key` unlocks it and checks the address. Failures raise
+`aleo.keystore.KeystoreError`; check `error.code` for a missing account
+(`ACCOUNT_NOT_FOUND`), a needed password (`PASSWORD_REQUIRED`), or a key for
+another address (`ADDRESS_MISMATCH`). See
+[`aleo.keystore`](../sdk/Readme.md#store-an-account--aleokeystore) for the full
+account API.
+
+### Move a key out of an older profile
+
+Older profiles with a private key in `profile.json` still work. Using that key
+logs a migration command once per profile file per process. To encrypt the key
+and remove the plaintext copy from the profile, run:
+
+```sh
+python -m aleo.keystore migrate --from ~/.shield-swap/profile.json --storage encrypted --remove-legacy-key
+```
+
+Without `--remove-legacy-key`, migration leaves the plaintext key in
+`profile.json`. Existing backups also retain their copies. Earlier SDK releases
+cannot read a profile after its key has been removed.
 
 ## How calls work
 

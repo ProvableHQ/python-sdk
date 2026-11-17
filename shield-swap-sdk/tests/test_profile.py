@@ -1,9 +1,8 @@
-"""The profile binds one Aleo account and finds its key through ``aleo.keystore``.
+"""Check that profiles retain the intended account without exposing its key.
 
-Every test runs inside the ``account_sandbox`` fixture (``conftest.py``): an
-empty home directory, the account and profile variables cleared, an in-memory
-Keychain and no terminal. Keys are random and never funded; comparisons go
-through ``same_secret`` so a failure never prints one.
+The account_sandbox fixture supplies temporary files and a fake Keychain.
+Accounts are generated for tests and never funded. Use same_secret for key
+comparisons so pytest does not include private keys in failure output.
 """
 from __future__ import annotations
 
@@ -23,25 +22,25 @@ from aleo_shield_swap import ShieldSwap
 from aleo_shield_swap import profile as profile_module
 from aleo_shield_swap.profile import DEFAULT_ENDPOINT, Profile
 
-# Test-only passwords. Never used for a funded account.
+# Fixed passwords for unfunded test accounts.
 PASSWORD = "correct horse battery staple"
 OTHER_PASSWORD = "another test password"
 
 
 def new_account() -> SimpleNamespace:
-    """Return a random account as an address and private-key pair of strings."""
+    """Generate an unfunded account for a test."""
     key = testnet.PrivateKey.random()
     return SimpleNamespace(address=str(key.address), private_key=str(key))
 
 
 def same_secret(actual: object, expected: object) -> None:
-    """Compare two secrets without putting either into an assertion message."""
+    """Fail on unequal secrets without printing either value."""
     if not isinstance(actual, str) or actual != expected:
         raise AssertionError("the secret values differ")
 
 
 def failure(call: Callable[[], Any]) -> KeystoreError:
-    """Return the keystore error a call fails with."""
+    """Capture a failed call so the test can inspect its error code."""
     try:
         call()
     except KeystoreError as error:
@@ -58,7 +57,7 @@ def files_under(*roots: Path) -> list[Path]:
 
 
 def assert_key_on_no_disk(private_key: str, *roots: Path) -> None:
-    """Assert that no file under *roots* contains the key."""
+    """Check for leaked private keys in files below the supplied directories."""
     for path in files_under(*roots):
         if private_key.encode() in path.read_bytes():
             raise AssertionError(f"{path} contains a private key")
@@ -69,7 +68,7 @@ def saved_profile(home: Path) -> dict[str, Any]:
 
 
 def write_legacy_profile(home: Path, account: SimpleNamespace, **extra: Any) -> Path:
-    """Write a profile whose ``profile.json`` holds the private key itself."""
+    """Create a profile in the older format for compatibility and migration tests."""
     home.mkdir(parents=True, exist_ok=True)
     path = home / "profile.json"
     data = {"address": account.address, "private_key": account.private_key,
@@ -81,13 +80,13 @@ def write_legacy_profile(home: Path, account: SimpleNamespace, **extra: Any) -> 
 
 @pytest.fixture(autouse=True)
 def fresh_legacy_notices(monkeypatch):
-    """Clear the once-per-process record of legacy-key notices before each test."""
+    """Let each test observe its own migration warnings."""
     monkeypatch.setattr(profile_module, "_legacy_notices", set())
 
 
 @pytest.fixture
 def lookups(monkeypatch):
-    """Count the keystore lookups a test triggers."""
+    """Record lookup arguments to check account selection and key caching."""
     calls: list[dict[str, Any]] = []
     real = keystore.load
 
@@ -99,10 +98,10 @@ def lookups(monkeypatch):
     return calls
 
 
-# ── The test surroundings themselves ─────────────────────────────────────────
+# Test isolation
 
 def test_tests_run_against_a_stand_in_home(account_sandbox, tmp_path):
-    """Check that nothing here resolves to the developer's own files."""
+    """Verify that the fixture redirects default paths and clears account variables."""
     import os
 
     assert Path.home() == account_sandbox.home
@@ -116,7 +115,7 @@ def test_tests_run_against_a_stand_in_home(account_sandbox, tmp_path):
     assert stored.path == account_sandbox.accounts / "default.json"
 
 
-# ── A home with no profile yet ───────────────────────────────────────────────
+# Creating a profile
 
 def test_create_then_reload_is_stable(tmp_path):
     p1 = Profile.load_or_create(tmp_path / "home")
@@ -206,7 +205,7 @@ def test_profile_made_from_an_environment_key_needs_it_again(tmp_path, monkeypat
     Profile.load_or_create(tmp_path / "home")
     monkeypatch.delenv("ALEO_PRIVATE_KEY")
 
-    later = Profile.load_or_create(tmp_path / "home")          # loading still works
+    later = Profile.load_or_create(tmp_path / "home")          # The saved address is still available without the key.
     assert later.address == account.address
     assert failure(lambda: later.private_key).code == "ACCOUNT_NOT_FOUND"
 
@@ -312,7 +311,7 @@ def test_account_variable_names_the_account_file(tmp_path, monkeypatch, account_
 ])
 def test_selected_name_is_recorded_when_the_key_comes_from_the_environment(
         tmp_path, monkeypatch, account_sandbox, argument, variable, recorded):
-    """No account file exists for a key supplied per run; the name the lookup selected is kept."""
+    """Keep the selected name so the same key can later be imported under it."""
     monkeypatch.setenv("ALEO_PRIVATE_KEY", new_account().private_key)
     if variable is not None:
         monkeypatch.setenv("ALEO_ACCOUNT", variable)
@@ -340,7 +339,7 @@ def test_accounts_dir_is_used_and_not_recorded(tmp_path, account_sandbox):
     assert not account_sandbox.accounts.exists()
     assert set(saved_profile(profile.home)) == {"address", "account", "network", "endpoint"}
 
-    # The directory is not recorded, so a later run passes it again.
+    # Reopening from a custom location requires the same directory.
     same_secret(Profile.load_or_create(tmp_path / "home", accounts_dir=accounts).private_key, profile.private_key)
     without = Profile.load_or_create(tmp_path / "home")
     assert failure(lambda: without.private_key).code == "ACCOUNT_NOT_FOUND"
@@ -354,7 +353,7 @@ def test_accounts_dir_variable_is_honoured(tmp_path, monkeypatch, account_sandbo
     same_secret(Profile.load_or_create(tmp_path / "home").private_key, profile.private_key)
 
 
-# ── Encrypted and Keychain storage ───────────────────────────────────────────
+# Protecting keys with encryption or Keychain
 
 def test_encrypted_account_needs_its_password_on_later_runs(tmp_path, monkeypatch, account_sandbox):
     created = Profile.load_or_create(tmp_path / "home", storage="encrypted", password=PASSWORD)
@@ -362,7 +361,7 @@ def test_encrypted_account_needs_its_password_on_later_runs(tmp_path, monkeypatc
     assert stored["key"]["type"] == "encrypted"
     assert_key_on_no_disk(created.private_key, tmp_path, account_sandbox.home)
 
-    # Loading never needs the password; reading the key does.
+    # Inspecting an existing profile must not require unlocking its key.
     locked = Profile.load_or_create(tmp_path / "home")
     assert locked.address == created.address
     assert failure(lambda: locked.private_key).code == "PASSWORD_REQUIRED"
@@ -430,7 +429,7 @@ def test_keychain_storage_outside_macos_creates_nothing(tmp_path, monkeypatch, a
     assert account_sandbox.keychain.entries == {}
 
 
-# ── An existing profile ──────────────────────────────────────────────────────
+# Reopening profiles and supporting older files
 
 def test_legacy_profile_keeps_working_and_is_left_untouched(tmp_path, account_sandbox):
     account = new_account()
@@ -449,7 +448,7 @@ def test_legacy_profile_is_reported_once(tmp_path, caplog):
     path = write_legacy_profile(tmp_path / "home", account)
     with caplog.at_level(logging.WARNING, logger="aleo_shield_swap.profile"):
         first = Profile.load_or_create(tmp_path / "home")
-        assert caplog.records == []                       # nothing until the key is read
+        assert caplog.records == []                       # Warn only when the legacy key is used.
         first.private_key
         first.private_key
         Profile.load_or_create(tmp_path / "home").private_key
@@ -473,7 +472,7 @@ def test_each_legacy_profile_is_reported(tmp_path, caplog):
 def test_migrated_legacy_profile_reads_the_account_file_without_a_notice(tmp_path, caplog, account_sandbox):
     account = new_account()
     path = write_legacy_profile(tmp_path / "home", account)
-    keystore.migrate(path)                                 # the copy in profile.json stays
+    keystore.migrate(path)                                 # Migration keeps the original key unless removal is requested.
     with caplog.at_level(logging.WARNING, logger="aleo_shield_swap.profile"):
         same_secret(Profile.load_or_create(tmp_path / "home").private_key, account.private_key)
     assert caplog.records == []
@@ -566,7 +565,7 @@ def test_address_only_account_file_needs_the_key_from_the_environment(tmp_path, 
     assert failure(lambda: profile.private_key).code == "KEY_NOT_STORED"
 
 
-# ── Which account name an existing profile selects ───────────────────────────
+# Choosing the account for a saved profile
 
 def test_recorded_account_name_is_used(tmp_path, lookups):
     created = Profile.load_or_create(tmp_path / "home", account="trading")
@@ -582,14 +581,14 @@ def test_account_variable_beats_the_recorded_name(tmp_path, monkeypatch, account
     profile = Profile.load_or_create(tmp_path / "home")
     error = failure(lambda: profile.private_key)
     assert error.code == "ACCOUNT_NOT_FOUND" and "elsewhere.json" in str(error)
-    # The recorded name is withheld so the keystore applies the variable itself.
+    # Leave name unset so keystore.load() can use ALEO_ACCOUNT.
     assert [call["name"] for call in lookups] == [None]
 
-    # A second account file holding the same key satisfies the address check.
+    # Renaming the account is allowed when its address stays the same.
     keystore.save(created.private_key, name="elsewhere")
     same_secret(Profile.load_or_create(tmp_path / "home").private_key, created.private_key)
 
-    # One holding another key does not.
+    # An override must not switch the profile to another address.
     monkeypatch.setenv("ALEO_ACCOUNT", "stranger")
     keystore.save(new_account().private_key, name="stranger")
     stranger = Profile.load_or_create(tmp_path / "home")
@@ -633,24 +632,24 @@ def test_lookup_passes_the_recorded_address_and_the_legacy_key(tmp_path, lookups
     same_secret(call["password"], PASSWORD)
 
 
-# ── One lookup per profile object ────────────────────────────────────────────
+# Unlocking once and retrying failed lookups
 
 def test_key_is_resolved_once_per_object_and_only_when_read(tmp_path, lookups):
     Profile.load_or_create(tmp_path / "home")
     del lookups[:]
     profile = Profile.load_or_create(tmp_path / "home")
     assert profile.address and profile.network and profile.credentials == {}
-    assert lookups == []                                   # loading reads no key
+    assert lookups == []                                   # Reading metadata does not unlock the account.
     for _ in range(3):
         profile.private_key
     assert len(lookups) == 1
-    Profile.load_or_create(tmp_path / "home").private_key  # a new object looks again
+    Profile.load_or_create(tmp_path / "home").private_key  # Each new object must load its own key.
     assert len(lookups) == 2
 
 
 def test_new_profile_keeps_the_key_it_was_created_with(tmp_path, lookups):
     profile = Profile.load_or_create(tmp_path / "home", storage="encrypted", password=PASSWORD)
-    assert len(lookups) == 1                               # the lookup that found no account
+    assert len(lookups) == 1                               # Creation first checked for an existing account.
     profile.private_key
     profile.private_key
     assert len(lookups) == 1
@@ -680,7 +679,7 @@ def test_repr_and_saved_profile_hold_no_key(tmp_path):
         raise AssertionError("the profile exposes a private key")
 
 
-# ── Callers ──────────────────────────────────────────────────────────────────
+# Opening a trading client
 
 def test_from_profile_signs_with_the_resolved_key(tmp_path, monkeypatch):
     account = new_account()
@@ -708,7 +707,7 @@ def test_from_profile_reports_a_locked_account(tmp_path, monkeypatch):
     assert not (tmp_path / "home").exists()
 
 
-# ── Homes, credentials and the journal ───────────────────────────────────────
+# Profile directories, credentials, and journals
 
 def test_env_home_override(tmp_path, monkeypatch):
     monkeypatch.setenv("SHIELD_SWAP_HOME", str(tmp_path / "envhome"))
@@ -739,8 +738,7 @@ def test_journal_path(tmp_path):
 
 
 def test_tilde_in_home_is_expanded(tmp_path, monkeypatch):
-    """A "~/..." string must not create a literal ~ directory in the cwd —
-    that would write the profile somewhere no later run looks."""
+    """Expand ~ so a restart can find the profile in the expected home directory."""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.chdir(tmp_path)
     profile = Profile.load_or_create("~/.shield-swap-tilde")

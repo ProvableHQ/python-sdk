@@ -1,12 +1,13 @@
-"""Bind a participant's home directory to one Aleo account.
+"""Keep a trading account and its saved work available between runs.
 
-One profile per home directory (``$SHIELD_SWAP_HOME`` or ``~/.shield-swap``).
-``profile.json`` records which Aleo account the profile trades with: its
-address and the name of its account file. The private key is held by the Aleo
-account keystore (``aleo.keystore``, by default
-``~/.aleo/accounts/<name>.json``). Every Aleo tool reads that keystore, so an
-account set up once serves them all. Credentials (JWT, delegated-proving keys)
-are stored separately so they can be refreshed without touching the account.
+A profile ties one Aleo address to a directory containing API credentials
+and a swap journal. Reuse that directory to continue trading and collect
+pending swaps. The default is ``SHIELD_SWAP_HOME``, then ``~/.shield-swap``.
+
+New profiles store the address and account name in ``profile.json``. The
+private key is loaded through ``aleo.keystore`` or supplied through the
+environment. Use macOS Keychain or encrypted account storage to protect a
+saved key; see :meth:`Profile.load_or_create`.
 """
 from __future__ import annotations
 
@@ -23,8 +24,7 @@ _CREDENTIALS = "credentials.json"
 
 _log = logging.getLogger(__name__)
 
-# Profile files already reported as holding their own key. The notice is given
-# once per process, however many Profile objects load the file.
+# Avoid repeating the migration warning when several objects load one profile.
 _legacy_notices: set[str] = set()
 _legacy_notices_lock = threading.Lock()
 
@@ -39,18 +39,18 @@ def _write_private(path: Path, payload: dict[str, Any]) -> None:
 
 
 def _selected_account_name(account: Optional[str]) -> str:
-    """Return the account name a lookup selects when the profile records none.
+    """Choose a name to record when no account file supplies one.
 
-    Applies the account keystore's own order: the *account* argument, then
-    ``ALEO_ACCOUNT`` (an empty value counts as unset), then ``default``.
+    Use the same defaults as the keystore: ``account``, then a nonempty
+    ``ALEO_ACCOUNT``, then ``default``.
     """
     return account if account is not None else (os.environ.get("ALEO_ACCOUNT") or "default")
 
 
 def _report_legacy_key(path: Path, address: str) -> None:
-    """Log, once per process and profile file, that the file holds the key itself.
+    """Point callers to the migration command for a key still in profile.json.
 
-    The warning names the command that copies the key into an account file.
+    Report each file once per process without including the key.
     """
     with _legacy_notices_lock:
         if str(path) in _legacy_notices:
@@ -64,45 +64,42 @@ def _report_legacy_key(path: Path, address: str) -> None:
 
 
 class Profile:
-    """A participant's persistent identity and credentials.
+    """Reuse an account and its trading history across sessions.
 
-    Holds exactly one Aleo address, fixed when the profile is created and
-    reused every session after.  For several addresses, create a profile per
-    address — each needs its own home directory (``SHIELD_SWAP_HOME``, or
-    *home* on :meth:`load_or_create`), since the journal and credentials are
-    per-profile too — and give each its own account name.
+    Load the same profile on each run to keep its address, API credentials,
+    and swap journal together. A profile belongs to one address and one
+    network; give a separate account or network its own home directory.
 
-    Load with :meth:`load_or_create`.  The same call serves the first run and
-    every later one, so callers never branch on whether a profile exists::
+    Use :meth:`load_or_create` to open the profile. If an account already
+    exists, the profile uses it. Otherwise it generates a key. For a new
+    key, choose password encryption or macOS Keychain storage::
 
         from aleo_shield_swap import Profile
 
-        # First run: uses the stored Aleo account, or creates and stores one.
-        profile = Profile.load_or_create()
-        print(profile.address)                  # aleo1…
+        profile = Profile.load_or_create(storage="encrypted")
+        address = profile.address
 
-        # Every run after: the same call returns that account, unchanged.
-        assert Profile.load_or_create().address == profile.address
+    The first run asks for an encryption password unless one was supplied.
+    Later runs need that password to unlock the key. On macOS,
+    ``storage="keychain"`` keeps the key in Keychain instead of the account
+    file. The default, ``"plaintext"``, leaves the key readable to anyone
+    with access to the file. Passing ``storage`` does not convert an
+    existing account; use ``python -m aleo.keystore protect`` for that.
 
-        # A second address needs its own home and its own account name.
-        other = Profile.load_or_create("~/.shield-swap-alt", account="alt")
-
-    The private key is not in the profile.  It is found through the Aleo
-    account keystore: the ``ALEO_PRIVATE_KEY`` or ``ALEO_PRIVATE_KEY_FILE``
-    variables for a key supplied per run, otherwise the account file the
-    profile names.  A key from the environment is used for the process and
-    never written to disk.  Whichever source supplies it, the key must belong
-    to the profile's address.
+    A second home directory alone does not create a separate account:
+    profiles selecting the same account name share its key. To trade from
+    another address, use a separate home and ``account`` name, and clear
+    any key variables that still select the first account.
     """
 
     def __init__(self, home: Path, data: dict[str, Any]) -> None:
         self.home = home
         self._data = data
-        # How to find the key of an existing profile, as given to load_or_create().
+        # Retain these options so inspecting a profile does not require unlocking it.
         self._account: Optional[str] = None
         self._accounts_dir: "Path | str | None" = None
         self._password: Optional[str] = None
-        # The key, once resolved; one lookup serves the object's lifetime.
+        # Reuse the unlocked key for this object instead of prompting on every read.
         self._private_key: Optional[str] = None
         self._key_lock = threading.Lock()
 
@@ -133,86 +130,87 @@ class Profile:
                        accounts_dir: "Path | str | None" = None,
                        password: Optional[str] = None,
                        save_password: bool = False) -> "Profile":
-        """Load the profile at *home*, binding one to an Aleo account if absent.
+        """Open a trading profile, creating one if this is its first run.
 
-        A new profile takes the account the Aleo account keystore resolves: a
-        key in ``ALEO_PRIVATE_KEY`` or the file named by
-        ``ALEO_PRIVATE_KEY_FILE`` (``SHIELD_SWAP_PRIVATE_KEY`` and
-        ``SHIELD_SWAP_PRIVATE_KEY_FILE`` are aliases), otherwise the account
-        file selected by *account*.  A user with an existing account supplies
-        it one of these ways rather than pasting a key into a chat.  When
-        neither exists, a new account is created and stored in the keystore
-        with the chosen *storage*; pass ``create=False`` to raise instead.  A
-        key from the environment is used for this process and never written
-        to disk, so it has to be supplied again on every later run.
+        To keep an existing address and its funds, import its key with
+        ``python -m aleo.keystore import --storage encrypted`` first, then
+        load the profile with ``create=False``. On macOS, ``--storage keychain``
+        keeps the key in Keychain. Import keys in a terminal, never in a chat.
+        ``create=False`` permits a new profile but requires an existing key.
 
-        ``profile.json`` then records the address, the account name, the
-        network and the endpoint, at mode 600.  It holds no private key.
+        To start with a separate address, choose an unused account name and
+        profile home. Use ``storage="keychain"`` on macOS or
+        ``storage="encrypted"`` to protect a newly generated key. The default
+        is plaintext, which leaves the private key readable in the account
+        file. ``storage`` applies only when generating a key; it does not
+        change an existing account. ``python -m aleo.keystore protect`` can
+        change storage while keeping the address and funds.
 
-        An existing profile is returned as recorded: *network*, *endpoint*,
-        *create*, *storage* and *save_password* apply only when creating.  Its
-        key is looked up on the first read of :attr:`private_key`, using
-        *account*, *accounts_dir* and *password* as given here.  A profile
-        whose ``profile.json`` holds a ``private_key`` keeps working: that key
-        is used when no other source supplies one.
+        The profile records its address, account name, network, and endpoint
+        in ``profile.json``. Creating it does not contact the network or move
+        funds. An existing profile keeps its recorded settings and can be
+        opened without a password; its key is unlocked on the first read of
+        :attr:`private_key`.
 
-        Reads the environment and the account file.  Creating also writes the
-        account file and the profile, and for ``"keychain"`` or
-        ``"encrypted"`` storage writes the macOS Keychain or asks for a
-        password on an attached terminal.  Does not contact a network.
+        Keys supplied through ``ALEO_PRIVATE_KEY`` or ``ALEO_PRIVATE_KEY_FILE``
+        take precedence over saved keys and are never copied to disk. Supply
+        the key again on each run, or import it once to save it.
+        ``SHIELD_SWAP_PRIVATE_KEY`` and ``SHIELD_SWAP_PRIVATE_KEY_FILE`` are
+        also accepted. Any supplied key must match the profile's address
+        and, if present, the selected account file.
 
         Args:
-            home: Profile directory; defaults to :meth:`default_home`.
-            network: Network to bind a NEW profile to.
-            endpoint: API endpoint to record on a NEW profile.
-            create: Whether to create and store an account when a NEW profile
-                finds none.  Defaults to True.
-            storage: Where the keystore holds a newly created key.
-                ``"plaintext"`` (the default) writes it to a file only its
-                owner can read, so an unattended process starts without a
-                password.  ``"keychain"`` holds it in the macOS login
-                keychain.  ``"encrypted"`` holds it under a password on every
-                system, and each later run needs that password.  ``"none"``
-                is rejected, because nothing would hold the new key once the
-                process exits.
-            account: Account name in the keystore.  Defaults to
-                ``ALEO_ACCOUNT``, then the name the profile records, then
-                ``default``.
-            accounts_dir: Accounts directory.  Defaults to
-                ``ALEO_ACCOUNTS_DIR``, then ``~/.aleo/accounts``.  The profile
-                does not record it; pass it again on later runs.
-            password: Password of an ``"encrypted"`` account.  Defaults to
-                ``ALEO_ACCOUNT_PASSWORD``, a password saved in the macOS
-                Keychain, then a hidden prompt on an attached terminal.
-            save_password: Also save the password of a newly created
-                ``"encrypted"`` account in the macOS Keychain, so later runs
-                need no password.  Defaults to False.
+            home: Directory for the profile, credentials, and swap journal.
+                Defaults to ``SHIELD_SWAP_HOME``, then ``~/.shield-swap``.
+            network: ``"testnet"`` (default) or ``"mainnet"`` for a new profile.
+                An existing profile keeps its network; use another home to
+                trade on a different network.
+            endpoint: API service root for a new profile. Defaults to
+                ``https://edge.provable.com/api``; ignored for an existing profile.
+            create: Generate and save a key if none is found for a new profile.
+                Defaults to True. Use False to require an existing account.
+            storage: Protection for a generated key. ``"encrypted"`` encrypts
+                the key in the account file and requires a password to unlock
+                it. ``"keychain"`` stores the key in macOS Keychain, outside
+                the file. ``"plaintext"`` (default) restricts file permissions
+                but does not encrypt the key or protect a copied file. The
+                address remains readable in every mode. ``"none"`` is rejected
+                because the generated key would be lost when the process exits.
+            account: Name of the saved account. Defaults to ``ALEO_ACCOUNT``,
+                then the profile's saved name, then ``default``. Use a distinct
+                name as well as a distinct home for each separate account.
+            accounts_dir: Directory containing account files. Defaults to
+                ``ALEO_ACCOUNTS_DIR``, then ``~/.aleo/accounts``. This location
+                is not saved in the profile; supply it on each run.
+            password: Password to unlock an encrypted account or protect a new
+                key. If omitted, uses ``ALEO_ACCOUNT_PASSWORD``, then a password
+                saved in macOS Keychain, then a hidden terminal prompt.
+            save_password: Save a new encrypted account's password in macOS
+                Keychain so later runs can unlock it without a prompt.
+                Defaults to False; applies only when generating a key.
 
         Returns:
-            The loaded or newly created profile.
+            The profile for the recorded address. For an existing profile,
+            opening it does not check whether its key is available; read
+            :attr:`private_key` when it is needed for signing.
 
         Raises:
-            aleo.keystore.KeystoreError: Read ``code``.  For a NEW profile:
-                ``ACCOUNT_NOT_FOUND`` when no account resolves and *create* is
-                False; ``UNSUPPORTED_STORAGE`` when an account would be
-                created with ``"none"`` or an unknown *storage*;
-                ``EMPTY_KEY_SOURCE``, ``KEY_CONFLICT`` or ``INVALID_KEY`` for
-                unusable key variables; ``ADDRESS_MISMATCH`` when a key from
-                the environment belongs to another address than the selected
-                account file; ``KEY_NOT_STORED`` when that file records an
-                address only and no key was supplied; ``PASSWORD_REQUIRED`` or
-                ``WRONG_PASSWORD`` for an encrypted account;
-                ``KEYCHAIN_UNAVAILABLE`` for ``"keychain"`` outside macOS;
-                ``INVALID_NAME`` for an unusable *account*.
+            aleo.keystore.KeystoreError: A new profile cannot open or save its
+                account. Check ``code``: ``ACCOUNT_NOT_FOUND`` with
+                ``create=False`` means the account must be imported or supplied;
+                ``PASSWORD_REQUIRED`` or ``WRONG_PASSWORD`` requires a valid
+                password; ``ADDRESS_MISMATCH`` means the supplied key belongs
+                to another account. Other codes identify invalid key sources,
+                names, or unavailable storage. An existing profile reports key
+                errors when :attr:`private_key` is read.
         """
-        # expanduser: a "~/..." string is otherwise taken literally, creating a
-        # directory named ~ in the cwd and writing the profile there.
+        # Treat ~ as the user's home, including paths passed directly from Python.
         home = Path(home).expanduser() if home is not None else cls.default_home()
         path = home / _PROFILE
         if path.exists():
             path.chmod(0o600)             # heal a pre-existing loose mode
             profile = cls(home, json.loads(path.read_text()))
-            # The key is looked up when it is first read, with these options.
+            # Allow address and credential reads before the account is unlocked.
             profile._account = account
             profile._accounts_dir = accounts_dir
             profile._password = password
@@ -223,8 +221,7 @@ class Profile:
             try:
                 loaded = keystore.load(name=account, dir=accounts_dir, password=password)
                 private_key, address = loaded.private_key, loaded.address
-                # A key from the environment needs no account file; the name
-                # the lookup selected is recorded all the same.
+                # Remember the account name even when the key is supplied per run.
                 name = loaded.stored.name if loaded.stored is not None else _selected_account_name(account)
             except keystore.KeystoreError as error:
                 if error.code != "ACCOUNT_NOT_FOUND" or not create:
@@ -237,7 +234,7 @@ class Profile:
                     ) from None
                 private_key = str(net.PrivateKey.random())
                 stored = keystore.save(private_key, name=account, dir=accounts_dir,
-                                       storage=cast(Any, storage),   # save() rejects an unknown value
+                                       storage=cast(Any, storage),   # save() validates storage.
                                        password=password, save_password=save_password)
                 address, name = stored.address, stored.name
             home.mkdir(parents=True, exist_ok=True)
@@ -257,35 +254,35 @@ class Profile:
 
     @property
     def private_key(self) -> str:
-        """The private key of the profile's account.
+        """Unlock the account's private key for signing.
 
-        Whoever holds this controls the account and can decrypt its records — do
-        not log it, echo it into a conversation, or send it to a service.
+        The key gives control of the account's funds and can decrypt its
+        records. Keep it out of logs, conversations, and service requests.
 
-        The key is looked up on first use and kept for the lifetime of this
-        object: from ``ALEO_PRIVATE_KEY`` or ``ALEO_PRIVATE_KEY_FILE`` when
-        set, otherwise from the account file named by the *account* argument
-        of :meth:`load_or_create`, then ``ALEO_ACCOUNT``, then the name the
-        profile records, then ``default``.  A ``private_key`` held in
-        ``profile.json`` is used when no other source has one, and a warning
-        is logged once with the command that moves it into an account file.
-        Whichever source supplies the key, it must belong to :attr:`address`.
+        For an existing profile, the first read loads the key and checks
+        that it belongs to :attr:`address`. An encrypted account may ask
+        for its password. Later reads reuse the unlocked key for this
+        object's lifetime, so changes to key variables or files take effect
+        only after loading another profile object.
 
-        The first read may run the macOS ``security`` tool or, for an
-        encrypted account, stretch a password (about 200 ms) and ask for it
-        on an attached terminal.
+        A key in ``ALEO_PRIVATE_KEY`` or ``ALEO_PRIVATE_KEY_FILE`` is used
+        before the saved account. Account selection follows the ``account``
+        argument, ``ALEO_ACCOUNT``, the profile's saved name, then ``default``.
+        An older profile containing a private key still works when no other
+        key source or account file exists. Using that key logs a migration
+        command once per profile file per process; it does not move or delete
+        the key.
 
         Raises:
-            aleo.keystore.KeystoreError: Read ``code``.  ``ADDRESS_MISMATCH``
-                when the key found belongs to another address; the message
-                names both.  ``ACCOUNT_NOT_FOUND`` when no source has a key,
-                such as a profile created from a key in the environment that
-                is no longer set.  ``PASSWORD_REQUIRED`` when the account is
-                encrypted and no password was passed, set in
-                ``ALEO_ACCOUNT_PASSWORD``, saved in the Keychain or typed at
-                a terminal; ``WRONG_PASSWORD`` when it does not unlock the
-                key.  ``EMPTY_KEY_SOURCE`` or ``KEY_CONFLICT`` for key
-                variables that are empty or disagree.
+            aleo.keystore.KeystoreError: Check ``code`` to decide what to supply.
+                ``ACCOUNT_NOT_FOUND`` means the key is missing;
+                ``KEY_NOT_STORED`` means the account file contains only an
+                address. Import or supply the original key in either case.
+                ``PASSWORD_REQUIRED`` or ``WRONG_PASSWORD`` means an encrypted
+                account needs its password. ``ADDRESS_MISMATCH`` means the key
+                belongs to another address; the message names both addresses.
+                ``EMPTY_KEY_SOURCE`` or ``KEY_CONFLICT`` identifies empty or
+                conflicting key variables.
         """
         if self._private_key is None:
             with self._key_lock:
@@ -294,24 +291,23 @@ class Profile:
         return self._private_key
 
     def _resolve_private_key(self) -> str:
-        """Find the key of an existing profile through the account keystore."""
+        """Load a key that matches the saved address before allowing it to sign."""
         from aleo import keystore
 
-        # The keystore lets its name argument override ALEO_ACCOUNT, so the
-        # recorded name is passed only when neither the caller nor the
-        # variable selects an account.
+        # Passing the saved name would override ALEO_ACCOUNT in keystore.load().
+        # Use it only when neither the caller nor the environment selects a name.
         name = self._account
         if name is None and not os.environ.get("ALEO_ACCOUNT"):
             name = self._data.get("account")
         loaded = keystore.load(
             name=name, dir=self._accounts_dir,
-            # A profile file may hold the key itself; it is the last source.
+            # Keep older profiles usable until their keys are migrated.
             legacy_key=self._data.get("private_key") or None,
             expected_address=self.address,
             password=self._password)
         if loaded.source == "legacy":
             _report_legacy_key(self.home / _PROFILE, self.address)
-        self._password = None             # the key is held now; the password is not needed again
+        self._password = None             # Release the password reference after unlocking.
         return loaded.private_key
 
     @property

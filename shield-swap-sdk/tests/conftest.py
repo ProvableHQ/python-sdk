@@ -14,8 +14,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import pytest
 
-# Variables a developer's shell could leak into a test: each one selects an
-# account, a key, a password or a profile home.
+# Clear these variables so tests cannot select a real account or profile.
 ACCOUNT_VARIABLES = (
     "ALEO_PRIVATE_KEY",
     "ALEO_PRIVATE_KEY_FILE",
@@ -29,11 +28,10 @@ ACCOUNT_VARIABLES = (
 
 
 class FakeKeychain:
-    """An in-memory stand-in for the macOS ``security`` tool.
+    """Test Keychain storage without reading or changing macOS Keychain.
 
-    Accepts the three invocations the account keystore makes (add, find
-    and delete a generic password), so Keychain storage can be exercised
-    without touching the login keychain of the machine running the tests.
+    Keep entries in memory and accept the add, find, and delete commands
+    used by the keystore.
     """
 
     def __init__(self) -> None:
@@ -56,15 +54,13 @@ class FakeKeychain:
 
 
 class AccountSandbox:
-    """Hold the stand-ins one test runs against in place of the developer's files.
+    """Keep a test's account files, Keychain entries, and notices together.
 
     Attributes:
-        home: Stand-in home directory. The default accounts directory and the
-            default profile home resolve inside it.
-        accounts: The default accounts directory, ``<home>/.aleo/accounts``.
-            Created by the keystore on first save.
-        keychain: The in-memory Keychain tool.
-        notes: Lines the keystore wrote to the terminal.
+        home: Temporary home used to resolve default account and profile paths.
+        accounts: Account files created by the test, under ``<home>/.aleo/accounts``.
+        keychain: In-memory entries available for assertions.
+        notes: Captured terminal notices, in the order they were written.
     """
 
     def __init__(self, home: Path) -> None:
@@ -81,12 +77,12 @@ def _no_prompt(message: str) -> str:
 @pytest.fixture(autouse=True)
 def account_sandbox(request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory,
                     monkeypatch: pytest.MonkeyPatch) -> AccountSandbox:
-    """Keep every test away from the developer's own accounts, profile and Keychain.
+    """Isolate account tests from real keys and passwords.
 
-    A profile finds its account through the account keystore, so a test that
-    only creates a profile would otherwise read or write ``~/.aleo/accounts``.
-    Each test gets an empty home directory, the account and profile variables
-    cleared, an in-memory Keychain and no terminal to prompt on.
+    Clear account variables, redirect keystore files to a temporary home,
+    and replace Keychain access with an in-memory fake. Reject prompts so
+    a missing test password fails instead of waiting for input. Offline
+    tests also use the temporary home for profile files.
     """
     from aleo.keystore._runtime import runtime
 
@@ -99,9 +95,8 @@ def account_sandbox(request: pytest.FixtureRequest, tmp_path_factory: pytest.Tem
     monkeypatch.setattr(runtime, "prompt_hidden", _no_prompt)
     monkeypatch.setattr(runtime, "prompt_visible", _no_prompt)
     monkeypatch.setattr(runtime, "notify", box.notes.append)
-    # The live and devnode tiers keep the real home directory in the
-    # environment: local proving caches its parameters there. The keystore's
-    # own home lookup is replaced for them all the same.
+    # Live and devnode tests need the existing proving-parameter cache.
+    # Keep their HOME while redirecting all keystore access above.
     if request.node.get_closest_marker("live") is None and request.node.get_closest_marker("devnode") is None:
         monkeypatch.setenv("HOME", str(box.home))
         monkeypatch.setenv("USERPROFILE", str(box.home))
