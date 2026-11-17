@@ -23,10 +23,8 @@ pytestmark = pytest.mark.live
 
 
 def test_full_lifecycle_from_fresh_profile(tmp_path, monkeypatch):
-    # Prove the participant path: credentials must SELF-provision and the
-    # profile key must be genuinely fresh (a developer shell may carry
-    # SHIELD_SWAP_PRIVATE_KEY, which would import a funded, already-redeemed
-    # account and void every "fresh account" assertion below).
+    # Require onboarding to obtain credentials for a new account. Credentials
+    # or keys inherited from the shell could skip the stages tested below.
     monkeypatch.delenv("ALEO_E2E_API_KEY", raising=False)
     monkeypatch.delenv("ALEO_E2E_CONSUMER_ID", raising=False)
     monkeypatch.delenv("SHIELD_SWAP_PRIVATE_KEY", raising=False)

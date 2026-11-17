@@ -9,11 +9,16 @@ that never landed just reports not-finalized).
 Counter reservation is the concurrency-critical piece: blinded identities
 must never collide, so counters are issued once, under an advisory file
 lock, and burned (never reused) when their swap fails.
+
+Profiles that trade from one account on one network share a counter ledger,
+a second JSONL file outside every profile home.  A journal opened with that
+ledger issues counters through it, so two homes never issue the same one.
 """
 from __future__ import annotations
 
 import fcntl
 import json
+import os
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -55,11 +60,23 @@ class Journal:
         path: Where the log lives, usually ``Profile.journal_path``.  Its
             parent is created on first append, alongside a ``.lock`` sibling
             used to serialize writers.
+        counters: Ledger of the counters issued for this journal's account,
+            usually ``Profile.counters_path``.  Every journal opened with the
+            same ledger issues counters through it, so profile homes that
+            share an account never issue the same counter.  The ledger holds
+            counter numbers and timestamps only; swaps and blinding factors
+            stay in *path*.  Opening the journal reads both files and, when
+            *path* records counters the ledger lacks, retires them in the
+            ledger.  Defaults to None: counters are then coordinated only
+            among users of *path*.
     """
 
-    def __init__(self, path: "Path | str") -> None:
+    def __init__(self, path: "Path | str", *, counters: "Path | str | None" = None) -> None:
         self.path = Path(path)
         self._lock_path = self.path.with_suffix(".lock")
+        self._ledger = Journal(counters) if counters is not None else None
+        # Counters issued before this journal used the ledger may still be pending.
+        self._publish_counters()
 
     def __repr__(self) -> str:
         return f"Journal({str(self.path)!r})"
@@ -113,17 +130,85 @@ class Journal:
 
     # ── Counters ─────────────────────────────────────────────────────────────
 
+    @contextmanager
+    def _counters_locked(self) -> Iterator[None]:
+        """Hold every lock a counter change needs.
+
+        Takes the ledger's lock before this journal's, in that order on every
+        path, so journals sharing a ledger cannot deadlock.  Takes one lock
+        when both are the same file.  Creates the
+        ledger's directory for its owner only: the file names in it are the
+        addresses this user trades from.
+        """
+        if self._ledger is None:
+            with self._locked():
+                yield
+            return
+        self._ledger.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self._ledger._lock_path.open("a") as outer, self._lock_path.open("a") as inner:
+            # Two file names can derive one lock file, such as journal.jsonl and
+            # journal.counters. A second lock on it would wait on the first forever.
+            shared = os.path.sameopenfile(outer.fileno(), inner.fileno())
+            fcntl.flock(outer, fcntl.LOCK_EX)
+            try:
+                if not shared:
+                    fcntl.flock(inner, fcntl.LOCK_EX)
+                try:
+                    yield
+                finally:
+                    if not shared:
+                        fcntl.flock(inner, fcntl.LOCK_UN)
+            finally:
+                fcntl.flock(outer, fcntl.LOCK_UN)
+
+    def _write_counter_event(self, event: dict[str, Any]) -> None:
+        """Append a counter event to the ledger, then to this journal.
+
+        The caller holds :meth:`_counters_locked`.  The ledger is written
+        first: a crash between the two writes leaves a counter that no
+        journal uses, never one that two journals use.
+        """
+        line = json.dumps(event) + "\n"
+        for journal in (self._ledger, self):
+            if journal is not None:
+                with journal.path.open("a") as f:
+                    f.write(line)
+
+    def _publish_counters(self) -> None:
+        """Retire this journal's counters in the ledger when the ledger is behind.
+
+        A journal holds counters the ledger did not issue when it reserved
+        them before it was opened with a ledger, or recorded a swap on an
+        identity the caller chose.  Their swaps may not have finalized, so
+        the chain cannot report them to the other journals; this does.
+
+        Reads both files.  Takes the locks and appends one
+        ``counters_skipped`` event to the ledger only when the ledger is
+        behind; otherwise writes nothing.
+        """
+        if self._ledger is None or self._own_cursor() <= self._ledger.counter_cursor():
+            return
+        with self._counters_locked():
+            through = self._own_cursor() - 1
+            if through >= self._ledger.counter_cursor():
+                event = {"type": "counters_skipped", "ts": time.time(), "through": through}
+                with self._ledger.path.open("a") as f:
+                    f.write(json.dumps(event) + "\n")
+
     def reserve_counters(self, n: int) -> list[int]:
-        """Issue the next *n* counters, exactly once, under a file lock."""
+        """Issue the next *n* counters, exactly once, under a file lock.
+
+        With a counter ledger, the counters are also unique among every
+        journal that shares the ledger.
+        """
         if n <= 0:
             return []
-        with self._locked():
+        with self._counters_locked():
             start = self.counter_cursor()
             counters = list(range(start, start + n))
-            event = {"type": "counters_reserved", "ts": time.time(),
-                     "counters": counters}
-            with self.path.open("a") as f:      # already under the lock
-                f.write(json.dumps(event) + "\n")
+            self._write_counter_event({"type": "counters_reserved", "ts": time.time(),
+                                       "counters": counters})
             return counters
 
     def skip_counters_through(self, counter: int) -> None:
@@ -132,17 +217,26 @@ class Journal:
         A fresh journal for an account that already swapped starts at 0, but
         those counters are consumed on chain — a swap built on one is rejected
         at finalize.  The client seeds the cursor past the used run with this;
-        it never moves the cursor backwards.
+        it never moves the cursor backwards.  With a counter ledger, the run
+        is retired for every journal that shares the ledger.
         """
-        with self._locked():
+        with self._counters_locked():
             if counter < self.counter_cursor():
                 return
-            event = {"type": "counters_skipped", "ts": time.time(), "through": counter}
-            with self.path.open("a") as f:      # already under the lock
-                f.write(json.dumps(event) + "\n")
+            self._write_counter_event({"type": "counters_skipped", "ts": time.time(),
+                                       "through": counter})
 
     def counter_cursor(self) -> int:
-        """Next unissued counter (max seen in any event + 1)."""
+        """Next unissued counter (max seen in any event + 1).
+
+        With a counter ledger, counts the counters issued to every journal
+        that shares it as well as this journal's own.
+        """
+        cursor = self._own_cursor()
+        return cursor if self._ledger is None else max(cursor, self._ledger.counter_cursor())
+
+    def _own_cursor(self) -> int:
+        """Next counter past every one this journal's own file records."""
         top = -1
         for e in self.events():
             if e["type"] == "counters_reserved":
@@ -169,6 +263,7 @@ class Journal:
         """
         self.append("swap", counter=counter, pool_keys=list(handle.pool_keys),
                     **{k: getattr(handle, k) for k in _HANDLE_FIELDS})
+        self._publish_counters()          # the caller may have chosen the identity
 
     def record_swap_failed(self, counter: int, error: str) -> None:
         """Burn a counter whose swap never landed.
@@ -182,6 +277,7 @@ class Journal:
             error: Why the swap failed, kept for diagnosis.
         """
         self.append("swap_failed", counter=counter, error=error)
+        self._publish_counters()
 
     def record_claim(self, swap_id: str, transaction_id: str,
                      amount_out: int) -> None:

@@ -43,9 +43,10 @@ TIER2_DERIVATIONS = ["blinded_identity_at", "next_blinded_identity"]
 
 QUICKSTART = """\
 ```python
-from aleo_shield_swap import ShieldSwap
+from aleo_shield_swap import Profile, ShieldSwap
 
-dex = ShieldSwap.from_profile()          # key material auto-managed on disk
+Profile.load_or_create(storage="encrypted")  # Protect a new key; existing storage stays unchanged.
+dex = ShieldSwap.from_profile()              # Resume with the same account and journal.
 dex.onboard()                            # first run registers; no-op afterwards
 pools = dex.api.get_pools()
 report = dex.swap_many(pool_key=pools[0].key, token_in_id=pools[0].token0,
@@ -58,13 +59,19 @@ CONVERSATION_PATTERN = """\
 
 ### Before doing anything: two questions
 
-1. **Existing account?**  When `status()` shows a brand-new, unregistered
-   profile, ask whether the user already has a shield-swap account before
-   creating anything — their funds and access live on the old key.
-   **NEVER ask the user to paste a private key into the conversation.**
-   They supply it out-of-band: `export SHIELD_SWAP_PRIVATE_KEY=...` (or
-   `SHIELD_SWAP_PRIVATE_KEY_FILE=path`) in their own shell before the
-   profile is first created.
+1. **Existing account?** Ask before creating a profile: an existing
+   account's funds stay with its original key. Have the user import that key
+   in their own terminal with
+   `python -m aleo.keystore import --storage encrypted`, or use
+   `--storage keychain` on macOS. These protect the saved key; plaintext
+   storage leaves it readable to anyone with access to the account file.
+   After import, `Profile.load_or_create(create=False)` requires that account
+   rather than generating another key if setup is missing.
+   **Never ask for a private key in the conversation.** Do not run
+   `python -m aleo.keystore export` or read account files to inspect an
+   address; use `python -m aleo.keystore show` instead. An account supplied
+   through `ALEO_PRIVATE_KEY` or `ALEO_PRIVATE_KEY_FILE` must be supplied
+   each run; the profile does not save that key.
 2. **Referral code — optional.**  Access is granted by authentication
    alone; `onboard()` needs nothing from the user.  Mention that a
    referral code from a friend can be passed (`onboard(referral_code=)`)
@@ -143,7 +150,7 @@ where the signing keys live:
 
 | Building | Stack | Keys live |
 | --- | --- | --- |
-| Bot / server / CLI / notebook | `aleo-sdk` facade + `shield-swap-sdk` (this package) | A local private key (`ShieldSwap.from_profile()` manages it); delegated proving through the Provable prover — fees covered by default. |
+| Bot / server / CLI / notebook | `aleo-sdk` facade + `shield-swap-sdk` (this package) | A saved Aleo account. Import an existing key to retain its funds, or create an account with Keychain or encrypted storage before calling `ShieldSwap.from_profile()`. Delegated proving uses the Provable prover; fees are covered by default. |
 | Agent integration | `aleo_shield_swap.agent` (Claude-shape tool schemas + `dispatch_tool`) or `python -m aleo_shield_swap.mcp` (MCP server), over the same client | Same as the underlying client; the tools bind to it. |
 | Browser dApp (wallet-signed) | The TypeScript stack: `@provablehq/shield-swap-sdk` + Veil react hooks — not this package | The user's wallet signs and proves. |
 
@@ -206,7 +213,7 @@ def render() -> str:
         "MCP alternative: `python -m aleo_shield_swap.mcp` exposes the same",
         "lifecycle as tools.",
         "",
-        "## Tier 1 — the lifecycle (six lines end to end)",
+        "## Tier 1 — start and resume a trading session",
         "",
         QUICKSTART,
         "",

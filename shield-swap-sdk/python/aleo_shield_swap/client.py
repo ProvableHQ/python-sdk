@@ -164,23 +164,54 @@ class ShieldSwap:
     def from_profile(cls, home: Any = None, *,
                      network: Optional[str] = None,
                      endpoint: Optional[str] = None) -> "ShieldSwap":
-        """The client for the local participant profile (created on first use).
+        """Continue trading with the same account, credentials, and swap journal.
 
-        Wires endpoint, network, signer, and (when present) delegated-proving
-        credentials from ``$SHIELD_SWAP_HOME``/``~/.shield-swap``.  Run
-        ``onboard()`` next on a fresh profile.
+        Use the same *home* on each run to retain pending swaps and saved API
+        credentials. On first use, the client uses an existing Aleo account
+        or creates one. To keep an existing address and its funds, import
+        that account before starting; see :meth:`Profile.load_or_create`.
 
-        *network* and *endpoint* apply only when the profile is being created —
-        an existing one keeps what it was created with, because its derived pool
-        keys and blinded identities are network-scoped and would not transfer.
-        Give each network its own home directory.
+        For a new account, use macOS Keychain or password encryption to
+        protect the private key. Set this up before building the client::
+
+            from aleo_shield_swap import Profile, ShieldSwap
+
+            Profile.load_or_create(storage="encrypted")
+            dex = ShieldSwap.from_profile()
+
+        This prompts for a password if none is supplied by the environment
+        or Keychain. It does not change an account's existing storage.
+        Without this setup, a generated key is saved as plaintext: anyone
+        who can read the account file can spend its funds. Use
+        ``storage="keychain"`` on macOS to keep the key outside the file.
+
+        An encrypted account needs its password each time the client starts.
+        For unattended runs, set ``ALEO_ACCOUNT_PASSWORD`` or save the password
+        in the macOS Keychain. A key supplied through ``ALEO_PRIVATE_KEY`` or
+        ``ALEO_PRIVATE_KEY_FILE`` must also be supplied each run; it is never
+        saved by the profile.
+
+        The client attempts to register with the hosted record scanner,
+        sharing the account's view key so the scanner can read its records.
+        For a custom record provider, construct ``ShieldSwap(aleo)`` instead.
+        Call ``onboard()`` to register a new account with Shield Swap before
+        trading. Client construction does not submit a trade.
 
         Args:
-            home: Profile directory; defaults to ``$SHIELD_SWAP_HOME`` or
-                ``~/.shield-swap``.
-            network: ``"mainnet"`` or ``"testnet"`` for a NEW profile; defaults
-                to testnet.
-            endpoint: Node API origin for a NEW profile.
+            home: Directory holding the profile and its saved work. Defaults to
+                ``SHIELD_SWAP_HOME``, then ``~/.shield-swap``. Use a separate
+                directory for each network.
+            network: ``"mainnet"`` or ``"testnet"``; defaults to testnet for a
+                new profile. An existing profile keeps its recorded network.
+            endpoint: API service root for a new profile; defaults to
+                ``https://edge.provable.com/api``. Ignored for an existing profile.
+
+        Raises:
+            aleo.keystore.KeystoreError: The account cannot be opened. Check
+                ``code``: ``PASSWORD_REQUIRED`` means a password must be supplied;
+                ``ACCOUNT_NOT_FOUND`` means an existing profile's key is missing;
+                ``ADDRESS_MISMATCH`` means the selected key belongs to another
+                address. Restore the intended key before trying again.
         """
         from aleo import Aleo, HTTPProvider
 
@@ -204,7 +235,8 @@ class ShieldSwap:
             pass  # offline or scanner down — record methods will surface it
         dex = cls(aleo)
         dex.profile = profile
-        dex.journal = Journal(profile.journal_path)
+        # The ledger keeps homes that share this account off each other's counters.
+        dex.journal = Journal(profile.journal_path, counters=profile.counters_path)
         # Durable ss_ token first — session JWTs are short-lived and stale
         # ones would shadow a perfectly good API token.
         if creds.get("dex_api_token"):

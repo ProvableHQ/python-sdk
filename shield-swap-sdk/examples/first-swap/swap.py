@@ -17,7 +17,8 @@ if __name__ == "__main__":
     # Use a configured private key or create a new key.
     key = os.environ.get("SHIELD_SWAP_PRIVATE_KEY")
     if not key:
-        # Load a saved private key from an existing Profile or create a new one.
+        # Reuse the account on later runs so its funds remain available.
+        # With no saved account, this creates one using plaintext storage.
         profile = Profile.load_or_create(network="testnet")
         if profile.network != "testnet":
             raise RuntimeError("This example requires a testnet profile")

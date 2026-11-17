@@ -8,9 +8,106 @@ of on testnet.
 """
 from __future__ import annotations
 
+import re
+from pathlib import Path
+from typing import Dict, List, Optional, Sequence, Tuple
+
 import pytest
 
-SLOT_TEXT = ("{ tick: 4055i32, tick_spacing: 60u32, "
+# Clear these variables so tests cannot select a real account or profile.
+ACCOUNT_VARIABLES = (
+    "ALEO_PRIVATE_KEY",
+    "ALEO_PRIVATE_KEY_FILE",
+    "ALEO_ACCOUNT",
+    "ALEO_ACCOUNTS_DIR",
+    "ALEO_ACCOUNT_PASSWORD",
+    "SHIELD_SWAP_PRIVATE_KEY",
+    "SHIELD_SWAP_PRIVATE_KEY_FILE",
+    "SHIELD_SWAP_HOME",
+)
+
+
+class FakeKeychain:
+    """Test Keychain storage without reading or changing macOS Keychain.
+
+    Keep entries in memory and accept the add, find, and delete commands
+    used by the keystore.
+    """
+
+    def __init__(self) -> None:
+        self.entries: Dict[str, str] = {}
+
+    def run(self, args: Sequence[str], stdin: Optional[str] = None) -> Tuple[Optional[int], str]:
+        args = list(args)
+        if args == ["-i"]:
+            match = re.fullmatch(r"add-generic-password -U -s (\S+) -a (\S+) -l (\S+) -w (\S+)\n", stdin or "")
+            if match is None:
+                return 1, ""
+            self.entries[f"{match.group(1)} {match.group(2)}"] = match.group(4)
+            return 0, ""
+        if len(args) == 6 and args[0] == "find-generic-password" and args[1] == "-s" and args[3] == "-a" and args[5] == "-w":
+            value = self.entries.get(f"{args[2]} {args[4]}")
+            return (44, "") if value is None else (0, f"{value}\n")
+        if len(args) == 5 and args[0] == "delete-generic-password" and args[1] == "-s" and args[3] == "-a":
+            return (44, "") if self.entries.pop(f"{args[2]} {args[4]}", None) is None else (0, "")
+        return 1, ""
+
+
+class AccountSandbox:
+    """Keep a test's account files, Keychain entries, and notices together.
+
+    Attributes:
+        home: Temporary home used to resolve default account and profile paths.
+        accounts: Account files created by the test, under ``<home>/.aleo/accounts``.
+        keychain: In-memory entries available for assertions.
+        notes: Captured terminal notices, in the order they were written.
+    """
+
+    def __init__(self, home: Path) -> None:
+        self.home = home
+        self.accounts = home / ".aleo" / "accounts"
+        self.keychain = FakeKeychain()
+        self.notes: List[str] = []
+
+
+def _no_prompt(message: str) -> str:
+    raise AssertionError("unexpected prompt")
+
+
+@pytest.fixture(autouse=True)
+def account_sandbox(request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory,
+                    monkeypatch: pytest.MonkeyPatch) -> AccountSandbox:
+    """Isolate account tests from real keys and passwords.
+
+    Clear account variables, redirect keystore files to a temporary home,
+    and replace Keychain access with an in-memory fake. Reject prompts so
+    a missing test password fails instead of waiting for input. Offline
+    tests also use the temporary home for profile files.
+    """
+    from aleo.keystore._runtime import runtime
+
+    for name in ACCOUNT_VARIABLES:
+        monkeypatch.delenv(name, raising=False)
+    box = AccountSandbox(tmp_path_factory.mktemp("account-home"))
+    monkeypatch.setattr(runtime, "home", lambda: str(box.home))
+    monkeypatch.setattr(runtime, "security", box.keychain.run)
+    monkeypatch.setattr(runtime, "terminal_attached", lambda: False)
+    monkeypatch.setattr(runtime, "prompt_hidden", _no_prompt)
+    monkeypatch.setattr(runtime, "prompt_visible", _no_prompt)
+    monkeypatch.setattr(runtime, "notify", box.notes.append)
+    # Live and devnode tests need the existing proving-parameter cache.
+    # Keep their HOME while redirecting all keystore access above.
+    if request.node.get_closest_marker("live") is None and request.node.get_closest_marker("devnode") is None:
+        monkeypatch.setenv("HOME", str(box.home))
+        monkeypatch.setenv("USERPROFILE", str(box.home))
+    else:
+        # Keep counter ledgers out of the real home, which these tests retain.
+        from aleo_shield_swap import profile
+        monkeypatch.setattr(profile, "_counters_root", lambda: box.home / ".aleo" / "shield-swap" / "counters")
+    return box
+
+
+SLOT_TEXT =("{ tick: 4055i32, tick_spacing: 60u32, "
              "sqrt_price: { hi: 1u128, lo: 0u128 }, "
              "fee_protocol: 0u8, liquidity: 1000u128, "
              "fee_growth_global0_x_128: { hi: 0u128, lo: 0u128 }, "
