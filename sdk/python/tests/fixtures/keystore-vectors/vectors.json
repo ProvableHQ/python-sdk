@@ -1,0 +1,68 @@
+{
+  "note": "Test-only material. The key is the public devnode key and the phrase is the public BIP-39 test phrase. Never fund these accounts.",
+  "account": {
+    "privateKey": "APrivateKey1zkp8CZNn3yeCseEtxuVPbDCwSyhGW6yZKUYKfgXmcpoGPWH",
+    "address": "aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px"
+  },
+  "encrypted": {
+    "password": "correct horse battery staple",
+    "wrongPassword": "incorrect horse battery staple",
+    "files": [
+      "encrypted-js.json",
+      "encrypted-py.json"
+    ]
+  },
+  "scrypt": [
+    {
+      "password": "correct horse battery staple",
+      "salt": "AAECAwQFBgcICQoLDA0ODw==",
+      "N": 131072,
+      "r": 8,
+      "p": 1,
+      "secret": "1b2946da71f41179e83b99dc33842d15741b87c4121c8c7f3781c1df864fb58b"
+    },
+    {
+      "password": "ｐａｓｓ word é",
+      "normalized": "pass word é",
+      "salt": "//79/Pv6+fj39vX08/Lx8A==",
+      "N": 131072,
+      "r": 8,
+      "p": 1,
+      "secret": "42da99cf9de95506e79f98cb509ad456dbd5980a2ad11a42aa49b81d041cd472"
+    }
+  ],
+  "keychain": {
+    "keyService": "aleo-account-key",
+    "passwordService": "aleo-account-password",
+    "passwordValue": "636f727265637420686f727365206261747465727920737461706c65"
+  },
+  "mnemonic": {
+    "phrase": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+    "accounts": [
+      {
+        "derivation": "standard",
+        "index": 0,
+        "privateKey": "APrivateKey1zkpEFmDijZZjb1miqaCefgLBWPyM6F661hG4NFRtZGnGQkH",
+        "address": "aleo1lkjecukweu9uhw9jch8ycvhzlmpnw0lv87kwe4lx8a9ev0228sfq6hf9tv"
+      },
+      {
+        "derivation": "standard",
+        "index": 1,
+        "privateKey": "APrivateKey1zkp93UuhVFh4anH1CgNDEjMKf22FskFwsXuomuFMtsutvZV",
+        "address": "aleo1vvc44uhv7hw3wvdt8n99wmqvqpv33zxt9vrs0jlq008uzwwyuuxs4ecws0"
+      },
+      {
+        "derivation": "legacy",
+        "index": 0,
+        "privateKey": "APrivateKey1zkp9Bn8hja3Kg5ZHEwDH2jPRGzVgM6zyUMrg8Wno92YsrMw",
+        "address": "aleo14pfq40wgltv8wrhsxqe5tlme4pkp448rfejfvqhd4yj0qycs7c9s2xkcwv"
+      },
+      {
+        "derivation": "legacy",
+        "index": 1,
+        "privateKey": "APrivateKey1zkpAMYZgho8zNE3TTXWsD6BhuZwzWrpUUm6Tnjz1D5vexWY",
+        "address": "aleo1cghrqlh8ec4tat4hy5xrdvyzx86tt07wd29aq0cfwl4uzr5zsu9qsrv7w3"
+      }
+    ]
+  }
+}

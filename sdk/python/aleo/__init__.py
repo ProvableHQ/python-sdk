@@ -68,6 +68,7 @@ from .inventory import (
     SqliteRecordInventoryStore as SqliteRecordInventoryStore,
     TokenJoinRouter as TokenJoinRouter,
 )
+from . import keystore as keystore
 
 
 def __getattr__(name: str) -> object:
