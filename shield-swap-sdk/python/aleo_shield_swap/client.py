@@ -173,7 +173,7 @@ class ShieldSwap:
         The signer is the profile's Aleo account, found through the account
         keystore (``aleo.keystore``): a key in ``ALEO_PRIVATE_KEY`` or
         ``ALEO_PRIVATE_KEY_FILE`` when set, otherwise the account file in
-        ``~/.aleo/accounts`` that the profile names.  A fresh profile adopts
+        ``~/.aleo/accounts`` that the profile names.  A fresh profile uses
         that account, or creates one and stores it there; the profile itself
         holds no private key, and a key from the environment is never written
         to disk.  To create the account encrypted, in the macOS Keychain or
@@ -185,18 +185,21 @@ class ShieldSwap:
         keys and blinded identities are network-scoped and would not transfer.
         Give each network its own home directory.
 
-        Raises ``aleo.keystore.KeystoreError`` (read ``code``) when the key
-        cannot be resolved: ``ADDRESS_MISMATCH`` for a key of another address
-        than the profile's, ``PASSWORD_REQUIRED`` for an encrypted account
-        with no password source, ``ACCOUNT_NOT_FOUND`` when the key of an
-        existing profile is no longer supplied.
-
         Args:
             home: Profile directory; defaults to ``$SHIELD_SWAP_HOME`` or
                 ``~/.shield-swap``.
             network: ``"mainnet"`` or ``"testnet"`` for a NEW profile; defaults
                 to testnet.
             endpoint: Node API origin for a NEW profile.
+
+        Raises:
+            aleo.keystore.KeystoreError: The signing key cannot be resolved.
+                Read ``code``: ``ADDRESS_MISMATCH`` when the key found belongs
+                to another address than the profile's; ``PASSWORD_REQUIRED``
+                when the account is encrypted and nothing supplies its
+                password; ``ACCOUNT_NOT_FOUND`` when no source has the key of
+                an existing profile, such as a key variable that is not set
+                on this run.
         """
         from aleo import Aleo, HTTPProvider
 

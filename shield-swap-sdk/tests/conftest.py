@@ -31,7 +31,7 @@ ACCOUNT_VARIABLES = (
 class FakeKeychain:
     """An in-memory stand-in for the macOS ``security`` tool.
 
-    Understands the three invocations the account keystore makes (add, find
+    Accepts the three invocations the account keystore makes (add, find
     and delete a generic password), so Keychain storage can be exercised
     without touching the login keychain of the machine running the tests.
     """
@@ -56,7 +56,7 @@ class FakeKeychain:
 
 
 class AccountSandbox:
-    """The replaced surroundings of one test.
+    """Hold the stand-ins one test runs against in place of the developer's files.
 
     Attributes:
         home: Stand-in home directory. The default accounts directory and the

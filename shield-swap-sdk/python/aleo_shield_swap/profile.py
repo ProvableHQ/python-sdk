@@ -1,12 +1,12 @@
-"""On-disk participant profile: account, credentials and journal location.
+"""Bind a participant's home directory to one Aleo account.
 
 One profile per home directory (``$SHIELD_SWAP_HOME`` or ``~/.shield-swap``).
 ``profile.json`` records which Aleo account the profile trades with: its
-address and the name of its account file. The private key itself lives in the
-Aleo account keystore (``aleo.keystore``, by default
-``~/.aleo/accounts/<name>.json``), which every Aleo tool reads, so an account
-set up once serves them all. Credentials (JWT, delegated-proving keys) are
-stored separately so they can be refreshed without touching the account.
+address and the name of its account file. The private key is held by the Aleo
+account keystore (``aleo.keystore``, by default
+``~/.aleo/accounts/<name>.json``). Every Aleo tool reads that keystore, so an
+account set up once serves them all. Credentials (JWT, delegated-proving keys)
+are stored separately so they can be refreshed without touching the account.
 """
 from __future__ import annotations
 
@@ -23,8 +23,8 @@ _CREDENTIALS = "credentials.json"
 
 _log = logging.getLogger(__name__)
 
-# Profile files already reported as still holding their key, so the notice is
-# given once per process however many Profile objects load the file.
+# Profile files already reported as holding their own key. The notice is given
+# once per process, however many Profile objects load the file.
 _legacy_notices: set[str] = set()
 _legacy_notices_lock = threading.Lock()
 
@@ -39,16 +39,19 @@ def _write_private(path: Path, payload: dict[str, Any]) -> None:
 
 
 def _selected_account_name(account: Optional[str]) -> str:
-    """The account name a lookup uses when the profile records none.
+    """Return the account name a lookup selects when the profile records none.
 
-    The *account* argument, then ``ALEO_ACCOUNT`` (an empty value counts as
-    unset), then ``default``: the order the account keystore applies itself.
+    Applies the account keystore's own order: the *account* argument, then
+    ``ALEO_ACCOUNT`` (an empty value counts as unset), then ``default``.
     """
     return account if account is not None else (os.environ.get("ALEO_ACCOUNT") or "default")
 
 
 def _report_legacy_key(path: Path, address: str) -> None:
-    """Log, once per process and profile file, that the file still holds the key."""
+    """Log, once per process and profile file, that the file holds the key itself.
+
+    The warning names the command that copies the key into an account file.
+    """
     with _legacy_notices_lock:
         if str(path) in _legacy_notices:
             return
@@ -150,8 +153,8 @@ class Profile:
         *create*, *storage* and *save_password* apply only when creating.  Its
         key is looked up on the first read of :attr:`private_key`, using
         *account*, *accounts_dir* and *password* as given here.  A profile
-        written by an earlier release, with the key still in ``profile.json``,
-        keeps working unchanged.
+        whose ``profile.json`` holds a ``private_key`` keeps working: that key
+        is used when no other source supplies one.
 
         Reads the environment and the account file.  Creating also writes the
         account file and the profile, and for ``"keychain"`` or
@@ -164,11 +167,14 @@ class Profile:
             endpoint: API endpoint to record on a NEW profile.
             create: Whether to create and store an account when a NEW profile
                 finds none.  Defaults to True.
-            storage: How the keystore holds a newly created key:
-                ``"plaintext"`` (the default, a file only its owner can read),
-                ``"keychain"`` (the macOS login keychain) or ``"encrypted"``
-                (under a password, on every system).  ``"none"`` is rejected,
-                because nothing would hold the new key once the process exits.
+            storage: Where the keystore holds a newly created key.
+                ``"plaintext"`` (the default) writes it to a file only its
+                owner can read, so an unattended process starts without a
+                password.  ``"keychain"`` holds it in the macOS login
+                keychain.  ``"encrypted"`` holds it under a password on every
+                system, and each later run needs that password.  ``"none"``
+                is rejected, because nothing would hold the new key once the
+                process exits.
             account: Account name in the keystore.  Defaults to
                 ``ALEO_ACCOUNT``, then the name the profile records, then
                 ``default``.
@@ -260,10 +266,10 @@ class Profile:
         object: from ``ALEO_PRIVATE_KEY`` or ``ALEO_PRIVATE_KEY_FILE`` when
         set, otherwise from the account file named by the *account* argument
         of :meth:`load_or_create`, then ``ALEO_ACCOUNT``, then the name the
-        profile records, then ``default``.  A profile written by an earlier
-        release supplies the key still stored in ``profile.json`` when no
-        other source has one, and logs once how to move it.  Whichever source
-        supplies the key, it must belong to :attr:`address`.
+        profile records, then ``default``.  A ``private_key`` held in
+        ``profile.json`` is used when no other source has one, and a warning
+        is logged once with the command that moves it into an account file.
+        Whichever source supplies the key, it must belong to :attr:`address`.
 
         The first read may run the macOS ``security`` tool or, for an
         encrypted account, stretch a password (about 200 ms) and ask for it
@@ -299,7 +305,7 @@ class Profile:
             name = self._data.get("account")
         loaded = keystore.load(
             name=name, dir=self._accounts_dir,
-            # Profiles written by earlier releases keep the key in the file.
+            # A profile file may hold the key itself; it is the last source.
             legacy_key=self._data.get("private_key") or None,
             expected_address=self.address,
             password=self._password)

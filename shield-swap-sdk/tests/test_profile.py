@@ -29,7 +29,7 @@ OTHER_PASSWORD = "another test password"
 
 
 def new_account() -> SimpleNamespace:
-    """A random account as an address and private-key pair of strings."""
+    """Return a random account as an address and private-key pair of strings."""
     key = testnet.PrivateKey.random()
     return SimpleNamespace(address=str(key.address), private_key=str(key))
 
@@ -41,7 +41,7 @@ def same_secret(actual: object, expected: object) -> None:
 
 
 def failure(call: Callable[[], Any]) -> KeystoreError:
-    """The keystore error a call fails with."""
+    """Return the keystore error a call fails with."""
     try:
         call()
     except KeystoreError as error:
@@ -58,7 +58,7 @@ def files_under(*roots: Path) -> list[Path]:
 
 
 def assert_key_on_no_disk(private_key: str, *roots: Path) -> None:
-    """No file under *roots* contains the key."""
+    """Assert that no file under *roots* contains the key."""
     for path in files_under(*roots):
         if private_key.encode() in path.read_bytes():
             raise AssertionError(f"{path} contains a private key")
@@ -69,7 +69,7 @@ def saved_profile(home: Path) -> dict[str, Any]:
 
 
 def write_legacy_profile(home: Path, account: SimpleNamespace, **extra: Any) -> Path:
-    """A profile as earlier releases wrote it: the key inside ``profile.json``."""
+    """Write a profile whose ``profile.json`` holds the private key itself."""
     home.mkdir(parents=True, exist_ok=True)
     path = home / "profile.json"
     data = {"address": account.address, "private_key": account.private_key,
@@ -81,7 +81,7 @@ def write_legacy_profile(home: Path, account: SimpleNamespace, **extra: Any) -> 
 
 @pytest.fixture(autouse=True)
 def fresh_legacy_notices(monkeypatch):
-    """The legacy-key notice is given once per process; start each test unnotified."""
+    """Clear the once-per-process record of legacy-key notices before each test."""
     monkeypatch.setattr(profile_module, "_legacy_notices", set())
 
 
@@ -102,7 +102,7 @@ def lookups(monkeypatch):
 # ── The test surroundings themselves ─────────────────────────────────────────
 
 def test_tests_run_against_a_stand_in_home(account_sandbox, tmp_path):
-    """Guards the guard: nothing here may resolve to the developer's own files."""
+    """Check that nothing here resolves to the developer's own files."""
     import os
 
     assert Path.home() == account_sandbox.home
@@ -708,7 +708,7 @@ def test_from_profile_reports_a_locked_account(tmp_path, monkeypatch):
     assert not (tmp_path / "home").exists()
 
 
-# ── Homes, credentials and the journal are unchanged ─────────────────────────
+# ── Homes, credentials and the journal ───────────────────────────────────────
 
 def test_env_home_override(tmp_path, monkeypatch):
     monkeypatch.setenv("SHIELD_SWAP_HOME", str(tmp_path / "envhome"))
