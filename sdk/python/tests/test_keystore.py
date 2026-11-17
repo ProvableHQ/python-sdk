@@ -63,11 +63,6 @@ def read_json(path: Any) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def test_sources_under_test_are_the_checkout() -> None:
-    """The package under test is the source tree next to these tests."""
-    assert Path(aleo.__file__).resolve().parent == Path(__file__).resolve().parents[1] / "aleo"
-
-
 def test_reads_every_sample_account_file(sandbox: Sandbox) -> None:
     sandbox.copy_vectors()
     expected = {

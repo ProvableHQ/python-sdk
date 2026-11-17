@@ -1,1 +1,6 @@
 *.ipynb linguist-documentation
+
+# Checked byte for byte against the same files in the TypeScript SDK, so they
+# keep LF line endings on every platform.
+sdk/python/tests/fixtures/keystore-vectors/*.json text eol=lf
+sdk/python/aleo/keystore/_bip39_english.txt text eol=lf

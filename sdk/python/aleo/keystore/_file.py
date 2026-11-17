@@ -298,15 +298,17 @@ def read_account_file(path: str) -> Optional[ExistingFile]:
         descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0))
     except FileNotFoundError:
         return None
+    # Windows has no fchmod and does not enforce these modes.
+    tighten = getattr(os, "fchmod", None)
     with os.fdopen(descriptor, "rb") as handle:
-        if runtime.platform != "win32":
+        if runtime.platform != "win32" and tighten is not None:
             status = os.fstat(handle.fileno())
             # Only a regular file is re-moded: a directory in place of the
             # file fails below and keeps its mode.
             if stat.S_ISREG(status.st_mode) and stat.S_IMODE(status.st_mode) & ~0o600:
                 # Best effort: a file the user cannot re-mode is still readable.
                 try:
-                    os.fchmod(handle.fileno(), 0o600)
+                    tighten(handle.fileno(), 0o600)
                 except OSError:
                     pass
         data = handle.read()
