@@ -575,10 +575,36 @@ def _xreserve_burn_mode(mode: str | None) -> str:
         f"Aleo xReserve mode must be 'private', 'public' or 'public-as-signer', got {mode!r}")
 
 
-def _derives_here(bridge, plan: Plan, secret_nonce: str | None) -> bool:
-    """True when this verb will look a derived nonce up: a private plan, no explicit nonce, and a
-    bridge that can derive for the plan's recipient."""
-    return plan.mint_mode == "private" and secret_nonce is None and _private_mint.can_derive(bridge, plan.recipient)
+def _recovery_secret_nonce(bridge, progress: Progress, secret_nonce: str | None) -> str | None:
+    """Resolve an existing deposit's nonce before authorizing another submission.
+
+    Uses the saved or attested commitment, including legacy ``0scalar`` deposits without a
+    store. A recovered identity may be saved, but no transaction is prepared or submitted.
+    Agent handlers call this before their write wrapper so a missing nonce keeps its own
+    recovery guidance. Already-proved destination transactions need no nonce.
+    """
+    plan, receipt = progress.plan, progress.receipt
+    if plan.protocol != "xreserve" or plan.mint_mode != "private" or secret_nonce is not None:
+        return secret_nonce
+    resolved = resolve_route(bridge.registry, plan)
+    if resolved.source_chain.family != "evm":
+        return secret_nonce
+    state = receipt.protocol_state
+    if progress.next == "complete":
+        if state.get("preparedDestinationTransaction") is not None:
+            return None
+        payload = _hex_bytes(state.get("payload"), length=305)
+        if payload is None:
+            raise AttestationError("Private mint is missing its 305-byte attested payload; refresh it with wait()")
+        hook = payload[-HOOK_DATA_BYTES:]
+    elif progress.next == "resume":
+        hook = _hex_bytes(state.get("hookData"), length=HOOK_DATA_BYTES)
+        if hook is None:
+            raise NotResumableError("Private deposit checkpoint is missing its 65-byte xReserve hook data")
+    else:
+        return None
+    commitment = _private_mint.commitment_from_hook_data(hook)
+    return _private_nonce(bridge, plan, resolved, None, address_commitment=commitment)
 
 
 def _private_nonce(bridge, plan: Plan, resolved: ResolvedRoute, secret_nonce: str | None, *,
@@ -1565,11 +1591,7 @@ def resume(bridge, progress: Progress, *, on_checkpoint: Callable | None = None,
             "approval committed to")
     nonce = None                                                            # before any RPC
     if is_xreserve:
-        # Only a derivable bridge reads the commitment out of the hook: an underivable one gets the
-        # "pass secret_nonce= or bind a store" error, not a complaint about the hook's shape.
-        commitment = (_private_mint.commitment_from_hook_data(cast(bytes, hook_bytes))
-                      if _derives_here(bridge, plan, secret_nonce) else None)
-        nonce = _private_nonce(bridge, plan, resolved, secret_nonce, address_commitment=commitment)
+        nonce = _private_nonce(bridge, plan, resolved, _recovery_secret_nonce(bridge, progress, secret_nonce))
 
     existing = create_checkpoint(plan, receipt, bridge.registry)
     emit.supersede(existing.id)          # whatever this resume writes replaces the record it started from
@@ -1700,9 +1722,7 @@ def complete(bridge, progress: Progress, *, secret_nonce: str | None = None,
         emit.finalize()
         return to_progress(plan, submitted)
 
-    commitment = (_private_mint.commitment_from_hook_data(payload[-HOOK_DATA_BYTES:])
-                  if _derives_here(bridge, plan, secret_nonce) else None)
-    nonce = _private_nonce(bridge, plan, resolved, secret_nonce, address_commitment=commitment)   # before any RPC
+    nonce = _private_nonce(bridge, plan, resolved, _recovery_secret_nonce(bridge, progress, secret_nonce))
     att = Attestation(payload=payload, message_hash=message_hash, attestation=attestation, status="complete")
     call = bridge.xreserve.private_mint(att, plan.recipient, secret_nonce=nonce, route=resolved.route)
     prepared = _prepare_aleo(call, proving)

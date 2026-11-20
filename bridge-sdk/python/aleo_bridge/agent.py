@@ -413,52 +413,21 @@ def _h_execute(b, a):
         return _confirmation(quote=_serialize(quote, b.registry))
     return _write(b, lambda seen: lifecycle.execute(
         b, quote.plan, on_checkpoint=seen.append, mode=a.get("mode"), proving=a.get("proving", "delegate"),
-        gas_payment_microcredits=a.get("gas_payment_microcredits"), secret_nonce=a.get("secret_nonce")))
-
-
-def _resume_needs_nonce(bridge: Any, progress: Any) -> bool:
-    """True when ``lifecycle.resume`` would demand a ``secret_nonce`` for this progress.
-
-    Only an EVM-source xReserve deposit with ``mint_mode == "private"``: it re-quotes the hook the
-    approval committed to, which is derived from the secret. An Aleo leg rebroadcasts proved bytes
-    and needs nothing.
-    """
-    plan = progress.plan
-    if plan.protocol != "xreserve" or getattr(plan, "mint_mode", "public") != "private":
-        return False
-    try:
-        resolved = lifecycle.resolve_route(bridge.registry, plan)
-    except BridgeError:
-        return False                       # an unresolvable route has a louder problem than this
-    return resolved.source_chain.family == "evm"
+        gas_payment_microcredits=a.get("gas_payment_microcredits"), secret_nonce=a.get("secret_nonce") or None))
 
 
 def _h_resume(b, a):
     progress = lifecycle.recover(b, a["checkpoint"])                 # reads only
-    if (_resume_needs_nonce(b, progress) and not a.get("secret_nonce")
-            and not _can_derive(b, progress.plan.recipient)):
-        # Pre-checked like _h_complete: lifecycle.resume refuses this before any RPC, but routed
-        # through _write that refusal would come back as next: "recover" — "it may already be on
-        # the wire" — for a transfer that never left the process. Say what is actually missing.
-        return _missing_nonce("the deposit this resume finishes")
+    secret_nonce = lifecycle._recovery_secret_nonce(b, progress, a.get("secret_nonce") or None)
     if not a.get("confirm"):
         return _confirmation(progress=_serialize(progress, b.registry))
     return _write(b, lambda seen: lifecycle.resume(b, progress, on_checkpoint=seen.append,
-                                                   secret_nonce=a.get("secret_nonce")))
-
-
-def _has_prepared_destination(progress: Any) -> bool:
-    """A mint whose bytes are already proved rebroadcasts without the secret."""
-    state = getattr(progress.receipt, "protocol_state", {}) or {}
-    return bool(state.get("preparedDestinationTransaction"))
+                                                   secret_nonce=secret_nonce))
 
 
 def _h_complete(b, a):
     progress = lifecycle.recover(b, a["checkpoint"])                 # reads only
-    secret_nonce = a.get("secret_nonce")
-    if (progress.plan.protocol == "xreserve" and not secret_nonce and not _has_prepared_destination(progress)
-            and not _can_derive(b, progress.plan.recipient)):
-        return _missing_nonce("the deposit this mint finishes")
+    secret_nonce = lifecycle._recovery_secret_nonce(b, progress, a.get("secret_nonce") or None)
     if not a.get("confirm"):
         return _confirmation(progress=_serialize(progress, b.registry))
     options = {"manual_mint": a["manual_mint"]} if "manual_mint" in a else {}

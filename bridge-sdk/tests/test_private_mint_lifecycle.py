@@ -77,6 +77,45 @@ def test_quote_peeks_without_consuming_a_counter():
     assert b.private_mint_identities.load() == []
 
 
+def test_quote_does_not_create_identity_store_files(tmp_path):
+    b = _bridge()
+    directory = tmp_path / "journal"
+    b.private_mint_identities = pm.FilePrivateMintIdentityStore(directory / "identities.json")
+    assert quote(b, **QUOTE).kind == "evm-xreserve"
+    assert not directory.exists()
+
+
+@pytest.mark.parametrize("broken", ["identities", "counter", "permissions"])
+def test_quote_falls_back_when_identity_storage_is_unreadable(tmp_path, monkeypatch, broken):
+    b = _bridge()
+    store = pm.FilePrivateMintIdentityStore(tmp_path / "identities.json")
+    b.private_mint_identities = store
+    if broken == "identities":
+        store.path.write_text("not json")
+    elif broken == "counter":
+        store.counter_path.write_text("not a counter")
+    else:
+        def denied():
+            raise PermissionError("Store cannot be read")
+        monkeypatch.setattr(store, "load", denied)
+    assert quote(b, **QUOTE).kind == "evm-xreserve"
+    assert b.calls[-1][1]["secret_nonce"] == "0scalar"
+    assert not store.lock_path.exists()
+    with pytest.raises((ConfigurationError, PermissionError)):
+        execute(b, _plan(b))
+    assert b.events == []
+
+
+def test_quote_does_not_acquire_the_reservation_lock(tmp_path, monkeypatch):
+    b = _bridge()
+    store = pm.FilePrivateMintIdentityStore(tmp_path / "identities.json")
+    b.private_mint_identities = store
+    def locked():
+        pytest.fail("A quote must not acquire the reservation lock")
+    monkeypatch.setattr(store, "exclusive", locked)
+    assert quote(b, **QUOTE).kind == "evm-xreserve"
+
+
 # ── resume ───────────────────────────────────────────────────────────────────
 
 def _resumable(b, nonce):
@@ -104,6 +143,13 @@ def test_resume_recovers_by_scanning_when_the_store_was_lost():
     plan, receipt = _resumable(b, nonce)
     resume(b, to_progress(plan, receipt))
     assert b.calls[-1][1]["secret_nonce"] == nonce and b.private_mint_identities.load()[0].counter == 3
+
+
+def test_resume_opens_a_zero_scalar_deposit_without_a_store():
+    b = FakeBridge()
+    plan, receipt = _resumable(b, "0scalar")
+    resume(b, to_progress(plan, receipt))
+    assert b.calls[-1][1]["secret_nonce"] == "0scalar"
 
 
 def test_resume_refuses_a_malformed_private_hook_before_any_rpc():
@@ -142,6 +188,15 @@ def test_complete_resolves_the_scalar_from_the_attested_hook():
     out = complete(b, to_progress(plan, receipt))
     assert out.receipt.status is Status.DESTINATION_CONFIRMING
     assert b.calls[-1][1]["secret_nonce"] == identity.secret_nonce
+
+
+def test_complete_opens_a_zero_scalar_deposit_without_a_store():
+    b = FakeBridge()
+    b.xreserve.expected_secret_nonce = "0scalar"
+    plan, receipt = _ready(b, "0scalar")
+    out = complete(b, to_progress(plan, receipt))
+    assert out.receipt.status is Status.DESTINATION_CONFIRMING
+    assert b.calls[-1][1]["secret_nonce"] == "0scalar"
 
 
 def test_complete_refuses_when_a_stored_identity_names_another_recipient():

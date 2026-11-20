@@ -493,7 +493,9 @@ def test_resume_refuses_a_missing_private_nonce_before_any_rpc():
     refusal through the write path relabelled it ``next: "recover"`` — "your deposit may already be
     on the wire". It never left the process. Pre-check it like ``bridge_complete`` does, so the
     answer is the actionable configuration error and nothing is read or sent."""
+    from aleo_bridge.encoding import xreserve_hook_data
     b = FakeBridge()
+    b.eth.hook_data = xreserve_hook_data("private", ALEO_RECIPIENT, "mainnet", NONCE)
     plan = prepare(b.registry, source_chain="ethereum", source_asset="usdc", destination_chain="aleo", destination_asset="usdcx", amount="2",
                    recipient=ALEO_RECIPIENT, sender=EVM_ADDRESS, mint_mode="private")
     approval = "0x" + "11" * 32

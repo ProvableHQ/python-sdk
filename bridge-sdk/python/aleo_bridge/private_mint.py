@@ -291,13 +291,13 @@ def peek_secret_nonce(store: PrivateMintIdentityStore, *, view_key: Any, recipie
     """The scalar the next :func:`reserve_identity` would produce, without consuming anything.
 
     Indicative only (another reservation may land first); quotes use it so their hook data matches
-    what execute will deposit in the common case.
+    what execute will deposit in the common case. Reads without reservation locks or filesystem
+    writes; concurrent updates may change the preview before execution reserves its own counter.
     """
     del recipient                                            # the nonce does not depend on it
-    with _process_lock(store), _exclusive(store):
-        identities = store.load()
-        minimum = _next_counter(identities)
-        counter = max(minimum, store._read_counter()) if isinstance(store, FilePrivateMintIdentityStore) else minimum
+    identities = store.load()
+    minimum = _next_counter(identities)
+    counter = max(minimum, store._read_counter()) if isinstance(store, FilePrivateMintIdentityStore) else minimum
     if counter > MAX_COUNTER:
         raise ConfigurationError(_EXHAUSTED)
     return derive_secret_nonce(view_key, counter, network, program)
@@ -413,7 +413,12 @@ def resolve_secret_nonce(bridge: Any, *, recipient: str, program: str, address_c
             "and keep it for its own account by binding a checkpoint directory (FileCheckpointStore) or "
             "private_mint_identities= to Bridge(...)")
     if placeholder:
-        return peek_secret_nonce(store, view_key=account.view_key, recipient=recipient, network=network, program=program)
+        try:
+            return peek_secret_nonce(store, view_key=account.view_key, recipient=recipient, network=network, program=program)
+        except (ConfigurationError, OSError, ValueError):
+            # Quoting never deposits under this value. Execute must still reserve durably and
+            # surface a damaged or inaccessible store before sending funds.
+            return "0scalar"
     if address_commitment is None:
         return reserve_identity(store, view_key=account.view_key, recipient=recipient, network=network,
                                 program=program).secret_nonce

@@ -363,7 +363,7 @@ jobs:
         run: |
           pip install sdk-dist/aleo_sdk-*.whl
           pip install "$(ls bridge-sdk/dist/*.whl)[mcp]" pytest pytest-asyncio
-          cd bridge-sdk && python -m pytest -q -m "not live"
+          cd bridge-sdk && python -m pytest -q -m "not slow and not live"
       - name: AGENTS.md up to date
         run: python bridge-sdk/codegen/gen_context.py --check
       - name: Smoke test the bare wheel

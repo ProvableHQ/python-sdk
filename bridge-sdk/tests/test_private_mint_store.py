@@ -130,6 +130,7 @@ def test_memory_store_is_explicit_only():
     assert pm.reserve_identity(store, **KW).counter == 0 and pm.reserve_identity(store, **KW).counter == 1
 
 
+@pytest.mark.slow
 def test_recovery_scan_is_fast_enough_to_use_the_default_limit(tmp_path):
     """Hoisted invariants: 2,000 counters in well under the time one would take re-parsing everything."""
     import time

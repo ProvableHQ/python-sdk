@@ -225,7 +225,9 @@ def test_resume_refuses_when_the_recovered_allowance_is_gone():
 
 
 def test_resume_of_a_private_mint_without_its_secret_nonce_is_refused_before_any_rpc():
+    from aleo_bridge.encoding import xreserve_hook_data
     b = FakeBridge()
+    b.eth.hook_data = xreserve_hook_data("private", ALEO_RECIPIENT, "mainnet", "7scalar")
     plan, receipt = _xreserve_progress(b, mint_mode="private")
     b.eth.recover_result = receipt
     with pytest.raises(ConfigurationError, match="secret_nonce") as info:
