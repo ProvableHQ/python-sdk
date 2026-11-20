@@ -114,6 +114,7 @@ class Plan:
     steps: tuple[Step, ...]
     #: Local recovery identity, allocated by execute; does not change the quoted transfer.
     journal_id: str | None = field(default=None, compare=False)
+    transfer_id: str | None = field(default=None, compare=False)
     cctp: CctpOptions | None = None
     #: Minimum net output approved by a Verulink quote; omitted for other protocols.
     amount_out: str | None = None
@@ -123,6 +124,8 @@ class Plan:
         d["steps"] = [dataclasses.asdict(s) for s in self.steps]
         if self.amount_out is None:
             d.pop("amount_out")
+        if self.transfer_id is None:
+            d.pop("transfer_id")
         return d
 
     @classmethod

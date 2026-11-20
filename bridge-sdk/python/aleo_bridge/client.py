@@ -10,13 +10,16 @@ constructor parameters reserved here.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Callable
 
 from . import lifecycle as _lifecycle
 from . import _evm_connections
 from ._calls import AleoCall
+from ._context import bridge_context, new_transfer_id
 from .cctp import CctpModule
 from .verulink import VerulinkModule
 from .errors import BridgeError, ConfigurationError, UnsupportedRouteError
@@ -119,6 +122,23 @@ def checkpoints_from_env() -> Any:
 def _checkpoints_for_profile(profile: Profile) -> Any:
     from .checkpoint import FileCheckpointStore
     return FileCheckpointStore(profile.checkpoint_dir)
+
+
+def _checkpoint_subject(checkpoint: Any) -> dict[str, Any]:
+    data = checkpoint.to_dict() if hasattr(checkpoint, "to_dict") else checkpoint
+    if isinstance(data, str):
+        try:
+            data = json.loads(data)
+        except ValueError:
+            return {}
+    if not isinstance(data, dict):
+        return {}
+    intent, route = data.get("intent"), data.get("route")
+    protocol = intent.get("bridgeProtocol") if isinstance(intent, dict) else None
+    route_id = route.get("id") if isinstance(route, dict) else None
+    return {"protocol": protocol if isinstance(protocol, str) else None,
+            "route_id": route_id if isinstance(route_id, str) else None,
+            "transfer_id": data.get("transferId")}
 
 
 class Bridge:
@@ -367,7 +387,9 @@ class Bridge:
         """
         from .pause import PauseReader
         route_id = getattr(route, "route_id", None) or getattr(route, "id", None) or route
-        return PauseReader(self).status(self.registry.route(route_id), sides=tuple(sides))
+        resolved = self.registry.route(route_id)
+        with bridge_context("route-status", protocol=resolved.protocol, route_id=resolved.id):
+            return PauseReader(self).status(resolved, sides=tuple(sides))
 
     def quote(self, *, source_chain: str | None = None, source_asset: str | None = None,
               destination_chain: str | None = None, destination_asset: str | None = None,
@@ -428,14 +450,18 @@ class Bridge:
         once the source step is broadcast: afterwards use ``wait`` / ``recover``,
         never ``execute`` again.
         """
-        return _lifecycle.execute(self, plan, on_checkpoint=on_checkpoint, proving=proving, mode=mode,
-                                  record=record, compliance_proofs=compliance_proofs, merkle_proof=merkle_proof,
-                                  gas_payment_microcredits=gas_payment_microcredits, secret_nonce=secret_nonce,
-                                  poll_seconds=poll_seconds, timeout_seconds=timeout_seconds)
+        if getattr(plan, "transfer_id", "") is None:
+            plan = replace(plan, transfer_id=new_transfer_id())
+        with bridge_context("execute", plan):
+            return _lifecycle.execute(self, plan, on_checkpoint=on_checkpoint, proving=proving, mode=mode,
+                                      record=record, compliance_proofs=compliance_proofs, merkle_proof=merkle_proof,
+                                      gas_payment_microcredits=gas_payment_microcredits, secret_nonce=secret_nonce,
+                                      poll_seconds=poll_seconds, timeout_seconds=timeout_seconds)
 
     def get_status(self, plan, receipt):
         """One status refresh (no polling, no signing); returns the same receipt when nothing changed."""
-        return _lifecycle.get_status(self, plan, receipt)
+        with bridge_context("status", plan):
+            return _lifecycle.get_status(self, plan, receipt)
 
     def wait(self, progress, *, until=None, poll_seconds: float = 15.0, timeout_seconds: float = 1200.0,
              on_update=None, on_error=None, max_consecutive_errors: int = 5):
@@ -448,9 +474,10 @@ class Bridge:
         is retried up to ``max_consecutive_errors`` times, calling ``on_error``
         on each tolerated retry; a non-transient error propagates immediately.
         """
-        return _lifecycle.wait(self, progress, until=until, poll_seconds=poll_seconds,
-                               timeout_seconds=timeout_seconds, on_update=on_update, on_error=on_error,
-                               max_consecutive_errors=max_consecutive_errors)
+        with bridge_context("wait", getattr(progress, "plan", None)):
+            return _lifecycle.wait(self, progress, until=until, poll_seconds=poll_seconds,
+                                   timeout_seconds=timeout_seconds, on_update=on_update, on_error=on_error,
+                                   max_consecutive_errors=max_consecutive_errors)
 
     def recover(self, checkpoint, *, approval_replacement=None, destination_tx_id: str | None = None):
         """Rebuild ``Progress`` from a saved checkpoint (``Checkpoint``, dict or JSON) — reads only.
@@ -468,7 +495,8 @@ class Bridge:
             options["approval_replacement"] = approval_replacement
         if destination_tx_id is not None:
             options["destination_tx_id"] = destination_tx_id
-        return _lifecycle.recover(self, checkpoint, **options)
+        with bridge_context("recover", **_checkpoint_subject(checkpoint)):
+            return _lifecycle.recover(self, checkpoint, **options)
 
     def resume(self, progress, *, on_checkpoint=None, secret_nonce: str | None = None,
                poll_seconds: float = 1.0, timeout_seconds: float = 120.0, proving: str = "delegate"):
@@ -480,8 +508,9 @@ class Bridge:
         ``RoutePausedError`` / ``PauseCheckError`` when a pause switch on either
         end reads paused or cannot be read.
         """
-        return _lifecycle.resume(self, progress, on_checkpoint=on_checkpoint, secret_nonce=secret_nonce,
-                                 poll_seconds=poll_seconds, timeout_seconds=timeout_seconds, proving=proving)
+        with bridge_context("resume", getattr(progress, "plan", None)):
+            return _lifecycle.resume(self, progress, on_checkpoint=on_checkpoint, secret_nonce=secret_nonce,
+                                     poll_seconds=poll_seconds, timeout_seconds=timeout_seconds, proving=proving)
 
     def complete(self, progress, *, secret_nonce: str | None = None, on_checkpoint=None, proving: str = "delegate",
                  manual_mint: bool = False):
@@ -499,8 +528,9 @@ class Bridge:
         nonce. A holding result retains its checkpoint for review and recovery.
         """
         options = {"manual_mint": manual_mint} if manual_mint else {}
-        return _lifecycle.complete(self, progress, secret_nonce=secret_nonce, on_checkpoint=on_checkpoint,
-                                   proving=proving, **options)
+        with bridge_context("complete", getattr(progress, "plan", None)):
+            return _lifecycle.complete(self, progress, secret_nonce=secret_nonce, on_checkpoint=on_checkpoint,
+                                       proving=proving, **options)
 
     def pending(self) -> list:
         """The in-flight transfers of this profile — every checkpoint in the bound store,

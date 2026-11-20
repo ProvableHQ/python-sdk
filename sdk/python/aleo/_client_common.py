@@ -1,8 +1,11 @@
 """Shared models, error types, retry logic and JWT helpers for AleoNetworkClient."""
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import random
 import time
+from collections.abc import Generator
 from typing import Any, Callable, TypeVar, cast
 from urllib.parse import urlparse
 
@@ -163,6 +166,23 @@ def make_default_headers() -> dict[str, str]:
     }
 
 
+_REQUEST_HEADERS: contextvars.ContextVar[dict[str, str]] = contextvars.ContextVar(
+    "aleo_request_headers", default={})
+
+
+@contextlib.contextmanager
+def request_headers(headers: dict[str, str]) -> Generator[None, None, None]:
+    token = _REQUEST_HEADERS.set({**_REQUEST_HEADERS.get(), **headers})
+    try:
+        yield
+    finally:
+        _REQUEST_HEADERS.reset(token)
+
+
+def current_request_headers() -> dict[str, str]:
+    return dict(_REQUEST_HEADERS.get())
+
+
 def user_headers(headers: dict[str, str]) -> dict[str, str]:
     """Return only non-SDK headers (for custom transport mode)."""
     return {k: v for k, v in headers.items() if k.lower() not in SDK_HEADERS}
@@ -188,7 +208,7 @@ def method_headers(
     """
     if has_custom_transport:
         return user_headers(headers)
-    return {**headers, "X-ALEO-METHOD": method, "User-Agent": user_agent()}
+    return {**current_request_headers(), **headers, "X-ALEO-METHOD": method, "User-Agent": user_agent()}
 
 
 def jwt_origin(host: str) -> str:

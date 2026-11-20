@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
+from ._context import is_transfer_id
 from .errors import BridgeError, CheckpointInvalidError
 from .registry import Registry
 from .types import Plan, Receipt
@@ -39,6 +40,7 @@ class Checkpoint:
     destination: dict[str, Any] | None = None
     delivery_verification: dict[str, str] | None = None
     journal_id: str | None = None
+    transfer_id: str | None = None
 
     @property
     def id(self) -> str:
@@ -50,6 +52,8 @@ class Checkpoint:
                                 "intent": self.intent, "route": self.route}
         if self.journal_id is not None:
             out["journalId"] = self.journal_id
+        if self.transfer_id is not None:
+            out["transferId"] = self.transfer_id
         if self.source:
             out["source"] = self.source
         if self.destination:
@@ -71,12 +75,14 @@ class Checkpoint:
         journal_id = data.get("journalId")
         if journal_id is not None and (not isinstance(journal_id, str) or not _JOURNAL_ID.fullmatch(journal_id)):
             raise CheckpointInvalidError("Invalid journalId: expected a dated transfer filename without .json")
+        transfer_id = data.get("transferId") if is_transfer_id(data.get("transferId")) else None
         source = data.get("source") or None
         destination = data.get("destination") or None
         receipt_id = data.get("receiptId") or _derive_id(source, destination)
         return cls(version=1, receipt_id=receipt_id, intent=dict(data["intent"]),
                    route=dict(data["route"]), source=source, destination=destination,
-                   delivery_verification=data.get("deliveryVerification") or None, journal_id=journal_id)
+                   delivery_verification=data.get("deliveryVerification") or None, journal_id=journal_id,
+                   transfer_id=transfer_id)
 
     @classmethod
     def from_json(cls, text: str) -> "Checkpoint":
@@ -221,7 +227,8 @@ def create_checkpoint(plan: Plan, receipt: Receipt, registry: Registry) -> Check
                     if isinstance(before, str) and isinstance(expected, str) else None)
     return Checkpoint(version=CHECKPOINT_VERSION, receipt_id=receipt.id, intent=intent,
                       route={"id": plan.route_id, "registryVersion": plan.registry_version},
-                      source=source, destination=destination, delivery_verification=verification, journal_id=plan.journal_id)
+                      source=source, destination=destination, delivery_verification=verification, journal_id=plan.journal_id,
+                      transfer_id=plan.transfer_id)
 
 
 @dataclass(frozen=True)

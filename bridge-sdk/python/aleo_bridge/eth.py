@@ -569,7 +569,7 @@ class EthModule:
         rebuilt = _plan_for(self.registry, route, amount_atomic=amount_atomic, recipient=recipient, sender=sender,
                             mint_mode=mint_mode)
         for field in fields(Plan):
-            if field.name == "journal_id":  # Local storage identity does not change the transfer.
+            if field.name in ("journal_id", "transfer_id"):  # Local identities do not change the transfer.
                 continue
             if field.name == "registry_version" and is_registry_version_compatible(
                     self.registry, plan.registry_version, plan.route_id):

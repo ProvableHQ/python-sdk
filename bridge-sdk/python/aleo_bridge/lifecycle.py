@@ -23,6 +23,7 @@ from typing import Any, Callable, Sequence, cast
 
 from . import _sealevel
 from ._calls import is_duplicate_submission
+from ._context import bridge_context, new_transfer_id
 from .encoding import HOOK_DATA_BYTES
 from ._plan import build_plan
 from .checkpoint import Checkpoint, create_checkpoint
@@ -252,6 +253,12 @@ def quote(bridge, *, source_chain: str | None = None, source_asset: str | None =
                    destination_chain=destination_chain, destination_asset=destination_asset,
                    bridge_protocol=bridge_protocol, route=route, amount=amount, amount_atomic=amount_atomic,
                    recipient=recipient, sender=sender, mint_mode=mint_mode, cctp=cctp)
+    plan = replace(plan, transfer_id=new_transfer_id())
+    with bridge_context("quote", plan):
+        return _quote_plan(bridge, plan, secret_nonce)
+
+
+def _quote_plan(bridge, plan: Plan, secret_nonce: str) -> Quote:
     resolved = resolve_route(bridge.registry, plan)
     _require_active(resolved.route)
     _require_unpaused(bridge, resolved.route)
@@ -607,8 +614,10 @@ def execute(bridge, plan: Plan, *, on_checkpoint: Callable | None = None, provin
     _require_unpaused(bridge, resolved.route)
     family = resolved.source_chain.family
     store = getattr(bridge, "checkpoints", None)
+    transfer_id = plan.transfer_id or new_transfer_id()
     if plan.protocol == "cctp":
         plan = bridge.cctp.quote(plan).plan
+    plan = replace(plan, transfer_id=transfer_id)
     reserve = getattr(store, "reserve", None)
     if callable(reserve):
         plan = replace(plan, journal_id=reserve(plan))
@@ -1298,7 +1307,7 @@ def progress_from_checkpoint(registry: Registry, checkpoint) -> Progress:
     cp = _coerce_checkpoint(checkpoint)
     if cp.version != 1 or not cp.intent or not cp.route:
         raise CheckpointInvalidError("Bridge checkpoint format is invalid or unsupported (version 1 required)")
-    plan = replace(_plan_from_intent(registry, cp.intent), journal_id=cp.journal_id)
+    plan = replace(_plan_from_intent(registry, cp.intent), journal_id=cp.journal_id, transfer_id=cp.transfer_id)
     if not is_registry_version_compatible(registry, cp.route.get("registryVersion"), plan.route_id):
         raise RegistryVersionMismatchError(
             f"Checkpoint was written against registry {cp.route.get('registryVersion')}; this client has "
@@ -1335,7 +1344,8 @@ def recover(bridge, checkpoint, *, approval_replacement=None, destination_tx_id:
     cp = _coerce_checkpoint(checkpoint)
     if cp.version != 1 or not cp.intent or not cp.route:
         raise CheckpointInvalidError("Bridge checkpoint format is invalid or unsupported (version 1 required)")
-    plan = replace(_plan_from_intent(bridge.registry, cp.intent), journal_id=cp.journal_id)
+    plan = replace(_plan_from_intent(bridge.registry, cp.intent), journal_id=cp.journal_id,
+                   transfer_id=cp.transfer_id)
     if not is_registry_version_compatible(bridge.registry, cp.route.get("registryVersion"), plan.route_id):
         raise RegistryVersionMismatchError(
             f"Checkpoint was written against registry {cp.route.get('registryVersion')}; this client has "

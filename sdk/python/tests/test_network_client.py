@@ -247,6 +247,53 @@ def test_per_method_header() -> None:
     assert req_headers.get("X-ALEO-METHOD") == "getBlock"
 
 
+@resp_lib.activate
+def test_request_headers_block_labels_calls_inside_it_only() -> None:
+    from aleo import request_headers
+    resp_lib.add(resp_lib.GET, f"{HOST}/block/latest", json={})
+    c = make_client()
+    with request_headers({"X-Aleo-Bridge": "action=quote"}):
+        c.get_latest_block()
+    c.get_latest_block()
+    assert resp_lib.calls[0].request.headers.get("X-Aleo-Bridge") == "action=quote"
+    assert resp_lib.calls[0].request.headers.get("X-ALEO-METHOD") == "getLatestBlock"
+    assert "X-Aleo-Bridge" not in resp_lib.calls[1].request.headers
+
+
+@resp_lib.activate
+def test_request_headers_nested_block_wins_and_restores() -> None:
+    from aleo import request_headers
+    resp_lib.add(resp_lib.GET, f"{HOST}/block/latest", json={})
+    c = make_client()
+    with request_headers({"X-A": "outer", "X-B": "outer"}):
+        with request_headers({"X-B": "inner"}):
+            c.get_latest_block()
+        c.get_latest_block()
+    inner, outer = resp_lib.calls[0].request.headers, resp_lib.calls[1].request.headers
+    assert (inner.get("X-A"), inner.get("X-B")) == ("outer", "inner")
+    assert (outer.get("X-A"), outer.get("X-B")) == ("outer", "outer")
+
+
+@resp_lib.activate
+def test_request_headers_yield_to_configured_headers() -> None:
+    from aleo import request_headers
+    resp_lib.add(resp_lib.GET, f"{HOST}/block/latest", json={})
+    c = AleoNetworkClient(BASE, network=NET, headers={"X-Aleo-Bridge": "mine"})
+    with request_headers({"X-Aleo-Bridge": "action=quote"}):
+        c.get_latest_block()
+    assert resp_lib.calls[0].request.headers.get("X-Aleo-Bridge") == "mine"
+
+
+@resp_lib.activate
+def test_custom_transport_suppresses_request_headers() -> None:
+    from aleo import request_headers
+    resp_lib.add(resp_lib.GET, f"{HOST}/block/latest", json={})
+    c = AleoNetworkClient(BASE, network=NET, transport=object())
+    with request_headers({"X-Aleo-Bridge": "action=quote"}):
+        c.get_latest_block()
+    assert "X-Aleo-Bridge" not in resp_lib.calls[0].request.headers
+
+
 def test_user_agent_value() -> None:
     from aleo._client_common import package_version, user_agent
     assert user_agent() == f"aleo-python-sdk/{package_version()}"
