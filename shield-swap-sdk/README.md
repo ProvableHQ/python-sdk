@@ -146,6 +146,11 @@ in flexible modes and cannot both be positive for the same token. Unused funds
 stay collectible as `tokens_owed` on the successor; they earn no liquidity fees
 until reinvested. Token minimums constrain consumption, not minimum liquidity.
 
+For a positive flexible target, planning rejects a quoted deposit outside its
+token bounds or above the available recovery plus funding minus refunds. A
+funding error reports the fixed amount to supply. Passing these checks does not
+guarantee execution: prices and recovery can change before the transaction lands.
+
 The generic `plan_rebalance` and `rebalance_position` preserve existing exact
 calls. With explicit caps, omitted minimums equal those caps. Widening either
 bound enables actual recovery; setting `liquidity_target=0` enables execution-time
@@ -175,8 +180,10 @@ result = dex.rebalance_position_from_amounts(plan=plan).delegate()
 print(result.transaction_id, result.position_token_id)
 ```
 
-Passing `plan=` preserves its constraints and estimates verbatim. Planning
-arguments cannot override a supplied plan; build a new plan to change them.
+Passing `plan=` preserves its constraints and estimates. Matching pool, position,
+and range arguments are accepted; conflicting values or sizing/amount arguments
+are rejected. Build a new plan to change constraints. Integer-like amount inputs
+are normalized to Python integers; booleans and fractional values are rejected.
 Preparation reads the network and resolves records/proofs; only `delegate()` or
 `transact()` submits. A rejected rebalance leaves the old position unchanged but
 can still cost a fee. Refresh state before retrying a confirmed rejection.

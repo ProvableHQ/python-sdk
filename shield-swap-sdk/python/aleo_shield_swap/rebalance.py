@@ -7,6 +7,7 @@ Planning never signs or submits a transaction.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from operator import index
 from typing import Any, Mapping, Optional
 
 from . import _generated as g
@@ -114,18 +115,29 @@ def _sizing(liquidity_target: Optional[int], max_funding0: Optional[int],
 
 _AMOUNT_FIELDS = ("amount0_desired", "amount1_desired", "amount0_min", "amount1_min",
                   "funded0", "funded1", "refund0", "refund1")
-_PLAN_INPUT_FIELDS = ("pool_key", "position_token_id", "tick_lower", "tick_upper",
-                      "liquidity_target", "max_funding0", "max_funding1", *_AMOUNT_FIELDS)
+_PLAN_IDENTITY_FIELDS = ("pool_key", "position_token_id", "tick_lower", "tick_upper")
+_PLAN_INPUT_FIELDS = ("liquidity_target", "max_funding0", "max_funding1", *_AMOUNT_FIELDS)
 
 
-def _validate_amounts(params: Mapping[str, Any]) -> None:
-    """Reject invalid contract integers, bounds, transfers, and exact accounting."""
+def _validate_amounts(params: Mapping[str, Any]) -> dict[str, Any]:
+    """Normalize integer inputs and reject invalid bounds and accounting."""
+    params = dict(params)
     fields = (*_AMOUNT_FIELDS, "liquidity_target", "old_liquidity", "recovered0",
               "recovered1", "required0", "required1", "max_funding0", "max_funding1")
     for key in fields:
         value = params.get(key)
-        if value is not None and (type(value) is not int or not 0 <= value < 1 << 128):
-            raise ValueError(f"{key} must be a u128 integer (0 through 2**128 - 1)")
+        if value is None:
+            continue
+        message = f"{key} must be a u128 integer (0 through 2**128 - 1)"
+        if isinstance(value, bool):
+            raise ValueError(message)
+        try:
+            value = index(value)
+        except TypeError:
+            raise ValueError(message) from None
+        if not 0 <= value < 1 << 128:
+            raise ValueError(message)
+        params[key] = value
     if params.get("liquidity_target") is not None and any(
             params.get(key) is not None for key in ("max_funding0", "max_funding1")):
         raise ValueError("Pass exactly one sizing mode: liquidity_target, or max_funding0 and max_funding1")
@@ -154,10 +166,11 @@ def _validate_amounts(params: Mapping[str, Any]) -> None:
                 and funded is not None and refund is not None):
             if recovered + funded != cap + refund:
                 raise ValueError(f"Exact token{i} recovery and funding must equal its desired amount and refund")
+    return params
 
 
-def _validate_planning(params: Mapping[str, Any]) -> None:
-    _validate_amounts(params)
+def _validate_planning(params: Mapping[str, Any]) -> dict[str, Any]:
+    params = _validate_amounts(params)
     _sizing(params.get("liquidity_target"), params.get("max_funding0"), params.get("max_funding1"))
     explicit = params.get("amount0_desired") is not None
     if explicit and params.get("liquidity_target") is None:
@@ -166,14 +179,19 @@ def _validate_planning(params: Mapping[str, Any]) -> None:
         raise ValueError("A zero liquidity_target requires amount0_desired and amount1_desired")
     if not explicit and any(params.get(key) is not None for key in ("funded0", "funded1", "refund0", "refund1")):
         raise ValueError("Fixed funding and refunds require explicit token bounds")
+    return params
 
 
-def _validate_plan_arguments(plan: RebalancePlan, params: Mapping[str, Any]) -> None:
+def _validate_plan_arguments(plan: RebalancePlan, params: Mapping[str, Any]) -> RebalancePlan:
     if any(params.get(key) is not None for key in _PLAN_INPUT_FIELDS):
         raise ValueError("A supplied plan cannot be combined with planning overrides")
-    _validate_amounts(asdict(plan))
+    for key in _PLAN_IDENTITY_FIELDS:
+        if params.get(key) is not None and params[key] != getattr(plan, key):
+            raise ValueError(f"{key} conflicts with the supplied plan")
+    plan = RebalancePlan(**_validate_amounts(asdict(plan)))
     if plan.liquidity_target == 0 and plan.amount0_desired is None:
         raise ValueError("A zero liquidity_target requires amount0_desired and amount1_desired")
+    return plan
 
 
 def _mode_parameters(mode: str, kwargs: Mapping[str, Any]) -> dict[str, Any]:
@@ -181,9 +199,11 @@ def _mode_parameters(mode: str, kwargs: Mapping[str, Any]) -> dict[str, Any]:
     result = dict(kwargs)
     plan = result.get("plan")
     if plan is not None:
-        _validate_plan_arguments(plan, result)
+        plan = _validate_plan_arguments(plan, result)
+        result["plan"] = plan
         params = asdict(plan)
     else:
+        result = _validate_amounts(result)
         params = result
     if mode != "exact_amounts":
         if any(params.get(key) is not None for key in ("max_funding0", "max_funding1")):
@@ -246,7 +266,13 @@ def plan_rebalance(*, pool_key: str, position_token_id: str,
     invalid bounds, conflicting transfers, or budgets supporting no liquidity.
     No network reads, signing, or submission occurs.
     """
-    _validate_planning(locals())
+    params = _validate_planning(locals())
+    liquidity_target = params["liquidity_target"]
+    max_funding0, max_funding1 = params["max_funding0"], params["max_funding1"]
+    amount0_desired, amount1_desired = params["amount0_desired"], params["amount1_desired"]
+    amount0_min, amount1_min = params["amount0_min"], params["amount1_min"]
+    funded0, funded1 = params["funded0"], params["funded1"]
+    refund0, refund1 = params["refund0"], params["refund1"]
 
     spacing = int(slot.tick_spacing)
     lo = round_tick_to_spacing(tick_lower, spacing)
@@ -304,6 +330,10 @@ def plan_rebalance(*, pool_key: str, position_token_id: str,
         target = liquidity_for_amounts(sqrt_price, sqrt_lo, sqrt_hi, budget0, budget1)
         for _ in range(BUDGET_CLAMP_RETRIES + 1):
             if target <= 0:
+                if amount_mode:
+                    raise ValueError("The token caps and available funds support no liquidity in this range "
+                                     "— increase amount0_desired/amount1_desired or funded0/funded1, "
+                                     "reduce fixed refunds, or change the range")
                 raise ValueError("The funding budget supports no liquidity in this "
                                  "range — raise it or narrow the range")
             required = required_for(target)
@@ -311,6 +341,9 @@ def plan_rebalance(*, pool_key: str, position_token_id: str,
                 break
             target -= 1
         else:
+            if amount_mode:
+                raise ValueError("Token-cap sizing did not converge — adjust amount0_desired/amount1_desired "
+                                 "or fixed funding/refunds, or change the range")
             raise ValueError("Budget sizing did not converge — pass an explicit liquidity_target")
 
     min0 = amount0_min if amount0_min is not None else amount0_desired
@@ -322,6 +355,22 @@ def plan_rebalance(*, pool_key: str, position_token_id: str,
     funded1 = funded1 if funded1 is not None else (0 if flexible else max(required[1] - recovered1, 0))
     refund0 = refund0 if refund0 is not None else (0 if flexible else max(recovered0 - required[0], 0))
     refund1 = refund1 if refund1 is not None else (0 if flexible else max(recovered1 - required[1], 0))
+    if flexible and not amount_mode:
+        for i, (cap, minimum, recovered, funded, refund) in enumerate(zip(
+                (amount0_desired, amount1_desired), (min0, min1),
+                (recovered0, recovered1), (funded0, funded1), (refund0, refund1))):
+            assert cap is not None and minimum is not None
+            if required[i] > cap:
+                raise ValueError(f"Quoted token{i} deposit {required[i]} exceeds amount{i}_desired={cap}")
+            if required[i] < minimum:
+                raise ValueError(f"Quoted token{i} deposit {required[i]} is below amount{i}_min={minimum}")
+            if required[i] > recovered + funded - refund:
+                if refund:
+                    raise ValueError(f"Quoted token{i} deposit exceeds available funds after refund{i}={refund}; "
+                                     "reduce the refund or target, or remove the refund and supply "
+                                     f"funded{i}={max(required[i] - recovered, 0)} or more")
+                raise ValueError(f"Quoted token{i} deposit exceeds available funds; "
+                                 f"supply funded{i}={required[i] - recovered} or more")
     route = rebalance_route(wrapped0, wrapped1, funded0 > 0, funded1 > 0)
 
     plan = RebalancePlan(

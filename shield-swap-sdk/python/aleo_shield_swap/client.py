@@ -1664,8 +1664,9 @@ class ShieldSwap:
 
         Amounts are integer token base units, from 0 through 2**128 - 1.
         ``estimated_liquidity`` is advisory; token floors do not guarantee a
-        minimum liquidity. Named planners supply mode-specific defaults.
-        Requires an existing pool, position, and initialized boundary ticks.
+        minimum liquidity. Positive flexible targets must fit the quoted token
+        bounds and available funds; funding errors name the amount to supply.
+        Named planners supply mode-specific defaults. Requires an existing pool, position, and initialized boundary ticks.
         """
         _validate_planning(locals())
         pool = self.get_pool(pool_key)
@@ -1690,39 +1691,89 @@ class ShieldSwap:
             amount0_min=amount0_min, amount1_min=amount1_min,
             funded0=funded0, funded1=funded1, refund0=refund0, refund1=refund1)
 
-    def plan_rebalance_exact_amounts(self, **kwargs: Any) -> RebalancePlan:
-        """Plan exact recovery and deposit amounts for a replacement position.
+    def plan_rebalance_exact_amounts(
+        self,
+        *,
+        pool_key: str,
+        position_token_id: str,
+        tick_lower: int,
+        tick_upper: int,
+        liquidity_target: Optional[int] = None,
+        max_funding0: Optional[int] = None,
+        max_funding1: Optional[int] = None,
+        amount0_desired: Optional[int] = None,
+        amount1_desired: Optional[int] = None,
+        amount0_min: Optional[int] = None,
+        amount1_min: Optional[int] = None,
+        funded0: Optional[int] = None,
+        funded1: Optional[int] = None,
+        refund0: Optional[int] = None,
+        refund1: Optional[int] = None,
+    ) -> RebalancePlan:
+        """Quote a complete replacement with fixed recovery and deposits.
 
-        Accepts the arguments of ``plan_rebalance``; positive targets and equal
-        token bounds are required. Paired ``max_funding0/1`` quote-time budgets
-        remain supported. Price or fee changes can reject execution.
-        Reads chain state without signing or submitting.
+        Supply a positive target or paired ``max_funding0/1`` budgets. Minimums
+        must equal caps. Price or fee changes can reject execution. Reads only.
         """
-        return self.plan_rebalance(**_mode_parameters("exact_amounts", kwargs))
+        params = {key: value for key, value in locals().items() if key != "self"}
+        return self.plan_rebalance(**_mode_parameters("exact_amounts", params))
 
-    def plan_rebalance_to_liquidity(self, **kwargs: Any) -> RebalancePlan:
-        """Plan exact successor liquidity with flexible recovered funds.
+    def plan_rebalance_to_liquidity(
+        self,
+        *,
+        pool_key: str,
+        position_token_id: str,
+        tick_lower: int,
+        tick_upper: int,
+        liquidity_target: Optional[int] = None,
+        max_funding0: Optional[int] = None,
+        max_funding1: Optional[int] = None,
+        amount0_desired: Optional[int] = None,
+        amount1_desired: Optional[int] = None,
+        amount0_min: Optional[int] = None,
+        amount1_min: Optional[int] = None,
+        funded0: Optional[int] = None,
+        funded1: Optional[int] = None,
+        refund0: Optional[int] = None,
+        refund1: Optional[int] = None,
+    ) -> RebalancePlan:
+        """Quote fixed successor liquidity with actual recovered funds.
 
-        Accepts the arguments of ``plan_rebalance``. Requires a positive
-        ``liquidity_target`` and both token caps; minimums default to zero and
-        at least one bound must be wider than its minimum. Use fixed
-        ``funded0/1`` and ``refund0/1``, not ``max_funding0/1``. Insufficient
-        funds reject execution instead of reducing liquidity.
-        Reads chain state without signing or submitting.
+        Supply a positive target and both caps; one bound must be flexible.
+        Minimums and fixed funding/refunds default to zero. Rejects quotes
+        outside the bounds or available funds. Later price changes can still
+        reject execution. Reads only.
         """
-        return self.plan_rebalance(**_mode_parameters("to_liquidity", kwargs))
+        params = {key: value for key, value in locals().items() if key != "self"}
+        return self.plan_rebalance(**_mode_parameters("to_liquidity", params))
 
-    def plan_rebalance_from_amounts(self, **kwargs: Any) -> RebalancePlan:
-        """Plan a replacement sized from available tokens at execution.
+    def plan_rebalance_from_amounts(
+        self,
+        *,
+        pool_key: str,
+        position_token_id: str,
+        tick_lower: int,
+        tick_upper: int,
+        liquidity_target: Optional[int] = None,
+        max_funding0: Optional[int] = None,
+        max_funding1: Optional[int] = None,
+        amount0_desired: Optional[int] = None,
+        amount1_desired: Optional[int] = None,
+        amount0_min: Optional[int] = None,
+        amount1_min: Optional[int] = None,
+        funded0: Optional[int] = None,
+        funded1: Optional[int] = None,
+        refund0: Optional[int] = None,
+        refund1: Optional[int] = None,
+    ) -> RebalancePlan:
+        """Estimate replacement liquidity from both token caps.
 
-        Accepts the arguments of ``plan_rebalance``. Requires both token caps;
-        minimums default to zero and the target must be omitted or zero. Fixed
-        funding/refunds default to zero. ``estimated_liquidity`` is a preview,
-        not a guarantee. Surplus stays collectible on the successor; no swap
-        occurs. Token amounts use integer base units.
-        Reads chain state without signing or submitting.
+        Omit the target or set zero. Minimums and fixed funding/refunds default
+        to zero. Estimates and token minimums do not guarantee liquidity.
+        Surplus stays collectible; no swap occurs. Reads only; integer base units.
         """
-        return self.plan_rebalance(**_mode_parameters("from_amounts", kwargs))
+        params = {key: value for key, value in locals().items() if key != "self"}
+        return self.plan_rebalance(**_mode_parameters("from_amounts", params))
 
     def rebalance_position(
         self,
@@ -1760,8 +1811,8 @@ class ShieldSwap:
         """Prepare an atomic replacement in the same pool, keeping owner and withdrawal.
 
         Pass a reviewed ``plan`` verbatim, or pool/range/sizing arguments as in
-        ``plan_rebalance``. A supplied plan cannot be combined with planning
-        overrides. Exact bounds enforce the quote; wider bounds use actual
+        ``plan_rebalance``. Pool, position, and range arguments may repeat the plan’s values;
+        conflicting values or sizing/amount arguments are rejected. Exact bounds enforce the quote; wider bounds use actual
         recovery and a zero target sizes liquidity at execution. Funding and
         immediate refunds stay fixed; flexible surplus remains collectible on
         the successor. Wrapped funding uses the underlying asset's records.
@@ -1786,7 +1837,7 @@ class ShieldSwap:
             # Validate the sizing before any chain read.
             _validate_planning(planning)
         else:
-            _validate_plan_arguments(plan, locals())
+            plan = _validate_plan_arguments(plan, locals())
             pool_key, position_token_id = plan.pool_key, plan.position_token_id
         assert pool_key is not None
         pool = self.get_pool(pool_key)
@@ -1914,37 +1965,130 @@ class ShieldSwap:
 
         return DexCall(self._aleo, bound, build_result)
 
-    def rebalance_position_exact_amounts(self, **kwargs: Any) -> DexCall[RebalanceResult]:
-        """Prepare a rebalance enforcing exact quoted recovery and deposits.
+    def rebalance_position_exact_amounts(
+        self,
+        *,
+        plan: Optional[RebalancePlan] = None,
+        pool_key: Optional[str] = None,
+        position_token_id: Optional[str] = None,
+        tick_lower: Optional[int] = None,
+        tick_upper: Optional[int] = None,
+        liquidity_target: Optional[int] = None,
+        max_funding0: Optional[int] = None,
+        max_funding1: Optional[int] = None,
+        amount0_desired: Optional[int] = None,
+        amount1_desired: Optional[int] = None,
+        amount0_min: Optional[int] = None,
+        amount1_min: Optional[int] = None,
+        funded0: Optional[int] = None,
+        funded1: Optional[int] = None,
+        refund0: Optional[int] = None,
+        refund1: Optional[int] = None,
+        position_record: Optional[str] = None,
+        token0_program: Optional[str] = None,
+        token1_program: Optional[str] = None,
+        token0_record: Optional[str] = None,
+        token1_record: Optional[str] = None,
+        tick_lower_hint: Optional[int] = None,
+        tick_upper_hint: Optional[int] = None,
+        deadline_offset_blocks: int = REBALANCE_DEADLINE_OFFSET_BLOCKS,
+        nonce: Optional[str] = None,
+        compliance_proofs: Optional[RebalanceProofs] = None,
+        wrapper_proofs: Optional[str] = None,
+        imports: Optional[dict[str, str]] = None,
+        account: Any = None,
+    ) -> DexCall[RebalanceResult]:
+        """Prepare an exact quote using target-or-budget sizing, or a reviewed plan.
 
-        Accepts ``rebalance_position`` arguments, including a reviewed plan.
-        Requires a positive target and equal token bounds. Price or fee
-        changes can reject execution.
-        Submit with ``delegate()`` or ``transact()`` after reviewing the plan.
+        Uses ``plan_rebalance_exact_amounts`` constraints. Price or fee changes
+        can reject execution. Submit with ``delegate()`` or ``transact()``.
         """
-        return self.rebalance_position(**_mode_parameters("exact_amounts", kwargs))
+        params = {key: value for key, value in locals().items() if key != "self"}
+        return self.rebalance_position(**_mode_parameters("exact_amounts", params))
 
-    def rebalance_position_to_liquidity(self, **kwargs: Any) -> DexCall[RebalanceResult]:
-        """Prepare exact successor liquidity using actual recovered funds.
+    def rebalance_position_to_liquidity(
+        self,
+        *,
+        plan: Optional[RebalancePlan] = None,
+        pool_key: Optional[str] = None,
+        position_token_id: Optional[str] = None,
+        tick_lower: Optional[int] = None,
+        tick_upper: Optional[int] = None,
+        liquidity_target: Optional[int] = None,
+        max_funding0: Optional[int] = None,
+        max_funding1: Optional[int] = None,
+        amount0_desired: Optional[int] = None,
+        amount1_desired: Optional[int] = None,
+        amount0_min: Optional[int] = None,
+        amount1_min: Optional[int] = None,
+        funded0: Optional[int] = None,
+        funded1: Optional[int] = None,
+        refund0: Optional[int] = None,
+        refund1: Optional[int] = None,
+        position_record: Optional[str] = None,
+        token0_program: Optional[str] = None,
+        token1_program: Optional[str] = None,
+        token0_record: Optional[str] = None,
+        token1_record: Optional[str] = None,
+        tick_lower_hint: Optional[int] = None,
+        tick_upper_hint: Optional[int] = None,
+        deadline_offset_blocks: int = REBALANCE_DEADLINE_OFFSET_BLOCKS,
+        nonce: Optional[str] = None,
+        compliance_proofs: Optional[RebalanceProofs] = None,
+        wrapper_proofs: Optional[str] = None,
+        imports: Optional[dict[str, str]] = None,
+        account: Any = None,
+    ) -> DexCall[RebalanceResult]:
+        """Prepare fixed successor liquidity with bounded token consumption.
 
-        Accepts ``rebalance_position`` arguments, including a reviewed plan.
-        Requires a positive target, both token caps, and at least one flexible
-        bound. Minimums default to zero when building a new plan. Fixed
-        funding/refunds default to zero; insufficient funds reject execution.
-        Submit with ``delegate()`` or ``transact()`` after reviewing the plan.
+        Uses ``plan_rebalance_to_liquidity`` constraints, or a reviewed plan.
+        Insufficient execution-time funds reject rather than minting less.
+        Submit with ``delegate()`` or ``transact()``.
         """
-        return self.rebalance_position(**_mode_parameters("to_liquidity", kwargs))
+        params = {key: value for key, value in locals().items() if key != "self"}
+        return self.rebalance_position(**_mode_parameters("to_liquidity", params))
 
-    def rebalance_position_from_amounts(self, **kwargs: Any) -> DexCall[RebalanceResult]:
+    def rebalance_position_from_amounts(
+        self,
+        *,
+        plan: Optional[RebalancePlan] = None,
+        pool_key: Optional[str] = None,
+        position_token_id: Optional[str] = None,
+        tick_lower: Optional[int] = None,
+        tick_upper: Optional[int] = None,
+        liquidity_target: Optional[int] = None,
+        max_funding0: Optional[int] = None,
+        max_funding1: Optional[int] = None,
+        amount0_desired: Optional[int] = None,
+        amount1_desired: Optional[int] = None,
+        amount0_min: Optional[int] = None,
+        amount1_min: Optional[int] = None,
+        funded0: Optional[int] = None,
+        funded1: Optional[int] = None,
+        refund0: Optional[int] = None,
+        refund1: Optional[int] = None,
+        position_record: Optional[str] = None,
+        token0_program: Optional[str] = None,
+        token1_program: Optional[str] = None,
+        token0_record: Optional[str] = None,
+        token1_record: Optional[str] = None,
+        tick_lower_hint: Optional[int] = None,
+        tick_upper_hint: Optional[int] = None,
+        deadline_offset_blocks: int = REBALANCE_DEADLINE_OFFSET_BLOCKS,
+        nonce: Optional[str] = None,
+        compliance_proofs: Optional[RebalanceProofs] = None,
+        wrapper_proofs: Optional[str] = None,
+        imports: Optional[dict[str, str]] = None,
+        account: Any = None,
+    ) -> DexCall[RebalanceResult]:
         """Prepare a replacement sized from available tokens at execution.
 
-        Accepts ``rebalance_position`` arguments, including a reviewed plan.
-        Requires both token caps and an omitted or zero target. Minimums and
-        fixed funding/refunds default to zero when building a new plan. Surplus
-        stays collectible on the successor; estimated liquidity is advisory.
-        Submit with ``delegate()`` or ``transact()`` after reviewing the plan.
+        Uses ``plan_rebalance_from_amounts`` constraints, or a reviewed plan.
+        Estimated liquidity is advisory; surplus stays collectible.
+        Submit with ``delegate()`` or ``transact()``.
         """
-        return self.rebalance_position(**_mode_parameters("from_amounts", kwargs))
+        params = {key: value for key, value in locals().items() if key != "self"}
+        return self.rebalance_position(**_mode_parameters("from_amounts", params))
 
     def _select_position_record(self, pool_key: str, account: Any,
                                 position_token_id: Optional[str] = None) -> str:

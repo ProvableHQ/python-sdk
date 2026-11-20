@@ -260,7 +260,7 @@ _TOOLS: list[tuple[str, str, dict[str, Any], Callable[[Any, dict[str, Any]], Any
 
 
 _REBALANCE_MODES = {
-    "exact_amounts": "Enforce exact quoted recovery and deposits. A positive target and equal bounds are required; price or fee changes can reject execution.",
+    "exact_amounts": "Enforce exact quoted recovery and deposits. Supply either a positive liquidity_target or paired max_funding0/max_funding1 budgets, never both. Token bounds, if supplied, must be equal; price or fee changes can reject execution.",
     "to_liquidity": "Require exact successor liquidity using actual recovery. Supply a positive target and both token caps; minimums default to zero and at least one bound must be wider. Insufficient funds reject instead of minting less liquidity.",
     "from_amounts": "Size successor liquidity from actual recovered tokens plus fixed funding minus fixed refunds, capped per token. Supply both desired caps; target must be omitted or zero and minimums default to zero. Estimated liquidity is advisory; no swap occurs.",
 }
@@ -277,10 +277,13 @@ for _mode, _description in _REBALANCE_MODES.items():
         ("plan_rebalance", _h_plan_rebalance, "Read chain state without submitting. Show the plan before execution."),
         ("rebalance_position", _h_rebalance_position, "Rebuild the plan and submit atomically, keeping owner and withdrawal. Rejection rolls back funds but can cost a fee."),
     ):
+        _funding_description = (
+            "Fixed funding/refunds default to zero; surplus stays collectible on the successor. "
+            "Flexible calls require an upgraded contract. "
+            if _mode != "exact_amounts" else "")
         _TOOLS.append((f"{_prefix}_{_mode}",
                        f"{_description} {_effect} Token amounts use integer base-unit strings. "
-                       "Fixed funding/refunds default to zero in flexible modes; surplus stays collectible on the successor. "
-                       "Flexible calls require an upgraded contract; rebalance routing is testnet-only.",
+                       f"{_funding_description}Rebalance routing is testnet-only.",
                        _schema(dict(_properties), list(_required)), partial(_handler, mode=_mode)))
 
 

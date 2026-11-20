@@ -30,6 +30,9 @@ TIER1 = ["from_profile", "onboard", "status", "get_positions",
 TIER2_CLIENT = ["confirm_airdrop", "quote", "swap", "claim_swap_output", "create_pool", "mint",
                 "increase_liquidity", "decrease_liquidity", "collect", "burn",
                 "plan_rebalance", "rebalance_position",
+                "plan_rebalance_exact_amounts", "rebalance_position_exact_amounts",
+                "plan_rebalance_to_liquidity", "rebalance_position_to_liquidity",
+                "plan_rebalance_from_amounts", "rebalance_position_from_amounts",
                 "plan_inventory", "rebalance_inventory",
                 "get_pool", "get_slot", "get_swap_output", "get_swap_execution",
                 "get_balances", "get_public_balances",
@@ -191,7 +194,13 @@ For the funding, swap, and claim flow, see
 
 def _entry(name: str, fn: object) -> str:
     try:
-        sig = str(inspect.signature(fn))  # type: ignore[arg-type]
+        signature = inspect.signature(fn)  # type: ignore[arg-type]
+        # Keep every argument and default visible without repeating Python's
+        # type annotations throughout the compact agent reference.
+        sig = str(signature.replace(parameters=[
+            param.replace(annotation=inspect.Parameter.empty)
+            for param in signature.parameters.values() if param.name not in ("self", "cls")
+        ], return_annotation=inspect.Signature.empty))
     except (TypeError, ValueError):
         sig = "(...)"
     doc = inspect.getdoc(fn) or ""

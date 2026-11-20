@@ -190,3 +190,111 @@ def test_agent_rejects_amounts_that_would_be_coerced_or_truncated(value):
     with pytest.raises(ValueError, match="integer|decimal"):
         dispatch_tool(ShieldSwap(_stub()), "plan_rebalance_from_amounts",
                       {**COMMON, "amount0_desired": value, "amount1_desired": "10000"})
+
+
+@pytest.mark.parametrize("side", [0, 1])
+@pytest.mark.parametrize("constraint", ["cap", "minimum", "funding"])
+def test_flexible_target_rejects_infeasible_quote(side, constraint):
+    dex = ShieldSwap(_stub())
+    args = dict(liquidity_target=500_000, amount0_desired=200_000, amount1_desired=200_000)
+    if constraint == "cap":
+        args[f"amount{side}_desired"] = 1
+        message = f"amount{side}_desired"
+    elif constraint == "minimum":
+        args[f"amount{side}_min"] = 199_999
+        message = f"amount{side}_min"
+    else:
+        args.update(liquidity_target=2_000_000, amount0_desired=1_000_000, amount1_desired=1_000_000)
+        args[f"funded{1 - side}"] = 1_000_000
+        message = f"funded{side}"
+    with pytest.raises(ValueError, match=message):
+        dex.plan_rebalance_to_liquidity(**COMMON, **args)
+
+
+def test_flexible_target_funding_suggestion_is_sufficient():
+    import re
+    dex = ShieldSwap(_stub())
+    args = dict(liquidity_target=2_000_000, amount0_desired=1_000_000,
+                amount1_desired=1_000_000, funded1=1_000_000)
+    with pytest.raises(ValueError, match=r"funded0=(\d+)") as exc:
+        dex.plan_rebalance_to_liquidity(**COMMON, **args)
+    funded0 = int(re.search(r"funded0=(\d+)", str(exc.value)).group(1))
+    plan = dex.plan_rebalance_to_liquidity(**COMMON, funded0=funded0, **args)
+    assert plan.recovered0 + plan.funded0 == plan.required0
+    assert plan.function_name == "rebalance_plain_plain_both"
+
+
+@pytest.mark.parametrize("mode", ["", "_exact_amounts", "_to_liquidity", "_from_amounts"])
+def test_prebuilt_plan_accepts_matching_identity_arguments(mode):
+    dex = ShieldSwap(_stub())
+    constraints = (dict(liquidity_target=500_000) if mode in ("", "_exact_amounts")
+                   else dict(amount0_desired=150_000, amount1_desired=160_000))
+    if mode == "_to_liquidity":
+        constraints["liquidity_target"] = 500_000
+    plan = getattr(dex, "plan_rebalance" + mode)(**COMMON, **constraints)
+    result = getattr(dex, "rebalance_position" + mode)(plan=plan, **COMMON).transact()
+    assert result.plan == plan
+
+
+@pytest.mark.parametrize("key,value", [("pool_key", "6field"),
+    ("position_token_id", "43field"), ("tick_lower", -4200), ("tick_upper", 4200)])
+def test_prebuilt_plan_rejects_conflicting_identity_arguments(key, value):
+    dex = ShieldSwap(_stub())
+    plan = dex.plan_rebalance(**COMMON, liquidity_target=500_000)
+    with pytest.raises(ValueError, match=key):
+        dex.rebalance_position(plan=plan, **{key: value})
+
+
+class IntAmount(int):
+    pass
+
+
+class IndexAmount:
+    def __init__(self, value):
+        self.value = value
+
+    def __index__(self):
+        return self.value
+
+
+@pytest.mark.parametrize("amount_type", [IntAmount, IndexAmount])
+def test_planner_normalizes_integer_protocol_inputs(amount_type):
+    dex = ShieldSwap(_stub())
+    plan = dex.plan_rebalance_to_liquidity(**COMMON,
+        liquidity_target=amount_type(500_000), amount0_desired=amount_type(150_000),
+        amount1_desired=amount_type(160_000), funded0=amount_type(123))
+    assert plan.liquidity_target == 500_000 and type(plan.liquidity_target) is int
+    assert plan.amount0_desired == 150_000 and type(plan.amount0_desired) is int
+    assert plan.funded0 == 123 and type(plan.funded0) is int
+    quoted = dex.plan_rebalance(**COMMON, max_funding0=amount_type(0), max_funding1=amount_type(0))
+    assert quoted.liquidity_target > 0 and type(quoted.liquidity_target) is int
+
+
+@pytest.mark.parametrize("amount_type", [IntAmount, IndexAmount])
+def test_prebuilt_plan_normalizes_integer_protocol_inputs(amount_type):
+    dex = ShieldSwap(_stub())
+    plan = dex.plan_rebalance(**COMMON, liquidity_target=500_000)
+    external = replace(plan, liquidity_target=amount_type(plan.liquidity_target),
+                       required0=amount_type(plan.required0), refund0=amount_type(plan.refund0))
+    result = dex.rebalance_position_exact_amounts(plan=external).transact()
+    assert result.plan == plan
+    assert type(result.plan.liquidity_target) is int
+
+
+@pytest.mark.parametrize("mode", ["to_liquidity", "from_amounts"])
+@pytest.mark.parametrize("value", ["500000", False, 0.0, True, 1.5])
+def test_named_planner_rejects_invalid_target_types(mode, value):
+    dex = ShieldSwap(_stub())
+    with pytest.raises(ValueError, match="u128"):
+        getattr(dex, f"plan_rebalance_{mode}")(**COMMON, liquidity_target=value,
+            amount0_desired=150_000, amount1_desired=160_000)
+
+
+@pytest.mark.asyncio
+async def test_async_planner_rejects_infeasible_quote():
+    from aleo_shield_swap import AsyncShieldSwap
+    from .test_async_client import AsyncStubAleo
+    dex = AsyncShieldSwap(AsyncStubAleo(mappings=_stub().programs._mappings))
+    with pytest.raises(ValueError, match="amount0_desired"):
+        await dex.plan_rebalance_to_liquidity(**COMMON, liquidity_target=500_000,
+            amount0_desired=1, amount1_desired=200_000)

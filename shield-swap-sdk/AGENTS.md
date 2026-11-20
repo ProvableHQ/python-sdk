@@ -21,7 +21,7 @@ report = dex.swap_many(pool_key=pools[0].key, token_in_id=pools[0].token0,
 dex.collect_all()                        # any session, any time
 ```
 
-### `from_profile(home: 'Any' = None, *, network: 'Optional[str]' = None, endpoint: 'Optional[str]' = None) -> "'ShieldSwap'"`
+### `from_profile(home=None, *, network=None, endpoint=None)`
 
 The client for the local participant profile (created on first use).
 
@@ -41,7 +41,7 @@ Args:
         to testnet.
     endpoint: Node API origin for a NEW profile.
 
-### `onboard(self, referral_code: 'Optional[str]' = None) -> 'OnboardReport'`
+### `onboard(referral_code=None)`
 
 Register this profile end to end — safe to re-run any time.
 
@@ -53,7 +53,7 @@ friend shared to credit them as the referrer (recorded once; later
 calls ignore it).  Requires a profile-bound client
 (``from_profile()``).
 
-### `status(self) -> 'SessionStatus'`
+### `status()`
 
 One re-orientation call: identity, access, holdings, pending work.
 
@@ -61,7 +61,7 @@ Run this first in any session — it answers "is this account already
 registered, what do I hold, what is in flight" from the profile,
 journal, chain, and API without changing anything.
 
-### `get_positions(self, account: 'Any' = None) -> 'list[PositionView]'`
+### `get_positions(account=None)`
 
 Every open position — journaled ones plus a record scan.
 
@@ -69,7 +69,7 @@ The scan catches positions the journal never saw (account used from
 another machine, journal lost); it needs a registered record
 provider and is skipped silently without one.
 
-### `swap_many(self, *, pool_key: 'str', token_in_id: 'str', amount_in: 'int', count: 'int', slippage_bps: 'int' = 50, expected_out: 'Optional[int]' = None, record_wait_seconds: 'float' = 120.0, account: 'Any' = None) -> 'SwapBatchReport'`
+### `swap_many(*, pool_key, token_in_id, amount_in, count, slippage_bps=50, expected_out=None, record_wait_seconds=120.0, account=None)`
 
 *count* private swaps of *amount_in* each, with reserved counters.
 
@@ -86,7 +86,7 @@ quotes once and refuses rather than falling back to a spot estimate,
 which ignores the pool fee and would revert every swap after paying for
 its proof.
 
-### `collect_all(self, account: 'Any' = None) -> 'CollectReport'`
+### `collect_all(account=None)`
 
 Claim every finalized swap and collect owed fees on open positions.
 
@@ -249,7 +249,7 @@ sequence.  Current stages:
 Apps that own their onboarding call the same `dex.api` endpoints
 the stages use:
 
-### `api.authenticate(self, address: 'str', sign: 'Any') -> 'str'`
+### `api.authenticate(address, sign)`
 
 Challenge/verify handshake; establishes the session.
 
@@ -267,7 +267,7 @@ returning an Aleo signature literal (``sign1…``) — e.g.::
     api.authenticate(str(pk.address),
                      lambda msg: str(pk.sign(msg.encode())))
 
-### `api.referral_status(self) -> 'models.ReferralStatusResponse'`
+### `api.referral_status()`
 
 This account's referral picture: ``referred_by`` (the referrer's
 address once a code was redeemed, else None), ``my_code`` (the code
@@ -279,7 +279,7 @@ raises :class:`NotAuthenticatedError` when the session is missing or
 expired, which makes this the session liveness probe (the dedicated
 ``/access/status`` route was retired in 2026-09).
 
-### `api.my_referral_code(self) -> 'Optional[str]'`
+### `api.my_referral_code()`
 
 The referral code this account hands to others.
 
@@ -287,7 +287,7 @@ The API issues the code on the first request, so this normally
 returns a value; None means issuance is disabled for the account.
 Network read.
 
-### `api.redeem_code(self, code: 'str') -> 'models.ReferralRedeemResponse'`
+### `api.redeem_code(code)`
 
 Redeem a referral code (``POST /referral/redeem``) — optional.
 
@@ -301,7 +301,7 @@ Sessions live on the ``/auth/*`` endpoints, so no token comes
 back (one is still adopted if the API resurrects the legacy
 body-JWT).
 
-### `api.request_airdrop(self, address: 'str') -> 'models.AirdropStartResult'`
+### `api.request_airdrop(address)`
 
 Start the test-token airdrop job for *address* (private records).
 
@@ -309,11 +309,11 @@ One claim per address per 15 minutes — raises
 :class:`AirdropRateLimitedError` on 429.  Poll the returned
 ``job_id`` with :meth:`get_airdrop_job`.
 
-### `api.get_airdrop_job(self, job_id: 'str') -> 'models.AirdropJob'`
+### `api.get_airdrop_job(job_id)`
 
 Progress of an airdrop job — ``running`` until every transfer lands.
 
-### `api.create_api_token(self, name: 'str', expires_in_days: "'int | None'" = None) -> 'models.ApiTokenCreatedResponse'`
+### `api.create_api_token(name, expires_in_days=None)`
 
 Mint a long-lived DEX API token (the secret is returned ONCE).
 
@@ -322,7 +322,7 @@ JWTs from :meth:`authenticate` expire in 24h; persist the returned
 tokens work on data/trading endpoints; ``/access/*`` and token
 management still require a session JWT.
 
-### `api.get_pools(self) -> 'list[PoolEntry]'`
+### `api.get_pools()`
 
 Every pool the DEX lists, each with its two tokens' metadata.
 
@@ -332,7 +332,7 @@ An entry exposes the pool's own fields directly — ``entry.key`` is the
 ``decimals``, but the API does not guarantee them — check for ``None``
 before reading.
 
-### `api.get_tokens(self) -> 'list[models.TokenDoc]'`
+### `api.get_tokens()`
 
 Every token the DEX lists, with its id, symbol, and decimals.
 
@@ -341,27 +341,27 @@ The API returns canonical decimal amounts (``"1.5"``), if using this
 value to call on-chain methods — ``swap(amount_in=…)``, ``mint``,
 ``collect`` — conversion to raw base units is necessary.
 
-### `api.get_route(self, *, token_in: 'str', token_out: 'str', amount_in: 'Any' = None, pool_key: 'Optional[str]' = None) -> 'models.RouteResultDoc'`
+### `api.get_route(*, token_in, token_out, amount_in=None, pool_key=None)`
 
 Best route between two tokens.  *amount_in* is a CANONICAL
 decimal amount (human units, e.g. ``1.5``) — not base units —
 and the returned ``estimated_amount_out`` is decimal too.  *pool_key*
 pins the quote to one pool instead of the router's best path.
 
-### `api.get_route_topology(self) -> 'models.RouteTopologyDoc'`
+### `api.get_route_topology()`
 
 The routable token graph: every (token0, token1) edge with an
 enabled pool and the router's ``max_hops``.  Lets a client enumerate
 reachable pairs without probing ``/route`` per pair.
 
-### `api.get_unclaimed(self) -> 'models.UnclaimedPayloadDoc'`
+### `api.get_unclaimed()`
 
 Everything the authenticated account can still collect, as the
 indexer sees it: swaps with finalized-but-unclaimed output and
 positions with owed balances.  A cross-check for a local journal —
 the chain, not this, gates the claim amounts.
 
-### `api.get_protocol_state(self, *, minimum_revision: 'Optional[int]' = None) -> 'models.ProtocolStateResponse'`
+### `api.get_protocol_state(*, minimum_revision=None)`
 
 The indexer's view of protocol configuration and its own freshness.
 
@@ -379,7 +379,7 @@ pick them: with a journal they reserve under its lock AND verify each
 counter on chain; without one they probe the chain.  Persist
 `SwapHandle`s — the blinding factor is the claim secret.
 
-### `blinded_identity_at(aleo: 'Any', account: 'Any', program: 'str', counter: 'int') -> 'BlindedIdentity'`
+### `blinded_identity_at(aleo, account, program, counter)`
 
 The identity at an exact *counter* — no on-chain probing.
 
@@ -387,7 +387,7 @@ Use with journal-reserved counters for concurrent swaps;
 :func:`next_blinded_identity` (probe-based) remains the recovery path
 when no journal exists.
 
-### `next_blinded_identity(aleo: 'Any', account: 'Any', program: 'str' = 'shield_swap.aleo', *, start_counter: 'int' = 0, max_scan: 'int' = 64, gallop: 'bool' = True) -> 'BlindedIdentity'`
+### `next_blinded_identity(aleo, account, program='shield_swap.aleo', *, start_counter=0, max_scan=64, gallop=True)`
 
 An unused single-use identity for *account*.
 
@@ -405,7 +405,7 @@ exhausting it raises — the fail-fast for a systematically wrong program.
 
 ### Chain methods
 
-### `confirm_airdrop(self, *, timeout: 'float' = 600.0, poll_interval: 'float' = 5.0, account: 'Any' = None) -> 'ConfirmAirdropResult'`
+### `confirm_airdrop(*, timeout=600.0, poll_interval=5.0, account=None)`
 
 Fund the account and wait for its airdrop records to become spendable.
 
@@ -414,7 +414,7 @@ faucet settlement and scanning. Check ``success`` and ``error`` before
 swapping. A record timeout retains the transfer results; inspect those
 transactions before requesting another airdrop. Scanner errors propagate.
 
-### `quote(self, *, token_in: 'str', token_out: 'str', amount_in: 'str | Decimal', slippage_bps: 'int' = 50) -> 'SwapQuote'`
+### `quote(*, token_in, token_out, amount_in, slippage_bps=50)`
 
 Quote a direct or multi-hop swap from two symbols and a token amount.
 
@@ -422,7 +422,7 @@ Returns the API's best route and final slippage floor; pass it to
 ``swap(quote)``. Requires API authentication. Quoting spends no funds
 and needs no record scanning or transaction signature.
 
-### `swap(self, quote: 'Optional[SwapQuote]' = None, *, pool_key: 'Optional[str]' = None, token_in_id: 'Optional[str]' = None, amount_in: 'Optional[int | str | Decimal]' = None, slippage_bps: 'Optional[int]' = None, expected_out: 'Optional[int | str | Decimal]' = None, sqrt_price_limit: 'Optional[int]' = None, deadline_offset_blocks: 'int' = 10000, nonce: 'Optional[int]' = None, identity: 'Optional[BlindedIdentity]' = None, token_in_program: 'Optional[str]' = None, token_record: 'Optional[str]' = None, compliance_proofs: 'Optional[SwapProofs]' = None, wrapper_proofs: 'Optional[str]' = None, track: 'bool' = True, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[SwapHandle]'`
+### `swap(quote=None, *, pool_key=None, token_in_id=None, amount_in=None, slippage_bps=None, expected_out=None, sqrt_price_limit=None, deadline_offset_blocks=10000, nonce=None, identity=None, token_in_program=None, token_record=None, compliance_proofs=None, wrapper_proofs=None, track=True, imports=None, account=None)`
 
 Prepare a direct or multi-hop swap; submit with transact/delegate.
 
@@ -439,7 +439,7 @@ journaling. ``deadline_offset_blocks`` defaults to 10,000 (~8 hours).
 Freeze-list proofs: leave ``compliance_proofs`` unset and the SDK builds
 them, or pass 0–1 bundles (the signer's, for a wrapped input).
 
-### `claim_swap_output(self, handle: 'SwapHandle', *, timeout: 'float' = 0.0, compliance_proofs: 'Optional[ClaimProofs]' = None, wrapper_proofs: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[ClaimResult]'`
+### `claim_swap_output(handle, *, timeout=0.0, compliance_proofs=None, wrapper_proofs=None, imports=None, account=None)`
 
 Claim a private swap's output.
 
@@ -458,7 +458,7 @@ After swap confirmation, ``timeout`` sets the maximum wait in seconds
 Freeze-list proofs: leave ``compliance_proofs`` unset and the SDK builds
 them, or pass 1–3 bundles (AMM signer, then each wrapped leg paid).
 
-### `create_pool(self, *, token0_id: 'str', token1_id: 'str', fee: 'int', initial_tick: 'int', tick_spacing: 'Optional[int]' = None, initial_sqrt_price: 'Optional[int]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[TxResult]'`
+### `create_pool(*, token0_id, token1_id, fee, initial_tick, tick_spacing=None, initial_sqrt_price=None, imports=None, account=None)`
 
 Create a pool — a single public transaction, no records involved.
 
@@ -466,7 +466,7 @@ The fee tier must be registered with the program (validated before
 submission); tick spacing defaults to the tier's on-chain binding and
 the opening price to the tick's sqrt price.
 
-### `mint(self, *, pool_key: 'str', tick_lower: 'int', tick_upper: 'int', amount0_desired: 'int', amount1_desired: 'int', amount0_min: 'int' = 0, amount1_min: 'int' = 0, token0_program: 'Optional[str]' = None, token1_program: 'Optional[str]' = None, token0_record: 'Optional[str]' = None, token1_record: 'Optional[str]' = None, tick_lower_hint: 'Optional[int]' = None, tick_upper_hint: 'Optional[int]' = None, recipient: 'Optional[str]' = None, withdrawal: 'Optional[str]' = None, nonce: 'Optional[str]' = None, compliance_proofs: 'Optional[MintProofs]' = None, wrapper_proofs: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[MintResult]'`
+### `mint(*, pool_key, tick_lower, tick_upper, amount0_desired, amount1_desired, amount0_min=0, amount1_min=0, token0_program=None, token1_program=None, token0_record=None, token1_record=None, tick_lower_hint=None, tick_upper_hint=None, recipient=None, withdrawal=None, nonce=None, compliance_proofs=None, wrapper_proofs=None, imports=None, account=None)`
 
 Mint a concentrated-liquidity position as a private PositionNFT.
 
@@ -478,18 +478,18 @@ Wrapped pool sides route via the LP router; fund with UNDERLYING records.
 Freeze-list proofs: leave ``compliance_proofs`` unset and the SDK builds
 them, or pass 3–5 bundles (wrapped senders, then signer, recipient, withdrawal).
 
-### `increase_liquidity(self, *, pool_key: 'str', amount0_desired: 'int', amount1_desired: 'int', amount0_min: 'int' = 0, amount1_min: 'int' = 0, token0_program: 'Optional[str]' = None, token1_program: 'Optional[str]' = None, token0_record: 'Optional[str]' = None, token1_record: 'Optional[str]' = None, position_record: 'Optional[str]' = None, tick_lower_hint: 'Optional[int]' = None, tick_upper_hint: 'Optional[int]' = None, compliance_proofs: 'Optional[IncreaseProofs]' = None, wrapper_proofs: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[TxResult]'`
+### `increase_liquidity(*, pool_key, amount0_desired, amount1_desired, amount0_min=0, amount1_min=0, token0_program=None, token1_program=None, token0_record=None, token1_record=None, position_record=None, tick_lower_hint=None, tick_upper_hint=None, compliance_proofs=None, wrapper_proofs=None, imports=None, account=None)`
 
 Add funds to an existing position (range fixed at mint).
 Wrapped pool sides route via the LP router; fund with UNDERLYING records.
 Freeze-list proofs: leave ``compliance_proofs`` unset and the SDK builds
 them, or pass 0–2 bundles (the signer's, per wrapped side).
 
-### `decrease_liquidity(self, *, pool_key: 'str', liquidity_to_remove: 'int', amount0_min: 'int' = 0, amount1_min: 'int' = 0, position_record: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[TxResult]'`
+### `decrease_liquidity(*, pool_key, liquidity_to_remove, amount0_min=0, amount1_min=0, position_record=None, imports=None, account=None)`
 
 Remove liquidity from a position; owed amounts become collectable.
 
-### `collect(self, *, pool_key: 'str', amount0_requested: 'int', amount1_requested: 'int', position_record: 'Optional[str]' = None, compliance_proofs: 'Optional[CollectProofs]' = None, wrapper_proofs: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[TxResult]'`
+### `collect(*, pool_key, amount0_requested, amount1_requested, position_record=None, compliance_proofs=None, wrapper_proofs=None, imports=None, account=None)`
 
 Collect owed token amounts from a position.
 
@@ -499,11 +499,11 @@ route via the LP router, unwrapping to that address in-transaction.
 Freeze-list proofs: leave ``compliance_proofs`` unset and the SDK builds
 them, or pass 2–4 bundles (owner, withdrawal, then a receiver per wrapped side).
 
-### `burn(self, *, pool_key: 'str', position_record: 'Optional[str]' = None, account: 'Any' = None) -> 'DexCall[TxResult]'`
+### `burn(*, pool_key, position_record=None, account=None)`
 
 Burn an empty position NFT.
 
-### `plan_rebalance(self, *, pool_key: 'str', position_token_id: 'str', tick_lower: 'int', tick_upper: 'int', liquidity_target: 'Optional[int]' = None, max_funding0: 'Optional[int]' = None, max_funding1: 'Optional[int]' = None, amount0_desired: 'Optional[int]' = None, amount1_desired: 'Optional[int]' = None, amount0_min: 'Optional[int]' = None, amount1_min: 'Optional[int]' = None, funded0: 'Optional[int]' = None, funded1: 'Optional[int]' = None, refund0: 'Optional[int]' = None, refund1: 'Optional[int]' = None) -> 'RebalancePlan'`
+### `plan_rebalance(*, pool_key, position_token_id, tick_lower, tick_upper, liquidity_target=None, max_funding0=None, max_funding1=None, amount0_desired=None, amount1_desired=None, amount0_min=None, amount1_min=None, funded0=None, funded1=None, refund0=None, refund1=None)`
 
 Plan a complete position replacement without signing or submitting.
 
@@ -517,16 +517,17 @@ surplus remains collectible on the successor and earns no LP fees.
 
 Amounts are integer token base units, from 0 through 2**128 - 1.
 ``estimated_liquidity`` is advisory; token floors do not guarantee a
-minimum liquidity. Named planners supply mode-specific defaults.
-Requires an existing pool, position, and initialized boundary ticks.
+minimum liquidity. Positive flexible targets must fit the quoted token
+bounds and available funds; funding errors name the amount to supply.
+Named planners supply mode-specific defaults. Requires an existing pool, position, and initialized boundary ticks.
 
-### `rebalance_position(self, *, plan: 'Optional[RebalancePlan]' = None, pool_key: 'Optional[str]' = None, position_token_id: 'Optional[str]' = None, tick_lower: 'Optional[int]' = None, tick_upper: 'Optional[int]' = None, liquidity_target: 'Optional[int]' = None, max_funding0: 'Optional[int]' = None, max_funding1: 'Optional[int]' = None, amount0_desired: 'Optional[int]' = None, amount1_desired: 'Optional[int]' = None, amount0_min: 'Optional[int]' = None, amount1_min: 'Optional[int]' = None, funded0: 'Optional[int]' = None, funded1: 'Optional[int]' = None, refund0: 'Optional[int]' = None, refund1: 'Optional[int]' = None, position_record: 'Optional[str]' = None, token0_program: 'Optional[str]' = None, token1_program: 'Optional[str]' = None, token0_record: 'Optional[str]' = None, token1_record: 'Optional[str]' = None, tick_lower_hint: 'Optional[int]' = None, tick_upper_hint: 'Optional[int]' = None, deadline_offset_blocks: 'int' = 20, nonce: 'Optional[str]' = None, compliance_proofs: 'Optional[RebalanceProofs]' = None, wrapper_proofs: 'Optional[str]' = None, imports: 'Optional[dict[str, str]]' = None, account: 'Any' = None) -> 'DexCall[RebalanceResult]'`
+### `rebalance_position(*, plan=None, pool_key=None, position_token_id=None, tick_lower=None, tick_upper=None, liquidity_target=None, max_funding0=None, max_funding1=None, amount0_desired=None, amount1_desired=None, amount0_min=None, amount1_min=None, funded0=None, funded1=None, refund0=None, refund1=None, position_record=None, token0_program=None, token1_program=None, token0_record=None, token1_record=None, tick_lower_hint=None, tick_upper_hint=None, deadline_offset_blocks=20, nonce=None, compliance_proofs=None, wrapper_proofs=None, imports=None, account=None)`
 
 Prepare an atomic replacement in the same pool, keeping owner and withdrawal.
 
 Pass a reviewed ``plan`` verbatim, or pool/range/sizing arguments as in
-``plan_rebalance``. A supplied plan cannot be combined with planning
-overrides. Exact bounds enforce the quote; wider bounds use actual
+``plan_rebalance``. Pool, position, and range arguments may repeat the plan’s values;
+conflicting values or sizing/amount arguments are rejected. Exact bounds enforce the quote; wider bounds use actual
 recovery and a zero target sizes liquidity at execution. Funding and
 immediate refunds stay fixed; flexible surplus remains collectible on
 the successor. Wrapped funding uses the underlying asset's records.
@@ -538,7 +539,54 @@ The default deadline is 20 blocks. Flexible calls require a deployment
 supporting execution-time recovery and amount-driven rebalancing.
 Freeze-list proofs are built automatically unless supplied explicitly.
 
-### `plan_inventory(self, token: 'str', target: 'InventoryTarget', *, max_transactions: 'Optional[int]' = None, account: 'Any' = None) -> 'InventoryPlan'`
+### `plan_rebalance_exact_amounts(*, pool_key, position_token_id, tick_lower, tick_upper, liquidity_target=None, max_funding0=None, max_funding1=None, amount0_desired=None, amount1_desired=None, amount0_min=None, amount1_min=None, funded0=None, funded1=None, refund0=None, refund1=None)`
+
+Quote a complete replacement with fixed recovery and deposits.
+
+Supply a positive target or paired ``max_funding0/1`` budgets. Minimums
+must equal caps. Price or fee changes can reject execution. Reads only.
+
+### `rebalance_position_exact_amounts(*, plan=None, pool_key=None, position_token_id=None, tick_lower=None, tick_upper=None, liquidity_target=None, max_funding0=None, max_funding1=None, amount0_desired=None, amount1_desired=None, amount0_min=None, amount1_min=None, funded0=None, funded1=None, refund0=None, refund1=None, position_record=None, token0_program=None, token1_program=None, token0_record=None, token1_record=None, tick_lower_hint=None, tick_upper_hint=None, deadline_offset_blocks=20, nonce=None, compliance_proofs=None, wrapper_proofs=None, imports=None, account=None)`
+
+Prepare an exact quote using target-or-budget sizing, or a reviewed plan.
+
+Uses ``plan_rebalance_exact_amounts`` constraints. Price or fee changes
+can reject execution. Submit with ``delegate()`` or ``transact()``.
+
+### `plan_rebalance_to_liquidity(*, pool_key, position_token_id, tick_lower, tick_upper, liquidity_target=None, max_funding0=None, max_funding1=None, amount0_desired=None, amount1_desired=None, amount0_min=None, amount1_min=None, funded0=None, funded1=None, refund0=None, refund1=None)`
+
+Quote fixed successor liquidity with actual recovered funds.
+
+Supply a positive target and both caps; one bound must be flexible.
+Minimums and fixed funding/refunds default to zero. Rejects quotes
+outside the bounds or available funds. Later price changes can still
+reject execution. Reads only.
+
+### `rebalance_position_to_liquidity(*, plan=None, pool_key=None, position_token_id=None, tick_lower=None, tick_upper=None, liquidity_target=None, max_funding0=None, max_funding1=None, amount0_desired=None, amount1_desired=None, amount0_min=None, amount1_min=None, funded0=None, funded1=None, refund0=None, refund1=None, position_record=None, token0_program=None, token1_program=None, token0_record=None, token1_record=None, tick_lower_hint=None, tick_upper_hint=None, deadline_offset_blocks=20, nonce=None, compliance_proofs=None, wrapper_proofs=None, imports=None, account=None)`
+
+Prepare fixed successor liquidity with bounded token consumption.
+
+Uses ``plan_rebalance_to_liquidity`` constraints, or a reviewed plan.
+Insufficient execution-time funds reject rather than minting less.
+Submit with ``delegate()`` or ``transact()``.
+
+### `plan_rebalance_from_amounts(*, pool_key, position_token_id, tick_lower, tick_upper, liquidity_target=None, max_funding0=None, max_funding1=None, amount0_desired=None, amount1_desired=None, amount0_min=None, amount1_min=None, funded0=None, funded1=None, refund0=None, refund1=None)`
+
+Estimate replacement liquidity from both token caps.
+
+Omit the target or set zero. Minimums and fixed funding/refunds default
+to zero. Estimates and token minimums do not guarantee liquidity.
+Surplus stays collectible; no swap occurs. Reads only; integer base units.
+
+### `rebalance_position_from_amounts(*, plan=None, pool_key=None, position_token_id=None, tick_lower=None, tick_upper=None, liquidity_target=None, max_funding0=None, max_funding1=None, amount0_desired=None, amount1_desired=None, amount0_min=None, amount1_min=None, funded0=None, funded1=None, refund0=None, refund1=None, position_record=None, token0_program=None, token1_program=None, token0_record=None, token1_record=None, tick_lower_hint=None, tick_upper_hint=None, deadline_offset_blocks=20, nonce=None, compliance_proofs=None, wrapper_proofs=None, imports=None, account=None)`
+
+Prepare a replacement sized from available tokens at execution.
+
+Uses ``plan_rebalance_from_amounts`` constraints, or a reviewed plan.
+Estimated liquidity is advisory; surplus stays collectible.
+Submit with ``delegate()`` or ``transact()``.
+
+### `plan_inventory(token, target, *, max_transactions=None, account=None)`
 
 Plan the joins and splits that give *token* the record layout trades need.
 
@@ -563,7 +611,7 @@ Example::
 
     plan = dex.plan_inventory("USDCx", InventoryTarget(records=6, min_record_amount=100_000, distribution="balanced"))
 
-### `rebalance_inventory(self, token: 'str', target: 'InventoryTarget', *, max_transactions: 'Optional[int]' = None, timeout: 'float' = 120.0, poll_interval: 'float' = 1.0, max_fee_microcredits: 'Optional[int]' = None, cancel: 'Any' = None, account: 'Any' = None) -> 'InventoryResult'`
+### `rebalance_inventory(token, target, *, max_transactions=None, timeout=120.0, poll_interval=1.0, max_fee_microcredits=None, cancel=None, account=None)`
 
 Reshape *token*'s underlying records to *target*, one confirmed transaction at a time.
 
@@ -580,18 +628,18 @@ Example::
     if result.status == "interrupted":
         dex.inventory.reconcile_record_inventory()
 
-### `get_pool(self, pool_key: 'str') -> 'g.PoolState'`
+### `get_pool(pool_key)`
 
 Static pool configuration (token pair, fee, decimal scales).
 
-### `get_slot(self, pool_key: 'str') -> 'SlotView'`
+### `get_slot(pool_key)`
 
 Live trading state (sqrt price, tick, in-range liquidity).
 
 Raises :class:`PoolNotFoundError` when the pool does not exist, or
 :class:`PoolNotInitializedError` when it exists but has no slot yet.
 
-### `get_swap_output(self, swap: "'SwapHandle | str'") -> 'g.SwapOutput'`
+### `get_swap_output(swap)`
 
 Chain-computed output of a finalized swap request.
 
@@ -599,7 +647,7 @@ Accepts the :class:`SwapHandle` from ``swap()`` or a bare swap id.
 Raises :class:`SwapOutputNotFinalizedError` when the entry is absent —
 not finalized yet (retry after a few blocks) or already claimed.
 
-### `get_swap_execution(self, swap: "'SwapHandle | str'") -> 'Optional[SwapExecution]'`
+### `get_swap_execution(swap)`
 
 Per-hop fill receipt of an executed swap — what each pool leg paid.
 
@@ -613,7 +661,7 @@ Raises:
     ValueError: If the header names a hop the node did not return —
         a node lagging its own finalize; retry.
 
-### `get_balances(self, address: 'Optional[str]' = None, account: 'Any' = None, *, include_private: 'bool' = True) -> 'dict[str, dict[str, Any]]'`
+### `get_balances(address=None, account=None, *, include_private=True)`
 
 Public + private + total per token id, joined via the API's
 token registry.  Defaults to the bound account's address; returns
@@ -625,7 +673,7 @@ token (their records are not scannable) rather than silently mixing
 in the caller's own private holdings.  ``include_private=False``
 skips the record scan (public only — before scanner credentials).
 
-### `get_public_balances(self, programs: 'list[str]', address: 'Optional[str]' = None) -> 'dict[str, int]'`
+### `get_public_balances(programs, address=None)`
 
 Public balances per token program from each program's on-chain
 ``balances`` mapping (plain-address key; one read per program, any
@@ -636,12 +684,12 @@ network lacks, or a non-ARC-20 value, is skipped with a warning
 rather than failing every other token.  *address* defaults to the
 bound account's (ValueError when there is none).
 
-### `get_private_balances(self, programs: 'list[str]', account: 'Any' = None) -> 'dict[str, int]'`
+### `get_private_balances(programs, account=None)`
 
 Sum of unspent record amounts per wrapper program (spendable
 privately).  Requires a configured record provider.
 
-### `derive_pool_key(self, token0: 'str', token1: 'str', fee: 'int') -> 'str'`
+### `derive_pool_key(token0, token1, fee)`
 
 Compute the pool key for a token pair and fee tier. Local — no network.
 
@@ -652,7 +700,7 @@ derivation is sensitive to token order and is network-scoped, so swapping
 a valid-looking ``field`` that matches nothing on chain.  *fee* is the
 contract's ``u16`` fee tier.
 
-### `derive_tick_key(self, pool_key: 'str', tick: 'int') -> 'str'`
+### `derive_tick_key(pool_key, tick)`
 
 Compute the key of one tick within a pool. Local — no network.
 
