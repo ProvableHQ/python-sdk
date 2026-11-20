@@ -115,7 +115,7 @@ def _sizing(liquidity_target: Optional[int], max_funding0: Optional[int],
 
 _AMOUNT_FIELDS = ("amount0_desired", "amount1_desired", "amount0_min", "amount1_min",
                   "funded0", "funded1", "refund0", "refund1")
-_PLAN_IDENTITY_FIELDS = ("pool_key", "position_token_id", "tick_lower", "tick_upper")
+_PLAN_IDENTITY_FIELDS = ("pool_key", "position_token_id")
 _PLAN_INPUT_FIELDS = ("liquidity_target", "max_funding0", "max_funding1", *_AMOUNT_FIELDS)
 
 
@@ -138,6 +138,10 @@ def _validate_amounts(params: Mapping[str, Any]) -> dict[str, Any]:
         if not 0 <= value < 1 << 128:
             raise ValueError(message)
         params[key] = value
+    if any(params.get(key) is not None for key in ("max_funding0", "max_funding1")) and any(
+            params.get(key) is not None for key in ("amount0_desired", "amount1_desired", "amount0_min", "amount1_min")):
+        raise ValueError("Funding budgets cannot be combined with explicit token bounds; "
+                         "use fixed funding (funded0/funded1) with bounds")
     if params.get("liquidity_target") is not None and any(
             params.get(key) is not None for key in ("max_funding0", "max_funding1")):
         raise ValueError("Pass exactly one sizing mode: liquidity_target, or max_funding0 and max_funding1")
@@ -183,6 +187,7 @@ def _validate_planning(params: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _validate_plan_arguments(plan: RebalancePlan, params: Mapping[str, Any]) -> RebalancePlan:
+    """Validate state-independent arguments; the client aligns repeated ticks."""
     if any(params.get(key) is not None for key in _PLAN_INPUT_FIELDS):
         raise ValueError("A supplied plan cannot be combined with planning overrides")
     for key in _PLAN_IDENTITY_FIELDS:
@@ -355,7 +360,7 @@ def plan_rebalance(*, pool_key: str, position_token_id: str,
     funded1 = funded1 if funded1 is not None else (0 if flexible else max(required[1] - recovered1, 0))
     refund0 = refund0 if refund0 is not None else (0 if flexible else max(recovered0 - required[0], 0))
     refund1 = refund1 if refund1 is not None else (0 if flexible else max(recovered1 - required[1], 0))
-    if flexible and not amount_mode:
+    if flexible:
         for i, (cap, minimum, recovered, funded, refund) in enumerate(zip(
                 (amount0_desired, amount1_desired), (min0, min1),
                 (recovered0, recovered1), (funded0, funded1), (refund0, refund1))):

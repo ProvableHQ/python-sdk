@@ -1664,7 +1664,7 @@ class ShieldSwap:
 
         Amounts are integer token base units, from 0 through 2**128 - 1.
         ``estimated_liquidity`` is advisory; token floors do not guarantee a
-        minimum liquidity. Positive flexible targets must fit the quoted token
+        minimum liquidity. Flexible plans must fit the quoted token
         bounds and available funds; funding errors name the amount to supply.
         Named planners supply mode-specific defaults. Requires an existing pool, position, and initialized boundary ticks.
         """
@@ -1811,8 +1811,9 @@ class ShieldSwap:
         """Prepare an atomic replacement in the same pool, keeping owner and withdrawal.
 
         Pass a reviewed ``plan`` verbatim, or pool/range/sizing arguments as in
-        ``plan_rebalance``. Pool, position, and range arguments may repeat the plan’s values;
-        conflicting values or sizing/amount arguments are rejected. Exact bounds enforce the quote; wider bounds use actual
+        ``plan_rebalance``. Pool/position arguments must match the plan, and
+        supplied ticks must align to its range. Sizing/amount arguments
+        are rejected. Exact bounds enforce the quote; wider bounds use actual
         recovery and a zero target sizes liquidity at execution. Funding and
         immediate refunds stay fixed; flexible surplus remains collectible on
         the successor. Wrapped funding uses the underlying asset's records.
@@ -1838,6 +1839,13 @@ class ShieldSwap:
             _validate_planning(planning)
         else:
             plan = _validate_plan_arguments(plan, locals())
+            supplied_ticks = {"tick_lower": tick_lower, "tick_upper": tick_upper}
+            if any(tick is not None and tick != getattr(plan, key)
+                   for key, tick in supplied_ticks.items()):
+                spacing = int(self.get_slot(plan.pool_key).raw.tick_spacing)
+                for key, tick in supplied_ticks.items():
+                    if tick is not None and round_tick_to_spacing(tick, spacing) != getattr(plan, key):
+                        raise ValueError(f"{key} conflicts with the supplied plan after spacing alignment")
             pool_key, position_token_id = plan.pool_key, plan.position_token_id
         assert pool_key is not None
         pool = self.get_pool(pool_key)

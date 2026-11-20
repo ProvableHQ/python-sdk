@@ -517,7 +517,7 @@ surplus remains collectible on the successor and earns no LP fees.
 
 Amounts are integer token base units, from 0 through 2**128 - 1.
 ``estimated_liquidity`` is advisory; token floors do not guarantee a
-minimum liquidity. Positive flexible targets must fit the quoted token
+minimum liquidity. Flexible plans must fit the quoted token
 bounds and available funds; funding errors name the amount to supply.
 Named planners supply mode-specific defaults. Requires an existing pool, position, and initialized boundary ticks.
 
@@ -526,8 +526,9 @@ Named planners supply mode-specific defaults. Requires an existing pool, positio
 Prepare an atomic replacement in the same pool, keeping owner and withdrawal.
 
 Pass a reviewed ``plan`` verbatim, or pool/range/sizing arguments as in
-``plan_rebalance``. Pool, position, and range arguments may repeat the plan’s values;
-conflicting values or sizing/amount arguments are rejected. Exact bounds enforce the quote; wider bounds use actual
+``plan_rebalance``. Pool/position arguments must match the plan, and
+supplied ticks must align to its range. Sizing/amount arguments
+are rejected. Exact bounds enforce the quote; wider bounds use actual
 recovery and a zero target sizes liquidity at execution. Funding and
 immediate refunds stay fixed; flexible surplus remains collectible on
 the successor. Wrapped funding uses the underlying asset's records.

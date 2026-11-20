@@ -66,7 +66,7 @@ def test_invalid_constraints(overrides, message):
     ({"liquidity_target": 0}, "zero.*requires"),
     ({"liquidity_target": 1, "funded0": 1}, "explicit token bounds"),
     ({"max_funding0": 0, "max_funding1": 0,
-      "amount0_desired": 10, "amount1_desired": 10}, "require liquidity_target"),
+      "amount0_desired": 10, "amount1_desired": 10}, "budgets cannot be combined with explicit token bounds"),
     ({"liquidity_target": 1, "amount0_min": 0}, "minimums require"),
     ({"liquidity_target": 500_000, "amount0_desired": 1, "amount1_desired": 1}, "quoted deposit"),
 ])
@@ -298,3 +298,57 @@ async def test_async_planner_rejects_infeasible_quote():
     with pytest.raises(ValueError, match="amount0_desired"):
         await dex.plan_rebalance_to_liquidity(**COMMON, liquidity_target=500_000,
             amount0_desired=1, amount1_desired=200_000)
+
+
+@pytest.mark.parametrize("side", [0, 1])
+@pytest.mark.parametrize("method", ["plan_rebalance", "plan_rebalance_from_amounts"])
+def test_amount_driven_rejects_unreachable_minimum(side, method):
+    dex = ShieldSwap(_stub())
+    args = dict(liquidity_target=0, amount0_desired=5_000, amount1_desired=5_000,
+                amount0_min=0, amount1_min=0)
+    args[f"amount{side}_desired"] = 10_000
+    args[f"amount{side}_min"] = 9_000
+    with pytest.raises(ValueError, match=f"below amount{side}_min=9000"):
+        getattr(dex, method)(**COMMON, **args)
+
+
+def test_generic_amount_mode_checks_its_default_exact_minimums():
+    with pytest.raises(ValueError, match="below amount0_min=10000"):
+        plan_rebalance(**_state(), liquidity_target=0,
+                       amount0_desired=10_000, amount1_desired=5_000)
+
+
+@pytest.mark.asyncio
+async def test_async_amount_planner_rejects_unreachable_minimum():
+    from aleo_shield_swap import AsyncShieldSwap
+    from .test_async_client import AsyncStubAleo
+    dex = AsyncShieldSwap(AsyncStubAleo(mappings=_stub().programs._mappings))
+    with pytest.raises(ValueError, match="below amount0_min=9000"):
+        await dex.plan_rebalance_from_amounts(**COMMON, amount0_desired=10_000,
+            amount1_desired=5_000, amount0_min=9_000)
+
+
+@pytest.mark.parametrize("mode", ["", "_exact_amounts", "_to_liquidity", "_from_amounts"])
+def test_prebuilt_plan_accepts_original_unaligned_ticks(mode):
+    dex = ShieldSwap(_stub())
+    original = dict(COMMON, tick_lower=-4100, tick_upper=4100)
+    constraints = (dict(liquidity_target=500_000) if mode in ("", "_exact_amounts")
+                   else dict(amount0_desired=150_000, amount1_desired=160_000))
+    if mode == "_to_liquidity":
+        constraints["liquidity_target"] = 500_000
+    plan = getattr(dex, "plan_rebalance" + mode)(**original, **constraints)
+    assert (plan.tick_lower, plan.tick_upper) == (-4140, 4080)
+    result = getattr(dex, "rebalance_position" + mode)(plan=plan, **original).transact()
+    req = next(g.CoreRebalanceRequest.from_plaintext(x) for x in dex._aleo.last_call[1]
+               if x.startswith("{ old_liquidity:"))
+    assert (req.mint.tick_lower, req.mint.tick_upper) == (-4140, 4080)
+    assert result.plan == plan
+
+
+@pytest.mark.parametrize("method", ["plan_rebalance", "plan_rebalance_exact_amounts"])
+@pytest.mark.parametrize("target", [None, 0, 500_000])
+def test_budget_with_bounds_reports_the_conflicting_arguments(method, target):
+    dex = ShieldSwap(_stub())
+    with pytest.raises(ValueError, match="budgets cannot be combined with explicit token bounds"):
+        getattr(dex, method)(**COMMON, liquidity_target=target,
+            max_funding0=0, max_funding1=0, amount0_desired=10, amount1_desired=10)

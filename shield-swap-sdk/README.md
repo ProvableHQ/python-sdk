@@ -146,7 +146,7 @@ in flexible modes and cannot both be positive for the same token. Unused funds
 stay collectible as `tokens_owed` on the successor; they earn no liquidity fees
 until reinvested. Token minimums constrain consumption, not minimum liquidity.
 
-For a positive flexible target, planning rejects a quoted deposit outside its
+For flexible plans, planning rejects a quoted deposit outside its
 token bounds or above the available recovery plus funding minus refunds. A
 funding error reports the fixed amount to supply. Passing these checks does not
 guarantee execution: prices and recovery can change before the transaction lands.
@@ -181,8 +181,8 @@ print(result.transaction_id, result.position_token_id)
 ```
 
 Passing `plan=` preserves its constraints and estimates. Matching pool, position,
-and range arguments are accepted; conflicting values or sizing/amount arguments
-are rejected. Build a new plan to change constraints. Integer-like amount inputs
+and range arguments (after tick alignment) are accepted; conflicting values or
+sizing/amount arguments are rejected. Build a new plan to change constraints. Integer-like amount inputs
 are normalized to Python integers; booleans and fractional values are rejected.
 Preparation reads the network and resolves records/proofs; only `delegate()` or
 `transact()` submits. A rejected rebalance leaves the old position unchanged but
