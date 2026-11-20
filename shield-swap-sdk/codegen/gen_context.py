@@ -30,6 +30,9 @@ TIER1 = ["from_profile", "onboard", "status", "get_positions",
 TIER2_CLIENT = ["confirm_airdrop", "quote", "swap", "claim_swap_output", "create_pool", "mint",
                 "increase_liquidity", "decrease_liquidity", "collect", "burn",
                 "plan_rebalance", "rebalance_position",
+                "plan_rebalance_exact_amounts", "rebalance_position_exact_amounts",
+                "plan_rebalance_to_liquidity", "rebalance_position_to_liquidity",
+                "plan_rebalance_from_amounts", "rebalance_position_from_amounts",
                 "plan_inventory", "rebalance_inventory",
                 "get_pool", "get_slot", "get_swap_output", "get_swap_execution",
                 "get_balances", "get_public_balances",
@@ -178,12 +181,16 @@ them):
   A swap with nothing left over claims through the no-refund entrypoints
   automatically; `get_swap_execution` reads the per-hop fill receipt (fees
   paid, price after) at any later time.
-- **Rebalancing is one transaction, testnet only for now** —
-  `plan_rebalance` quotes the close-and-remint (what comes back, what the
-  new range needs, funding vs refund per token) and `rebalance_position`
-  submits it through `shield_swap_rebalance_router.aleo`.  Every amount is
-  asserted at the execution price: a trade in between reverts the whole
-  transaction (fee paid, no funds moved) — re-plan and resubmit.
+- **Rebalancing replaces the complete position in one transaction** —
+  choose `plan_rebalance_exact_amounts` for exact quotes,
+  `plan_rebalance_to_liquidity` for exact liquidity with actual recovery, or
+  `plan_rebalance_from_amounts` for execution-time sizing from token caps.
+  Review the plan, then pass `plan=` to the matching `rebalance_position_*`
+  method. Flexible funding/refunds are fixed; surplus stays collectible on
+  the successor. `estimated_liquidity` is advisory, and token minimums do not
+  guarantee minimum liquidity. The router is supported on testnet; flexible
+  calls require an upgraded contract. A rejection rolls back funds movements
+  but can still cost a fee — refresh state before retrying.
 - **Concurrency needs partitioned blinded-identity counters AND disjoint
   input records** — `swap_many` implements the recipe; copy it, don't
   improvise.
@@ -194,7 +201,13 @@ For the funding, swap, and claim flow, see
 
 def _entry(name: str, fn: object) -> str:
     try:
-        sig = str(inspect.signature(fn))  # type: ignore[arg-type]
+        signature = inspect.signature(fn)  # type: ignore[arg-type]
+        # Keep every argument and default visible without repeating Python's
+        # type annotations throughout the compact agent reference.
+        sig = str(signature.replace(parameters=[
+            param.replace(annotation=inspect.Parameter.empty)
+            for param in signature.parameters.values() if param.name not in ("self", "cls")
+        ], return_annotation=inspect.Signature.empty))
     except (TypeError, ValueError):
         sig = "(...)"
     doc = inspect.getdoc(fn) or ""
