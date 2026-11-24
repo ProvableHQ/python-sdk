@@ -221,12 +221,15 @@ class FilePrivateMintIdentityStore:
     def _read_counter(self) -> int:
         if not self.counter_path.exists():
             return 0
-        text = self.counter_path.read_text(encoding="utf-8").strip()
-        if not text.isdigit():
+        try:
+            text = self.counter_path.read_text(encoding="utf-8").strip()
+            if not text.isascii() or not text.isdigit():
+                raise ValueError("Counter must contain ASCII decimal digits")
+            return int(text)
+        except (ValueError, UnicodeError) as exc:
             raise ConfigurationError(
                 "Private mint identity counter file is unreadable; restore it (and the identities file) "
-                "from a backup before reserving a private mint")
-        return int(text)
+                "from a backup before reserving a private mint") from exc
 
     def allocate_counter(self, minimum: int) -> int:
         value = max(self._read_counter(), minimum)
@@ -240,7 +243,9 @@ class FilePrivateMintIdentityStore:
 # ── reservation and recovery ─────────────────────────────────────────────────
 
 _process_locks: "weakref.WeakKeyDictionary[Any, threading.Lock]" = weakref.WeakKeyDictionary()
-_process_locks_by_id: dict[int, threading.Lock] = {}
+# A bounded fallback for unhashable or non-weak-referenceable custom stores. Collisions
+# only serialize unrelated stores; the same live store always selects the same lock.
+_fallback_process_locks = tuple(threading.Lock() for _ in range(64))
 _registry_lock = threading.Lock()
 
 
@@ -249,7 +254,7 @@ def _process_lock(store: Any) -> threading.Lock:
         try:
             return _process_locks.setdefault(store, threading.Lock())
         except TypeError:                                    # not weak-referenceable
-            return _process_locks_by_id.setdefault(id(store), threading.Lock())
+            return _fallback_process_locks[(id(store) >> 4) % len(_fallback_process_locks)]
 
 
 def _exclusive(store: Any) -> ContextManager[None]:
@@ -385,13 +390,15 @@ def _why_not(bridge: Any, recipient: str) -> str:
 
 def resolve_secret_nonce(bridge: Any, *, recipient: str, program: str, address_commitment: str | None = None,
                          secret_nonce: str | None = None, placeholder: bool = False) -> str:
-    """The scalar a private mint uses, from one of three sources in this order.
+    """The scalar a private mint uses, checking explicit and stored values before derivation.
 
     1. An explicit *secret_nonce*: validated and returned; no store is read or written.
-    2. Derivation for the bridge's own account with a store bound: a new identity is reserved when
-       *address_commitment* is ``None`` (execute); otherwise the identity behind that commitment is
-       looked up and, when the store lacks it, re-derived by counting up (resume / complete).
-    3. Neither: ``"0scalar"`` when *placeholder* is set (a quote, where nothing is deposited), else a
+    2. A stored identity matching *address_commitment* and *recipient*, validated against the
+       commitment. This lookup needs no loaded account or view key.
+    3. Derivation for the bridge's own account with a store bound: a new identity is reserved when
+       *address_commitment* is ``None`` (execute); otherwise a missing identity is re-derived by
+       counting up (resume / complete).
+    4. Neither: ``"0scalar"`` when *placeholder* is set (a quote, where nothing is deposited), else a
        ``ConfigurationError`` naming both fixes.
     """
     if secret_nonce is not None:
@@ -403,6 +410,15 @@ def resolve_secret_nonce(bridge: Any, *, recipient: str, program: str, address_c
         # so answering it costs nothing and keeps those callers working without a store.
         return "0scalar"
     store = getattr(bridge, "private_mint_identities", None)
+    if store is not None and address_commitment is not None:
+        stored = find_identity(store, address_commitment)
+        if stored is not None:
+            if stored.recipient != recipient:
+                raise ConfigurationError("The stored private mint identity names a different recipient")
+            nonce = encoding.validate_scalar(stored.secret_nonce)
+            if derive_address_commitment(recipient, nonce, network) != address_commitment:
+                raise ConfigurationError(_INVALID_RECORD)
+            return nonce
     account = derivable_account(bridge, recipient)
     if store is None or account is None:
         if placeholder:

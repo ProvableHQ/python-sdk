@@ -411,25 +411,37 @@ def _h_execute(b, a):
     quote = lifecycle.quote(b, **_quote_kwargs(a))
     if not a.get("confirm"):
         return _confirmation(quote=_serialize(quote, b.registry))
+    secret_nonce = a.get("secret_nonce") or None
+    resolved = lifecycle.resolve_route(b.registry, quote.plan)
+    if quote.plan.protocol == "xreserve" and resolved.source_chain.family == "evm":
+        try:
+            secret_nonce = lifecycle._private_nonce(b, quote.plan, resolved, secret_nonce)
+        except OSError as exc:
+            raise ConfigurationError(
+                "Private mint identity storage is inaccessible; restore access before executing the transfer") from exc
     return _write(b, lambda seen: lifecycle.execute(
         b, quote.plan, on_checkpoint=seen.append, mode=a.get("mode"), proving=a.get("proving", "delegate"),
-        gas_payment_microcredits=a.get("gas_payment_microcredits"), secret_nonce=a.get("secret_nonce") or None))
+        gas_payment_microcredits=a.get("gas_payment_microcredits"), secret_nonce=secret_nonce))
 
 
 def _h_resume(b, a):
     progress = lifecycle.recover(b, a["checkpoint"])                 # reads only
-    secret_nonce = lifecycle._recovery_secret_nonce(b, progress, a.get("secret_nonce") or None)
     if not a.get("confirm"):
         return _confirmation(progress=_serialize(progress, b.registry))
+    secret_nonce = a.get("secret_nonce") or None
+    if progress.next == "resume":
+        secret_nonce = lifecycle._recovery_secret_nonce(b, progress, secret_nonce)
     return _write(b, lambda seen: lifecycle.resume(b, progress, on_checkpoint=seen.append,
                                                    secret_nonce=secret_nonce))
 
 
 def _h_complete(b, a):
     progress = lifecycle.recover(b, a["checkpoint"])                 # reads only
-    secret_nonce = lifecycle._recovery_secret_nonce(b, progress, a.get("secret_nonce") or None)
     if not a.get("confirm"):
         return _confirmation(progress=_serialize(progress, b.registry))
+    secret_nonce = a.get("secret_nonce") or None
+    if progress.next == "complete":
+        secret_nonce = lifecycle._recovery_secret_nonce(b, progress, secret_nonce)
     options = {"manual_mint": a["manual_mint"]} if "manual_mint" in a else {}
     return _write(b, lambda seen: lifecycle.complete(b, progress, on_checkpoint=seen.append,
                                                      secret_nonce=secret_nonce, **options))

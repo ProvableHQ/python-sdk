@@ -111,9 +111,10 @@ def test_malformed_identities_file_raises_instead_of_resetting(tmp_path, corrupt
         pm.reserve_identity(store, **KW)
 
 
-def test_malformed_counter_file_raises(tmp_path):
+@pytest.mark.parametrize("text", ["x", "²", "１２", "9" * 5000])
+def test_malformed_counter_file_raises(tmp_path, text):
     store = _file_store(tmp_path)
-    store.counter_path.write_text("x")
+    store.counter_path.write_text(text)
     with pytest.raises(ConfigurationError, match="restore"):
         pm.reserve_identity(store, **KW)
 
@@ -139,3 +140,25 @@ def test_recovery_scan_is_fast_enough_to_use_the_default_limit(tmp_path):
     with pytest.raises(ConfigurationError, match="2000 counters"):
         pm.recover_identity(store, address_commitment="ab" * 32, scan_limit=2000, **KW)
     assert time.perf_counter() - started < 5.0
+
+
+def test_nonweakref_store_locks_are_bounded_and_serialize_reservations():
+    from concurrent.futures import ThreadPoolExecutor
+    class Store:
+        __slots__ = ("inner",)
+        def __init__(self):
+            self.inner = pm.MemoryPrivateMintIdentityStore()
+        def load(self):
+            return self.inner.load()
+        def save(self, identities):
+            self.inner.save(identities)
+        def allocate_counter(self, minimum):
+            return self.inner.allocate_counter(minimum)
+    stores = [Store() for _ in range(1024)]
+    locks = [pm._process_lock(store) for store in stores]
+    assert len({id(lock) for lock in locks}) <= 64
+    store = stores[0]
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        identities = list(pool.map(lambda _: pm.reserve_identity(store, **KW), range(16)))
+    assert sorted(i.counter for i in identities) == list(range(16))
+    assert len(store.load()) == 16

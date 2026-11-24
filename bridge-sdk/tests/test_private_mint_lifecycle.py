@@ -236,3 +236,26 @@ def test_tier2_private_mint_without_a_nonce_still_opens_a_zero_scalar_deposit():
                       message_hash=bytes.fromhex(receipt.id[2:]), attestation=b"\x33" * 65, status="complete")
     inputs = XReserveModule(b).build_private_mint_inputs(route, att, ME, None)
     assert inputs[3] == "0scalar"
+
+
+def test_resume_uses_stored_nonce_without_an_aleo_account():
+    b = _bridge()
+    identity = _reserve(b)
+    plan, receipt = _resumable(b, identity.secret_nonce)
+    b.aleo.default_account = None
+    resume(b, to_progress(plan, receipt))
+    assert b.calls[-1][1]["secret_nonce"] == identity.secret_nonce
+
+
+@pytest.mark.parametrize("corruption", ["recipient", "nonce"])
+def test_stored_nonce_without_account_is_validated(corruption):
+    from dataclasses import replace
+    b = _bridge()
+    identity = _reserve(b)
+    plan, receipt = _resumable(b, identity.secret_nonce)
+    bad = replace(identity, **({"recipient": OTHER} if corruption == "recipient" else {"secret_nonce": "7scalar"}))
+    b.private_mint_identities.save([bad])
+    b.aleo.default_account = None
+    with pytest.raises(ConfigurationError):
+        resume(b, to_progress(plan, receipt))
+    assert b.calls == [] and b.events == []

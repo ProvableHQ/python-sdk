@@ -20,8 +20,8 @@ def _recovery_case(phase, nonce, *, store=True):
 
 
 @pytest.mark.parametrize("phase", ["resume", "complete"])
-@pytest.mark.parametrize("confirm", [False, True])
-def test_missing_supplied_nonce_keeps_configuration_guidance(phase, confirm):
+def test_missing_supplied_nonce_keeps_configuration_guidance(phase):
+    confirm = True
     bridge, checkpoint = _recovery_case(phase, "123scalar")
     out = dispatch_tool(bridge, f"bridge_{phase}", {"checkpoint": checkpoint, "confirm": confirm})
     assert out["error_type"] == "ConfigurationError"
@@ -86,3 +86,48 @@ def test_prepared_mint_rebroadcast_needs_neither_nonce_nor_store():
     assert "error" not in out
     assert bridge.aleo.submitted == [prepared["serializedTransaction"]]
     assert sum(event[0] == "delegate_prepared" for event in bridge.events) == 1
+
+
+@pytest.mark.parametrize("phase", ["resume", "complete"])
+def test_preview_does_not_resolve_or_save_nonce(phase, monkeypatch):
+    from aleo_bridge import private_mint as pm
+    bridge, checkpoint = _recovery_case(phase, "123scalar")
+    def forbidden(*args, **kwargs):
+        pytest.fail("Preview must not resolve or persist a nonce")
+    monkeypatch.setattr(pm, "resolve_secret_nonce", forbidden)
+    out = dispatch_tool(bridge, f"bridge_{phase}", {"checkpoint": checkpoint})
+    assert "error" not in out and "how_to_confirm" in out
+    assert bridge.private_mint_identities.load() == []
+
+
+@pytest.mark.parametrize("phase", ["resume", "complete"])
+def test_wrong_phase_does_not_resolve_nonce(phase, monkeypatch):
+    from aleo_bridge import private_mint as pm
+    bridge, checkpoint = _recovery_case("complete" if phase == "resume" else "resume", "123scalar")
+    def forbidden(*args, **kwargs):
+        pytest.fail("Wrong-phase calls must not resolve a nonce")
+    monkeypatch.setattr(pm, "resolve_secret_nonce", forbidden)
+    out = dispatch_tool(bridge, f"bridge_{phase}", {"checkpoint": checkpoint, "confirm": True})
+    assert out["error_type"] == "NotResumableError"
+
+
+@pytest.mark.parametrize("broken", ["identities", "counter", "exhausted", "permissions"])
+def test_execute_store_error_preserves_configuration_guidance(tmp_path, monkeypatch, broken):
+    from aleo_bridge import private_mint as pm
+    bridge = _bridge()
+    store = pm.FilePrivateMintIdentityStore(tmp_path / "identities.json")
+    bridge.private_mint_identities = store
+    if broken == "identities":
+        store.path.write_text("not json")
+    elif broken == "permissions":
+        def denied():
+            raise PermissionError("Store cannot be read")
+        monkeypatch.setattr(store, "load", denied)
+    else:
+        store.counter_path.write_text("²" if broken == "counter" else str(pm.MAX_COUNTER + 1))
+    out = dispatch_tool(bridge, "bridge_execute", {**QUOTE, "confirm": True})
+    assert out["error_type"] == "ConfigurationError"
+    assert "next" not in out
+    assert "never bridge_execute" not in out.get("how_to_fix", "")
+    assert not any(name == "eth.deposit_usdc" for name, *_ in bridge.calls)
+    assert bridge.events == []
