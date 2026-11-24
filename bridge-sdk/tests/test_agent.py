@@ -514,9 +514,8 @@ def test_resume_refuses_a_missing_private_nonce_before_any_rpc():
     assert not any(name in ("eth.deposit_usdc", "eth.quote_deposit_usdc") for name, *_ in b.calls)
     json.dumps(out)
 
-    # A preview reports progress without resolving the nonce or mutating its store.
-    preview = dispatch_tool(b, "bridge_resume", {"checkpoint": cp})
-    assert "error" not in preview and "how_to_confirm" in preview
+    # The read-only preview must not hide an input it already knows is missing.
+    assert dispatch_tool(b, "bridge_resume", {"checkpoint": cp})["error_type"] == "ConfigurationError"
     # and with the nonce the verb proceeds exactly as before
     ok = dispatch_tool(b, "bridge_resume", {"checkpoint": cp, "secret_nonce": NONCE, "confirm": True})
     assert "error" not in ok and NONCE not in json.dumps(ok)

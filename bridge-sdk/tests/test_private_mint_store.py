@@ -162,3 +162,11 @@ def test_nonweakref_store_locks_are_bounded_and_serialize_reservations():
         identities = list(pool.map(lambda _: pm.reserve_identity(store, **KW), range(16)))
     assert sorted(i.counter for i in identities) == list(range(16))
     assert len(store.load()) == 16
+
+
+@pytest.mark.parametrize("nonce", [" 812345scalar", "812345scalar\n", "-812345scalar"])
+def test_invalid_stored_scalar_is_redacted(nonce):
+    with pytest.raises(ConfigurationError) as error:
+        pm.PrivateMintIdentity.from_dict(dict(counter=0, recipient=RECIPIENT,
+                                             secretNonce=nonce, addressCommitment="ab" * 32))
+    assert "812345" not in str(error.value)

@@ -124,7 +124,7 @@ class PrivateMintIdentity:
         nonce, commitment = data.get("secretNonce"), data.get("addressCommitment")
         if (isinstance(counter, bool) or not isinstance(counter, int) or not 0 <= counter <= MAX_COUNTER
                 or not isinstance(recipient, str) or not recipient.startswith("aleo1")
-                or not isinstance(nonce, str) or not nonce.endswith("scalar")
+                or not isinstance(nonce, str) or not re.fullmatch(r"[0-9]+scalar", nonce)
                 or not isinstance(commitment, str) or not _COMMITMENT_RE.fullmatch(commitment)):
             raise ConfigurationError(_INVALID_RECORD)
         return cls(counter=counter, recipient=recipient, secret_nonce=nonce, address_commitment=commitment)
@@ -388,7 +388,63 @@ def _why_not(bridge: Any, recipient: str) -> str:
     return "no identity store is bound to keep the derived nonce"
 
 
+@contextmanager
+def _storage_errors() -> Iterator[None]:
+    try:
+        yield
+    except OSError:
+        raise ConfigurationError(
+            "Private mint identity storage is inaccessible; restore access to the identities file "
+            "and its counter/lock files before continuing") from None
+
+
+def _stored_nonce(store: PrivateMintIdentityStore, recipient: str, commitment: str, network: str) -> str | None:
+    stored = find_identity(store, commitment)
+    if stored is None:
+        return None
+    if stored.recipient != recipient:
+        raise ConfigurationError("The stored private mint identity names a different recipient")
+    # Custom stores may return objects without passing through from_dict. Never echo their
+    # secret scalars, including in chained exceptions from validation or native parsing.
+    try:
+        PrivateMintIdentity.from_dict(stored.to_dict())
+        nonce = encoding.validate_scalar(stored.secret_nonce)
+        if derive_address_commitment(recipient, nonce, network) != commitment:
+            raise ConfigurationError(_INVALID_RECORD)
+    except (ConfigurationError, ValueError, RuntimeError):
+        raise ConfigurationError(_INVALID_RECORD) from None
+    return nonce
+
+
+def check_recovery_nonce(bridge: Any, *, recipient: str, address_commitment: str) -> None:
+    """Read-only availability check: no scan, reservation, lock acquisition or save.
+
+    A derivable account is sufficient for a preview, although a later scan can still fail for
+    a caller-supplied nonce. Stored and legacy-zero identities need no loaded account.
+    """
+    with _storage_errors():
+        if address_commitment == derive_address_commitment(recipient, "0scalar", bridge.network):
+            return
+        store = getattr(bridge, "private_mint_identities", None)
+        if store is not None and _stored_nonce(store, recipient, address_commitment, bridge.network) is not None:
+            return
+        if can_derive(bridge, recipient):
+            return
+        raise ConfigurationError(
+            "This deposit needs its original secret_nonce; pass secret_nonce or bind its private_mint_identities "
+            "store and the recipient's Aleo account before confirming")
+
+
 def resolve_secret_nonce(bridge: Any, *, recipient: str, program: str, address_commitment: str | None = None,
+                         secret_nonce: str | None = None, placeholder: bool = False) -> str:
+    """Resolve a nonce while converting inaccessible identity storage to an actionable error."""
+    with _storage_errors():
+        return _resolve_secret_nonce(bridge, recipient=recipient, program=program,
+                                     address_commitment=address_commitment, secret_nonce=secret_nonce,
+                                     placeholder=placeholder)
+
+
+def _resolve_secret_nonce(bridge: Any, *, recipient: str, program: str, address_commitment: str | None = None,
                          secret_nonce: str | None = None, placeholder: bool = False) -> str:
     """The scalar a private mint uses, checking explicit and stored values before derivation.
 
@@ -411,13 +467,8 @@ def resolve_secret_nonce(bridge: Any, *, recipient: str, program: str, address_c
         return "0scalar"
     store = getattr(bridge, "private_mint_identities", None)
     if store is not None and address_commitment is not None:
-        stored = find_identity(store, address_commitment)
-        if stored is not None:
-            if stored.recipient != recipient:
-                raise ConfigurationError("The stored private mint identity names a different recipient")
-            nonce = encoding.validate_scalar(stored.secret_nonce)
-            if derive_address_commitment(recipient, nonce, network) != address_commitment:
-                raise ConfigurationError(_INVALID_RECORD)
+        nonce = _stored_nonce(store, recipient, address_commitment, network)
+        if nonce is not None:
             return nonce
     account = derivable_account(bridge, recipient)
     if store is None or account is None:

@@ -414,11 +414,9 @@ def _h_execute(b, a):
     secret_nonce = a.get("secret_nonce") or None
     resolved = lifecycle.resolve_route(b.registry, quote.plan)
     if quote.plan.protocol == "xreserve" and resolved.source_chain.family == "evm":
-        try:
-            secret_nonce = lifecycle._private_nonce(b, quote.plan, resolved, secret_nonce)
-        except OSError as exc:
-            raise ConfigurationError(
-                "Private mint identity storage is inaccessible; restore access before executing the transfer") from exc
+        eth = lifecycle._module(b, "eth", resolved.source_chain.id)
+        lifecycle._assert_sender(quote.plan, (getattr(eth, "conn", None) or b.ethereum).address, family="evm")
+        secret_nonce = lifecycle._private_nonce(b, quote.plan, resolved, secret_nonce)
     return _write(b, lambda seen: lifecycle.execute(
         b, quote.plan, on_checkpoint=seen.append, mode=a.get("mode"), proving=a.get("proving", "delegate"),
         gas_payment_microcredits=a.get("gas_payment_microcredits"), secret_nonce=secret_nonce))
@@ -427,6 +425,8 @@ def _h_execute(b, a):
 def _h_resume(b, a):
     progress = lifecycle.recover(b, a["checkpoint"])                 # reads only
     if not a.get("confirm"):
+        if progress.next == "resume":
+            lifecycle._recovery_secret_nonce(b, progress, a.get("secret_nonce") or None, preview=True)
         return _confirmation(progress=_serialize(progress, b.registry))
     secret_nonce = a.get("secret_nonce") or None
     if progress.next == "resume":
@@ -438,6 +438,8 @@ def _h_resume(b, a):
 def _h_complete(b, a):
     progress = lifecycle.recover(b, a["checkpoint"])                 # reads only
     if not a.get("confirm"):
+        if progress.next == "complete":
+            lifecycle._recovery_secret_nonce(b, progress, a.get("secret_nonce") or None, preview=True)
         return _confirmation(progress=_serialize(progress, b.registry))
     secret_nonce = a.get("secret_nonce") or None
     if progress.next == "complete":

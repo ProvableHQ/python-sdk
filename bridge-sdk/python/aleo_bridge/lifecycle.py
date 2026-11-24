@@ -575,7 +575,8 @@ def _xreserve_burn_mode(mode: str | None) -> str:
         f"Aleo xReserve mode must be 'private', 'public' or 'public-as-signer', got {mode!r}")
 
 
-def _recovery_secret_nonce(bridge, progress: Progress, secret_nonce: str | None) -> str | None:
+def _recovery_secret_nonce(bridge, progress: Progress, secret_nonce: str | None, *,
+                           preview: bool = False) -> str | None:
     """Resolve an existing deposit's nonce before authorizing another submission.
 
     Uses the saved or attested commitment, including legacy ``0scalar`` deposits without a
@@ -604,6 +605,9 @@ def _recovery_secret_nonce(bridge, progress: Progress, secret_nonce: str | None)
     else:
         return None
     commitment = _private_mint.commitment_from_hook_data(hook)
+    if preview:
+        _private_mint.check_recovery_nonce(bridge, recipient=plan.recipient, address_commitment=commitment)
+        return None
     return _private_nonce(bridge, plan, resolved, None, address_commitment=commitment)
 
 

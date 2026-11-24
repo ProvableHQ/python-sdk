@@ -663,6 +663,18 @@ otherwise a later deposit can reuse a nonce and be linked to an earlier one.
 Pass `private_mint_identities=` to `Bridge(...)` to keep the identities
 elsewhere.
 
+Counters are local to this store and are not coordinated with Shield or other
+SDK installations. Using the same Aleo account with independent stores can
+repeat commitments and link deposits on chain; Shield-compatible derivation
+is retained with this privacy tradeoff.
+
+When an identity is missing, recovery scans up to 10,000 counters. This may
+pause a confirmed recovery call, including when the deposit used a caller-supplied
+nonce. The range is not shortened to the current store's counter, because a
+restored backup can predate the deposit. Pass the original `secret_nonce` for
+caller-managed deposits to avoid a scan. Confirmation previews only check
+availability; they never scan or save identities.
+
 #### Bring your own nonce
 
 Pass `secret_nonce=` to deposit under a nonce the application manages. This is

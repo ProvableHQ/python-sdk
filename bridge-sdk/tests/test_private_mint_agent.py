@@ -131,3 +131,73 @@ def test_execute_store_error_preserves_configuration_guidance(tmp_path, monkeypa
     assert "never bridge_execute" not in out.get("how_to_fix", "")
     assert not any(name == "eth.deposit_usdc" for name, *_ in bridge.calls)
     assert bridge.events == []
+
+
+@pytest.mark.parametrize("phase", ["resume", "complete"])
+@pytest.mark.parametrize("broken", ["read", "lock"])
+def test_recovery_storage_errors_are_structured(phase, broken, monkeypatch):
+    from aleo_bridge import private_mint as pm
+    identity = _reserve(_bridge())
+    bridge, checkpoint = _recovery_case(phase, identity.secret_nonce)
+    def denied(*args, **kwargs):
+        raise PermissionError("private storage unavailable")
+    if broken == "read":
+        monkeypatch.setattr(bridge.private_mint_identities, "load", denied)
+    else:
+        monkeypatch.setattr(pm, "_exclusive", denied)
+    out = dispatch_tool(bridge, f"bridge_{phase}", {"checkpoint": checkpoint, "confirm": True})
+    assert out["error_type"] == "ConfigurationError" and "next" not in out
+    assert bridge.events == []
+
+
+@pytest.mark.parametrize("phase", ["resume", "complete"])
+def test_preview_reports_missing_nonce_without_derivation(phase):
+    bridge, checkpoint = _recovery_case(phase, "123scalar", store=False)
+    out = dispatch_tool(bridge, f"bridge_{phase}", {"checkpoint": checkpoint})
+    assert out["error_type"] == "ConfigurationError"
+    assert "secret_nonce" in out["error"] and "confirmation_required" not in out
+
+
+@pytest.mark.parametrize("phase", ["resume", "complete"])
+def test_stored_nonce_error_never_echoes_secret(phase):
+    from dataclasses import replace
+    identity = _reserve(_bridge())
+    bridge, checkpoint = _recovery_case(phase, identity.secret_nonce)
+    bridge.private_mint_identities.save([replace(identity, secret_nonce=" " + identity.secret_nonce)])
+    out = dispatch_tool(bridge, f"bridge_{phase}", {"checkpoint": checkpoint, "confirm": True})
+    assert out["error_type"] == "ConfigurationError"
+    assert identity.secret_nonce not in json.dumps(out)
+    assert "restore" in out["error"]
+
+
+def test_execute_sender_mismatch_does_not_reserve_identity():
+    bridge = _bridge()
+    out = dispatch_tool(bridge, "bridge_execute", {
+        **QUOTE, "sender": "0x" + "98" * 20, "confirm": True})
+    assert "error" in out
+    assert bridge.private_mint_identities.load() == []
+    assert bridge.private_mint_identities._next == 0
+
+
+@pytest.mark.parametrize("phase", ["resume", "complete"])
+@pytest.mark.parametrize("source", ["stored", "zero", "derived"])
+def test_preview_accepts_available_nonce_without_scanning(phase, source, monkeypatch):
+    from aleo_bridge import private_mint as pm
+    identity = _reserve(_bridge())
+    nonce = "0scalar" if source == "zero" else identity.secret_nonce
+    bridge, checkpoint = _recovery_case(phase, nonce)
+    if source == "stored":
+        bridge.private_mint_identities.save([identity])
+        bridge.aleo.default_account = None
+    elif source == "zero":
+        bridge.private_mint_identities = None
+        bridge.aleo.default_account = None
+    def forbidden(*args, **kwargs):
+        pytest.fail("Preview must not scan, lock, reserve or save")
+    monkeypatch.setattr(pm, "recover_identity", forbidden)
+    monkeypatch.setattr(pm, "reserve_identity", forbidden)
+    monkeypatch.setattr(pm, "_exclusive", forbidden)
+    if bridge.private_mint_identities is not None:
+        monkeypatch.setattr(bridge.private_mint_identities, "save", forbidden)
+    out = dispatch_tool(bridge, f"bridge_{phase}", {"checkpoint": checkpoint})
+    assert "error" not in out and out["confirmation_required"]

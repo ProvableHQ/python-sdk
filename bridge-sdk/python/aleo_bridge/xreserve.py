@@ -225,7 +225,10 @@ class XReserveModule:
             raise AttestationError("Circle attestation payload has an invalid message hash")
         if secret_nonce is None:
             from . import private_mint
-            commitment = private_mint.commitment_from_hook_data(payload[-enc.HOOK_DATA_BYTES:])
+            try:
+                commitment = private_mint.commitment_from_hook_data(payload[-enc.HOOK_DATA_BYTES:])
+            except ConfigurationError:
+                raise AttestationError("Private mint requires a canonical private-mint attested hook") from None
             secret_nonce = private_mint.resolve_secret_nonce(
                 self._bridge, recipient=recipient, program=route.meta_str("wrapperProgram"),
                 address_commitment=commitment)
@@ -241,7 +244,9 @@ class XReserveModule:
         An explicit ``secret_nonce`` is used as given. Without one, the bridge resolves the scalar
         for its own account from the identity store that reserved the deposit (re-deriving it from
         the view key when the store lacks it); a deposit made with a caller-supplied nonce needs
-        that nonce back.
+        that nonce back. A malformed or non-private attested hook raises ``AttestationError``.
+        A valid private hook whose nonce cannot be resolved raises ``ConfigurationError``;
+        callers using automatic resolution should handle both error types.
         """
         route = self._validated(route if route is not None else self.inbound_route(), direction="mint")
         inputs = self.build_private_mint_inputs(route, attestation, recipient, secret_nonce)

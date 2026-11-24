@@ -353,7 +353,9 @@ Finish a private-mode deposit: the only user-signed Aleo step of the inbound flo
 An explicit ``secret_nonce`` is used as given. Without one, the bridge resolves the scalar
 for its own account from the identity store that reserved the deposit (re-deriving it from
 the view key when the store lacks it); a deposit made with a caller-supplied nonce needs
-that nonce back.
+that nonce back. A malformed or non-private attested hook raises ``AttestationError``.
+A valid private hook whose nonce cannot be resolved raises ``ConfigurationError``;
+callers using automatic resolution should handle both error types.
 
 ### `xreserve.get_attestation(self, message_hash: "'str | bytes'", *, route: 'Route | None' = None) -> 'Attestation | None'`
 
