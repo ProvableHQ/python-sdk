@@ -683,7 +683,9 @@ recipient's wallet should hold its secrets, and useful when an application keeps
 its own secret store. The same value must come back on `execute`, `resume` and
 `complete`; the bridge never stores a supplied nonce and the journal excludes
 it. Generate it with `str(aleo.mainnet.Scalar.random())` and save it before
-sending funds. The default `0scalar` provides no secrecy.
+sending funds. An explicit `0scalar` provides no secrecy. Omitting the nonce
+on lifecycle execution derives one when possible or raises; only the low-level
+`eth.deposit_usdc` retains the `0scalar` default.
 
 ```python
 secret_nonce = os.environ["BRIDGE_MINT_SECRET_NONCE"]  # Aleo scalar: decimal digits + "scalar".

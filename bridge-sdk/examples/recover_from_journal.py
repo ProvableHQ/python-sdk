@@ -60,7 +60,9 @@ def main(argv=None):
     if args.action in ("resume", "complete") and progress.next == args.action:
         # A private USDCx deposit made under a nonce you supplied needs that ORIGINAL value again;
         # the journal cannot replace it. A nonce the bridge derived is found in the identities
-        # file beside the journal, or re-derived from the account's view key.
+        # file beside the journal. This script loads an Aleo account only for complete,
+        # which can also re-derive a missing identity. Resume needs the saved identity or
+        # BRIDGE_MINT_SECRET_NONCE; it does not load an Aleo private key.
         nonce = None
         if cp.intent.get("mintMode") == "private":
             nonce = os.environ.get("BRIDGE_MINT_SECRET_NONCE") or None

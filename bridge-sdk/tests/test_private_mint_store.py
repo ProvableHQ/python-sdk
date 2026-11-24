@@ -170,3 +170,43 @@ def test_invalid_stored_scalar_is_redacted(nonce):
         pm.PrivateMintIdentity.from_dict(dict(counter=0, recipient=RECIPIENT,
                                              secretNonce=nonce, addressCommitment="ab" * 32))
     assert "812345" not in str(error.value)
+
+
+@pytest.mark.parametrize("kind", ["memory", "file", "custom"])
+def test_peek_respects_consumed_unsaved_counter(tmp_path, kind):
+    if kind == "file":
+        store = _file_store(tmp_path)
+    elif kind == "memory":
+        store = pm.MemoryPrivateMintIdentityStore()
+    else:
+        class Custom:
+            def load(self):
+                return []
+            def peek_counter(self, minimum):
+                return max(minimum, 1)
+        store = Custom()
+    if kind != "custom":
+        with pytest.raises(ConfigurationError):
+            pm.reserve_identity(store, **{**KW, "view_key": "invalid"})
+    assert store.load() == []
+    assert pm.peek_secret_nonce(store, **KW) == pm.derive_secret_nonce(VIEW_KEY, 1, "mainnet")
+    if kind != "custom":
+        assert pm.reserve_identity(store, **KW).counter == 1
+
+
+def test_peek_keeps_legacy_custom_store_compatible():
+    class Custom:
+        def load(self):
+            return []
+    assert pm.peek_secret_nonce(Custom(), **KW) == pm.derive_secret_nonce(VIEW_KEY, 0, "mainnet")
+
+
+@pytest.mark.parametrize("counter", [-1, True, "1", pm.MAX_COUNTER + 1])
+def test_peek_rejects_invalid_custom_counter(counter):
+    class Custom:
+        def load(self):
+            return []
+        def peek_counter(self, minimum):
+            return counter
+    with pytest.raises(ConfigurationError):
+        pm.peek_secret_nonce(Custom(), **KW)

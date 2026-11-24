@@ -201,3 +201,17 @@ def test_preview_accepts_available_nonce_without_scanning(phase, source, monkeyp
         monkeypatch.setattr(bridge.private_mint_identities, "save", forbidden)
     out = dispatch_tool(bridge, f"bridge_{phase}", {"checkpoint": checkpoint})
     assert "error" not in out and out["confirmation_required"]
+
+
+@pytest.mark.parametrize("phase", ["resume", "complete"])
+def test_storage_failure_reports_safe_errno(phase, monkeypatch):
+    import errno
+    from tests.test_private_mint_lifecycle import _bridge
+    identity = _reserve(_bridge())
+    bridge, checkpoint = _recovery_case(phase, identity.secret_nonce)
+    def failed(*args):
+        raise OSError(errno.ENOSPC, "sensitive-secret-text", "/secret/path")
+    monkeypatch.setattr(bridge.private_mint_identities, "load", failed)
+    out = dispatch_tool(bridge, f"bridge_{phase}", {"checkpoint": checkpoint, "confirm": True})
+    assert out["error_type"] == "ConfigurationError" and "ENOSPC" in out["error"]
+    assert "sensitive-secret-text" not in json.dumps(out) and "/secret/path" not in json.dumps(out)

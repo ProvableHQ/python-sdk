@@ -11,6 +11,7 @@ a checkpoint or an error message.
 """
 from __future__ import annotations
 
+import errno
 import json
 import re
 import threading
@@ -147,7 +148,9 @@ class PrivateMintIdentityStore(Protocol):
     it runs before derivation, so a failed derivation or save never recycles the counter. A store
     whose backing resource is shared between instances or processes should also expose
     ``exclusive()`` (a context manager) — :func:`reserve_identity` holds it around load → allocate
-    → derive → save when present.
+    → derive → save when present. Stores may optionally expose ``peek_counter(minimum)`` to
+    report their next allocation without consuming it, taking locks or writing files. Quotes
+    use that value when available; legacy stores fall back to the saved identities only.
     """
 
     def load(self) -> list[PrivateMintIdentity]: ...
@@ -168,6 +171,10 @@ class MemoryPrivateMintIdentityStore:
 
     def save(self, identities: list[PrivateMintIdentity]) -> None:
         self._identities = list(identities)
+
+    def peek_counter(self, minimum: int) -> int:
+        """Preview the next allocation without consuming it."""
+        return max(self._next, minimum)
 
     def allocate_counter(self, minimum: int) -> int:
         self._next = max(self._next, minimum)
@@ -230,6 +237,10 @@ class FilePrivateMintIdentityStore:
             raise ConfigurationError(
                 "Private mint identity counter file is unreadable; restore it (and the identities file) "
                 "from a backup before reserving a private mint") from exc
+
+    def peek_counter(self, minimum: int) -> int:
+        """Read the next allocation without locking or creating files."""
+        return max(self._read_counter(), minimum)
 
     def allocate_counter(self, minimum: int) -> int:
         value = max(self._read_counter(), minimum)
@@ -302,7 +313,10 @@ def peek_secret_nonce(store: PrivateMintIdentityStore, *, view_key: Any, recipie
     del recipient                                            # the nonce does not depend on it
     identities = store.load()
     minimum = _next_counter(identities)
-    counter = max(minimum, store._read_counter()) if isinstance(store, FilePrivateMintIdentityStore) else minimum
+    peek = getattr(store, "peek_counter", None)
+    counter = peek(minimum) if callable(peek) else minimum
+    if isinstance(counter, bool) or not isinstance(counter, int) or counter < minimum:
+        raise ConfigurationError("Private mint identity store returned an invalid counter preview")
     if counter > MAX_COUNTER:
         raise ConfigurationError(_EXHAUSTED)
     return derive_secret_nonce(view_key, counter, network, program)
@@ -347,8 +361,10 @@ def recover_identity(store: PrivateMintIdentityStore, *, view_key: Any, recipien
     raise ConfigurationError(
         f"No private mint identity for this deposit's commitment was found in the store or among the first "
         f"{scan_limit} counters derived from the account's view key. A deposit made with an explicit "
-        "secret_nonce can only be completed with that same secret_nonce; otherwise raise scan_limit or "
-        "restore the identities file that reserved it")
+        "secret_nonce can only be completed with that same secret_nonce. Otherwise restore the identities file "
+        "that reserved it, or call aleo_bridge.private_mint.recover_identity with the bound identity store, "
+        "the account's view key, recipient, commitment, network, wrapper program and a larger scan_limit, "
+        "then retry. Bridge lifecycle verbs do not accept scan_limit")
 
 
 # ── the resolver every verb calls ────────────────────────────────────────────
@@ -392,10 +408,15 @@ def _why_not(bridge: Any, recipient: str) -> str:
 def _storage_errors() -> Iterator[None]:
     try:
         yield
-    except OSError:
+    except OSError as exc:
+        # Only a standard errno label is safe to expose: custom exceptions can put secrets
+        # in their message, filename or chained traceback.
+        label = errno.errorcode.get(exc.errno, "unknown OS error") if exc.errno is not None else "unknown OS error"
+        remedy = ("free disk space" if exc.errno == errno.ENOSPC else
+                  "check disk space, filesystem availability and permissions")
         raise ConfigurationError(
-            "Private mint identity storage is inaccessible; restore access to the identities file "
-            "and its counter/lock files before continuing") from None
+            f"Private mint identity storage operation failed ({label}); {remedy} for the identities "
+            "file and its counter/lock files before continuing") from None
 
 
 def _stored_nonce(store: PrivateMintIdentityStore, recipient: str, commitment: str, network: str) -> str | None:

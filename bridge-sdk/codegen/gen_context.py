@@ -137,7 +137,8 @@ still in flight and check again later.
    completes without a nonce.  A user-supplied
    `secret_nonce` overrides that: the SDK **never stores** it and checkpoints
    exclude it (and every other secret), so tell the user to keep it for
-   `complete` (the default `0scalar` adds no entropy).  A deposit to any other
+   `complete` (an explicit `0scalar` adds no entropy). Omitting the nonce on
+   lifecycle execution derives one when possible or raises. A deposit to any other
    recipient needs a supplied nonce — only the recipient's Aleo key can
    complete a private mint, so confirm the recipient before depositing.
 7. Aleo-origin Hyperlane transfers spend PUBLIC balances: `unshield` a private

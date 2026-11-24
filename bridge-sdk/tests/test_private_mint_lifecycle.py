@@ -259,3 +259,23 @@ def test_stored_nonce_without_account_is_validated(corruption):
     with pytest.raises(ConfigurationError):
         resume(b, to_progress(plan, receipt))
     assert b.calls == [] and b.events == []
+
+
+@pytest.mark.parametrize("phase", ["resume", "complete"])
+@pytest.mark.parametrize("mode", ["public", "record"])
+def test_recovery_nonprivate_hook_has_phase_specific_error(phase, mode):
+    from aleo_bridge.errors import AttestationError
+    from aleo_bridge.lifecycle import _recovery_secret_nonce
+    b = _bridge()
+    plan, receipt = (_resumable if phase == "resume" else _ready)(b, "7scalar")
+    hook = xreserve_hook_data(mode, ME, "mainnet")
+    state = dict(receipt.protocol_state)
+    if phase == "resume":
+        state["hookData"] = "0x" + hook.hex()
+    else:
+        payload = bytes.fromhex(state["payload"][2:])[:-65] + hook
+        state["payload"] = "0x" + payload.hex()
+        state["messageHash"] = "0x" + xreserve_message_hash(payload).hex()
+    progress = to_progress(plan, receipt.replace(protocol_state=state))
+    with pytest.raises(NotResumableError if phase == "resume" else AttestationError):
+        _recovery_secret_nonce(b, progress, None)

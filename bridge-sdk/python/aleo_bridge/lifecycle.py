@@ -604,7 +604,12 @@ def _recovery_secret_nonce(bridge, progress: Progress, secret_nonce: str | None,
             raise NotResumableError("Private deposit checkpoint is missing its 65-byte xReserve hook data")
     else:
         return None
-    commitment = _private_mint.commitment_from_hook_data(hook)
+    try:
+        commitment = _private_mint.commitment_from_hook_data(hook)
+    except ConfigurationError:
+        if progress.next == "complete":
+            raise AttestationError("Private mint requires a canonical private-mint attested hook") from None
+        raise NotResumableError("Private deposit checkpoint has non-canonical private-mint hook data") from None
     if preview:
         _private_mint.check_recovery_nonce(bridge, recipient=plan.recipient, address_commitment=commitment)
         return None
