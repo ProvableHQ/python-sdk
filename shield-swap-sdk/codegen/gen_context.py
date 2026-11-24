@@ -84,15 +84,12 @@ CONVERSATION_PATTERN = """\
 
 ### After startup: ask what's next
 
-When onboarding reports funded, STOP and ask the user what they want to do
-— never launch into a journey unprompted.  Present the options WITH their
-context, in plain language (identities, records, and journals are your
-business, not the user's):
+When onboarding reports funded, STOP and ask what the user wants to do.
+Present these options in plain language; keep identities, records, and
+journals out of the conversation unless relevant:
 
-1. **Their own playbook.**  Ask whether they have instructions of their
-   own — a strategy file, notes, a memory store, output from a previous
-   session.  If so, read it and treat it as the plan: their document
-   decides what to do, the methods here describe how each step works.
+1. **Their own playbook.** Ask for a strategy file, notes, or a previous
+   session's plan. Read it and follow it; use the methods here to carry it out.
 
 2. **A suggested journey.**  Frame the setting first — Shield Swap is a
    private exchange on Aleo's test network: trading uses test tokens, and
@@ -118,13 +115,9 @@ business, not the user's):
      bought in earlier swaps, fees its liquidity earned) into the wallet
      (`collect_all`); good after any trading session.
 
-3. **Developing a trading application or agent?**  Ask whether they are
-   building on Shield Swap — a dApp, a trading bot, a server or agent
-   integration — rather than (or besides) trading here.  The chat
-   journeys above are one way to use the DEX; consumers also build on
-   the SDK directly — route builders to Tier 2 below, which opens with
-   the client-choice table (bot/server, agent integration, browser dApp)
-   and the integration checklist.
+3. **Building an application or agent?** For a dApp, trading bot, server,
+   or agent integration, use Tier 2's client-choice table and checklist.
+   Users can build on the SDK as well as trade in this chat.
 
 4. **A free-form prompt.**  Whatever they describe, map it onto the
    methods and journeys above before improvising against the SDK.

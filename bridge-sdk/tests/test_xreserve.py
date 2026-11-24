@@ -164,3 +164,17 @@ def test_is_delivered_reads_bridge_program_nullifier(bridge):
     assert "usdcx_bridge_v2.aleo" in bridge.aleo.fetched
     with pytest.raises(ConfigurationError, match="32-byte deposit nonce"):
         bridge.xreserve.is_delivered("0x01")
+
+
+@pytest.mark.parametrize("mode", ["public", "record"])
+def test_private_mint_without_nonce_rejects_nonprivate_attestation(bridge, mode):
+    att = _attested(bridge)
+    payload = att.payload[:-65] + bridge.xreserve.hook_data(mode, RECIPIENT)
+    wrong = Attestation(payload, enc.xreserve_message_hash(payload), att.attestation, "complete")
+    with pytest.raises(AttestationError):
+        bridge.xreserve.build_private_mint_inputs(INBOUND, wrong, RECIPIENT, None)
+
+
+def test_private_mint_missing_nonce_is_a_configuration_error(bridge):
+    with pytest.raises(ConfigurationError, match="secret_nonce"):
+        bridge.xreserve.build_private_mint_inputs(INBOUND, _attested(bridge), RECIPIENT, None)
